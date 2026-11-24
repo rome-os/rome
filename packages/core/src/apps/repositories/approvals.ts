@@ -1,4 +1,4 @@
-import { hashArgs } from "../actions/replay.js";
+import { approvedEntrySequence, hashArgs } from "../actions/replay.js";
 import { and, eq, or, desc, gte, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../../db/schema.js";
@@ -251,6 +251,33 @@ export class ApprovalsRepository {
     const resolved = read(updated[0]);
     for (const listener of this.resolvedListeners) listener(resolved);
     return { outcome: "resolved", approval: resolved };
+  }
+
+  /** The pending action_execution approval whose card owns the journal entry
+   *  at `sequence` under `rootExecutionId` — the entry it named when recorded,
+   *  or the single pending row its snapshot holds for the call when recorded
+   *  before the binding existed. No live card yields null. */
+  async findPendingForEntry(
+    rootExecutionId: string,
+    sequence: number,
+    actionName: string,
+  ): Promise<ApprovalRow | null> {
+    const rows = await this.db
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.type, "action_execution"),
+          eq(approvals.status, "pending"),
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+          sql`json_extract(${approvals.payload}, '$.actionName') = ${actionName}`,
+        ),
+      );
+    for (const row of rows) {
+      const payload = row.payload as Record<string, unknown> | null;
+      if (payload && approvedEntrySequence(payload) === sequence) return read(row);
+    }
+    return null;
   }
 
   async claimExecution(id: string): Promise<boolean> {

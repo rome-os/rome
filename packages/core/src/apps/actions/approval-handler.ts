@@ -4,7 +4,7 @@ import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
-import type { JournalEntry } from "./replay.js";
+import { approvedEntrySequence, type JournalEntry } from "./replay.js";
 import type { ApprovalSessionRunner } from "./session-runner.js";
 import { createLogger } from "../../logger.js";
 import { withoutSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -14,6 +14,9 @@ const log = createLogger("approval-handler");
 interface ApprovalPayload {
   actionName: string;
   args: Record<string, unknown>;
+  /** The journal sequence of the pending entry this card owns; payloads
+   *  recorded before the binding existed derive it from their snapshot. */
+  journalSequence?: number;
   rootActionName: string;
   rootArgs: Record<string, unknown>;
   rootExecutionId: string;
@@ -218,11 +221,19 @@ export class ApprovalHandler {
       // so approving replays the root and resumes at the approved call. It
       // runs for the person who asked, not the guardian who approved.
       const requester = await this.requesterOf(payload.rootExecutionId);
+      const approvedSequence = approvedEntrySequence(payload);
+      if (approvedSequence === undefined) {
+        log.warn("approval payload names no pending journal entry; replay binds nothing", {
+          approvalId,
+          actionName: payload.actionName,
+        });
+      }
       const runContext: ActionRunContext = {
         initiator: `approval:${approvalId}`,
         ...(requester ? { actor: requester } : {}),
         replayJournal: payload.replayJournal,
         replayRootExecutionId: payload.rootExecutionId,
+        approvedSequence,
         channelContext: payload.channelContext,
         sharedContext: payload.sharedContext,
         sessionId: payload.sessionId,

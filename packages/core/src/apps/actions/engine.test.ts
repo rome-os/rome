@@ -2437,7 +2437,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 0 },
+      );
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("executed");
       expect(child.calls).toEqual([{ x: 1 }]);
@@ -2475,7 +2479,7 @@ describe("ActionEngine", () => {
         },
       ];
 
-      await rome.actionEngine.run("parent", {}, { replayJournal });
+      await rome.actionEngine.run("parent", {}, { replayJournal, approvedSequence: 0 });
       expect(modeAfterApproval).toBe("record");
     });
 
@@ -2512,6 +2516,7 @@ describe("ActionEngine", () => {
         {
           replayJournal,
           replayRootExecutionId: rootExecutionId,
+          approvedSequence: 0,
         },
       );
 
@@ -2572,7 +2577,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 1 },
+      );
       // "a" was cached (not re-executed), "b" was executed for real
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("B-fresh");
@@ -2990,7 +2999,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 1 },
+      );
       expect(result).toEqual({
         status: "ok",
         data: ["A-cached", "B", "C"],

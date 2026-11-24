@@ -4,7 +4,7 @@ import { ActionEngine } from "./engine.js";
 import { ApprovalsRepository } from "../repositories/approvals.js";
 import { ExecutionJournalRepository } from "../repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../repositories/action-executions.js";
-import { hashArgs } from "./replay.js";
+import { hashArgs, type JournalEntry } from "./replay.js";
 import { callAction } from "./call-action.js";
 import type { Action, ActionConfig, ActionRegistry, ActionResult } from "./types.js";
 
@@ -143,6 +143,7 @@ describe("Approval flow integration", () => {
         initiator: `approval:${approvalId}`,
         replayJournal: journal,
         replayRootExecutionId: rootExecutionId,
+        approvedSequence: (payload.journalSequence as number) ?? 1,
       },
     );
 
@@ -160,6 +161,131 @@ describe("Approval flow integration", () => {
       status: "ok",
       data: ["A-result", "B-result"],
     });
+  });
+
+  it("executes only the resolved card's entry; a rejected sibling's pending call stays unauthorized", async () => {
+    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A-result" }));
+    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "B-result" }));
+
+    const childA = makeAction("child_a", { requiresApproval: true, execute: execA });
+    const childB = makeAction("child_b", { requiresApproval: true, execute: execB });
+    const parent = makeAction("parent", {
+      execute: async () => {
+        const rA = await callAction("child_a", { id: 1 });
+        const rB = await callAction("child_b", { id: 2 });
+        return { status: "ok", data: [rA.status, rB.status] };
+      },
+    });
+
+    const registry = makeRegistry(parent, childA, childB);
+    const engine = new ActionEngine(registry, {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    expect(execA).not.toHaveBeenCalled();
+    expect(execB).not.toHaveBeenCalled();
+
+    const pending = await approvalsRepo.findPending();
+    const cardOf = (actionName: string) =>
+      pending.find((row) => (row.payload as { actionName?: string }).actionName === actionName);
+    const cardA = cardOf("child_a")!;
+    const cardB = cardOf("child_b")!;
+    const payloadA = cardA.payload as { journalSequence: number };
+    const payloadB = cardB.payload as {
+      journalSequence: number;
+      replayJournal: JournalEntry[];
+      rootExecutionId: string;
+    };
+    // Each card names the journal entry its own pending call recorded.
+    expect(payloadA.journalSequence).toBe(0);
+    expect(payloadB.journalSequence).toBe(1);
+
+    // The guardian rejects child_a's card and approves child_b's.
+    await approvalsRepo.resolvePending(cardA.id, "reject", "guardian");
+    await approvalsRepo.resolvePending(cardB.id, "approve", "guardian");
+
+    const replayResult = await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${cardB.id}`,
+        replayJournal: payloadB.replayJournal,
+        replayRootExecutionId: payloadB.rootExecutionId,
+        approvedSequence: payloadB.journalSequence,
+      },
+    );
+
+    // child_b's resolved card ran its own entry. child_a's pending entry was
+    // never authorized by that card, so it must not execute under it.
+    expect(execA).not.toHaveBeenCalled();
+    expect(execB).toHaveBeenCalledTimes(1);
+    if (replayResult.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${replayResult.status}`);
+    }
+    expect(replayResult.approval.actionName).toBe("child_a");
+  });
+
+  it("runs one pending entry once when concurrent calls share one resolved card", async () => {
+    const exec = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "done" }));
+    const child = makeAction("child", { requiresApproval: true, execute: exec });
+    const parent = makeAction("parent", {
+      execute: async () => {
+        const [r1, r2] = await Promise.all([
+          callAction("child", { id: 1 }),
+          callAction("child", { id: 1 }),
+        ]);
+        return { status: "ok", data: [r1.status, r2.status] };
+      },
+    });
+
+    const registry = makeRegistry(parent, child);
+    const engine = new ActionEngine(registry, {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    const pending = await approvalsRepo.findPending();
+    const cardOf = (journalSequence: number) =>
+      pending.find(
+        (row) => (row.payload as { journalSequence?: number }).journalSequence === journalSequence,
+      );
+    const card0 = cardOf(0)!;
+    const card1 = cardOf(1)!;
+    const rootExecutionId = (card0.payload as { rootExecutionId: string }).rootExecutionId;
+    const journal = await journalRepo.loadJournal(rootExecutionId);
+    await approvalsRepo.resolvePending(card0.id, "approve", "guardian");
+    exec.mockClear();
+
+    const replayResult = await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${card0.id}`,
+        replayJournal: journal,
+        replayRootExecutionId: rootExecutionId,
+        approvedSequence: 0,
+      },
+    );
+
+    // The resolved card covers exactly one journal entry: the second
+    // concurrent call lands on its own still-pending entry, not on the slot
+    // the approved card owns, so the effect ran once.
+    expect(exec).toHaveBeenCalledTimes(1);
+    if (replayResult.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${replayResult.status}`);
+    }
+    expect(replayResult.approval.approvalId).toBe(card1.id);
   });
 
   it("divergence during replay falls through gracefully in default mode", async () => {

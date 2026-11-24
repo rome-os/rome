@@ -217,6 +217,10 @@ export interface ActionRunContext {
   replayJournal?: JournalEntry[];
   /** Original root execution ID to reuse during replay */
   replayRootExecutionId?: string;
+  /** Set on an approval-resolution replay: the journal sequence of the
+   * `pending_approval` entry the resolved card owns. Only that entry may
+   * execute under the replay; every other pending entry stays unauthorized. */
+  approvedSequence?: number;
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
   agentName?: string;
@@ -774,6 +778,7 @@ export class ActionEngine {
     let approvedRootResume = false;
     if (context?.replayJournal) {
       replayStore.journal = [...context.replayJournal];
+      replayStore.approvedSequence = context.approvedSequence;
       preloadedEntryCount = replayStore.journal.length;
       const maxSeq = replayStore.journal.reduce((max, e) => Math.max(max, e.sequence), -1);
       replayStore.nextSequence = maxSeq + 1;
@@ -928,10 +933,35 @@ export class ActionEngine {
         }
 
         if (entry.status === "pending_approval") {
+          if (entry.sequence !== store.approvedSequence) {
+            // The resolved card this replay runs under owns one journal
+            // entry; a pending entry it does not own stays unauthorized —
+            // the call parks on the card that already waits for it.
+            store.replayIndex++;
+            log.info("replay: pending entry is not the resolved card's, left unauthorized", {
+              action: action.config.name,
+              sequence: entry.sequence,
+            });
+            const card = await this.approvalsRepo.findPendingForEntry(
+              store.rootExecutionId,
+              entry.sequence,
+              entry.actionName,
+            );
+            const approval: PendingApproval = {
+              approvalId: card?.id ?? "",
+              actionName: entry.actionName,
+              description: `Action "${entry.actionName}" requires guardian approval`,
+            };
+            if (!store.pendingApproval) store.pendingApproval = approval;
+            return { status: "pending_approval", approval };
+          }
           log.info("replay: executing previously pending action", {
             action: action.config.name,
             sequence: entry.sequence,
           });
+          // Reserve the entry's slot before the execution await: a concurrent
+          // call must not run this same entry a second time under one card.
+          store.replayIndex++;
           const result = await this.executeNestedInvocation(
             action,
             args,
@@ -943,7 +973,6 @@ export class ActionEngine {
           entry.result = result;
           entry.status = "completed";
           await this.updateJournalEntry(store.rootExecutionId, entry.sequence, result, "completed");
-          store.replayIndex++;
           store.mode = "record";
           return result;
         }
@@ -2226,6 +2255,7 @@ export class ActionEngine {
     const approvalId = await this.createApprovalRecord(
       actionName,
       args,
+      seq,
       description,
       store,
       context,
@@ -2245,6 +2275,7 @@ export class ActionEngine {
   private async createApprovalRecord(
     actionName: string,
     args: Record<string, unknown>,
+    journalSequence: number,
     description: string,
     store: ReplayStore,
     context: ActionRunContext | undefined,
@@ -2274,6 +2305,7 @@ export class ActionEngine {
       payload: {
         actionName,
         args,
+        journalSequence,
         rootActionName: store.rootActionName,
         rootArgs: store.rootArgs,
         rootExecutionId: store.rootExecutionId,
