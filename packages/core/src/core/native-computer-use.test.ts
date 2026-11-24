@@ -2107,10 +2107,10 @@ describe("native computer-use agent admission", () => {
     // Start cancelDevice for guardian A while remote cancel is still pending.
     const cancelPromise = f.service.cancelDevice("device", { userId: "guardian-a" });
 
-    // Guardian A's local binding is invalidated immediately without waiting for remote RPC.
+    // Guardian A's local binding is stopped immediately without waiting for remote RPC.
     const afterA = await f.call("observe", { sessionId: sessionA }, guardianA);
     expect(afterA.isError).toBe(true);
-    expect(content(afterA)).toMatchObject({ error: { code: "invalid_session" } });
+    expect(content(afterA)).toMatchObject({ error: { code: "session_stopped" } });
 
     // Guardian B's binding on the same device remains active.
     const afterB = await f.call("observe", { sessionId: sessionB }, guardianB);
@@ -2121,6 +2121,10 @@ describe("native computer-use agent admission", () => {
       ok({ sessionId: "native-session-1", terminalCause: "cancelled", stopConfirmed: true }),
     );
     await cancelPromise;
+
+    const afterSettled = await f.call("observe", { sessionId: sessionA }, guardianA);
+    expect(afterSettled.isError).toBe(true);
+    expect(content(afterSettled)).toMatchObject({ error: { code: "invalid_session" } });
 
     const cancelCalls = f.client.run.mock.calls.filter(
       ([, action]) => action === "computer.cancel",

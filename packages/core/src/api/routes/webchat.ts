@@ -5685,7 +5685,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
     await deps.settingsRepo.delete(approvalKey);
-    void deps.nativeComputerUse?.cancelDevice(deviceId, context.actor).catch(() => {});
+    void deps.nativeComputerUse?.cancelDevice(deviceId, context.actor).catch((error) => {
+      log.warn("computer-use revoke cancel failed", {
+        deviceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     return c.body(null, 204);
   });
 

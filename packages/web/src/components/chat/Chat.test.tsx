@@ -937,13 +937,66 @@ describe("computer use", () => {
     await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("button", { name: "composer.computerUseActive" })).toBeTruthy();
 
-    // 404 is terminal: hide cached control immediately.
+    // 404 is terminal: discard cached control immediately.
     await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
     await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(3));
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
       expect(screen.queryByRole("button", { name: "composer.computerUseAccess" })).toBeNull();
     });
+  });
+
+  it("discards cached eligibility and selection on terminal 404 so later 503 or reappearance cannot resurrect it", async () => {
+    const target = {
+      deviceId,
+      name: "Test Mac",
+      authorized: true as const,
+      persistentAccess: true as const,
+    };
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce(target)
+      .mockRejectedValueOnce(new ChatApiError("Not found", 404, null))
+      .mockRejectedValueOnce(new ChatApiError("Device discovery unavailable", 503, null))
+      .mockResolvedValueOnce(target);
+    rs.mocked(postSessionTurn)
+      .mockResolvedValueOnce({ ok: true, data: { turnId: "after-404-then-503" } })
+      .mockResolvedValueOnce({ ok: true, data: { turnId: "after-reappear" } });
+    const client = queries();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    // Terminal 404 discards cached targets and clears selection.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "composer.computerUseAccess" })).toBeNull();
+    });
+
+    // Subsequent 503 must NOT resurface the pre-404 target or attach it to a send.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "composer.computerUseAccess" })).toBeNull();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].has("computerUseDeviceId")).toBe(false);
+
+    // Even if the target later becomes eligible again, previous selection stays cleared.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(4));
+    await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(2));
+    expect(rs.mocked(postSessionTurn).mock.calls[1]?.[1].has("computerUseDeviceId")).toBe(false);
   });
 
   it("preserves previously cached remote targets when a refetch returns discoveryDegraded", async () => {

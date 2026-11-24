@@ -651,14 +651,12 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
     }
     for (const [ref, entry] of windows) if (matches(entry)) windows.delete(ref);
     const selected = [...bindings].filter(([, binding]) => matches(binding));
-    for (const [id, binding] of selected) {
-      stopBindingLocally(binding, "cancel_requested");
-      bindings.delete(id);
-    }
+    for (const [, binding] of selected) stopBindingLocally(binding, "cancel_requested");
     await Promise.allSettled([
       ...pending,
       ...selected.flatMap(([, binding]) => (binding.stopConfirmed ? [] : [cancelBinding(binding)])),
     ]);
+    for (const [id] of selected) bindings.delete(id);
   };
   const cancelScope = (agentSessionId: string, turnId?: string) =>
     cancelMatching(

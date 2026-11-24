@@ -703,11 +703,22 @@ export function Chat({
     queryKey: ["chat-computer-use", computerUseSession],
     queryFn: async ({ signal }) => {
       if (!computerUseSession) return null;
-      const next = await getChatComputerUseTarget(computerUseSession, signal);
+      let next: Awaited<ReturnType<typeof getChatComputerUseTarget>>;
+      try {
+        next = await getChatComputerUseTarget(computerUseSession, signal);
+      } catch (error) {
+        if (
+          error instanceof ChatApiError &&
+          (error.status === 401 || error.status === 403 || error.status === 404)
+        ) {
+          return null;
+        }
+        throw error;
+      }
       if (next.discoveryDegraded) {
-        const previous = computerUseQueryClient.getQueryData<
-          Awaited<ReturnType<typeof getChatComputerUseTarget>>
-        >(["chat-computer-use", computerUseSession]);
+        const previous = computerUseQueryClient.getQueryData<Awaited<
+          ReturnType<typeof getChatComputerUseTarget>
+        > | null>(["chat-computer-use", computerUseSession]);
         if (previous) {
           const prevList = previous.targets ?? [previous];
           const nextList = next.targets ?? [next];
@@ -724,17 +735,8 @@ export function Chat({
     staleTime: 0,
     retry: false,
   });
-  const computerUseDeniedOrGone =
-    computerUseEligibility.isError &&
-    computerUseEligibility.error instanceof ChatApiError &&
-    (computerUseEligibility.error.status === 401 ||
-      computerUseEligibility.error.status === 403 ||
-      computerUseEligibility.error.status === 404);
   const computerUseTarget =
-    computerUseSession &&
-    computerUseEligibility.isFetchedAfterMount &&
-    !computerUseDeniedOrGone &&
-    computerUseEligibility.data
+    computerUseSession && computerUseEligibility.isFetchedAfterMount && computerUseEligibility.data
       ? computerUseEligibility.data
       : null;
   const computerUseTargets =
@@ -762,6 +764,20 @@ export function Chat({
     computerUseChoice.deviceId === selectedWindow?.deviceId
       ? computerUseChoice
       : null;
+  useEffect(() => {
+    if (
+      computerUseEligibility.isFetchedAfterMount &&
+      preferredComputer?.sessionId === computerUseSession &&
+      !selectedWindow
+    ) {
+      setPreferredComputer(null);
+    }
+  }, [
+    computerUseEligibility.isFetchedAfterMount,
+    computerUseSession,
+    preferredComputer,
+    selectedWindow,
+  ]);
   useEffect(() => {
     setComputerUseChoice(null);
   }, [computerUseSession, computerUseDeviceIds]);
