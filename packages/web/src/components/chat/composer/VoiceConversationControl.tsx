@@ -146,10 +146,7 @@ export function VoiceConversationCapsule({
     <div
       data-voice-conversation-capsule
       data-state={shown}
-      className={cn(
-        "mx-auto mb-2 flex h-12 w-fit items-center gap-3 rounded-full border-[1.5px] bg-background px-4 transition-colors",
-        shown === "muted" ? "border-subtle-foreground" : "border-foreground",
-      )}
+      className="mx-auto mb-2 flex h-12 w-fit items-center gap-3 rounded-full bg-surface px-4 shadow-10"
     >
       <RomeLogo
         aria-hidden
