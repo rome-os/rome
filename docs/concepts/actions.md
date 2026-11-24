@@ -4,7 +4,7 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 
 **Contracts:**
 
-- Actions are owned by [apps](apps.md#rome-apps) and exist only via manifest declaration — no implicit discovery. Disabling an app removes its actions. Enabling it puts them back. Install re-reads the manifest, so a newly added action becomes callable without a process restart.
+- Actions are owned by [apps](apps.md#rome-apps) and exist only via manifest declaration — no implicit discovery. Disabling an app removes its actions. Enabling it puts them back. Install re-reads the manifest, so a newly added action becomes callable without a process restart. Core's own actions, such as its [agent tools](#core-agent-tools), are the exception: core registers them at start.
 - An action definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`. References and runtime calls use the canonical `<app-id>:<local-name>` id.
 - An input schema makes an action agent-callable. A public action enters an agent catalog through `actions: ["*"]` or an exact reference. An explicit action enters only through an exact reference.
 - An action without an input schema stays outside every agent catalog. It runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
@@ -24,6 +24,42 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 - **[Skill](skills.md)** — a skill is loaded into an agent's context as instructions. An action executes code.
 - **Builtin tool** — the agent runtime provides builtin tools (file read/write, bash, web search). Actions are app-owned and manifest-declared.
 - **[Hook](apps.md#hooks)** — a hook is an event subscription that routes into an action. The action is what runs.
+
+## Core agent tools
+
+A core agent tool is an action core declares so an agent can do what a dashboard page does, in chat. Core registers it in the main process under its full name, such as `system:pause_routine`. Unlike an app action, it has no manifest entry and never runs in an action worker.
+
+**Rules:**
+
+- Declare the tool in the `agent-tools.ts` file of the context that owns its operation, beside that operation, with the page's `agentTool` from [`agentToolsOf`](../../packages/core/src/apps/actions/agent-tool.ts). Add it to the page's list in the same file.
+- Give it a name, a description, `sideEffects`, `input`, and `run`. Add `approval` when the guardian approves each call on a card first.
+- Write the arguments once, as the Zod `input`, each with a `.describe()` the agent reads. `run` and `approval` get their argument types from it. An input that does not fit answers the agent with what is wrong.
+- Set `sideEffects` to `read-only` or `write`. It decides who may ask, in one check before `run` ([`who-may-ask.ts`](../../packages/core/src/apps/actions/who-may-ask.ts)). A read needs a turn that works for the guardian. A write needs the guardian's own message in their private chat. A tool holds no check of its own.
+- Return plain data from `run` for the agent to read, `toolError(message)` for something not found or turned down, or `card(...)` for one of core's own cards. Say in an error what the agent does next.
+- Reach other code only through the page's deps, which the wiring hands each page once ([`wiring/agent-tools.ts`](../../packages/core/src/wiring/agent-tools.ts)). A new page joins `PAGES` there, and its deps join the `registerAgentTools` call in `index.ts`.
+- Enroll each tool in `whoMayAskSuite` in the page's test file. Test the operation through `callTool`, as the guardian.
+- Never rename a tool. Agents, agent prompts and saved routines call it by its name.
+
+**Example:**
+
+```ts
+const agentTool = agentToolsOf<ConnectionToolDeps>();
+
+export const disconnectService = agentTool({
+  name: "system:disconnect_service",
+  description: "Disconnect one service from Rome, such as a Slack workspace. …",
+  sideEffects: "write",
+  input: z.object({ connectionId: z.string().describe("The connection's id, from read_connections.") }),
+  approval: async ({ connectionId }, { deps }) => ({ title: "Disconnect …", summary: "…" }),
+  run: async ({ connectionId }, { deps }) => {
+    const outcome = await disconnectConnection(deps.registry, connectionId);
+    if (outcome.status === "not-found") return toolError(`No connection found with id "${connectionId}". …`);
+    return { connectionId, disconnected: true };
+  },
+});
+
+export const connectionTools = [readConnections, connectService, disconnectService];
+```
 
 ## Action results
 
