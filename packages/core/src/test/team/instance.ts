@@ -18,7 +18,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { AgentLoader } from "../../app-host/agent-loader.js";
 import { buildAgentConfig, buildTestDeps, createTestDb, type TestDeps } from "../helpers.js";
 import { seedBaseline } from "../seeds.js";
-import { guardianAuth, settings } from "../../db/schema.js";
+import { guardianAuth, settings, visitorProfiles } from "../../db/schema.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { isGuardianSession } from "../../access/session-actor.js";
@@ -242,6 +242,12 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     computerUseLocal: { deviceId: COMPUTER_USE_DEVICE, name: "Verifier Mac" },
   };
   deps.features = [...features(deps), ...(options.extraFeatures ?? [])];
+
+  // A signed-in teammate has a profile: the sign-in callback keeps it, and Rome
+  // reads a chat owner's email from it.
+  await db
+    .insert(visitorProfiles)
+    .values({ accountId: TEAMMATE.accountId, email: TEAMMATE.email, updatedAt: new Date() });
 
   const chatId = randomUUID();
   await deps.webchatRepo.createSession(chatId, "Team verifier chat");
