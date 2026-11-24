@@ -52,8 +52,9 @@ export class ActionRegistryImpl implements ActionRegistry {
   constructor(private readonly identity?: ArtifactIdentityContext) {}
 
   register(action: Action, metadata?: ArtifactMetadata): void {
+    // An app's action is named in its app; core's already carries its full name.
     const artifactId =
-      metadata && this.identity
+      metadata?.ownerType === "app" && this.identity
         ? formatArtifactId(metadata.ownerId, action.config.name)
         : action.config.name;
     const registeredAction =

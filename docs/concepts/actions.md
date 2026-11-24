@@ -39,6 +39,7 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 - Reach other code only through the page's deps, which the wiring hands each page once ([`wiring/agent-tools.ts`](../../packages/core/src/wiring/agent-tools.ts)). A new page joins `PAGES` there, and its deps join the `registerAgentTools` call in `index.ts`.
 - Enroll each tool in `whoMayAskSuite` in the page's test file. Test the operation through `callTool`, as the guardian.
 - Never rename a tool. Agents, agent prompts and saved routines call it by its name.
+- When a tool takes over from an older action, name the older one's full name in `olderNames`. The older action keeps its registration and its behavior, and stays callable by that exact name. While the agent may call the new tool, the catalog lists and searches only the new tool.
 
 **Example:**
 
