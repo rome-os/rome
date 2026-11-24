@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
-import type { TurnFacts } from "../agent/index.js";
-import { shareLocationTools } from "./share-location-tool.js";
+import type { Audience, TurnFacts } from "../agent/index.js";
+import { privateTurnOf, shareLocationTools } from "./share-location-tool.js";
 
-const turnStartedBy = (actor?: { kind: string; userId?: string; via?: string }) =>
-  ({ actor: () => actor }) as unknown as TurnFacts;
+const turnStartedBy = (
+  actor?: { kind: string; userId?: string; via?: string },
+  audience: Audience = "private",
+) => ({ actor: () => actor, audience: () => audience }) as unknown as TurnFacts;
 
 const call = async (
   input: {
@@ -58,6 +60,17 @@ describe("share_location", () => {
     });
   });
 
+  it("lets the card share by itself in a turn a dashboard admin's own message started in their own chat", async () => {
+    const { result } = await call({
+      privateTurn: async () => true,
+      turn: turnStartedBy({ kind: "visitor" }, "admin"),
+    });
+    expect(JSON.parse(result.content[0]!.text).render.props).toEqual({
+      reason: "To find coffee near you",
+      autoShareToken: expect.any(String),
+    });
+  });
+
   it("reads a request for places that names none as near the guardian, with no questions first", async () => {
     const { tool } = await call({ privateTurn: async () => true });
     expect(tool?.description).toContain("names no place means near them");
@@ -87,5 +100,27 @@ describe("share_location", () => {
   it("asks for a reason", async () => {
     const { result } = await call({ privateTurn: async () => true }, { reason: " " });
     expect(result.isError).toBe(true);
+  });
+});
+
+describe("privateTurnOf", () => {
+  const turnIn = (audience: Audience) =>
+    ({ audience: () => audience, threadContext: () => undefined }) as unknown as TurnFacts;
+  const chatReads = (audience: Audience) => privateTurnOf(async () => audience);
+
+  it("holds while one person reads both the turn and its chat now", async () => {
+    expect(await chatReads("private")(turnIn("private"))).toBe(true);
+    expect(await chatReads("admin")(turnIn("admin"))).toBe(true);
+  });
+
+  it("fails once the chat reads otherwise than when the turn started", async () => {
+    // Visitors let in, or the chat's dashboard admin taken off the team.
+    expect(await chatReads("shared")(turnIn("private"))).toBe(false);
+    expect(await chatReads("shared")(turnIn("admin"))).toBe(false);
+    expect(await chatReads("admin")(turnIn("private"))).toBe(false);
+  });
+
+  it("fails in a shared turn", async () => {
+    expect(await chatReads("shared")(turnIn("shared"))).toBe(false);
   });
 });

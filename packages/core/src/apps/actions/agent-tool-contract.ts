@@ -103,6 +103,42 @@ const CASES: ReadonlyArray<{
     write: "needs_guardian",
   },
   {
+    name: "a dashboard admin's own message in a chat only they read",
+    turn: {
+      actor: visitor,
+      audience: "admin",
+      channelContext: { channel: "webchat", threadId: "visitor-chat" },
+    },
+    "read-only": null,
+    write: null,
+  },
+  {
+    name: "a turn no one started in a chat only a dashboard admin reads",
+    turn: { audience: "admin", channelContext: { channel: "webchat", threadId: "visitor-chat" } },
+    "read-only": null,
+    write: "needs_guardian",
+  },
+  {
+    name: "a visitor in their own chat while others read it",
+    turn: {
+      actor: visitor,
+      audience: "shared",
+      channelContext: { channel: "webchat", threadId: "visitor-chat" },
+    },
+    "read-only": "guardian_only",
+    write: "private_only",
+  },
+  {
+    name: "the guardian in a chat only a dashboard admin reads",
+    turn: {
+      actor: guardianCookie,
+      audience: "admin",
+      channelContext: { channel: "webchat", threadId: "visitor-chat" },
+    },
+    "read-only": "guardian_only",
+    write: "needs_guardian",
+  },
+  {
     name: "a turn no one started in a visitor's chat",
     turn: { channelContext: { channel: "webchat", threadId: "visitor-chat" } },
     "read-only": "guardian_only",

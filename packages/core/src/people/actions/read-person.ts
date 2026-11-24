@@ -2,7 +2,7 @@
 // notes the guardian keeps on them. Vocabulary: docs/domains/people.md.
 
 import { readFile } from "node:fs/promises";
-import { runsForGuardian } from "./guardian-only.js";
+import { runsForTeam } from "./guardian-only.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
 import type { PeopleRepository } from "../model/people-repository.js";
 import type { Person } from "../model/person.js";
@@ -54,7 +54,7 @@ export function registerReadPersonAction(
     },
     execute: async (args) => {
       // The notes are the guardian's own, so a visitor never reads them.
-      if (!(await runsForGuardian(deps.ownerOfChat))) {
+      if (!(await runsForTeam(deps.ownerOfChat))) {
         return { status: "error", error: "Only the guardian's agents can read a person's notes." };
       }
       const name = typeof args.name === "string" ? args.name.trim() : "";

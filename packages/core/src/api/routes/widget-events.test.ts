@@ -50,7 +50,7 @@ function setup(
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
-  audience: "private" | "shared" = "private",
+  audience: "private" | "admin" | "shared" = "private",
   storedDevice: string | null = null,
   setupState: SetupStartOutcome = {
     status: "started",
@@ -1010,6 +1010,21 @@ describe("an event on the share-location card core owns", () => {
     const output = (forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output;
     expect(output).toMatchObject({ status: "declined", dismissed: true });
     expect(JSON.stringify(forwarded)).not.toContain(String(position.latitude));
+  });
+
+  it("takes the position a dashboard admin shares in a chat only they read", async () => {
+    const { fire, forwarded } = setup(
+      { m: { chatId: "c1", content: [locationCard] } },
+      "visitor:ada",
+      undefined,
+      [],
+      [],
+      "admin",
+    );
+    await fire("m", { name: "share-location", context: position });
+    expect((forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output).toMatchObject(
+      { status: "shared", latitude: 31.23 },
+    );
   });
 
   it("lets the first of two clients answer, and refuses the other", async () => {

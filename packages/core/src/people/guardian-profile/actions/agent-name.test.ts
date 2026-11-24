@@ -107,8 +107,39 @@ describe("core:set_agent_name", () => {
     ).toBe("ok");
   });
 
+  it("accepts a dashboard admin's own message in a chat only they read", async () => {
+    const ownChat = { channel: "webchat", threadId: "visitor-chat" };
+    expect(
+      (await rename("Pebble", { actor: visitor, audience: "admin", channelContext: ownChat }))
+        .status,
+    ).toBe("ok");
+  });
+
+  it("accepts an autonomous turn in a chat only a dashboard admin reads", async () => {
+    const ownChat = { channel: "webchat", threadId: "visitor-chat" };
+    expect((await rename("Pebble", { audience: "admin", channelContext: ownChat })).status).toBe(
+      "ok",
+    );
+  });
+
   for (const [label, context] of [
     ["visitor actor", { actor: visitor }],
+    [
+      "visitor actor in their own chat while others read it",
+      {
+        actor: visitor,
+        audience: "shared",
+        channelContext: { channel: "webchat", threadId: "visitor-chat" },
+      },
+    ],
+    [
+      "guardian actor in a chat only a dashboard admin reads",
+      {
+        actor: guardian,
+        audience: "admin",
+        channelContext: { channel: "webchat", threadId: "visitor-chat" },
+      },
+    ],
     [
       "visitor actor in the guardian chat",
       { actor: visitor, channelContext: { channel: "webchat", threadId: "guardian-chat" } },
@@ -128,7 +159,8 @@ describe("core:set_agent_name", () => {
     it(`rejects a ${label} without writes or events`, async () => {
       expect(await rename("Pebble", context)).toMatchObject({
         status: "error",
-        error: "Only the guardian can change the agent name.",
+        error:
+          "Only the guardian, or a dashboard admin in their own chat, can change the agent name.",
       });
       await unchanged();
     });

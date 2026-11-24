@@ -368,6 +368,41 @@ describe("channels.query from a turn that is not the guardian's", () => {
   });
 });
 
+describe("channels.query from a dashboard admin's turn", () => {
+  const admin = { kind: "visitor", accountId: "ada", email: "ada@example.test" };
+  const read = (calls: ReturnType<typeof makeCalls>, callerActionContext: object) =>
+    calls["channels.query"]({ channel: "telegram", chatId: "else" }, {
+      callerActionContext,
+    } as never);
+
+  it("reads any chat from a turn only they read, as the guardian's private one does", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({ channelsService: { list: rs.fn(), send: rs.fn(), query } as never });
+
+    await read(calls, {
+      actor: admin,
+      audience: "admin",
+      turnId: "t1",
+      channelContext: { channel: "webchat", threadId: "ada-chat" },
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads only the chat it is in from a turn others read, or outside any turn", async () => {
+    const query = rs.fn(async () => []);
+    const calls = makeCalls({ channelsService: { list: rs.fn(), send: rs.fn(), query } as never });
+    const here = { channel: "webchat", threadId: "common" };
+
+    await expect(
+      read(calls, { actor: admin, audience: "shared", turnId: "t1", channelContext: here }),
+    ).rejects.toThrow("reads only the chat it is in");
+    // A visitor's call outside any turn, such as an app visitor's, reads no other chat.
+    await expect(read(calls, { actor: admin })).rejects.toThrow("reads only the chat it is in");
+    expect(query).not.toHaveBeenCalled();
+  });
+});
+
 describe("channels.chats", () => {
   const turnIn = (audience: "private" | "shared") => ({
     callerActionContext: {

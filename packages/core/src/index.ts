@@ -259,6 +259,7 @@ import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
+import { privateTurnOf } from "./core/share-location-tool.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
@@ -1625,10 +1626,7 @@ async function main() {
           return typeof stored === "string" ? stored : null;
         },
         deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
-        // The turn's audience, narrowed by the chat's as it stands now, so a
-        // chat that opens to visitors after the turn started is no longer private.
-        privateTurn: async (turn) =>
-          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
+        privateTurn: privateTurnOf(chatAudience),
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),

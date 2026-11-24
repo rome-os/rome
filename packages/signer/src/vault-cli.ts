@@ -27,10 +27,14 @@ a secret's value prints as [vault:NAME].
 
 const NO_SIGNER = "The vault is not available on this instance (no signer).";
 
-/** Whether the environment says the turn is shared. Unset means a person runs the CLI. */
+/**
+ * Whether the environment says others read the turn: anything but `private`
+ * (the guardian alone) or `admin` (the dashboard admin it works for alone).
+ * Unset means a person runs the CLI.
+ */
 function turnIsShared(env: NodeJS.ProcessEnv): boolean {
   const audience = env.ROME_TURN_AUDIENCE;
-  return audience !== undefined && audience !== "private";
+  return audience !== undefined && audience !== "private" && audience !== "admin";
 }
 
 class VaultCliError extends Error {}

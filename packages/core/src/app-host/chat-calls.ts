@@ -104,21 +104,24 @@ export interface ChatWorkerCallsDeps {
 }
 
 /**
- * Whether the calling action may read any chat: it runs in a turn whose
- * audience is private, so nobody but the guardian reads what it says, or
- * outside any agent turn. A turn others read, such as one for a visitor, in a
- * group or in an email thread, could pass on what another chat holds, so it
- * reads only the chat it is in. An agent turn with no chat of its own, such
- * as a summoned agent's, reads any chat only when its audience is private,
- * and otherwise none. A turn in a chat with no audience reads as shared, and
- * so does one acting for anyone but the guardian. A routine's fire runs
- * outside any agent turn, so a routine made for a shared chat still reads any
- * chat (#2437). Domain: docs/domains/participation.md#audience.
+ * Whether the calling action may read any chat: it runs in a turn only one
+ * person on the team reads (`private` or `admin`), or outside any agent turn.
+ * A dashboard chat still reads as that person, so an `admin` turn sees none of
+ * the guardian's private chats. A turn others read, such as one for a visitor
+ * off the team, in a group or in an email thread, could pass on what another
+ * chat holds, so it reads only the chat it is in. An agent turn with no chat
+ * of its own, such as a summoned agent's, reads any chat only when one person
+ * reads it, and otherwise none. A turn in a chat with no audience reads as
+ * shared. A visitor reads any chat only in an `admin` turn, never outside one.
+ * A routine's fire runs outside any agent turn, so a routine made for a
+ * shared chat still reads any chat (#2437). Domain:
+ * docs/domains/participation.md#audience.
  */
 function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
+  if (context?.actor?.kind === "visitor") return context.audience === "admin";
   if (context?.actor && context.actor.kind !== "guardian") return false;
   if (!context?.channelContext && !context?.turnId) return true;
-  return context.audience === "private";
+  return context.audience === "private" || context.audience === "admin";
 }
 
 /** Whether `chatId` is the chat a turn is in: its own, or, in a native

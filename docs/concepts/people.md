@@ -44,6 +44,7 @@ A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow
 
 - A dashboard admin passes every dashboard check the guardian passes, approvals, the vault and app-connection access included, apart from the four [exceptions](#team).
 - A dashboard admin has their own Concierge while it is on. Memory and connections stay shared.
+- A dashboard admin's own message in their own Concierge chat asks the agent for what the guardian's own message asks in theirs, apart from what is the guardian's own person ([audience](../domains/participation.md#audience)).
 - Removing the email ends dashboard admin access at the next request.
 
 **Not to be confused with:**

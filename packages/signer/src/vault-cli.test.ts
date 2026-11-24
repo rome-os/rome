@@ -129,6 +129,14 @@ describe("vault load", () => {
     expect(result.out).toBe("");
   });
 
+  it("goes on to the vault in a conversation only a dashboard admin reads", async () => {
+    const result = await run(["load", "FIRST_KEY", ...node("1")], {
+      ROME_SIGNER_SOCKET: "/nonexistent/signer.sock",
+      ROME_TURN_AUDIENCE: "admin",
+    });
+    expect(result.err).toBe("vault: The vault is not available on this instance (no signer).\n");
+  });
+
   it("explains when the instance has no signer", async () => {
     const result = await run(["load", "FIRST_KEY", ...node("1")], {
       ROME_SIGNER_SOCKET: "/nonexistent/signer.sock",

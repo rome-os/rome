@@ -199,9 +199,9 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
       // The chat may have become shared since the card was shown, as when
-      // visitors were let in: then the position reaches nobody, and the card
-      // is answered as declined.
-      if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
+      // visitors were let in or its dashboard admin left the team: then the
+      // position reaches nobody, and the card is answered as declined.
+      if ((await io.chatAudience()) === "shared") return { answer: DECLINED_LOCATION };
       // A share the client sent by itself is marked so only on a card core
       // marked for it; a client cannot mark any other.
       const auto = context.auto === true && typeof io.props.autoShareToken === "string";

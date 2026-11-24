@@ -1,20 +1,38 @@
-import type { RomeTool, TurnFacts, WidgetDrawing } from "../agent/index.js";
+import type { ThreadContext } from "@rome-os/app-runtime";
+import type { Audience, RomeTool, TurnFacts, WidgetDrawing } from "../agent/index.js";
 import { parseShareLocationInput, shareLocationToolOutput } from "../webchat/location-card.js";
 
 /**
- * Whether the guardian's own message started the running turn: the guardian,
- * proven by their signed-in session. A turn something else started (a
+ * Whether the person who reads the running turn alone started it with their
+ * own message: the guardian, proven by their signed-in session, or a
+ * dashboard admin in a turn only they read. A turn something else started (a
  * followed event, a routine, a task's result, another agent) acts for the
  * guardian only by loopback, so its card never shares by itself.
  */
-export function startedByGuardian(turn: TurnFacts): boolean {
+export function startedByItsReader(turn: TurnFacts): boolean {
   // The actor is a SessionActor, which says how guardianship was proven.
   const actor = turn.actor() as { kind: string; via?: string } | undefined;
+  if (actor?.kind === "visitor") return turn.audience() === "admin";
   return actor?.kind === "guardian" && actor.via === "cookie";
 }
 
-/** Whether the running turn is read by the guardian alone. */
+/** Whether the running turn is read by one person on the team alone. */
 export type PrivateTurn = (turn: TurnFacts) => Promise<boolean>;
+
+/**
+ * The {@link PrivateTurn} rule over `chatAudience`, who can read a chat now:
+ * the turn is read by one person (`private` or `admin`), and its chat still
+ * reads the same, so a chat that opens to others after the turn started, or
+ * whose dashboard admin left the team, is no longer private.
+ */
+export function privateTurnOf(
+  chatAudience: (place: ThreadContext | undefined) => Promise<Audience>,
+): PrivateTurn {
+  return async (turn) => {
+    const audience = turn.audience();
+    return audience !== "shared" && (await chatAudience(turn.threadContext())) === audience;
+  };
+}
 
 /**
  * `share_location`, served with the session's own tools. In a private turn
@@ -69,7 +87,7 @@ export function shareLocationTools(input: {
             {
               type: "text",
               text: JSON.stringify(
-                shareLocationToolOutput(parsed.reason, startedByGuardian(input.turn)),
+                shareLocationToolOutput(parsed.reason, startedByItsReader(input.turn)),
               ),
             },
           ],
