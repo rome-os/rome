@@ -116,7 +116,8 @@ export async function entryMention({ slack, bot, nonce, ...opts }) {
   const mine = await allPages(
     slack,
     "users.conversations",
-    { types: "public_channel,private_channel", exclude_archived: true },
+    // Public channels only: the tester token holds channels:read, not groups:read.
+    { types: "public_channel", exclude_archived: true },
     "channels",
   );
   let shared = null;

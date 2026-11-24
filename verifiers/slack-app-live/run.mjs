@@ -2,7 +2,7 @@
 // Scores the official Slack app's three rubric entries against real Slack and
 // production. Usage:
 //   node verifiers/slack-app-live/run.mjs --env ~/.config/rome/slack-tester.env --out <dir>
-//     [--signer-jwt-file <path>] [--rome-cloud https://romeos.cc] [--chromium <path>]
+//     [--signer-jwt-file <path>] [--app-id <id>] [--only approval-page,direct-message,mention] [--rome-cloud https://romeos.cc] [--chromium <path>]
 // Writes <out>/report.json and <out>/report.md. Sends at most one message per
 // entry, and none when the app is not installed.
 
@@ -27,6 +27,7 @@ const { values: args } = parseArgs({
     "signer-jwt-file": { type: "string" },
     "rome-cloud": { type: "string", default: "https://romeos.cc" },
     "app-id": { type: "string", default: ROME_APP_ID },
+    only: { type: "string" },
     chromium: { type: "string", default: process.env.CHROMIUM_PATH },
   },
 });
@@ -90,11 +91,22 @@ const loadPage = (link) =>
   loadApprovalPage(link, { dCookie: env.SLACK_TESTER_D_COOKIE, executablePath: args.chromium });
 
 const { bot, scanned, removed } = await findRomeBot(slack, args["app-id"]);
+// A Slack error ends that entry as not checked, so one entry's failure never
+// loses another's result, and never tempts a rerun that sends twice.
+const only = args.only ? new Set(args.only.split(",")) : null;
+const run = async (id, score) => {
+  if (only && !only.has(id)) return null;
+  try {
+    return await score();
+  } catch (err) {
+    return { id, verdict: "not checked", reason: `Slack answered ${err.message}`, evidence: {} };
+  }
+};
 const entries = [
-  await entryApprovalPage({ installLink, loadPage }),
-  await entryDirectMessage({ slack, bot, nonce }),
-  await entryMention({ slack, bot, nonce }),
-];
+  await run("approval-page", () => entryApprovalPage({ installLink, loadPage })),
+  await run("direct-message", () => entryDirectMessage({ slack, bot, nonce })),
+  await run("mention", () => entryMention({ slack, bot, nonce })),
+].filter(Boolean);
 
 const report = {
   started_at: startedAt,
