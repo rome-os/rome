@@ -257,6 +257,21 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_EXTERNAL/U_ANN"]);
   });
 
+  it("names an author of the app's workspace there, whatever workspace the directory gives", async () => {
+    const mailbox = fakeMailbox();
+    const api = fakeApi({
+      userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: "T_HOME" })),
+    });
+    const { adapter: a, delivered } = adapter(mailbox, api);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1" }),
+      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, user_team: "T_POSTED_IN" } }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_A/U_GUARDIAN", "T_POSTED_IN/U_GUARDIAN"]);
+  });
+
   it("holds a message that names another workspace but not its author's", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
