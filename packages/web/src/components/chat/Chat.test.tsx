@@ -996,6 +996,95 @@ describe("computer use", () => {
     );
   });
 
+  it("clears revoked remote authorization even when the refetch returns discoveryDegraded", async () => {
+    const remoteDeviceId = "992a6210-71d8-4233-858b-764acbbcfe30";
+    const localTarget = {
+      deviceId,
+      name: "This computer",
+      persistentAccess: true as const,
+    };
+    const remoteTarget = {
+      deviceId: remoteDeviceId,
+      name: "Office Mac",
+      authorized: true as const,
+      persistentAccess: true as const,
+    };
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce({
+        ...localTarget,
+        targets: [localTarget, remoteTarget],
+      })
+      .mockResolvedValueOnce({
+        ...localTarget,
+        targets: [localTarget],
+        discoveryDegraded: true,
+      });
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: { turnId: "after-degraded-revoke" },
+    });
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevokeLabel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevoke" }));
+    await waitFor(() =>
+      expect(setChatComputerUseAccess).toHaveBeenLastCalledWith("session-1", remoteDeviceId, false),
+    );
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+
+    // The revoked remote target stays listed for re-allowing, but is no longer selected or authorized.
+    const trigger = await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].has("computerUseDeviceId")).toBe(false);
+
+    fireEvent.click(trigger);
+    const allowButtons = await screen.findAllByRole("button", {
+      name: "composer.computerUseAllowLabel",
+    });
+    expect(allowButtons).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "composer.computerUseSelectLabel" })).toBeNull();
+  });
+
+  it("clears revoked authorization even when the refetch fails with 503", async () => {
+    const remoteDeviceId = "992a6210-71d8-4233-858b-764acbbcfe30";
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce({
+        deviceId: remoteDeviceId,
+        name: "Office Mac",
+        authorized: true,
+        persistentAccess: true,
+      })
+      .mockRejectedValueOnce(new ChatApiError("Device discovery unavailable", 503, null));
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: { turnId: "after-503-revoke" },
+    });
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevokeLabel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevoke" }));
+    await waitFor(() =>
+      expect(setChatComputerUseAccess).toHaveBeenLastCalledWith("session-1", remoteDeviceId, false),
+    );
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+
+    await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].has("computerUseDeviceId")).toBe(false);
+  });
+
   it("clears stale selection and refreshes targets when a turn returns computer_use_denied", async () => {
     rs.mocked(getChatComputerUseTarget)
       .mockResolvedValueOnce({

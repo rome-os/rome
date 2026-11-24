@@ -96,7 +96,8 @@ export function createNodeDevicesService(
     },
     /**
      * Authorized devices from Cloud's list. Unlike getStatus it sends
-     * no probe to any device. Null when the caller cannot reach the list.
+     * no probe to any device. Returns an empty list when Cloud is not
+     * configured, and null when the caller cannot reach the list.
      */
     async listDevices(): Promise<DeviceList | null> {
       try {
@@ -115,6 +116,9 @@ export function createNodeDevicesService(
             })),
         };
       } catch (error) {
+        if (error instanceof CallerConfigurationError && error.code === "not_configured") {
+          return { devices: [] };
+        }
         if (error instanceof DaemonVersionError) {
           client?.disconnect();
           client = undefined;

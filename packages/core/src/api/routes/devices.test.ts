@@ -272,7 +272,7 @@ describe("device list for the folder picker", () => {
     service.close();
   });
 
-  it("answers 503 when the caller cannot reach the list", async () => {
+  it("returns an empty list when Cloud is not configured", async () => {
     const service = createNodeDevicesService(() => ({
       disconnect() {},
       getDevicesStatus: rs.fn(),
@@ -281,6 +281,23 @@ describe("device list for the folder picker", () => {
       removeDevice: rs.fn(),
       listDevices: async () => {
         throw new CallerConfigurationError("not_configured", "secret");
+      },
+    }));
+    const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ devices: [] });
+    service.close();
+  });
+
+  it("answers 503 when the caller cannot reach the list", async () => {
+    const service = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus: rs.fn(),
+      run: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
+      listDevices: async () => {
+        throw new Error("cloud unreachable");
       },
     }));
     const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");

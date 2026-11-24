@@ -15,7 +15,9 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
+import { CallerConfigurationError } from "@rome-os/node-core/client";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { createNodeDevicesService } from "../../desktops/node-devices.js";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
@@ -784,6 +786,77 @@ describe("Webchat API", () => {
       name: local.name,
       discoveryDegraded: true,
     });
+  });
+
+  it("treats unconfigured Cloud as empty remote devices rather than 503 or discoveryDegraded", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const local = {
+      deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02",
+      name: "This computer",
+    };
+    const unconfigured = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus: rs.fn(),
+      run: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
+      listDevices: async () => {
+        throw new CallerConfigurationError("not_configured", "Cloud is not configured");
+      },
+    }));
+    try {
+      const remoteOnlyApp = createWebchatRuntime({
+        ...deps,
+        nodeDevices: unconfigured,
+        computerUseSigningSecretReady: true,
+        placeAudience: async () => "private",
+      }).routes;
+      const { id: remoteChatId } = (await (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request("/chat/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "No cloud" }),
+          }),
+        )
+      ).json()) as { id: string };
+
+      expect(
+        (
+          await runWithSessionActor(guardian, () =>
+            remoteOnlyApp.request(`/chat/sessions/${remoteChatId}/computer-use`),
+          )
+        ).status,
+      ).toBe(404);
+
+      const localOnlyApp = createWebchatRuntime({
+        ...deps,
+        nodeDevices: unconfigured,
+        computerUseLocal: local,
+        computerUseSigningSecretReady: true,
+        placeAudience: async () => "private",
+      }).routes;
+      const { id: localChatId } = (await (
+        await runWithSessionActor(guardian, () =>
+          localOnlyApp.request("/chat/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "Local without cloud" }),
+          }),
+        )
+      ).json()) as { id: string };
+
+      const response = await runWithSessionActor(guardian, () =>
+        localOnlyApp.request(`/chat/sessions/${localChatId}/computer-use`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ deviceId: local.deviceId, name: local.name });
+      expect(body).not.toHaveProperty("discoveryDegraded");
+    } finally {
+      unconfigured.close();
+    }
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {

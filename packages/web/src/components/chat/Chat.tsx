@@ -3296,6 +3296,14 @@ export function Chat({
                             );
                             setComputerUseChoice(null);
                           }}
+                          onRevoked={(deviceId) => {
+                            setPreferredComputer((current) =>
+                              current?.deviceId === deviceId ? null : current,
+                            );
+                            setComputerUseChoice((current) =>
+                              current?.deviceId === deviceId ? null : current,
+                            );
+                          }}
                           onTogglePreemption={() => {
                             if (!selectedWindow) return;
                             setComputerUseChoice((current) => {

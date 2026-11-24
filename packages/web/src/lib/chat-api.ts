@@ -130,6 +130,8 @@ export async function getChatComputerUseTarget(sessionId: string, signal: AbortS
     .parse(await jsonOrThrow<unknown>(res));
 }
 
+export type ChatComputerUseEligibility = Awaited<ReturnType<typeof getChatComputerUseTarget>>;
+
 export async function setChatComputerUseAccess(
   sessionId: string,
   deviceId: string,
