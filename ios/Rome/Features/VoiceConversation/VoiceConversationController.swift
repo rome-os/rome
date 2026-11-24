@@ -1,0 +1,129 @@
+import AVFoundation
+import SwiftUI
+import UIKit
+
+/// One message field's voice conversation: whether it runs, Rome's state,
+/// mute, and why the last one ended on its own. Like voice input, it needs
+/// the screen: the screen stays on while it runs, and the app going to the
+/// background or a call taking the microphone ends it.
+@MainActor
+@Observable
+final class VoiceConversationController {
+    private(set) var active = false
+    private(set) var state: VoiceConversationState = .listening
+    private(set) var muted = false
+    /// Why the last conversation ended on its own; it goes on the next edit,
+    /// send or start. One without a fault also goes once seen for a while.
+    private(set) var notice: VoiceConversationStopReason?
+    @ObservationIgnored private let noticeTimer: VoiceNoticeTimer
+    @ObservationIgnored private let makeAudio: @MainActor () -> VoiceConversationAudio
+    @ObservationIgnored private var conversation: VoiceConversation?
+    @ObservationIgnored private var audio: VoiceConversationAudio?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// Where the app's trips to the background and audio interruptions are told.
+    @ObservationIgnored private let center: NotificationCenter
+
+    init(noticeTimer: VoiceNoticeTimer = VoiceNoticeTimer(), center: NotificationCenter = .default,
+         makeAudio: @escaping @MainActor () -> VoiceConversationAudio = VoiceConversationAudios.make) {
+        self.noticeTimer = noticeTimer
+        self.center = center
+        self.makeAudio = makeAudio
+    }
+
+    /// Starts a voice conversation in `chat`. Does nothing while one runs, or
+    /// without a signed-in instance.
+    func start(service: VoiceInputService, chat: String) {
+        guard conversation == nil, let request = service.conversationSocketRequest() else { return }
+        start(request: request, chat: chat)
+    }
+
+    func start(request: URLRequest, chat: String, session: URLSession = .shared) {
+        guard conversation == nil else { return }
+        notice = nil
+        noticeTimer.cancel()
+        state = .listening
+        muted = false
+        active = true
+        // The screen locking would send the app to the background and end the conversation.
+        UIApplication.shared.isIdleTimerDisabled = true
+        let audio = makeAudio()
+        self.audio = audio
+        let conversation = VoiceConversation(
+            request: request,
+            chatId: chat,
+            audio: audio,
+            session: session,
+            handlers: .init(
+                onState: { [weak self] state in self?.state = state },
+                onEnded: { [weak self] reason in self?.ended(reason) }
+            )
+        )
+        self.conversation = conversation
+        observe()
+        conversation.start()
+    }
+
+    /// The guardian's End.
+    func end() { conversation?.end() }
+
+    func toggleMute() {
+        guard let conversation else { return }
+        muted.toggle()
+        conversation.setMuted(muted)
+    }
+
+    /// How loud whoever is talking is, 0 to 1: Rome while it speaks, the guardian otherwise.
+    func level() -> Float {
+        guard active, let audio else { return 0 }
+        if state == .speaking { return audio.replyLevel }
+        return muted ? 0 : audio.microphoneLevel
+    }
+
+    /// The field is going away with the chat: the conversation ends, as on
+    /// the dashboard, and a notice that goes by itself goes too.
+    func leave() {
+        conversation?.end()
+        if let notice, notice.endsWithoutFault { dismissNotice() }
+    }
+
+    /// The guardian's own edit in the field, or a send: the notice goes.
+    func edited() {
+        guard notice != nil, !active else { return }
+        dismissNotice()
+    }
+
+    private func ended(_ reason: VoiceConversationStopReason?) {
+        conversation = nil
+        audio = nil
+        active = false
+        muted = false
+        state = .listening
+        UIApplication.shared.isIdleTimerDisabled = false
+        for observer in observers { center.removeObserver(observer) }
+        observers = []
+        guard let reason else { return }
+        notice = reason
+        UIAccessibility.post(notification: .announcement, argument: reason.notice)
+        if reason.endsWithoutFault {
+            noticeTimer.start { [weak self] in self?.notice = nil }
+        }
+    }
+
+    private func dismissNotice() {
+        notice = nil
+        noticeTimer.cancel()
+    }
+
+    /// The app going to the background, or a call, Siri or another app taking
+    /// the microphone, ends the conversation at once. It never resumes by itself.
+    private func observe() {
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.conversation?.end(.backgrounded) }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            guard raw == AVAudioSession.InterruptionType.began.rawValue else { return }
+            MainActor.assumeIsolated { self?.conversation?.end(.interrupted) }
+        })
+    }
+}

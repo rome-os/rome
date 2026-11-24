@@ -17,7 +17,8 @@ struct Composer: View {
     /// The chat this field writes in, so voice input stopped by leaving it
     /// says why on return; nil keeps no such notice.
     var voiceKey: String? = nil
-    /// Which field this is, for the voice input start's signpost.
+    /// Which field this is, for the voice input start's signpost. Chat and
+    /// topic chats also offer a voice conversation; a task chat does not.
     var voiceField: VoiceInputField = .chat
     /// False while the field's chat is covered or hidden but still mounted
     /// (Chat under another section, a sheet, the drawer): listening stops.
@@ -33,6 +34,7 @@ struct Composer: View {
     @State private var editorHeight: CGFloat?
     @State private var overflows = false
     @State private var voice = VoiceInputController()
+    @State private var conversation = VoiceConversationController()
     @State private var textHandle = ComposerTextHandle()
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
@@ -50,11 +52,13 @@ struct Composer: View {
         guard !(attachments?.isPreparing ?? false) else { return false }
         // Sending waits for the spoken words to land.
         guard !voice.active else { return false }
+        // The voice conversation sends what is said; End shows in Send's place.
+        guard !conversation.active else { return false }
         return !committedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
     }
 
     private var usesRows: Bool {
-        focused || multiline || text.contains("\n") || expanded || hasPhotos || voice.active || dynamicTypeSize.isAccessibilitySize
+        focused || multiline || text.contains("\n") || expanded || hasPhotos || voice.active || conversation.active || dynamicTypeSize.isAccessibilitySize
     }
 
     private var shapeAnimation: Animation? {
@@ -66,15 +70,41 @@ struct Composer: View {
     }
 
     private var compactGutter: CGFloat { composerWidth >= 340 ? 24 : 0 }
-    private var showsExpansion: Bool { (overflows || expanded) && !voice.active }
+    private var showsExpansion: Bool { (overflows || expanded) && !voice.active && !conversation.active }
+
+    /// Whether this field offers a voice conversation: Chat and topic chats,
+    /// on an instance that offers one.
+    private var offersConversation: Bool {
+        voiceField != .taskChat && voiceKey != nil && (voiceInput?.conversationAvailable ?? false)
+    }
 
     private func leadingInset(rows: Bool) -> CGFloat { rows || attachments == nil ? 18 : 51 }
-    private func trailingInset(rows: Bool) -> CGFloat { rows ? 18 : (voiceInput?.available ?? false) ? 95 : 51 }
+    /// Send, and 44 pt more for each voice control beside it.
+    private func trailingInset(rows: Bool) -> CGFloat {
+        guard !rows else { return 18 }
+        return 51 + ((voiceInput?.available ?? false) ? 44 : 0) + (offersConversation ? 44 : 0)
+    }
 
     var body: some View {
+        VStack(spacing: 8) {
+            if conversation.active {
+                VoiceConversationCapsule(state: conversation.state, muted: conversation.muted, level: conversation.level)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
+            }
+            field
+        }
+        .animation(shapeAnimation, value: conversation.active)
+    }
+
+    /// The field itself: the notices, the photos, the text and its controls.
+    private var field: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let notice = voice.notice {
                 VoiceInputNotice(stop: notice)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 18)
+            } else if let stop = conversation.notice {
+                VoiceConversationNotice(reason: stop)
                     .padding(.top, 10)
                     .padding(.horizontal, 18)
             }
@@ -97,7 +127,10 @@ struct Composer: View {
                 handle: textHandle,
                 editable: !voice.active,
                 onReturn: returnSends,
-                onEdit: { voice.edited(service: voiceInput, chat: voiceKey) },
+                onEdit: {
+                    voice.edited(service: voiceInput, chat: voiceKey)
+                    conversation.edited()
+                },
                 expanded: expanded,
                 compactWidth: compactWidth,
                 onMeasure: { multiple, height, overflow in
@@ -172,13 +205,17 @@ struct Composer: View {
         // A field mounted hidden, such as the main Chat under another section,
         // arrives when it shows.
         .onAppear { if onScreen { voice.arrive(service: voiceInput, chat: voiceKey) } }
-        .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
+        .onDisappear {
+            voice.leave(service: voiceInput, chat: voiceKey)
+            conversation.leave()
+        }
         .onChange(of: voice.state) { voice.stateShown() }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)
             } else {
                 voice.leave(service: voiceInput, chat: voiceKey)
+                conversation.leave()
                 expanded = false
             }
         }
@@ -228,17 +265,39 @@ struct Composer: View {
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasPhotos
             else { return }
             voice.edited(service: voiceInput, chat: voiceKey)
+            conversation.edited()
             onSend()
         }
     }
 
-    /// The voice control, and Send or the turn's stop.
+    /// The voice controls, and Send or the turn's stop. During a voice
+    /// conversation: mute and End alone.
     @ViewBuilder private var controls: some View {
-        if let voiceInput, voiceInput.available {
-            VoiceInputButton(state: voice.state) {
-                voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
+        if conversation.active {
+            Group {
+                VoiceConversationMuteButton(muted: conversation.muted) { conversation.toggleMute() }
+                VoiceConversationEndButton { conversation.end() }
             }
+            .transition(.scale.combined(with: .opacity))
+        } else {
+            if let voiceInput, voiceInput.available {
+                VoiceInputButton(state: voice.state) {
+                    voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
+                }
+            }
+            if offersConversation, !voice.active, let voiceInput, let voiceKey {
+                VoiceConversationButton {
+                    focused = false
+                    conversation.start(service: voiceInput, chat: voiceKey)
+                }
+                .transition(.scale.combined(with: .opacity))
+            }
+            sendOrStop
         }
+    }
+
+    /// Send, or the turn's stop while it runs.
+    private var sendOrStop: some View {
         Group {
             // While listening, the field's stop is the voice control's.
             if stopVisible && !canSend && !voice.active {
@@ -256,6 +315,7 @@ struct Composer: View {
             } else {
                 Button {
                     voice.edited(service: voiceInput, chat: voiceKey)
+                    conversation.edited()
                     onSend()
                 } label: {
                     Image(systemName: "arrow.up")
@@ -294,8 +354,8 @@ struct Composer: View {
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
-        // The camera would cover the voice control while it listens.
-        .disabled(attachments.isFull || voice.active)
+        // The camera would cover the voice controls while they listen.
+        .disabled(attachments.isFull || voice.active || conversation.active)
         .accessibilityLabel("Add photos")
     }
 }
