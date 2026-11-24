@@ -227,11 +227,34 @@ export class ApprovalHandler {
           approvalId,
           actionName: payload.actionName,
         });
+        emit?.({
+          type: "tool_result",
+          toolUseId: traceId,
+          tool: payload.actionName,
+          output: { error: "Action execution failed. See server logs for details." },
+          isError: true,
+          agent: agentName,
+        });
+        await this.approvalsRepo.markExecutionFailed(
+          approvalId,
+          "approval could not be bound to a journal entry",
+        );
+        return;
       }
+      // Replay from the live journal, not the card's frozen snapshot: a
+      // sibling resolved under another card since may already hold a recorded
+      // outcome, and consuming its entry in replay mode keeps the call from
+      // recording (and running) a second time. The snapshot stays as the
+      // fallback for a payload whose journal row is gone.
+      const liveJournal = await this.journalRepo.loadJournal(payload.rootExecutionId);
+      const replayJournal =
+        liveJournal.length >= payload.replayJournal.length && liveJournal.length > 0
+          ? liveJournal
+          : payload.replayJournal;
       const runContext: ActionRunContext = {
         initiator: `approval:${approvalId}`,
         ...(requester ? { actor: requester } : {}),
-        replayJournal: payload.replayJournal,
+        replayJournal,
         replayRootExecutionId: payload.rootExecutionId,
         approvedSequence,
         channelContext: payload.channelContext,

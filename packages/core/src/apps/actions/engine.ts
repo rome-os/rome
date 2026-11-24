@@ -947,8 +947,18 @@ export class ActionEngine {
               entry.sequence,
               entry.actionName,
             );
+            if (!card) {
+              // No live card owns this entry — it was rejected, expired or
+              // consumed — so nothing left can approve the call. Refuse it
+              // instead of reporting a pending approval on a card that does
+              // not exist.
+              return {
+                status: "error",
+                error: `Action "${entry.actionName}" was not approved`,
+              };
+            }
             const approval: PendingApproval = {
-              approvalId: card?.id ?? "",
+              approvalId: card.id,
               actionName: entry.actionName,
               description: `Action "${entry.actionName}" requires guardian approval`,
             };
@@ -973,7 +983,13 @@ export class ActionEngine {
           entry.result = result;
           entry.status = "completed";
           await this.updateJournalEntry(store.rootExecutionId, entry.sequence, result, "completed");
-          store.mode = "record";
+          // Keep replaying while the journal still holds entries after this
+          // one: a sibling resolved under another card may already have a
+          // recorded outcome to consume, and replaying past it keeps the
+          // call from recording (and running) again.
+          if (store.replayIndex >= store.journal.length) {
+            store.mode = "record";
+          }
           return result;
         }
 
