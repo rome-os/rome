@@ -97,6 +97,37 @@ async function startMockModel(): Promise<MockModel> {
  * paginated-history contract that Rome's borrowed exact forks depend on.
  */
 describe("bundled Codex app-server", () => {
+  it("lists GPT-6.2 models from the bundled catalog", async () => {
+    const { home, close } = await startMockModel();
+    const client = new AppServerClient({
+      cwd: home,
+      env: { HOME: home, CODEX_HOME: home, PATH: process.env.PATH ?? "" },
+      onNotification: () => {},
+      onServerRequest: () => ({}),
+    });
+
+    try {
+      client.start();
+      await client.request(Method.initialize, {
+        clientInfo: { name: "rome-test", title: "Rome test", version: "0" },
+        capabilities: { experimentalApi: true },
+      });
+      client.notify(Method.initialized, {});
+      const listed = (await client.request("model/list", {
+        includeHidden: false,
+      })) as { data: Array<{ model: string; hidden: boolean }> };
+      expect(listed.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ model: "gpt-6.2-sol", hidden: false }),
+          expect.objectContaining({ model: "gpt-6.2-astra", hidden: false }),
+        ]),
+      );
+    } finally {
+      client.close();
+      await close();
+    }
+  }, 30_000);
+
   it("starts an Astra thread and reverts its borrowed turn", async () => {
     const { home, close } = await startMockModel();
 
