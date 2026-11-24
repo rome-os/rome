@@ -6,9 +6,9 @@ import { readAnswerShape, romeSessionTracing } from "../../agent/index.js";
 import { TurnUsageReporter } from "../../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -54,7 +54,9 @@ import { createSessions } from "../../agent/index.js";
 import { TurnListeners } from "../../agent/index.js";
 import { AppTurnHooks } from "../../app-host/app-turn-hooks.js";
 import { SkillLoader } from "../../app-host/skill-loader.js";
-import { AgentRunner } from "../../core/agent-runner.js";
+import { AgentRunner, type ModelProvider } from "../../core/agent-runner.js";
+import type { PromptFacts, Sessions } from "../../agent/index.js";
+import type { SessionToolsProvider } from "../../core/session-tools.js";
 import type { RunParams } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
@@ -72,6 +74,23 @@ export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
   agents?: TestAgentFile[];
+  /** Agent YAML files loaded beside `agents`, such as a production agent
+   *  under `packages/core/agents/`. */
+  agentFiles?: string[];
+  /** The model provider sessions run on, in place of the harness's FakeModel. */
+  modelProvider?: ModelProvider;
+  /** What a conversation's turns catch up on, as production's chatPromptFacts. */
+  promptFacts?: PromptFacts;
+  /** How a session's place changes its agent, as production's placeSetup. */
+  placeSetup?: Parameters<typeof createSessions>[0]["placeSetup"];
+  /** The tools Rome adds for an agent, such as the Concierge's. */
+  sessionTools?: SessionToolsProvider;
+  /** Wraps the session manager the runner opens sessions through, as
+   *  production wraps it to share one session among chats. */
+  wrapSessions?: (sessions: Sessions) => Sessions;
+  /** Record each run's chat and transcript in the dashboard's chat store,
+   *  which `webchat` then reads. Off by default. */
+  recordChats?: boolean;
   /** Actions registered into the real ActionRegistry / ActionEngine. */
   actions?: Action[];
   /** Channel names to expose as FakeChannelEndpoints. */
@@ -131,6 +150,8 @@ export interface TestRome {
   actionEngine: ActionEngine;
   agentLoader: AgentLoader;
   agentRunner: AgentRunner;
+  /** The chat store runs record into when `recordChats` is on. */
+  webchat: ChatsWebChatRepository;
   approvalHandler: ApprovalHandler;
   connections: TestConnections;
   /** The channels over `connections`, built by the production `channelList`.
@@ -246,12 +267,15 @@ async function buildHarness(
       "utf-8",
     );
   }
+  for (const file of options.agentFiles ?? []) {
+    await copyFile(file, join(agentsDir, basename(file)));
+  }
   const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(agentsDir);
 
   const model = new FakeModel();
   const modelResolver = createModelResolver({
-    providers: [model],
+    providers: [options.modelProvider ?? model],
     accounts: fakeAccounts(bothAvailable()),
   });
 
@@ -279,6 +303,7 @@ async function buildHarness(
   );
 
   const systemPrompts = createTestSystemPrompts();
+  const webchat = new ChatsWebChatRepository(db);
   const agentSessionManager = createSessions(
     {
       agentLoader,
@@ -294,17 +319,21 @@ async function buildHarness(
       turnUsage: new TurnUsageReporter(),
       folders: agentFolders(),
       log: createLogger("agent-session"),
+      ...(options.promptFacts ? { promptFacts: options.promptFacts } : {}),
+      ...(options.placeSetup ? { placeSetup: options.placeSetup } : {}),
       ...romeToolPorts({
         actionRegistry,
         actionEngine,
+        ...(options.recordChats ? { webchatRepo: webchat } : {}),
+        ...(options.sessionTools ? { sessionTools: options.sessionTools } : {}),
       }),
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );
   const agentRunner = new AgentRunner(
-    agentSessionManager,
+    options.wrapSessions ? options.wrapSessions(agentSessionManager) : agentSessionManager,
     agentLoader,
-    undefined,
+    options.recordChats ? webchat : undefined,
     undefined,
     undefined,
     undefined,
@@ -406,6 +435,7 @@ async function buildHarness(
     actionEngine,
     agentLoader,
     agentRunner,
+    webchat,
     approvalHandler,
     connections,
     channels,
