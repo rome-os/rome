@@ -293,6 +293,11 @@ import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
+import { ConciergeObservationsRepository } from "./db/repositories/concierge-observations.js";
+import { ConciergeToldRepository } from "./db/repositories/concierge-told.js";
+import { startConciergePatrol } from "./concierge/patrol/index.js";
+import { readPatrolMemory } from "./concierge/patrol/memory.js";
+import { calendarWindow } from "./personal-data/calendar-window.js";
 import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
@@ -373,6 +378,7 @@ import {
   getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
+  getProfileMemoryDir,
   getProjectRoot,
   getReleaseNotesCacheDir,
 } from "./paths.js";
@@ -1952,6 +1958,8 @@ async function main() {
         { final: true },
       ),
   });
+  // What alerts, digests and the patrol told the guardian, which the patrol reads before it speaks.
+  const conciergeTold = new ConciergeToldRepository(db);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
     timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
@@ -1970,6 +1978,24 @@ async function main() {
     items: new ConciergeFollowItemsRepository(db),
     agentRunner,
     triageRecord: webchatRepo,
+    told: conciergeTold,
+  });
+  // Every few hours the patrol looks over what Rome holds for the guardian
+  // and may tell them one thing (docs/architecture/concierge-patrol.md).
+  startConciergePatrol(concierge, {
+    routines: routinesRepo,
+    routineEngine,
+    actions: actionRegistry,
+    settings: settingsRepo,
+    agentRunner,
+    record: webchatRepo,
+    told: conciergeTold,
+    observations: new ConciergeObservationsRepository(db),
+    chats: webchatRepo,
+    memory: () => readPatrolMemory(getProfileMemoryDir()),
+    calendar: async (from, to, timeZone) => calendarWindow(personalDataRepo, from, to, timeZone),
+    patrolAgent: () => agentLoader.find("core:concierge-patrol")?.definition,
+    intervalHours: config.conciergePatrolIntervalHours,
   });
 
   const approvalHandler = new ApprovalHandler(
