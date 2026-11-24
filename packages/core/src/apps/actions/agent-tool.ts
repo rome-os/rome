@@ -36,6 +36,10 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
   name: `system:${string}`;
   /** What the agent reads to choose the tool. */
   description: string;
+  /** Full names of older actions this tool replaces. Each stays callable by
+   *  its exact name, as whatever registers it runs it, but is neither listed
+   *  nor found by search, so the agent finds this tool. */
+  olderNames?: readonly string[];
   /** Picks who may ask: a read needs a turn that works for the guardian, a
    *  write the guardian's own message in their private chat (who-may-ask.ts). */
   sideEffects: ActionConfig["sideEffects"];
@@ -58,6 +62,7 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
 export interface AgentTool<D> {
   readonly name: string;
   readonly sideEffects: ActionConfig["sideEffects"];
+  readonly olderNames: readonly string[];
   /** The action core registers for this tool. */
   action(deps: D, whoMayAsk: WhoMayAsk): Action;
 }
@@ -111,6 +116,7 @@ export function agentToolsOf<D>() {
   return <S extends z.ZodType>(spec: AgentToolSpec<D, S>): AgentTool<D> => ({
     name: spec.name,
     sideEffects: spec.sideEffects,
+    olderNames: spec.olderNames ?? [],
     action: (deps, whoMayAsk) => toolAction(spec, deps, whoMayAsk),
   });
 }

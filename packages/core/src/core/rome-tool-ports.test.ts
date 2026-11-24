@@ -10,6 +10,7 @@ import {
 } from "../webchat/task-input-actor.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 
 function action(name: string): Action {
   return {
@@ -121,6 +122,52 @@ describe("romeToolPorts actions", () => {
     );
     await expect(actions.run(turn(), "secret", {})).rejects.toThrow("Unknown action: secret");
     await expect(actions.run(turn(), "missing", {})).rejects.toThrow("Unknown action: missing");
+  });
+});
+
+describe("romeToolPorts actions under an older name", () => {
+  // `system:stop_run` took over from `system:stop_old`, which stays registered.
+  function withOlderName() {
+    const registry = new ActionRegistryImpl();
+    registry.register(action("system:stop_old"));
+    registry.register(action("system:stop_run"), {
+      kind: "action",
+      ownerType: "core",
+      ownerId: "core",
+      publicName: "system:stop_run",
+      aliases: ["system:stop_old"],
+      sourcePath: "",
+    });
+    const run = rs.fn(async () => ({ status: "ok" as const, data: {} }));
+    const built = romeToolPorts({
+      actionRegistry: registry,
+      actionEngine: { run } as unknown as ActionEngine,
+    });
+    return { actions: built.actions, run };
+  }
+
+  it("lists only the tool that took over, so search finds only it", () => {
+    const { actions } = withOlderName();
+
+    expect(actions.list(turn({ actions: ["*"] })).map((a) => a.name)).toEqual(["system:stop_run"]);
+  });
+
+  it("still finds and runs the older name by its exact name", async () => {
+    const { actions, run } = withOlderName();
+    const all = turn({ actions: ["*"] });
+
+    expect(actions.find(all, "system:stop_old")?.name).toBe("system:stop_old");
+    await actions.run(all, "system:stop_old", { runId: "r-1" });
+
+    expect(run).toHaveBeenCalledWith("system:stop_old", { runId: "r-1" }, expect.anything());
+  });
+
+  it("lists the older name to an agent that may not call the tool that took over", () => {
+    const { actions } = withOlderName();
+
+    expect(actions.list(turn({ actions: ["system:stop_old"] })).map((a) => a.name)).toEqual([
+      "system:stop_old",
+    ]);
   });
 });
 

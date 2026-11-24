@@ -38,6 +38,17 @@ export function registerAgentTools(
   const check = whoMayAsk(ownerOfChat);
   for (const page of Object.keys(PAGES) as Page[]) {
     const tools = PAGES[page] as ReadonlyArray<AgentTool<AgentToolDeps[Page]>>;
-    for (const tool of tools) actions.register(tool.action(deps[page], check));
+    for (const tool of tools) {
+      // The older names ride as the tool's aliases, which the agent's catalog
+      // leaves out of listing and search (core/rome-tool-ports.ts).
+      actions.register(tool.action(deps[page], check), {
+        kind: "action",
+        ownerType: "core",
+        ownerId: "core",
+        publicName: tool.name,
+        aliases: [...tool.olderNames],
+        sourcePath: "",
+      });
+    }
   }
 }
