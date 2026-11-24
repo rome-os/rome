@@ -248,4 +248,15 @@ describe("the prompts and device connections", () => {
       "`rome-node` runs programs and reads files on the guardian's computers",
     );
   });
+
+  it("sends adding a device to system:add_device, not to the docs or rome-node", () => {
+    const { systemPromptPrefix, actions, policy } = definition("main");
+    const prompt = buildPromptPrefix(
+      { name: "main", owner: "core", systemPromptPrefix, actions, policy },
+      { ...material, charter: "", identity: "" },
+    );
+    expect(prompt).toContain(
+      "To add or link a new device, such as a computer or a phone, use `system:add_device`",
+    );
+  });
 });

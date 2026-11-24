@@ -16,6 +16,7 @@ const NAMES = [
   "system:stop_routine_run",
   "system:stop_routine",
   "system:read_devices",
+  "system:add_device",
   "system:run_on_device",
   "system:rename_device",
   "system:remove_device",

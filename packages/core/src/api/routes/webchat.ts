@@ -181,6 +181,8 @@ import {
 } from "../../webchat/location-card.js";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
+import { ADD_DEVICE } from "../../connections/device/agent-tools.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
 const MAIN_AGENT = "core:main";
@@ -573,6 +575,18 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
 const isExecuteActionTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
 
+/** The action an `execute_action` call ran when core owns it, or undefined
+ *  when it ran an app's action or none. */
+function coreActionRun(
+  actionName: string | undefined,
+  deps: Pick<ApiDeps, "actionRegistry">,
+): string | undefined {
+  if (!actionName) return undefined;
+  return deps.actionRegistry.getMetadata?.(actionName)?.ownerType === "core"
+    ? actionName
+    : undefined;
+}
+
 /** The action an `execute_action` tool call names, or undefined for any other
  *  tool call. */
 function executedActionName(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
@@ -685,23 +699,30 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
  * has no agent tool and is emitted by turn middleware alone, so an exact
- * name is the whole allow-list. */
-const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
-  [
-    {
-      componentId: "question-card",
-      emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
-    },
-    { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
-    {
-      componentId: "connect-card",
-      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
-    },
-    {
-      componentId: LOCATION_CARD_ID,
-      emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
-    },
-  ];
+ * name is the whole allow-list. The add-device card comes from one core
+ * agent tool, which `execute_action` runs (`coreAction`). */
+const BUILTIN_CARDS: ReadonlyArray<{
+  componentId: string;
+  emittedBy: (tool: string, coreAction: string | undefined) => boolean;
+}> = [
+  {
+    componentId: "question-card",
+    emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
+  },
+  { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+  {
+    componentId: "connect-card",
+    emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+  },
+  {
+    componentId: ADD_DEVICE_CARD_ID,
+    emittedBy: (tool, coreAction) => isExecuteActionTool(tool) && coreAction === ADD_DEVICE,
+  },
+  {
+    componentId: LOCATION_CARD_ID,
+    emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
+  },
+];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
  *
@@ -714,10 +735,12 @@ function buildBuiltinCard(
   msg: Extract<AgentEvent, { type: "tool_result" }>,
   suspension: Extract<Suspension, { kind: "inline" }>,
   sessionId: string,
+  /** The core action the call ran through `execute_action` (`coreActionRun`). */
+  coreAction?: string,
 ): PendingInteractionPart | null {
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
-  if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+  if (card && suspension.appId === "core" && card.emittedBy(toolName, coreAction)) {
     // The question card described as data, built here from its questions so
     // the agent never carries it in its context and no tool can supply one.
     // Readers that know `ui` draw it; older ones draw their own question card
@@ -5207,7 +5230,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // Host built-in inline card (the ask_question question-card,
                   // the connect_ai ai-tools-card): rendered by rome-web, so
                   // there is no owning app to validate.
-                  const card = buildBuiltinCard(msg, suspension, sessionId);
+                  const card = buildBuiltinCard(
+                    msg,
+                    suspension,
+                    sessionId,
+                    coreActionRun(executeActionCalls.get(msg.toolUseId), deps),
+                  );
                   if (card) {
                     await persistCard(deps.webchatRepo, sessionId, turnId, card, cardReplies);
                   }
@@ -5839,7 +5867,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         const suspension = readSuspensionFromOutput(msg.output);
         const card =
           suspension && suspension.kind === "inline" && suspension.builtin
-            ? buildBuiltinCard(msg, suspension, sessionId)
+            ? buildBuiltinCard(
+                msg,
+                suspension,
+                sessionId,
+                coreActionRun(executeActionCalls.get(msg.toolUseId), deps),
+              )
             : trustedWidget(msg, executeActionCalls.get(msg.toolUseId), deps, sessionId);
         if (card && recorded) {
           const cardTurnId = recordedTurnId ?? syntheticTurnId;

@@ -9987,6 +9987,57 @@ describe("Webchat API", () => {
       }
     });
 
+    // The add-device card comes only from system:add_device's `execute_action`
+    // call: never from a tool of the card's name, nor from another core action.
+    it.each([
+      ["persists", "execute_action", "system:add_device", true],
+      ["rejects", "add_device", "system:add_device", false],
+      ["rejects", "execute_action", "system:read_devices", false],
+    ])("%s an add-device card from the %s tool running %s", async (_label, tool, actionName, persisted) => {
+      deps.actionRegistry.register({
+        config: {
+          name: actionName,
+          type: "system",
+          description: actionName,
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "write",
+        },
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => ({ status: "ok", data: {} }),
+      });
+      const sessionId = `sess-add-device-${tool}-${actionName}`;
+      await deps.webchatRepo.createSession(sessionId, "Add-device card");
+      const { runtime } = createWebchatRuntime(deps);
+      const toolUseId = `add-device-${tool}-${actionName}`;
+      const render = {
+        kind: "inline",
+        componentId: "add-device-card",
+        props: { deviceIds: ["dev-phone"] },
+        builtin: true,
+      };
+
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({ type: "tool_use", id: toolUseId, tool, input: { action_name: actionName } });
+        emit({
+          type: "tool_result",
+          tool,
+          toolUseId,
+          output: { pendingInteraction: true, appId: "core", render },
+        });
+        emit({ type: "result", content: "" });
+      });
+
+      const cards = (await deps.webchatRepo.getMessages(sessionId))
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => JSON.parse(message.content) as Array<Record<string, unknown>>)
+        .filter((part) => part.type === "pending_interaction");
+      expect(cards).toEqual(
+        persisted ? [expect.objectContaining({ toolUseId, appId: "core", render })] : [],
+      );
+    });
+
     it("returns 404 for message events on a missing session", async () => {
       const app = createWebchatRuntime(deps).routes;
 

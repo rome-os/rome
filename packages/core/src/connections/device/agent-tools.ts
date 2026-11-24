@@ -1,15 +1,17 @@
 // What agents do on the Devices page: see the guardian's devices and what each
-// lets Rome reach, run one operation on a device, and rename or remove one.
-// The page reads the same status (`GET /api/devices`) and renames and removes
-// through the same service (`PATCH` and `DELETE /api/devices/:deviceId`); a
-// run is `core:device_run`'s (actions.ts). Turning on what a device offers is
-// the connect card's (`connect_account`). Vocabulary:
+// lets Rome reach, show how to add one, run one operation on a device, and
+// rename or remove one. The page reads the same status (`GET /api/devices`)
+// and renames and removes through the same service (`PATCH` and
+// `DELETE /api/devices/:deviceId`); the add-device card draws the instructions
+// of the page's Link device dialog; a run is `core:device_run`'s (actions.ts).
+// Turning on what a device offers is the connect card's (`connect_account`). Vocabulary:
 // docs/domains/connections.md#device-connection. How a tool is declared:
 // docs/concepts/actions.md#core-agent-tools.
 
+import { ADD_DEVICE_CARD_ID, type AddDeviceCardProps } from "@rome/api-types/add-device-card";
 import { type DevicesStatus, deviceRenameSchema } from "@rome/api-types/devices";
 import { z } from "zod";
-import { agentToolsOf, toolError } from "../../apps/actions/agent-tool.js";
+import { agentToolsOf, card, toolError } from "../../apps/actions/agent-tool.js";
 import type { DeviceManageResult, createNodeDevicesService } from "../../desktops/node-devices.js";
 import { type DeviceActionDeps, describeDevices, deviceRunTurnOf, runOnDevice } from "./actions.js";
 import { askingDeviceOf, READ_DEVICES_TOOL, RUN_ON_DEVICE_TOOL } from "./live-route.js";
@@ -29,6 +31,9 @@ export interface DeviceToolDeps {
 }
 
 const agentTool = agentToolsOf<DeviceToolDeps>();
+
+/** The one tool that shows the add-device card (api/routes/webchat.ts). */
+export const ADD_DEVICE = "system:add_device";
 
 const deviceId = z.string().describe("The device's id, from system:read_devices.");
 
@@ -155,8 +160,27 @@ export const removeDevice = agentTool({
   },
 });
 
+export const addDevice = agentTool({
+  name: ADD_DEVICE,
+  description:
+    "Show the guardian how to add a device to Rome, such as a computer or a phone, on a card in the chat with the same ways the Devices page offers: the Rome app, or Rome Node on a computer. Use it when the guardian asks to add, link or connect a new device or computer, or when a task needs a device they have not added. The guardian finishes on the device itself. Only in the guardian's private chat, in a turn their own message started. See the devices already added with system:read_devices",
+  sideEffects: "write",
+  input: z.object({}),
+  run: async (_input, { deps }) => {
+    const listed = await deps.devices.listDevices();
+    const props: AddDeviceCardProps = listed
+      ? { deviceIds: listed.devices.map((device) => device.id) }
+      : {};
+    return card({
+      componentId: ADD_DEVICE_CARD_ID,
+      props,
+      ask: "Add a device in Settings › Devices with Link device.",
+    });
+  },
+});
+
 /** The Devices page's agent tools. */
-export const deviceTools = [readDevices, runOnDeviceTool, renameDevice, removeDevice];
+export const deviceTools = [readDevices, addDevice, runOnDeviceTool, renameDevice, removeDevice];
 
 /** What the agent tells the guardian when the device service is not up, as
  *  the Devices page says it. Absent for a service that works. */
