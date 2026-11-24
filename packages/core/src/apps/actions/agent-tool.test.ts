@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { approvalOf, callTool, whoMayAskSuite } from "./agent-tool-contract.js";
-import { agentToolsOf, toolError } from "./agent-tool.js";
+import { agentToolsOf, card, toolError } from "./agent-tool.js";
 
 interface Deps {
   names: Map<string, string>;
@@ -30,10 +30,11 @@ const renameThing = agentTool({
 
 const showThing = agentTool({
   name: "system:show_thing",
-  description: "Show a thing",
+  description: "Show a thing on a card",
   sideEffects: "read-only",
   input: z.object({ thingId: z.string() }),
-  run: async ({ thingId }) => ({ thingId }),
+  run: async ({ thingId }) =>
+    card({ componentId: "thing-card", props: { thingId }, ask: "Look at the thing." }),
 });
 
 const deps = (): Deps => ({ names: new Map([["t-1", "Old"]]) });
@@ -85,6 +86,22 @@ describe("an agent tool's action", () => {
 
     expect(result).toMatchObject({ status: "error", error: expect.stringContaining("name") });
     expect(d.names.get("t-1")).toBe("Old");
+  });
+
+  it("returns a card as core's own card for the chat to draw", async () => {
+    expect(await callTool(showThing, deps(), { thingId: "t-1" })).toEqual({
+      status: "pending_interaction",
+      interaction: {
+        appId: "core",
+        promptText: "Look at the thing.",
+        render: {
+          kind: "inline",
+          componentId: "thing-card",
+          props: { thingId: "t-1" },
+          builtin: true,
+        },
+      },
+    });
   });
 
   it("words the approval card from the input and the deps", async () => {

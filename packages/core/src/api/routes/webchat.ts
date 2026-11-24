@@ -181,6 +181,7 @@ import {
 } from "../../webchat/location-card.js";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
+import { agentToolNames } from "../../wiring/agent-tools.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
 const MAIN_AGENT = "core:main";
@@ -573,6 +574,16 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
 const isExecuteActionTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
 
+/** Whether an `execute_action` call ran one of core's agent tools, which
+ *  core registered itself (wiring/agent-tools.ts). */
+function ranCoreAgentTool(
+  actionName: string | undefined,
+  deps: Pick<ApiDeps, "actionRegistry">,
+): boolean {
+  if (!actionName || !agentToolNames.has(actionName)) return false;
+  return deps.actionRegistry.getMetadata?.(actionName)?.ownerType === "core";
+}
+
 /** The action an `execute_action` tool call names, or undefined for any other
  *  tool call. */
 function executedActionName(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
@@ -685,7 +696,9 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
  * has no agent tool and is emitted by turn middleware alone, so an exact
- * name is the whole allow-list. */
+ * name is the whole allow-list. Any of them also comes from the
+ * `execute_action` call of one of core's agent tools, which returns it through
+ * `card` (apps/actions/agent-tool.ts). */
 const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
   [
     {
@@ -707,17 +720,20 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
  *
  * `readSuspensionFromOutput` intentionally parses arbitrary tool output, so a
  * caller must not trust `builtin: true` by itself. Only the tool paired with a
- * card in `BUILTIN_CARDS` may mount it. Keep this check shared by foreground
- * turns and system-initiated backend continuations so a deferred turn cannot
- * claim the card was shown while leaving it only in the trace. */
+ * card in `BUILTIN_CARDS`, or a core agent tool (`fromCoreAgentTool`), may
+ * mount it. Keep this check shared by foreground turns and system-initiated
+ * backend continuations so a deferred turn cannot claim the card was shown
+ * while leaving it only in the trace. */
 function buildBuiltinCard(
   msg: Extract<AgentEvent, { type: "tool_result" }>,
   suspension: Extract<Suspension, { kind: "inline" }>,
   sessionId: string,
+  fromCoreAgentTool = false,
 ): PendingInteractionPart | null {
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
-  if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+  const emitted = card?.emittedBy(toolName) || (fromCoreAgentTool && isExecuteActionTool(toolName));
+  if (card && suspension.appId === "core" && emitted) {
     // The question card described as data, built here from its questions so
     // the agent never carries it in its context and no tool can supply one.
     // Readers that know `ui` draw it; older ones draw their own question card
@@ -5207,7 +5223,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // Host built-in inline card (the ask_question question-card,
                   // the connect_ai ai-tools-card): rendered by rome-web, so
                   // there is no owning app to validate.
-                  const card = buildBuiltinCard(msg, suspension, sessionId);
+                  const card = buildBuiltinCard(
+                    msg,
+                    suspension,
+                    sessionId,
+                    ranCoreAgentTool(executeActionCalls.get(msg.toolUseId), deps),
+                  );
                   if (card) {
                     await persistCard(deps.webchatRepo, sessionId, turnId, card, cardReplies);
                   }
@@ -5839,7 +5860,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         const suspension = readSuspensionFromOutput(msg.output);
         const card =
           suspension && suspension.kind === "inline" && suspension.builtin
-            ? buildBuiltinCard(msg, suspension, sessionId)
+            ? buildBuiltinCard(
+                msg,
+                suspension,
+                sessionId,
+                ranCoreAgentTool(executeActionCalls.get(msg.toolUseId), deps),
+              )
             : trustedWidget(msg, executeActionCalls.get(msg.toolUseId), deps, sessionId);
         if (card && recorded) {
           const cardTurnId = recordedTurnId ?? syntheticTurnId;

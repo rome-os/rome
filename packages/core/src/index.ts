@@ -1928,6 +1928,18 @@ async function main() {
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
     },
+    // The projection `GET /connections` serves, and the Connections page's disconnect.
+    connections: {
+      connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+      registry: connectionRegistry,
+      deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+      deviceState: (kind, askingDeviceId) =>
+        deviceKindState(deviceLiveRoutes.forKind(kind, { askingDeviceId }), { askingDeviceId }),
+      guardianLanguage: async () => {
+        const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+        return typeof stored === "string" ? stored : null;
+      },
+    },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,

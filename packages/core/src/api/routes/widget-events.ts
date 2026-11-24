@@ -5,6 +5,7 @@ import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { deviceConnectPath } from "../../connections/connect-card.js";
+import type { SetupStartOutcome } from "../../connections/setup/start.js";
 import { ASKING_DEVICE_HEADER, createLiveRoutes } from "../../connections/device/live-route.js";
 import type { DeviceConnection } from "../../connections/device/repository.js";
 import { DECLINED_LOCATION, sharedLocationAnswer } from "../../webchat/location-card.js";
@@ -31,6 +32,15 @@ interface CoreIo {
   props: Record<string, unknown>;
   /** Who can read the widget's chat now, read when the event arrives. */
   chatAudience(): Promise<"private" | "shared">;
+  /** Starts a connection's setup, as the Connections page's Connect does. */
+  startSetup(request: SetupStartRequest): Promise<SetupStartOutcome>;
+}
+
+/** What a setup start names: as `POST /api/connections/:idOrKind/grants/:grant/setup` takes it. */
+export interface SetupStartRequest {
+  idOrKind: string;
+  grant: string;
+  force?: boolean;
 }
 
 type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<CoreReply>;
@@ -38,7 +48,10 @@ type CoreHandler = (context: Record<string, unknown>, io: CoreIo) => Promise<Cor
 /** A connection as `GET /api/connections` lists it, in the fields the connect
  *  card reads. */
 interface ConnectionStatus {
+  /** Null for a kind the guardian never connected. */
+  id: string | null;
   connectionKind: string;
+  grants: Record<string, unknown>;
   kindLabel?: string;
   state: "working" | "broken" | null;
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
@@ -68,10 +81,28 @@ async function deviceKindState(kind: string, io: CoreIo) {
 }
 
 /**
+ * The setup the Connections page's button starts for a kind that does not
+ * work: Reconnect on a broken connection, which starts afresh, else Connect on
+ * the kind, or on the one connection it lists. Null when no listing names a grant.
+ */
+function setupTarget(ofKind: readonly ConnectionStatus[]): SetupStartRequest | null {
+  const chosen =
+    ofKind.find((c) => c.state === "broken") ?? ofKind.find((c) => c.id === null) ?? ofKind[0];
+  const grant = chosen ? Object.keys(chosen.grants ?? {})[0] : undefined;
+  if (!chosen || !grant) return null;
+  return {
+    idOrKind: chosen.id ?? chosen.connectionKind,
+    grant,
+    force: chosen.state === "broken",
+  };
+}
+
+/**
  * The widgets core owns, by kind, and how each handles its events. The question
  * card's Send answers the agent with what was picked and typed, and its Dismiss
- * declines. The connect card's Connect opens the connection kind's
- * authorization page, or answers at once when the connection is working; its
+ * declines. The connect card's Connect starts the setup the Connections page
+ * starts and opens its authorization page, or answers at once when the
+ * connection is working; its
  * Check answers once the connection is working; its Dismiss declines. For a
  * device kind, Connect opens the device's page, which the device's own app
  * turns into its flow, and Check reads the device connections. Core
@@ -102,7 +133,33 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
           `${kind} can't be connected from the chat on this instance.`;
         return Response.json({ error: reason }, { status: 409 });
       }
-      return { open: connect.url };
+      // Shopify asks which store on its own install page, which the
+      // Connections page's Connect opens too.
+      if (kind === "shopify") return { open: connect.url };
+      const target = setupTarget(ofKind);
+      if (!target) {
+        return Response.json(
+          { error: `Connect ${kind} in Settings › Connections.` },
+          { status: 409 },
+        );
+      }
+      const outcome = await io.startSetup(target);
+      if (outcome.status === "refused") {
+        return Response.json({ error: outcome.error }, { status: outcome.code });
+      }
+      const { state } = outcome.started;
+      if (state.status === "awaiting-redirect") return { open: state.url };
+      if (state.status === "done") return { answer: { kind, status: "connected" } };
+      const label = ofKind[0]?.kindLabel ?? kind;
+      return Response.json(
+        {
+          error:
+            state.status === "failed"
+              ? state.reason
+              : `Finish connecting ${label} in Settings › Connections.`,
+        },
+        { status: 409 },
+      );
     },
     check: async (context, io) => {
       const kind = String(io.props.kind ?? context.kind ?? "");
@@ -207,6 +264,9 @@ export interface WidgetEventDeps {
   /** Who can read a dashboard chat now. Absent, every chat reads as shared,
    *  so no location is accepted. */
   chatAudience?: (chatId: string) => Promise<"private" | "shared">;
+  /** Starts a connection's setup: the operation behind the Connections page's
+   *  Connect. Absent, the connect card's Connect starts none and says so. */
+  startSetup?: (request: SetupStartRequest) => Promise<SetupStartOutcome>;
 }
 
 /**
@@ -294,6 +354,10 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
         origin,
         props: widget.props,
         chatAudience: async () => (await deps.chatAudience?.(message.chatId)) ?? "shared",
+        startSetup: async (request) =>
+          deps.startSetup
+            ? deps.startSetup(request)
+            : { status: "refused", code: 409, error: "Connect it in Settings › Connections." },
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),

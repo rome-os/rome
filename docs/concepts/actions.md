@@ -35,7 +35,7 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 - Give it a name, a description, `sideEffects`, `input`, and `run`. Add `approval` when the guardian approves each call on a card first.
 - Write the arguments once, as the Zod `input`, each with a `.describe()` the agent reads. `run` and `approval` get their argument types from it. An input that does not fit answers the agent with what is wrong.
 - Set `sideEffects` to `read-only` or `write`. It decides who may ask, in one check before `run` ([`who-may-ask.ts`](../../packages/core/src/apps/actions/who-may-ask.ts)). A read needs a turn that works for the guardian. A write needs the guardian's own message in their private chat. A tool holds no check of its own.
-- Return plain data from `run` for the agent to read, or `toolError(message)` for something not found or turned down. Say in an error what the agent does next.
+- Return plain data from `run` for the agent to read, `toolError(message)` for something not found or turned down, or `card(...)` for one of core's own cards. Say in an error what the agent does next.
 - Reach other code only through the page's deps, which the wiring hands each page once ([`wiring/agent-tools.ts`](../../packages/core/src/wiring/agent-tools.ts)). A new page joins `PAGES` there, and its deps join the `registerAgentTools` call in `index.ts`.
 - Enroll each tool in `whoMayAskSuite` in the page's test file. Test the operation through `callTool`, as the guardian.
 - Never rename a tool. Agents, agent prompts and saved routines call it by its name.
@@ -43,22 +43,22 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 **Example:**
 
 ```ts
-const agentTool = agentToolsOf<RoutineToolDeps>();
+const agentTool = agentToolsOf<ConnectionToolDeps>();
 
-export const stopRoutine = agentTool({
-  name: "system:stop_routine",
-  description: "Stop a routine's running run, as the Routines page's Stop does. …",
+export const disconnectService = agentTool({
+  name: "system:disconnect_service",
+  description: "Disconnect one service from Rome, such as a Slack workspace. …",
   sideEffects: "write",
-  input: z.object({ routineId: z.string().describe("The routine's id, from search_routine.") }),
-  run: async ({ routineId }, { deps }) => {
-    const row = await deps.routines.findById(routineId);
-    if (!row) return toolError(`No routine found with id "${routineId}". …`);
-    const { stopped } = await deps.engine.cancelRun(routineId);
-    return { routineId, name: row.name, stopped };
+  input: z.object({ connectionId: z.string().describe("The connection's id, from read_connections.") }),
+  approval: async ({ connectionId }, { deps }) => ({ title: "Disconnect …", summary: "…" }),
+  run: async ({ connectionId }, { deps }) => {
+    const outcome = await disconnectConnection(deps.registry, connectionId);
+    if (outcome.status === "not-found") return toolError(`No connection found with id "${connectionId}". …`);
+    return { connectionId, disconnected: true };
   },
 });
 
-export const routineTools = [listRoutineRunsTool, readRoutineRunTool, pauseRoutine, resumeRoutine, runRoutine, stopRoutine];
+export const connectionTools = [readConnections, connectService, disconnectService];
 ```
 
 ## Action results

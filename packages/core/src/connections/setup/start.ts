@@ -1,6 +1,6 @@
 // Starting a connection's setup for one grant, as the Connections page's
-// Connect does (`POST /api/connections/:id/grants/:name/setup`). Vocabulary:
-// docs/domains/connections.md#grant.
+// Connect does (`POST /api/connections/:id/grants/:name/setup`) and as core's
+// connect card does in the chat. Vocabulary: docs/domains/connections.md#grant.
 
 import { createLogger } from "../../logger.js";
 import type { ConnectionRegistry } from "../registry.js";
