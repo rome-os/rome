@@ -99,7 +99,8 @@ to bypass a card error or rejection.
    activate anything. If the spec changes, summarize it again and get a new yes.
    Permission to subscribe to an event source does not confirm the routine.
 3. Only after that yes, discover `system:create_routine` with `search_actions`
-   and read it with `read_action`. If unavailable or denied, stop and explain the
+   (`read_action` gives an argument's full description when the signature in the
+   search result is not enough). If unavailable or denied, stop and explain the
    limit. Do not bypass permissions. Call it through `execute_action` with
    `name`, `key`, `trigger`, `actionName`, `args` (one object), and `enabled: true`.
    Generate a unique `key` once for this confirmed request and retain it with the

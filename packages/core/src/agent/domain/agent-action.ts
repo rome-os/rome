@@ -55,13 +55,11 @@ interface ActionArgumentSummary {
   items?: Record<string, unknown>;
 }
 
+// Only what the agent chooses and calls an action by; read_action gives the rest.
 interface ActionSummary {
   name: string;
   description: string;
-  type: AgentAction["type"];
-  complexity: AgentAction["complexity"];
-  speed: AgentAction["speed"];
-  reliability: AgentAction["reliability"];
+  signature: string;
   sideEffects: AgentAction["sideEffects"];
   requiresApproval: boolean;
   cancellable: boolean;
@@ -71,14 +69,30 @@ export function toActionSummary(action: AgentAction): ActionSummary {
   return {
     name: action.name,
     description: action.description,
-    type: action.type,
-    complexity: action.complexity,
-    speed: action.speed,
-    reliability: action.reliability,
+    signature: actionSignature(action),
     sideEffects: action.sideEffects,
     requiresApproval: action.requiresApproval,
     cancellable: action.cancellable,
   };
+}
+
+const MAX_SIGNATURE_LENGTH = 300;
+
+// The arguments in a TypeScript-like form, such as `(appId: string, deleteData?: boolean)`.
+function actionSignature(action: AgentAction): string {
+  const params = summarizeActionArguments(action).map((arg) => {
+    const itemType = arg.items?.type;
+    const type = arg.enum
+      ? arg.enum.map((value) => JSON.stringify(value)).join(" | ")
+      : arg.type === "array" && typeof itemType === "string"
+        ? `${itemType}[]`
+        : arg.type.replaceAll("|", " | ");
+    return `${arg.name}${arg.required ? "" : "?"}: ${type}`;
+  });
+  const signature = `(${params.join(", ")})`;
+  return signature.length > MAX_SIGNATURE_LENGTH
+    ? `${signature.slice(0, MAX_SIGNATURE_LENGTH - 1)}…`
+    : signature;
 }
 
 function summarizeActionArguments(action: AgentAction): ActionArgumentSummary[] {
@@ -148,7 +162,15 @@ function argumentTypeGuidance(prop: Record<string, unknown>): string | undefined
 
 export function describeAction(action: AgentAction) {
   return {
-    ...toActionSummary(action),
+    name: action.name,
+    description: action.description,
+    type: action.type,
+    complexity: action.complexity,
+    speed: action.speed,
+    reliability: action.reliability,
+    sideEffects: action.sideEffects,
+    requiresApproval: action.requiresApproval,
+    cancellable: action.cancellable,
     arguments: summarizeActionArguments(action),
   };
 }

@@ -76,8 +76,61 @@ describe("searchActions", () => {
     expect(names("/^ALPHA/i")).toEqual(["alpha"]);
   });
 
+  it("shows each found action's arguments as a signature, without their descriptions", () => {
+    const [found] = searchActions(
+      [
+        action({
+          name: "manage_app",
+          inputSchema: {
+            type: "object",
+            required: ["appId", "change"],
+            properties: {
+              appId: { type: "string", description: "The app's id" },
+              change: { type: "string", enum: ["install", "remove"] },
+              deleteData: { type: "boolean" },
+              tags: { type: "array", items: { type: "string" } },
+            },
+          },
+        }),
+      ],
+      "manage",
+      undefined,
+    );
+
+    expect(found).toEqual({
+      name: "manage_app",
+      description: "does a thing",
+      signature:
+        '(appId: string, change: "install" | "remove", deleteData?: boolean, tags?: string[])',
+      sideEffects: "none",
+      requiresApproval: false,
+      cancellable: false,
+    });
+  });
+
+  it("cuts a signature longer than 300 characters", () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`argument${i}`, { type: "string" }]),
+    );
+    const [found] = searchActions(
+      [action({ name: "wide", inputSchema: { type: "object", properties } })],
+      "wide",
+      undefined,
+    );
+
+    expect(found?.signature).toHaveLength(300);
+    expect(found?.signature.startsWith("(argument0?: string, argument1?: string")).toBe(true);
+    expect(found?.signature.endsWith("…")).toBe(true);
+  });
+
   it("rejects a query that is not a valid regex", () => {
     expect(() => names("(")).toThrow("Invalid regex query");
+  });
+
+  it("names the accepted form when it rejects an inline flag", () => {
+    expect(() => names("(?i)github")).toThrow(
+      /JavaScript regular expression such as disconnect\|unlink.*\(\?i\) are not accepted/,
+    );
   });
 });
 

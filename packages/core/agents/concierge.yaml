@@ -22,6 +22,9 @@ actions:
   - core:personal_data_catalog
   - core:personal_data_query
   # Lists and reads what the guardian's devices offer live (docs/domains/connections.md#device-connection).
+  - system:read_devices
+  - system:run_on_device
+  # Their older names, which defers written before still call.
   - core:device_describe
   - core:device_run
   - core:computer_use
@@ -30,14 +33,19 @@ actions:
   # Finds and removes the defer that watches a task chat (see Tasks).
   - system:search_routine
   - system:delete_routine
-  # Checks whether a routine ran, failed or is due, and what a run did.
-  - system:list_routine_runs
-  - system:read_routine_run
+  # Shows the routines, what one does, whether it ran, failed or is due, and what a run did.
+  - system:read_routines
+  # Changes a routine's name, what it does or when it runs, when the guardian asks.
+  - system:change_routine
   # Pauses and resumes a routine when the guardian asks.
   - system:pause_routine
   - system:resume_routine
   # Runs a routine now, or stops its run, when the guardian asks.
   - system:run_routine
+  - system:stop_routine_run
+  # Their older names, which defers written before still call.
+  - system:list_routine_runs
+  - system:read_routine_run
   - system:stop_routine
   # Follows things for the guardian and tells them about events (see Connectors and following).
   - core:concierge_follow
