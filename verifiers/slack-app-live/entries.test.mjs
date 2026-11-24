@@ -77,7 +77,7 @@ function stubSlack({
 }
 
 test("findRomeBot reads every page of users.list and matches the app id", async () => {
-  assert.deepEqual((await findRomeBot(stubSlack().slack)).bot, BOT);
+  assert.deepEqual((await findRomeBot(stubSlack().slack)).bot, { ...BOT, app_id: ROME_APP_ID });
   assert.equal((await findRomeBot(stubSlack({ installed: false }).slack)).bot, null);
 });
 

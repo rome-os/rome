@@ -53,13 +53,17 @@ export async function entryApprovalPage({ installLink, loadPage }) {
 export async function findRomeBot(slack, appId = ROME_APP_ID) {
   const members = await allPages(slack, "users.list", {}, "members");
   const bot = members.find((m) => m.profile?.api_app_id === appId && !m.deleted);
-  return { bot: bot ? { id: bot.id, bot_id: bot.profile?.bot_id } : null, scanned: members.length };
+  return {
+    bot: bot ? { id: bot.id, bot_id: bot.profile?.bot_id, app_id: appId } : null,
+    scanned: members.length,
+    removed: members.some((m) => m.profile?.api_app_id === appId && m.deleted),
+  };
 }
 
 const isFromBot = (message, bot) =>
   message.user === bot.id ||
   (bot.bot_id && message.bot_id === bot.bot_id) ||
-  message.app_id === ROME_APP_ID;
+  (bot.app_id && message.app_id === bot.app_id);
 
 /** Polls `read()` until it yields a message after `afterTs` from the bot, or the window closes. */
 async function waitForBotMessage({ read, bot, afterTs, windowMs, pollMs, now, sleep }) {

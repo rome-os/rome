@@ -16,6 +16,7 @@ import {
   entryDirectMessage,
   entryMention,
   findRomeBot,
+  ROME_APP_ID,
 } from "./lib/entries.mjs";
 import { slackClient } from "./lib/slack.mjs";
 
@@ -25,6 +26,7 @@ const { values: args } = parseArgs({
     out: { type: "string" },
     "signer-jwt-file": { type: "string" },
     "rome-cloud": { type: "string", default: "https://romeos.cc" },
+    "app-id": { type: "string", default: ROME_APP_ID },
     chromium: { type: "string", default: process.env.CHROMIUM_PATH },
   },
 });
@@ -87,7 +89,7 @@ async function installLink() {
 const loadPage = (link) =>
   loadApprovalPage(link, { dCookie: env.SLACK_TESTER_D_COOKIE, executablePath: args.chromium });
 
-const { bot, scanned } = await findRomeBot(slack);
+const { bot, scanned, removed } = await findRomeBot(slack, args["app-id"]);
 const entries = [
   await entryApprovalPage({ installLink, loadPage }),
   await entryDirectMessage({ slack, bot, nonce }),
@@ -99,7 +101,8 @@ const report = {
   finished_at: new Date().toISOString(),
   workspace: "SLACK_TESTER_TEAM_ID",
   nonce,
-  bot: bot ? { found: true, user: bot.id } : { found: false, users_scanned: scanned },
+  app_id: args["app-id"],
+  bot: bot ? { found: true, user: bot.id } : { found: false, removed, users_scanned: scanned },
   entries,
 };
 mkdirSync(args.out, { recursive: true });
@@ -107,7 +110,7 @@ writeFileSync(join(args.out, "report.json"), `${JSON.stringify(report, null, 2)}
 const md = [
   `# Slack app rubric, live (${startedAt})`,
   "",
-  `Rome bot: ${bot ? `found (${bot.id})` : `not installed (${scanned} users scanned)`}`,
+  `Rome bot (app ${args["app-id"]}): ${bot ? `found (${bot.id})` : `not installed${removed ? ", its bot user is deleted" : ""} (${scanned} users scanned)`}`,
   "",
   "| Entry | Verdict | Reason |",
   "|---|---|---|",

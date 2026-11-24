@@ -6,7 +6,7 @@ Scores three rubric entries for the official Slack app against real Slack and pr
 2. **direct-message**: a direct message to the Rome bot gets a reply within 60 s.
 3. **mention**: a message mentioning the bot, in a channel the bot and the tester share, gets a reply in the channel or a thread within 60 s.
 
-Each entry scores `pass`, `fail`, or `not checked` with the reason. Entries 2 and 3 are `not checked: app not installed` when no workspace user has `profile.api_app_id` A0BEGBH132L. Entry 1 is `not checked` without a signer JWT from an instance enrolled with Rome Cloud, since install-url answers nothing else.
+Each entry scores `pass`, `fail`, or `not checked` with the reason. Entries 2 and 3 are `not checked: app not installed` when no workspace user has `profile.api_app_id` A0BEGBH132L (or the app given with `--app-id`). Entry 1 is `not checked` without a signer JWT from an instance enrolled with Rome Cloud, since install-url answers nothing else.
 
 ## Run
 
