@@ -2,10 +2,12 @@
 // docs/architecture/channels.md.
 
 import { z } from "zod";
+import type { ConnectionApiRequest } from "../../../apps/platform-requests.js";
 import { createLogger } from "../../../logger.js";
 import { CredentialRejected } from "../../errors.js";
 import type { SetupFn } from "../../setup/types.js";
 import type {
+  Actor,
   AuthScheme,
   ConnectionDescriptor,
   Credential,
@@ -231,6 +233,34 @@ export function createDiscordAppDescriptor(deps: DiscordAppDescriptorDeps): Conn
             async send(chatId, message) {
               try {
                 return await adapter.send(chatId, message);
+              } catch (error) {
+                if (isDiscordAppCredentialError(error)) {
+                  throw new CredentialRejected({ grant: "bot", cause: error });
+                }
+                throw error;
+              }
+            },
+          };
+        },
+      },
+      // The `discord` CLI's REST calls (api/routes/discord-cli.ts), passed to
+      // the Worker's proxy as they are.
+      actor: {
+        build(): Actor {
+          return {
+            operations: () => [
+              {
+                name: "discord.api.request",
+                description: "Execute a Discord REST API request as Rome's Discord bot.",
+                inputSchema: { type: "object" },
+              },
+            ],
+            async invoke(call) {
+              if (call.operation !== "discord.api.request") {
+                throw new Error(`Unknown Discord operation "${call.operation}"`);
+              }
+              try {
+                return await deps.cloud.api(call.input as ConnectionApiRequest);
               } catch (error) {
                 if (isDiscordAppCredentialError(error)) {
                   throw new CredentialRejected({ grant: "bot", cause: error });

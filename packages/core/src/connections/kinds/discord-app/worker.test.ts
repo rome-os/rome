@@ -171,6 +171,92 @@ describe("the Discord gateway Worker and Rome Cloud, as the instance calls them"
     expect(new URL(calls[0]?.url ?? "").pathname).toBe("/v1/discord/users/@me/guilds");
   });
 
+  it("passes the discord CLI's REST calls to the proxy as they are, and Discord's answer back", async () => {
+    const calls: Array<{ url: string; method: string; headers: Headers; body: unknown }> = [];
+    const fetchImpl = (async (url: URL, init: RequestInit) => {
+      calls.push({
+        url: url.toString(),
+        method: String(init.method),
+        headers: new Headers(init.headers),
+        body: init.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return Response.json([{ id: "9", content: "hello" }], {
+        status: 200,
+        headers: { "x-ratelimit-remaining": "4", "set-cookie": "a=b" },
+      });
+    }) as unknown as typeof fetch;
+    const cloud = romeCloudDiscordApp(fetchImpl);
+    const read = await cloud.api({
+      method: "GET",
+      path: "/channels/444444444444444444/messages",
+      query: [
+        ["limit", "50"],
+        ["before", "333333333333333333"],
+      ],
+      headers: { "x-audit-log-reason": "why", authorization: "Bot stolen" },
+      body: null,
+      timeoutMs: 5000,
+    });
+    expect(read).toEqual({
+      response: {
+        status: 200,
+        headers: { "content-type": "application/json", "x-ratelimit-remaining": "4" },
+        body: [{ id: "9", content: "hello" }],
+      },
+    });
+    await cloud.api({
+      method: "POST",
+      path: "/channels/444444444444444444/messages",
+      query: [],
+      headers: {},
+      body: { content: "hi" },
+      timeoutMs: 5000,
+    });
+    expect(calls.map(({ url, method, body }) => ({ url, method, body }))).toEqual([
+      {
+        url: "https://discord.romeos.io/v1/discord/channels/444444444444444444/messages?limit=50&before=333333333333333333",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        url: "https://discord.romeos.io/v1/discord/channels/444444444444444444/messages",
+        method: "POST",
+        body: { content: "hi" },
+      },
+    ]);
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer instance-jwt");
+    expect(calls[0]?.headers.get("x-audit-log-reason")).toBe("why");
+    expect(calls[0]?.headers.get("content-type")).toBeNull();
+    expect(calls[1]?.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("hands back Discord's and the proxy's refusals, and throws only for a refused Rome", async () => {
+    const request = {
+      method: "GET" as const,
+      path: "/channels/4/messages",
+      query: [],
+      headers: {},
+      body: null,
+      timeoutMs: 5000,
+    };
+    expect(await answering(403, { error: "not_bound" }).cloud.api(request)).toMatchObject({
+      response: { status: 403, body: { error: "not_bound" } },
+    });
+    expect(
+      await answering(401, { message: "401: Unauthorized", code: 0 }).cloud.api(request),
+    ).toMatchObject({ response: { status: 401 } });
+    const refused = await answering(401, { error: "invalid_token" })
+      .cloud.api(request)
+      .catch((error: unknown) => error);
+    expect(isDiscordAppCredentialError(refused)).toBe(true);
+    const down = romeCloudDiscordApp((async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch);
+    expect(await down.api(request)).toEqual({
+      error: { type: "network", message: "Rome could not reach Discord's service." },
+    });
+  });
+
   it("reads the bindings, keeping only well-formed rows", async () => {
     const { cloud } = answering(200, {
       servers: [{ serverId: "5", serverName: "Lab", createdAt: 10 }, { serverName: "no id" }],
