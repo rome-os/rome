@@ -1,13 +1,22 @@
 // What agents do with connections through the system app's connection
-// actions: read what is connected and whether it works, and disconnect one.
-// The Connections page reads the same projection (`GET /api/connections`) and
-// disconnects through the same operation (disconnect.ts). The main process
+// actions: read what is connected and whether it works, ask the guardian to
+// connect a service, and disconnect one. The Connections page reads the same
+// projection (`GET /api/connections`) and disconnects through the same
+// operation (disconnect.ts); the connect card is `connect_account`'s
+// (connect-card.ts), whose Connect starts the page's setup. The main process
 // runs these operations; an action worker reaches them over the
 // `connections.control` worker call (app-host/connection-calls.ts).
 // Vocabulary: docs/domains/connections.md.
 
-import type { PreviewPayload } from "@rome-os/app-runtime";
+import type { PendingInteraction, PreviewPayload } from "@rome-os/app-runtime";
 import { actionExecutionContext, type ActionExecutionStore } from "../apps/actions/context.js";
+import {
+  CONNECT_CARD_ID,
+  connectCardRequest,
+  type DeviceKind,
+  type DeviceKindState,
+} from "./connect-card.js";
+import { askingDeviceOf } from "./device/live-route.js";
 import { disconnectConnection } from "./disconnect.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { CapabilityStatus, ConnectionState } from "./types.js";
@@ -17,9 +26,15 @@ export type ConnectionTurn = Pick<ActionExecutionStore, "actor" | "audience" | "
 
 export type ConnectionControlResult =
   | { status: "ok"; data: unknown }
-  | { status: "error"; error: string };
+  | { status: "error"; error: string }
+  | { status: "pending_interaction"; interaction: PendingInteraction };
 
-export const CONNECTION_CONTROL_OPS = ["read", "previewDisconnect", "disconnect"] as const;
+export const CONNECTION_CONTROL_OPS = [
+  "read",
+  "connect",
+  "previewDisconnect",
+  "disconnect",
+] as const;
 export type ConnectionControlOp = (typeof CONNECTION_CONTROL_OPS)[number];
 
 /** Each operation, for the turn that asks for it. */
@@ -79,6 +94,12 @@ export interface ConnectionOperationDeps {
   /** Why the turn may not change what the guardian alone changes: the routine
    *  writes' rule (routines/turn-access.ts `changeRefusalReason`). */
   changeRefusalReason: (turn: ConnectionTurn) => "not_private" | "not_guardian" | null;
+  /** The device kinds devices reported, which the connect card connects too. */
+  deviceKinds?: () => readonly DeviceKind[];
+  /** How a device kind stands, on the device the guardian asks from alone when there is one. */
+  deviceState?: (kind: string, askingDeviceId: string | undefined) => DeviceKindState | undefined;
+  /** The guardian's language, which a device card's words follow. */
+  guardianLanguage?: () => Promise<string | null>;
 }
 
 const READ_REFUSED = {
@@ -87,11 +108,18 @@ const READ_REFUSED = {
     "connections_guardian_only: Only the guardian's agents can read Rome's connections, and this turn does not work for the guardian. Say so, and that the guardian can ask in their own chat.",
 };
 
-const CHANGE_REFUSED = {
+const DISCONNECT_REFUSED = {
   not_private:
     "connection_private_only: This chat is not private with the guardian, so no connection can be disconnected from it. Say so, and that they can ask in their own chat.",
   not_guardian:
     "connection_needs_guardian: Only the guardian's own message can disconnect a connection, and this turn did not start from one. Disconnect nothing; tell them what you would disconnect, so they can ask for it themselves.",
+} as const;
+
+const CONNECT_REFUSED = {
+  not_private:
+    "connection_private_only: This chat is not private with the guardian, so no connect card can be shown in it. Say so, and that they can connect it in their own chat or in Settings › Connections.",
+  not_guardian:
+    "connection_needs_guardian: Only the guardian's own message can ask to connect a service, and this turn did not start from one. Show no card; tell them what you would connect, so they can ask for it themselves.",
 } as const;
 
 /** The connection operations, over the Connections page's projection and the registry. */
@@ -108,6 +136,33 @@ export function connectionOperations(deps: ConnectionOperationDeps): ConnectionO
             .filter((c) => c.id === null)
             .map((c) => ({ kind: c.connectionKind, name: c.kindLabel })),
         },
+      };
+    },
+
+    // The same card `connect_account` shows, from the same request. Where
+    // the chat draws no card, the agent asks the guardian in a message.
+    connect: async (input, turn) => {
+      const refused = deps.changeRefusalReason(turn);
+      if (refused) return { status: "error", error: CONNECT_REFUSED[refused] };
+      const askingDeviceId = askingDeviceOf(turn.channelContext);
+      const request = await connectCardRequest(input, {
+        devices: deps.deviceKinds?.() ?? [],
+        deviceState: (kind) => deps.deviceState?.(kind, askingDeviceId),
+        language: deps.guardianLanguage,
+      });
+      if (request.status === "refused") return { status: "error", error: request.error };
+      if (request.status === "answer") return { status: "ok", data: { message: request.message } };
+      // `builtin` marks the card as core's own, which the chat draws only
+      // from `connect_account` or this action.
+      const render = {
+        kind: "inline",
+        componentId: CONNECT_CARD_ID,
+        props: request.props,
+        builtin: true,
+      } as PendingInteraction["render"];
+      return {
+        status: "pending_interaction",
+        interaction: { appId: "core", promptText: request.ask, render },
       };
     },
 
@@ -129,7 +184,7 @@ export function connectionOperations(deps: ConnectionOperationDeps): ConnectionO
 
     disconnect: async (input, turn) => {
       const refused = deps.changeRefusalReason(turn);
-      if (refused) return { status: "error", error: CHANGE_REFUSED[refused] };
+      if (refused) return { status: "error", error: DISCONNECT_REFUSED[refused] };
       const connectionId = text(fieldsOf(input).connectionId);
       if (!connectionId) return notFound(connectionId);
       const outcome = await disconnectConnection(deps.registry, connectionId);

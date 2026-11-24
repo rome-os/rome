@@ -1,0 +1,7 @@
+name: connect_service
+type: system
+description: Ask the guardian to connect a service to Rome, such as GitHub, Slack or Shopify, or to turn on something one of their devices offers, such as Apple Health on an iPhone, through a card in the chat they press to finish. Use it when the guardian asks to connect a service, or when a task needs a service that is not connected. Only in the guardian's private chat, in a turn their own message started. Check what is already connected with system:read_connections
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

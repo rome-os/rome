@@ -92,6 +92,8 @@ import { byChannel, readAccountAgent } from "../chats/connected-accounts/account
 import { SessionQueryService } from "../sessions/query-service.js";
 import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
+import { requireConnectionRegistry, requireSetupManager } from "./helpers.js";
+import { startConnectionSetup } from "../connections/setup/start.js";
 
 const log = createLogger("api");
 
@@ -251,6 +253,13 @@ export function buildApp(
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
       chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
+      // The setup `POST /connections/:id/grants/:name/setup` starts, so the
+      // connect card's Connect is the Connections page's.
+      startSetup: (request) =>
+        startConnectionSetup(
+          { registry: requireConnectionRegistry(deps), manager: requireSetupManager(deps) },
+          request,
+        ),
     }),
   );
   // The backend-turn orchestrator is the single holder of the webchat runtime

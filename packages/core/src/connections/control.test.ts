@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   type ConnectionOperationDeps,
   type ConnectionTurn,
@@ -176,5 +176,92 @@ describe("disconnecting a connection", () => {
           "Rome loses its access to Slack (Acme). To use it again, you connect it again in Settings › Connections.",
       },
     });
+  });
+});
+
+describe("asking the guardian to connect a service", () => {
+  // Where Rome Cloud is set up, as on a provisioned instance.
+  beforeEach(() => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+  });
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+
+  it("returns core's connect card, which the chat draws and the agent waits on", async () => {
+    const { ops } = operations();
+
+    const result = await ops.connect({ kind: "github" }, guardianAsked);
+
+    expect(result).toEqual({
+      status: "pending_interaction",
+      interaction: {
+        appId: "core",
+        promptText: "Connect GitHub to Rome, from Settings › Connections.",
+        render: {
+          kind: "inline",
+          componentId: "connect-card",
+          props: { kind: "github" },
+          builtin: true,
+        },
+      },
+    });
+  });
+
+  it("shows a device kind's card for the device the guardian asks from", async () => {
+    const { ops } = operations({
+      deviceKinds: () => [{ kind: "apple_health", label: "Apple Health" }],
+      deviceState: (_kind, askingDeviceId) => ({ state: "off", askingDeviceId }),
+    });
+
+    const result = await ops.connect(
+      { kind: "apple_health" },
+      {
+        ...guardianAsked,
+        channelContext: { channel: "webchat", threadId: "c1", askingDeviceId: "dev-1" } as never,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "pending_interaction",
+      interaction: {
+        render: { props: { kind: "apple_health", device: true, deviceId: "dev-1" } },
+      },
+    });
+  });
+
+  it("answers with no card for a device kind that already works", async () => {
+    const { ops } = operations({
+      deviceKinds: () => [{ kind: "apple_health", label: "Apple Health" }],
+      deviceState: () => ({ state: "working", device: "iPhone" }),
+    });
+
+    expect(await ops.connect({ kind: "apple_health" }, guardianAsked)).toEqual({
+      status: "ok",
+      data: { message: "Apple Health is already connected on iPhone. Go ahead; no card shown." },
+    });
+  });
+
+  it("lists the kinds it connects for one it does not", async () => {
+    const { ops } = operations();
+
+    const result = await ops.connect({ kind: "notion" }, guardianAsked);
+
+    expect(result.status === "error" && result.error).toContain('"github"');
+  });
+
+  it("refuses a turn the guardian's own message did not start, and shows no card", async () => {
+    const { ops } = operations();
+
+    const shared = await ops.connect({ kind: "github" }, visitorAsked);
+    const notGuardian = await ops.connect(
+      { kind: "github" },
+      { ...visitorAsked, audience: "private" },
+    );
+
+    expect(shared.status === "error" && shared.error).toMatch(/^connection_private_only: /);
+    expect(notGuardian.status === "error" && notGuardian.error).toMatch(
+      /^connection_needs_guardian: /,
+    );
   });
 });

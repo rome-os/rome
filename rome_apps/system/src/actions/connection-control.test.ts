@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
+import { createAction as connectService } from "./connect-service/index.js";
 import { createAction as disconnectService } from "./disconnect-service/index.js";
 import { createAction as readConnections } from "./read-connections/index.js";
 
@@ -20,6 +21,25 @@ describe("the connection actions core runs", () => {
 
     expect(call).toHaveBeenCalledWith("read", {});
     expect(result).toEqual({ status: "ok", data: { connections: [] } });
+  });
+
+  it("connect_service hands the kind to core's connect, and returns the card core gives", async () => {
+    const card = {
+      status: "pending_interaction" as const,
+      interaction: {
+        appId: "core",
+        promptText: "Connect GitHub to Rome, from Settings › Connections.",
+        render: { kind: "inline" as const, componentId: "connect-card", props: { kind: "github" } },
+      },
+    };
+    const call = rs.fn(async () => card);
+
+    const result = await connectService(config("connect_service"), {
+      connectionControl: { call },
+    }).execute({ kind: "github" });
+
+    expect(call).toHaveBeenCalledWith("connect", { kind: "github" });
+    expect(result).toEqual(card);
   });
 
   it("disconnect_service hands the connection's id to core's disconnect", async () => {
@@ -64,6 +84,7 @@ describe("the connection actions core runs", () => {
 
   for (const [name, factory] of [
     ["read_connections", readConnections],
+    ["connect_service", connectService],
     ["disconnect_service", disconnectService],
   ] as const) {
     it(`${name} fails to load without core's connection operations`, () => {

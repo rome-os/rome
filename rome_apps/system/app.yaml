@@ -48,6 +48,7 @@ actions:
   - actions/run-routine
   - actions/stop-routine
   - actions/read-connections
+  - actions/connect-service
   - actions/disconnect-service
   - actions/request-approval-demo
   - actions/resume-session

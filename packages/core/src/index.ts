@@ -1930,6 +1930,13 @@ async function main() {
     worksForGuardian: (turn) =>
       turnWorksForGuardian((chatId) => concierge.ownerOfChat(chatId), turn),
     changeRefusalReason,
+    deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+    deviceState: (kind, askingDeviceId) =>
+      deviceKindState(deviceLiveRoutes.forKind(kind, { askingDeviceId }), { askingDeviceId }),
+    guardianLanguage: async () => {
+      const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+      return typeof stored === "string" ? stored : null;
+    },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,

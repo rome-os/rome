@@ -9532,6 +9532,87 @@ describe("Webchat API", () => {
       }
     });
 
+    // The connect card also comes from `system:connect_service`, run through
+    // `execute_action`, when the system app owns that action; never from
+    // another action, nor from an action of that name another app owns.
+    it.each([
+      ["persists", "system:connect_service", "system", true],
+      ["rejects", "system:connect_service", "meals", false],
+      ["rejects", "meals:connect_service", "meals", false],
+    ])("%s a connect card from the execute_action call of %s owned by %s", async (_label, actionName, ownerId, persisted) => {
+      deps.actionRegistry.register(
+        {
+          config: {
+            name: actionName,
+            type: "system",
+            description: actionName,
+            complexity: "simple",
+            speed: "fast",
+            reliability: "high",
+            sideEffects: "write",
+          },
+          inputSchema: { type: "object", properties: {} },
+          execute: async () => ({ status: "ok", data: {} }),
+        },
+        {
+          kind: "action",
+          ownerType: "app",
+          ownerId,
+          publicName: actionName,
+          aliases: [],
+          sourcePath: "",
+        },
+      );
+      const sessionId = `sess-connect-action-${ownerId}-${persisted}`;
+      await deps.webchatRepo.createSession(sessionId, "Connect card");
+      const { runtime } = createWebchatRuntime(deps);
+      const toolUseId = `connect-action-${ownerId}-${persisted}`;
+
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({
+          type: "tool_use",
+          id: toolUseId,
+          tool: "execute_action",
+          input: { action_name: actionName },
+        });
+        emit({
+          type: "tool_result",
+          tool: "execute_action",
+          toolUseId,
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "connect-card",
+              props: { kind: "github" },
+              builtin: true,
+            },
+          },
+        });
+        emit({ type: "result", content: "" });
+      });
+
+      const cards = (await deps.webchatRepo.getMessages(sessionId))
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => JSON.parse(message.content) as Array<Record<string, unknown>>)
+        .filter((part) => part.type === "pending_interaction");
+      if (persisted) {
+        expect(cards).toEqual([
+          expect.objectContaining({
+            toolUseId,
+            appId: "core",
+            render: expect.objectContaining({
+              componentId: "connect-card",
+              ui: connectCardUiFromProps({ kind: "github" }),
+            }),
+          }),
+        ]);
+      } else {
+        expect(cards).toEqual([]);
+      }
+    });
+
     it("returns 404 for message events on a missing session", async () => {
       const app = createWebchatRuntime(deps).routes;
 
