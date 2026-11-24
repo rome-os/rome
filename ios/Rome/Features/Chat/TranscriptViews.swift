@@ -223,14 +223,9 @@ private extension View {
     }
 }
 
-/// One photo large, or two to a row.
-private struct UserImageGrid: View {
-    let images: [UserImage]
-    @State private var showViewer = false
-    @State private var viewerStart = 0
-
-    /// The pictures of the message, for the viewer; other files stay tiles.
-    private var gallery: [ViewerImage] {
+extension ViewerImage {
+    /// The pictures of a message, for the viewer; other files stay tiles.
+    static func gallery(_ images: [UserImage]) -> [ViewerImage] {
         images.compactMap { image in
             switch image {
             case .local(let photo): return photo.thumbnail == nil ? nil : .local(photo)
@@ -238,17 +233,24 @@ private struct UserImageGrid: View {
             }
         }
     }
+}
 
-    private func open(_ image: UserImage) {
-        let id: String
-        switch image {
-        case .local(let photo): id = photo.id.uuidString
-        case .stored(let upload): id = upload.linkPath
+extension UserImage {
+    /// Its page's id in the viewer.
+    var viewerID: String {
+        switch self {
+        case .local(let photo): return photo.id.uuidString
+        case .stored(let upload): return upload.linkPath
         }
-        guard let start = gallery.firstIndex(where: { $0.id == id }) else { return }
-        viewerStart = start
-        showViewer = true
     }
+}
+
+/// One photo large, or two to a row.
+private struct UserImageGrid: View {
+    let images: [UserImage]
+    @State private var viewer: PhotoViewerStart?
+
+    private var gallery: [ViewerImage] { ViewerImage.gallery(images) }
 
     var body: some View {
         let side: CGFloat = images.count == 1 ? 200 : 110
@@ -263,16 +265,16 @@ private struct UserImageGrid: View {
                     .frame(width: side, height: side)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .contentShape(Rectangle())
-                    .onTapGesture { open(image) }
+                    .onTapGesture { viewer = PhotoViewerStart(id: image.viewerID, in: gallery) }
                     .accessibilityAddTraits(.isButton)
                     .accessibilityHint("Opens the photo full screen")
+                    .accessibilityIdentifier("user-photo")
             }
         }
         .frame(width: width)
-        .fullScreenCover(isPresented: $showViewer) {
-            PhotoViewer(images: gallery, start: viewerStart)
-        }
-    }
+        .fullScreenCover(item: $viewer) { start in
+            PhotoViewer(images: gallery, start: start.index)
+        }    }
 }
 
 private struct UserImageTile: View {

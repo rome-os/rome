@@ -322,6 +322,25 @@ struct ImageFailedTile: View {
 
 // MARK: - Viewer
 
+/// The page the viewer opens at, presented as the cover's item. A start kept
+/// in state of its own reaches the cover's closure only when the presenting
+/// view draws again, so a tap that sets both opened the first page.
+struct PhotoViewerStart: Identifiable, Equatable {
+    let index: Int
+    var id: Int { index }
+
+    /// The page of the image with `id`, or nil when the gallery has none.
+    init?(id: String, in gallery: [ViewerImage]) {
+        guard let index = gallery.firstIndex(where: { $0.id == id }) else { return nil }
+        self.index = index
+    }
+
+    /// The page of the Markdown image at `position`, else the first.
+    init(position: Int, in gallery: [ViewerImage]) {
+        index = gallery.firstIndex { $0.matches(position: position) } ?? 0
+    }
+}
+
 /// The images of one message, full screen on black: pinch or double-tap to
 /// zoom, swipe sideways between them, swipe down to close, share at the top.
 struct PhotoViewer: View {

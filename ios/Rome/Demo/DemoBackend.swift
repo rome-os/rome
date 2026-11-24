@@ -1473,6 +1473,18 @@ final class DemoBackend: RomeBackend {
             UIColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1).setFill()
             context.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
         }.jpegData(compressionQuality: 0.8)
+        // Two more rooms, so a message of photos pages between different ones.
+        let bathroom = "projects/demo/home/bathroom.jpg"
+        let lamp = "projects/demo/home/lamp.jpg"
+        for (path, wall, floor) in [(bathroom, UIColor(red: 0.7, green: 0.84, blue: 0.86, alpha: 1), UIColor(red: 0.9, green: 0.92, blue: 0.94, alpha: 1)),
+                                    (lamp, UIColor(red: 0.3, green: 0.32, blue: 0.42, alpha: 1), UIColor(red: 0.98, green: 0.85, blue: 0.45, alpha: 1))] {
+            assets[path] = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 450)).image { context in
+                wall.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
+                floor.setFill()
+                context.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
+            }.jpegData(compressionQuality: 0.8)
+        }
         messages["topic-home"] = [
             user("h1", "厨房翻新，记下要找的师傅。\n\n- File 1: [kitchen.jpg](</\(kitchen)>)", at: at(20, 10, daysAgo: 1), session: "topic-home"),
             agent((1...20).map { "\($0). 第 \($0) 步：量好尺寸，确认材料和师傅的时间。" }.joined(separator: "\n"), at: at(20, 11, daysAgo: 1), session: "topic-home"),
@@ -1656,7 +1668,8 @@ final class DemoBackend: RomeBackend {
             marked(user("er4", "顺便查一下周五的航班。", at: at(13, 9), session: "topic-errors"), nil, inputState: "failed"),
             marked(user("er5", "再提醒我带护照。", at: at(13, 10), session: "topic-errors"), nil, inputState: "unknown"),
             // Photos alone, with a mark: the badge sits on the photos' corner.
-            marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
+            // Three different ones: a tap on the third opens the viewer there.
+            marked(user("er6", "- File 1: [kitchen.jpg](</\(kitchen)>)\n- File 2: [bathroom.jpg](</\(bathroom)>)\n- File 3: [lamp.jpg](</\(lamp)>)", at: at(13, 11), session: "topic-errors"), nil, status: "working"),
             // Photos with text, with a mark: the badge sits on the text bubble.
             marked(user("er6b", "厨房这样改可以吗？\n\n- File 1: [kitchen.jpg](</\(kitchen)>)", at: at(13, 11), session: "topic-errors"), "👍"),
             // Two messages in a row, the second marked: its badge sits over

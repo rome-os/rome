@@ -841,8 +841,7 @@ struct MarkdownText: View {
 
     /// The drawn height of each block select mode does not select, by place.
     @State private var blockHeights: [Int: CGFloat] = [:]
-    @State private var showViewer = false
-    @State private var viewerStart = 0
+    @State private var viewer: PhotoViewerStart?
     @Environment(\.instanceOrigin) private var origin
     @Environment(\.chatLinkOpener) private var linkOpener
     @Environment(\.taskLinks) private var taskLinks
@@ -851,7 +850,10 @@ struct MarkdownText: View {
     @Environment(\.displayScale) private var displayScale
 
     /// The message's images, for paging in the viewer.
-    private var gallery: [ViewerImage] {
+    private var gallery: [ViewerImage] { Self.gallery(blocks, origin: origin) }
+
+    /// The images of `blocks` in order, as the viewer pages through them.
+    static func gallery(_ blocks: [MarkdownBlock], origin: URL?) -> [ViewerImage] {
         blocks.enumerated().flatMap { position, block -> [ViewerImage] in
             switch block {
             case .image(let alt, let src):
@@ -860,7 +862,7 @@ struct MarkdownText: View {
             case .pictures(_, let items):
                 return items.enumerated().compactMap { index, item -> ViewerImage? in
                     let source = ImageSource(src: item.src, origin: origin)
-                    return source == .rejected ? nil : ViewerImage.markdown(source, alt: item.alt, src: item.src, position: Self.pictureKey(block: position, item: index))
+                    return source == .rejected ? nil : ViewerImage.markdown(source, alt: item.alt, src: item.src, position: pictureKey(block: position, item: index))
                 }
             default:
                 return []
@@ -870,7 +872,7 @@ struct MarkdownText: View {
 
     /// The viewer position of a set's picture. Negative, so it never meets the
     /// block position of an image.
-    private static func pictureKey(block: Int, item: Int) -> Int {
+    static func pictureKey(block: Int, item: Int) -> Int {
         -(block * 1_000 + item) - 1
     }
 
@@ -917,8 +919,8 @@ struct MarkdownText: View {
             let ids = TaskLink.ids(in: source)
             if !ids.isEmpty { taskLinks.register(ids) }
         }
-        .fullScreenCover(isPresented: $showViewer) {
-            PhotoViewer(images: gallery, start: viewerStart)
+        .fullScreenCover(item: $viewer) { start in
+            PhotoViewer(images: gallery, start: start.index)
         }
     }
 
@@ -989,15 +991,13 @@ struct MarkdownText: View {
             Rectangle().fill(Palette.hair).frame(height: 1).padding(.vertical, 4)
         case .image(let alt, let src):
             MarkdownImageView(source: ImageSource(src: src, origin: origin), alt: alt, src: src) {
-                viewerStart = gallery.firstIndex { $0.matches(position: position) } ?? 0
-                showViewer = true
+                viewer = PhotoViewerStart(position: position, in: gallery)
             }
         case .table(let header, let alignments, let rows):
             MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1, linksAsText: textOnly)
         case .pictures(let layout, let items):
             MarkdownPictureSet(layout: layout, items: items, fontSize: fontSize) { index in
-                viewerStart = gallery.firstIndex { $0.matches(position: Self.pictureKey(block: position, item: index)) } ?? 0
-                showViewer = true
+                viewer = PhotoViewerStart(position: Self.pictureKey(block: position, item: index), in: gallery)
             }
         }
     }
