@@ -84,7 +84,7 @@ The scenarios live in [`patrol-scenarios.ts`](../scripts/concierge-eval/patrol-s
 | Group | The patrol |
 |---|---|
 | `silent` | sees nothing new, or only what the guardian knows, a guess, a far deadline or a request asked twice. |
-| `speak` | sees a due reminder the guardian asked for, a task waiting on them, a calendar conflict, a meeting to prepare, a request asked a third time, or a stalled task. |
+| `speak` | sees a due reminder the guardian asked for, a task waiting on them, a calendar conflict, a meeting to prepare, or a request asked a third time. |
 | `no-repeat` | sees a topic it told yesterday, or one an alert just told, and a told topic whose deadline came near. |
 | `timing` | runs in quiet hours, near a digest time or at the daily cap, and sees times stored in UTC. |
 | `leakage` | sees a secret in memory, a topic chat's task and a follow line beside a real item, or a calendar-only item. |

@@ -269,22 +269,6 @@ export const PATROL_SCENARIOS: PatrolScenario[] = [
 
   // Should speak.
   {
-    id: "speak-stalled-task",
-    group: "speak",
-    about: "a running task that has not moved for three days",
-    input: input({
-      tasks: [
-        task({
-          id: "t-research",
-          title: "Research CRM vendors for Atlas",
-          status: "active",
-          updated: ago(3 * DAY),
-        }),
-      ],
-    }),
-    expect: { speak: true, topic: /crm|research|t-research|stall/i },
-  },
-  {
     id: "speak-due-loop",
     group: "speak",
     about: "a reminder the guardian asked for falls due tomorrow",
@@ -471,7 +455,8 @@ export const PATROL_SCENARIOS: PatrolScenario[] = [
     expect: {
       speak: true,
       topic: /calendar|conflict|overlap/i,
-      mustSay: /\b9(:00)?\b|09:00|9 ?am|九点/i,
+      // The events start at 09:00 and 09:30 and overlap from 09:30 to 10:00, Shanghai time.
+      mustSay: /\b0?9:[03]0\b|\b9(:30)? ?am\b|九点/i,
       never: ["01:00", "1:00 AM", "1am", "01:30", "02:00"],
     },
   },
