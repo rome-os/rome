@@ -1342,8 +1342,8 @@ async function main() {
     },
   });
   // Speech credentials for voice conversation mode. Only the speaker source
-  // asks for one, and only while `voice_mode` is on. At boot this reports the
-  // usage of speech sessions an earlier run left, if any.
+  // asks for one, when a conversation starts. At boot this reports the usage
+  // of speech sessions an earlier run left, if any.
   const speechCredentials = createRomeCloudSpeechCredentials({
     romeCloud: romeCloudAccess,
     settings: settingsRepo,

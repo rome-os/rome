@@ -63,12 +63,12 @@ function standInTranscriber() {
 }
 
 /** A speaker that speaks each sentence as 100 ms of silence at once. */
-function standInSpeaker(outcome: "ok" | "disabled" = "ok") {
+function standInSpeaker(outcome: "ok" | "not-configured" = "ok") {
   const said: string[] = [];
   let closed = false;
   const source: SpeakerSource = {
     async open(listener: SpeakerListener) {
-      if (outcome === "disabled") return { ok: false, reason: "disabled" };
+      if (outcome === "not-configured") return { ok: false, reason: "not-configured" };
       return {
         ok: true,
         provider: "soniox",
@@ -185,7 +185,7 @@ describe("voice conversation socket", () => {
     ]);
   });
 
-  it("ends at once, listening to nothing, while voice mode is off", async () => {
+  it("ends at once, listening to nothing, when speaking is not set up", async () => {
     let listened = 0;
     const { client, messages, closed } = await connect({
       listening: {
@@ -194,7 +194,7 @@ describe("voice conversation socket", () => {
           return { ok: false, reason: "service-unavailable" };
         },
       },
-      speaker: standInSpeaker("disabled").source,
+      speaker: standInSpeaker("not-configured").source,
       canTalkIn: async () => true,
       send: async () => replyOf(""),
     });
@@ -218,7 +218,7 @@ describe("voice conversation socket", () => {
       speaker: {
         open: async () => {
           spoke++;
-          return { ok: false, reason: "disabled" };
+          return { ok: false, reason: "not-configured" };
         },
       },
       canTalkIn: async (chatId) => {
@@ -260,28 +260,31 @@ describe("voice conversation socket", () => {
     expect(first.messages).toEqual([{ type: "error", reason: "bad-request" }]);
   });
 
-  it("is not there while voice mode is off", async () => {
-    const http: Server = createServer();
-    const voice = attachVoiceConversationServer(
-      http,
-      {} as DrizzleDb,
-      {
-        listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
+  it("is there only for an account Rome Cloud lets use voice input", async () => {
+    const statusFor = async (available: boolean) => {
+      const http: Server = createServer();
+      const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
+        listening: {
+          info: async () => ({ available, place: null }),
+          open: async () => ({ ok: false, reason: "service-refused" }),
+        },
         speaker: standInSpeaker().source,
         canTalkIn: async () => true,
         send: async () => replyOf(""),
-      },
-      async () => false,
-    );
-    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-    servers.push({ close: () => (voice.close(), http.close()) });
-    const client = new WebSocket(
-      `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
-    );
-    const status = await new Promise<number>((resolve) => {
-      client.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
-      client.on("open", () => resolve(101));
-    });
-    expect(status).toBe(404);
+      });
+      await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+      servers.push({ close: () => (voice.close(), http.close()) });
+      const client = new WebSocket(
+        `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
+      );
+      return new Promise<number>((resolve) => {
+        client.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        client.on("open", () => resolve(101));
+      });
+    };
+    // Off the list, the path is not there at all.
+    expect(await statusFor(false)).toBe(404);
+    // On it, the upgrade goes on to the guardian check, which a bare request fails.
+    expect(await statusFor(true)).not.toBe(404);
   });
 });

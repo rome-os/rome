@@ -63,7 +63,7 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
   }, [state]);
 
   return {
-    /** False hides the voice conversation button: `voice_mode` is off, or this is no chat yet. */
+    /** False hides the voice conversation button: the account is off the voice input list, or this is no chat yet. */
     available: Boolean(info.data?.available) && Boolean(chatId) && shellAllowsMicrophone(),
     active,
     state,

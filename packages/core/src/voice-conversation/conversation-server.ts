@@ -2,8 +2,8 @@
 // plays what comes down. Rome listens on a transcription stream with endpoint
 // detection, and `conversation.ts` sends each turn to the chat and speaks the
 // reply. Messages are in `@rome/api-types/voice-conversation`. Only the
-// guardian may connect, and only while `voice_mode` is on. Rome keeps no
-// audio: frames go straight to the provider.
+// guardian may connect, and only while Rome Cloud lets their account use
+// voice input. Rome keeps no audio: frames go straight to the provider.
 
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -29,7 +29,6 @@ import type { TranscriptionStream } from "../voice-input/transcriber.js";
 import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-input-source.js";
 import { readVoiceTerms } from "../voice-input/voice-terms.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
-import { resolveVoiceModeEnabled } from "../voice-output/voice-mode-gate.js";
 import { createConversation, type ReplyTurn } from "./conversation.js";
 
 const log = createLogger("voice-conversation");
@@ -56,14 +55,14 @@ export interface VoiceConversationDeps {
 }
 
 /**
- * Serves `/ws/voice-conversation` to the guardian while `voice_mode` is on. With
- * it off the path answers 404, as no client should offer the conversation.
+ * Serves `/ws/voice-conversation` to the guardian while Rome Cloud lets their
+ * account use voice input, the list the microphone follows. For any other
+ * account the path answers 404, as no client offers the conversation.
  */
 export function attachVoiceConversationServer(
   httpServer: Server,
   db: DrizzleDb,
-  deps: VoiceConversationDeps,
-  enabled: () => Promise<boolean> = resolveVoiceModeEnabled,
+  deps: VoiceConversationDeps & { listening: Pick<VoiceInputSource, "open" | "info"> },
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
 
@@ -71,9 +70,10 @@ export function attachVoiceConversationServer(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname !== VOICE_CONVERSATION_SOCKET_PATH) return;
     socket.on("error", () => socket.destroy());
-    void enabled()
-      .then(async (on) => {
-        if (!on) return rejectUpgrade(socket, 404, "Not Found");
+    void deps.listening
+      .info()
+      .then(async ({ available }) => {
+        if (!available) return rejectUpgrade(socket, 404, "Not Found");
         const caller = await gateUpgrade(req, socket, db);
         if (!caller || socket.destroyed) return;
         if (caller.kind !== "guardian") return rejectUpgrade(socket, 403, "Forbidden");
@@ -190,11 +190,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     }
     if (!spoken.ok) {
       log.warn("voice conversation cannot speak", { reason: spoken.reason });
-      return fail(
-        spoken.reason === "disabled" || spoken.reason === "not-configured"
-          ? "unavailable"
-          : "speaking-failed",
-      );
+      return fail(spoken.reason === "not-configured" ? "unavailable" : "speaking-failed");
     }
     conversation.attach(spoken.session);
     const [opened, terms] = await Promise.all([

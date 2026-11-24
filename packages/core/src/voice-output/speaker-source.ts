@@ -1,14 +1,12 @@
-// Opens speaking sessions for voice conversation mode. It is the one place
-// that decides whether Rome may speak: with the `voice_mode` gate off it makes
-// no speaker, asks for no credential and opens no connection. A session lasts
-// longer than its credential: it moves to a new one when the provider refuses
-// the old.
+// Opens speaking sessions for voice conversation mode. Only a conversation
+// asks for one, and the conversation socket admits only an account Rome Cloud
+// lets use voice. A session lasts longer than its credential: it moves to a
+// new one when the provider refuses the old.
 
 import { createLogger } from "../logger.js";
 import { speakerFor } from "./create-speaker.js";
 import type { SpeakerError, SpeakerListener, SpeakerSession } from "./speaker.js";
 import type { SpeechCredentialSource, SpeechUsage } from "./speech-credentials.js";
-import { resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
 const log = createLogger("voice-output");
 
@@ -25,9 +23,7 @@ type SpeakerOpenOutcome =
     }
   | {
       ok: false;
-      reason: /** The `voice_mode` gate is off. */
-        | "disabled"
-        /** No source of speech credentials is set up. */
+      reason: /** No source of speech credentials is set up. */
         | "not-configured"
         | "refused"
         | "signed-out"
@@ -43,18 +39,14 @@ export interface SpeakerSource {
 
 export interface SpeakerSourceDeps {
   credentials: SpeechCredentialSource;
-  /** Whether voice mode is on. Read on every `open`. Defaults to the `voice_mode` gate. */
-  enabled?: () => Promise<boolean>;
   /** Epoch milliseconds. */
   now?: () => number;
 }
 
 export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
-  const enabled = deps.enabled ?? resolveVoiceModeEnabled;
   const retire = deps.credentials.retire?.bind(deps.credentials);
   return {
     async open(listener) {
-      if (!(await enabled())) return { ok: false, reason: "disabled" };
       return renewing(
         listener,
         (inner) => openOnCredential(deps.credentials, inner),
