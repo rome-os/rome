@@ -310,7 +310,9 @@ function oauthCardRequest(kind: OAuthProvider): ConnectCardAnswer {
   return {
     status: "card",
     props: { kind },
-    ask: `Connect ${label} to Rome, from Settings › Connections.`,
+    // The agent reads it both beside the card and, where no card shows, as
+    // what to ask instead, so the card's own ask comes first.
+    ask: `Connect ${label} to Rome. Where the chat shows no card, connect it in Settings › Connections.`,
   };
 }
 

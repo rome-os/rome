@@ -183,7 +183,8 @@ describe("asking the guardian to connect a service", () => {
       status: "pending_interaction",
       interaction: {
         appId: "core",
-        promptText: "Connect GitHub to Rome, from Settings › Connections.",
+        promptText:
+          "Connect GitHub to Rome. Where the chat shows no card, connect it in Settings › Connections.",
         render: {
           kind: "inline",
           componentId: "connect-card",
@@ -259,7 +260,8 @@ describe("where the connect card shows", () => {
 
   const loopback = { kind: "guardian", userId: "guardian", via: "loopback" } as const;
   const visitor = { kind: "visitor", accountId: "visitor", email: "v@example.test" } as const;
-  const SETTINGS = "Connect GitHub to Rome, from Settings › Connections.";
+  const SETTINGS =
+    "Connect GitHub to Rome. Where the chat shows no card, connect it in Settings › Connections.";
 
   // What the agent reads when it calls the tool through `execute_action` in
   // `turn`, in a session whose cards show or not: a place that draws cards,
@@ -286,7 +288,13 @@ describe("where the connect card shows", () => {
     return executeActionTool(tools, "system:connect_service", { kind: "github" });
   }
 
-  const shown = { pendingInteraction: true, render: { componentId: "connect-card" } };
+  // Beside the card, the agent reads what the card asks first, not a
+  // sentence that sends the guardian to Settings instead.
+  const shown = {
+    pendingInteraction: true,
+    render: { componentId: "connect-card" },
+    message: expect.stringContaining("It asks them to: Connect GitHub to Rome. "),
+  };
   const settings = { message: expect.stringContaining(SETTINGS) };
 
   for (const c of [
