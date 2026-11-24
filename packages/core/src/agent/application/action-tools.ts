@@ -10,7 +10,11 @@ import {
 } from "../domain/agent-action.js";
 import type { AgentLog } from "../domain/agent-log.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
-import { MAX_SEARCH_LIMIT, SEARCH_LIMIT_DESCRIPTION } from "../domain/catalog-search.js";
+import {
+  MAX_SEARCH_LIMIT,
+  SEARCH_LIMIT_DESCRIPTION,
+  SEARCH_QUERY_FORM,
+} from "../domain/catalog-search.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { RomeToolRunner } from "./rome-tool-runner.js";
 
@@ -73,13 +77,15 @@ export function actionTools(
     {
       name: "search_actions",
       description:
-        "Search available actions by regex against name, description, or argument guidance. Supports /pattern/flags for explicit flags.",
+        `Search available actions by name, description, or argument text. ${SEARCH_QUERY_FORM} ` +
+        "Write /pattern/flags to set flags yourself.",
       inputSchema: {
         type: "object",
         properties: {
           query: {
             type: "string",
-            description: "Regex pattern to match actions, or /pattern/flags for explicit flags.",
+            description:
+              "A JavaScript regular expression such as disconnect|unlink, or /pattern/flags.",
           },
           limit: {
             type: "integer",
