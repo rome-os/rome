@@ -25,6 +25,11 @@ import type {
   RoutineControlService,
 } from "../routines/control.js";
 import type {
+  ConnectionControlOp,
+  ConnectionControlResult,
+  ConnectionControlService,
+} from "../connections/control.js";
+import type {
   AgentFeedback,
   FeedbackOutcome,
   FeedbackService,
@@ -191,6 +196,14 @@ export class RoutineCreationProxy implements RoutineCreationService {
 export class RoutineControlProxy implements RoutineControlService {
   call(op: RoutineControlOp, input: unknown): Promise<RoutineControlResult> {
     return callMain<RoutineControlResult>("routines.control", { op, input });
+  }
+}
+
+/** Worker-side stand-in for core's connection operations: the main process
+ * runs them, for the turn of this worker's action. */
+export class ConnectionControlProxy implements ConnectionControlService {
+  call(op: ConnectionControlOp, input: unknown): Promise<ConnectionControlResult> {
+    return callMain<ConnectionControlResult>("connections.control", { op, input });
   }
 }
 

@@ -252,6 +252,8 @@ import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { routineControlService, routineOperations } from "./routines/control.js";
+import { changeRefusalReason, turnWorksForGuardian } from "./routines/turn-access.js";
+import { connectionControlService, connectionOperations } from "./connections/control.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -307,7 +309,10 @@ import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
 import { chatWorkerCalls } from "./app-host/chat-calls.js";
 import { mailWorkerCalls } from "./app-host/mail-calls.js";
-import { connectionWorkerCalls } from "./app-host/connection-calls.js";
+import {
+  connectionControlWorkerCalls,
+  connectionWorkerCalls,
+} from "./app-host/connection-calls.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1916,6 +1921,16 @@ async function main() {
     actionExecutions: actionExecutionsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
+  // What the system app's connection actions do: in this process directly,
+  // from a worker over `connections.control`. They read the projection
+  // `GET /connections` serves and disconnect as the Connections page does.
+  const connectionOps = connectionOperations({
+    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+    registry: connectionRegistry,
+    worksForGuardian: (turn) =>
+      turnWorksForGuardian((chatId) => concierge.ownerOfChat(chatId), turn),
+    changeRefusalReason,
+  });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
@@ -2053,6 +2068,7 @@ async function main() {
     routinesRepo,
     routineEngine,
     routineControl: routineControlService(routineOps),
+    connectionControl: connectionControlService(connectionOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2710,6 +2726,7 @@ async function main() {
         routineOperations: routineOps,
       }),
       ...mailWorkerCalls(actionRegistry),
+      ...connectionControlWorkerCalls(connectionOps),
       ...connectionWorkerCalls({
         appConnections,
         appIdForAction: (actionName) => {

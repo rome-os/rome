@@ -11,6 +11,13 @@ import type {
 } from "../connections/app-connections.js";
 import type { EmailInboundResult } from "../connections/kinds/email/email-control.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import {
+  CONNECTION_CONTROL_OPS,
+  type ConnectionOperations,
+  type ConnectionTurn,
+} from "../connections/control.js";
+import type { IpcCallContext } from "../apps/actions/ipc.js";
+import type { WorkerCallHandler } from "./routine-calls.js";
 
 const ListParams = z
   .object({
@@ -133,5 +140,30 @@ export function connectionWorkerCalls(
         signature,
       })) as EmailInboundResult;
     },
+  };
+}
+
+const ControlParams = z.object({ op: z.enum(CONNECTION_CONTROL_OPS), input: z.unknown() });
+
+/** The system app's connection actions, for the turn of the worker's action
+ * as the IPC boundary captured it. Without one, the turn shows no one and the
+ * operation refuses. */
+export function connectionControlWorkerCalls(
+  operations: ConnectionOperations,
+): Record<string, WorkerCallHandler> {
+  return {
+    "connections.control": async (params, context) => {
+      const { op, input } = parseWorkerCallParams("connections.control", ControlParams, params);
+      return operations[op](input, connectionTurnOf(context));
+    },
+  };
+}
+
+function connectionTurnOf(context: IpcCallContext | undefined): ConnectionTurn {
+  const from = context?.callerActionContext;
+  return {
+    ...(from?.actor ? { actor: from.actor } : {}),
+    ...(from?.audience ? { audience: from.audience } : {}),
+    ...(from?.channelContext ? { channelContext: from.channelContext } : {}),
   };
 }

@@ -27,17 +27,28 @@ export async function turnWorksForGuardian(
   return true;
 }
 
-/** Why the turn may not change a routine, or null when it may. A change is the
- * guardian's to ask for, in their own private chat: never a routine, a followed
- * event or another agent acting on what it read. The same rule as a write
- * through `core:device_run`. */
-export function changeRefusal(turn: RoutineTurn): string | null {
-  if (turn.audience !== "private") {
-    return "routine_private_only: This chat is not private with the guardian, so routines cannot be changed from it. Say so, and that they can ask in their own chat.";
-  }
+/** Why the turn may not change what the guardian alone changes on the
+ * dashboard, or null when it may. A change is the guardian's to ask for, in
+ * their own private chat: never a routine, a followed event or another agent
+ * acting on what it read. `not_private` is a chat someone else can read;
+ * `not_guardian` is a turn the guardian's own signed-in message did not start.
+ * The same rule as a write through `core:device_run`. */
+export function changeRefusalReason(turn: RoutineTurn): "not_private" | "not_guardian" | null {
+  if (turn.audience !== "private") return "not_private";
   const actor = turn.actor;
-  if (actor?.kind !== "guardian" || actor.via !== "cookie") {
-    return "routine_needs_guardian: Only the guardian's own message can change a routine, and this turn did not start from one. Change nothing; tell them what you would change, so they can ask for it themselves.";
-  }
+  if (actor?.kind !== "guardian" || actor.via !== "cookie") return "not_guardian";
   return null;
+}
+
+/** Why the turn may not change a routine, or null when it may, by
+ * {@link changeRefusalReason}. */
+export function changeRefusal(turn: RoutineTurn): string | null {
+  switch (changeRefusalReason(turn)) {
+    case "not_private":
+      return "routine_private_only: This chat is not private with the guardian, so routines cannot be changed from it. Say so, and that they can ask in their own chat.";
+    case "not_guardian":
+      return "routine_needs_guardian: Only the guardian's own message can change a routine, and this turn did not start from one. Change nothing; tell them what you would change, so they can ask for it themselves.";
+    case null:
+      return null;
+  }
 }

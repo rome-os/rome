@@ -111,6 +111,7 @@ const CALLER_GATED_CALLS = new Set([
   "session.continue",
   "routines.create",
   "routines.control",
+  "connections.control",
   "agent.session.runTurn",
 ]);
 

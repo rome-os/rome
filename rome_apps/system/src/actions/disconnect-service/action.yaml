@@ -1,0 +1,8 @@
+name: disconnect_service
+type: system
+description: Disconnect one service from Rome, such as a Slack workspace or a Google account, so Rome no longer has access to it. Use it when the guardian asks to disconnect, unlink or remove a connection. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find the connection's id with system:read_connections
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+requiresApproval: true
