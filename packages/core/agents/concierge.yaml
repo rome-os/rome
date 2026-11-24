@@ -22,6 +22,9 @@ actions:
   - core:personal_data_catalog
   - core:personal_data_query
   # Lists and reads what the guardian's devices offer live (docs/domains/connections.md#device-connection).
+  - system:read_devices
+  - system:run_on_device
+  # Their older names, which defers written before still call.
   - core:device_describe
   - core:device_run
   - core:computer_use
