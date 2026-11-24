@@ -469,22 +469,4 @@ describe("device actions", () => {
       error: "invalid_args: device.status takes no arguments.",
     });
   });
-
-  it("names the connect card's tool by its current name in a shipped phone's error", async () => {
-    devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
-    answer = {
-      ok: false,
-      code: "live_off",
-      message: 'Offer the connect card: connect_account with kind "apple_health".',
-    };
-    const result = await engine.run(
-      DEVICE_RUN_ACTION,
-      { operation: "device.status", args: {} },
-      { audience: "private" },
-    );
-    expect(result).toEqual({
-      status: "error",
-      error: 'live_off: Offer the connect card: connect_service with kind "apple_health".',
-    });
-  });
 });

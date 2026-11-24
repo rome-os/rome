@@ -29,12 +29,6 @@ export interface RomeToolDefinition {
    * the turn. Absent means the call returns and the turn goes on.
    */
   endsTurn?: boolean;
-  /**
-   * Names the tool had before. A model thread written before the rename holds
-   * calls under them, so an adapter that reads a resumed thread by tool name
-   * reads those calls as this tool's.
-   */
-  formerNames?: readonly string[];
 }
 
 export interface ModelToolCallContext {

@@ -1934,26 +1934,6 @@ describe("AnthropicProvider", () => {
       expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question", "mcp__x__y"]);
     });
 
-    it("lists a turn-ending tool's former names, so a thread parked on an older call resumes finished", async () => {
-      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const parks = {
-        name: "connect_service",
-        formerNames: ["connect_account"],
-        endsTurn: true,
-        description: "Shows a card.",
-        inputSchema: { type: "object", properties: {} },
-        handler: async () => ({ content: [] }),
-      };
-      const session = await provider.openSession(buildParams({ tools: { sessionTools: [parks] } }));
-      await collectEvents(session);
-      await session.close();
-
-      expect(terminalMcpTools()).toEqual([
-        "mcp__ask_user__connect_service",
-        "mcp__ask_user__connect_account",
-      ]);
-    });
-
     it("passes inherited terminal tools through unchanged on a non-interactive surface", async () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__x__y" },
