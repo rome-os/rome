@@ -433,12 +433,14 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             send: (chatId, text, signal, note) =>
               webchatRuntime.sendSpoken(chatId, text, signal, note),
             watch: (listener) => deps.webchatRepo.onMessageInserted(listener),
-            // A late result is offered by the name of the task it reports on.
-            nameOf: async (chatId, messageId) => {
+            // A late result is filed under the one task started at the message it replies to.
+            taskOf: async (chatId, messageId) => {
               const started =
                 (await deps.concierge?.deps.tasks.repo.listStartedAt(chatId, messageId)) ?? [];
-              return started.length === 1 ? (started[0]?.chat.name ?? null) : null;
+              const only = started.length === 1 ? started[0] : undefined;
+              return only ? { chatId: only.chat.id, name: only.chat.name } : null;
             },
+            isRunning: (chatId) => webchatRuntime.isRunning(chatId),
             usage: deps.transcriptionUsage ?? null,
           })
         : null;

@@ -14,6 +14,8 @@ const STORED_WITHIN_MS = 5_000;
 export interface AddedMessage {
   /** Its id in the chat. */
   id?: string;
+  /** The message it replies to, as its thread records it. */
+  chatThreadId?: string | null;
   /** The chat it was added to. */
   sessionId: string;
   turnId: string | null;

@@ -47,7 +47,17 @@ function scriptedTurn() {
   };
 }
 
-function setup(options: { nameOf?: (messageId: string) => Promise<string | null> } = {}) {
+/** Task `task-1`, 「夏威夷酒店」, started at message `start-1`. */
+const oneTask = async (messageId: string) =>
+  messageId === "start-1" ? { chatId: "task-1", name: "夏威夷酒店" } : null;
+
+function setup(
+  options: {
+    taskOf?: (messageId: string) => Promise<{ chatId: string; name: string } | null>;
+    chatBusy?: () => boolean;
+    notReady?: boolean;
+  } = {},
+) {
   let at = 0;
   const timers: { at: number; fn: () => void; live: boolean }[] = [];
   const clock = {
@@ -98,7 +108,8 @@ function setup(options: { nameOf?: (messageId: string) => Promise<string | null>
       turns.push(turn);
       return { ...turn.turn, id: `spoken-${turns.length}` };
     },
-    ...(options.nameOf ? { nameOf: options.nameOf } : {}),
+    ...(options.taskOf ? { taskOf: options.taskOf } : {}),
+    ...(options.chatBusy ? { chatBusy: options.chatBusy } : {}),
     message: (m) => messages.push(m),
     audio: (pcm) => played.push(pcm.byteLength),
     fail: (reason) => {
@@ -108,6 +119,7 @@ function setup(options: { nameOf?: (messageId: string) => Promise<string | null>
     now: clock.now,
   });
   conversation.attach(speaker);
+  if (!options.notReady) conversation.ready();
   const states = () =>
     messages.filter((m) => m.type === "state").map((m) => (m as { state: string }).state);
   /** The provider speaks sentence `index` in full. */
@@ -477,7 +489,7 @@ describe("late messages in a voice conversation", () => {
   };
 
   it("asks once both are quiet for 3 s, and sends the answer to the chat with what was asked", async () => {
-    const c = setup({ nameOf: async (id) => (id === "start-1" ? "夏威夷酒店" : null) });
+    const c = setup({ taskOf: oneTask });
     c.conversation.arrived(late("system-1", "酒店查好了。一共三家。", "start-1", "msg-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS - 1);
@@ -535,11 +547,11 @@ describe("late messages in a voice conversation", () => {
   });
 
   it("asks about each task once a conversation", async () => {
-    const c = setup();
+    const c = setup({ taskOf: oneTask });
     c.conversation.arrived(late("system-1", "测试都过了。", "start-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS);
-    expect(texts(c)).toEqual(["有个任务有结果了，要听吗？"]);
+    expect(texts(c)).toEqual(["「夏威夷酒店」有结果了，要听吗？"]);
     answer(c, "等会儿再说");
     c.turns[0]?.end();
     await settled();
@@ -566,7 +578,7 @@ describe("late messages in a voice conversation", () => {
   });
 
   it("tells only the newest report on a task, the one before being out of date", async () => {
-    const c = setup();
+    const c = setup({ taskOf: oneTask });
     c.conversation.heard("说说别的", "");
     c.conversation.arrived(late("system-1", "还在跑，过了一半。", "start-1"));
     c.conversation.arrived(late("system-2", "跑完了，全部通过。", "start-1"));
@@ -575,10 +587,94 @@ describe("late messages in a voice conversation", () => {
     c.turns[0]?.end();
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS);
-    expect(texts(c)).toEqual(["有个任务有结果了，要听吗？"]);
+    expect(texts(c)).toEqual(["「夏威夷酒店」有结果了，要听吗？"]);
     answer(c, "好，念吧");
     expect(c.notes[1]).toContain("跑完了，全部通过。");
     expect(c.notes[1]).not.toContain("过了一半");
+  });
+
+  it("asks one question at a time, the next only after the guardian answers", async () => {
+    const c = setup();
+    c.conversation.arrived(late("system-1", "A 跑完了。"));
+    c.conversation.arrived(late("system-2", "B 跑完了。"));
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    expect(texts(c)).toEqual(["有新消息了，要听吗？"]);
+    c.speak(0);
+    // No answer for a minute: the first question still waits.
+    c.clock.advance(60_000);
+    expect(c.said).toHaveLength(1);
+    c.conversation.heard("要", "");
+    c.conversation.endpoint();
+    expect(c.notes[0]).toContain("A 跑完了。");
+    expect(c.notes[0]).not.toContain("B 跑完了。");
+    c.turns[0]?.end();
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    expect(texts(c)[1]).toBe("有新消息了，要听吗？");
+    answer(c, "好");
+    expect(c.notes[1]).toContain("B 跑完了。");
+  });
+
+  it("files a task's text result and its card under the task, as one offer", async () => {
+    const c = setup({ taskOf: oneTask });
+    c.conversation.arrived(late("system-1", "订好了。", "start-1", "msg-1"));
+    c.conversation.arrived({
+      id: "msg-2",
+      sessionId: "concierge",
+      turnId: "system-1",
+      role: "assistant",
+      chatThreadId: "start-1",
+      content: JSON.stringify([
+        { type: "widget", forwardedFrom: { chatId: "task-1", title: "夏威夷酒店" } },
+      ]),
+    });
+    await settled();
+    c.clock.advance(60_000);
+    expect(texts(c)).toEqual(["「夏威夷酒店」有结果了，要听吗？"]);
+    answer(c, "念吧");
+    expect(c.notes[0]).toContain("message msg-2, msg-1");
+  });
+
+  it("asks about each report apart when several tasks share the start message", async () => {
+    const c = setup({ taskOf: async () => null });
+    c.conversation.arrived(late("system-1", "第一个好了。", "start-1", "msg-1"));
+    c.conversation.arrived(late("system-1", "第二个好了。", "start-1", "msg-2"));
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    answer(c, "要");
+    expect(c.notes[0]).toContain("第一个好了。");
+    expect(c.notes[0]).not.toContain("第二个好了。");
+    c.turns[0]?.end();
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    answer(c, "要");
+    expect(c.notes[1]).toContain("第二个好了。");
+  });
+
+  it("offers nothing before the client can play, and waits 3 s of quiet from then", async () => {
+    const c = setup({ notReady: true });
+    c.conversation.arrived(late("system-1", "PR 合并了。"));
+    await settled();
+    c.clock.advance(60_000);
+    expect(c.said).toEqual([]);
+    c.conversation.ready();
+    c.clock.advance(OFFER_AFTER_QUIET_MS - 1);
+    expect(c.said).toEqual([]);
+    c.clock.advance(1);
+    expect(texts(c)).toEqual(["有新消息了，要听吗？"]);
+  });
+
+  it("waits while the chat still runs a turn, such as one still saying the report", async () => {
+    let busy = true;
+    const c = setup({ chatBusy: () => busy });
+    c.conversation.arrived(late("system-1", "PR 合并了。"));
+    await settled();
+    c.clock.advance(30_000);
+    expect(c.said).toEqual([]);
+    busy = false;
+    c.clock.advance(1_000);
+    expect(texts(c)).toEqual(["有新消息了，要听吗？"]);
   });
 
   it("offers nothing once the conversation has ended", async () => {

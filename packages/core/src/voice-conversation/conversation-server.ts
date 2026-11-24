@@ -52,8 +52,10 @@ export interface VoiceConversationDeps {
   send(chatId: string, text: string, signal: AbortSignal, note?: string): Promise<ReplyTurn>;
   /** Calls `listener` with each message added to any chat, and returns the unsubscribe. */
   watch?: (listener: (message: AddedMessage) => void) => () => void;
-  /** The name of the task started at message `messageId` of `chatId`. */
-  nameOf?: (chatId: string, messageId: string) => Promise<string | null>;
+  /** The one task started at message `messageId` of `chatId`: its chat and name, or null. */
+  taskOf?: (chatId: string, messageId: string) => Promise<{ chatId: string; name: string } | null>;
+  /** Whether `chatId` runs a turn now. */
+  isRunning?: (chatId: string) => boolean;
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
   maxConversationMs?: number;
@@ -145,8 +147,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
     },
     fail: (reason) => close({ type: "error", reason }),
-    nameOf: (messageId) =>
-      chatId && deps.nameOf ? deps.nameOf(chatId, messageId) : Promise.resolve(null),
+    taskOf: (messageId) =>
+      chatId && deps.taskOf ? deps.taskOf(chatId, messageId) : Promise.resolve(null),
+    chatBusy: () => Boolean(chatId && deps.isRunning?.(chatId)),
   });
 
   // Every listening session is a Rome Cloud session, so each one reports.
@@ -251,6 +254,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       termCount: terms.length,
     });
     reply({ type: "ready", sampleRate: spoken.session.format.sampleRate });
+    conversation.ready();
     reply({ type: "state", state: "listening" });
   }
 

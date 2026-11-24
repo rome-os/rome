@@ -53,6 +53,9 @@ export const SPOKEN_TURN_NOTE = [
 
 /** How long the guardian and Rome are both quiet before Rome offers a late message. */
 export const OFFER_AFTER_QUIET_MS = 3_000;
+// While the chat's own turn still runs, such as a report still being said, how
+// often Rome looks again.
+const CHAT_BUSY_RECHECK_MS = 1_000;
 /** How long the agent may work with nothing said before Rome says it is looking. */
 export const LOOKING_AFTER_MS = 2_000;
 const LOOKING = { zh: "我查一下。", en: "Let me check." };
@@ -92,8 +95,10 @@ export interface ConversationDeps {
   audio(pcm: Uint8Array): void;
   /** Ends the conversation. */
   fail(reason: VoiceConversationStopReason): void;
-  /** The name of the task started at message `messageId`, to offer its result by. */
-  nameOf?: (messageId: string) => Promise<string | null>;
+  /** The one task started at message `messageId`, its chat and name, or null for none or several. */
+  taskOf?: (messageId: string) => Promise<{ chatId: string; name: string } | null>;
+  /** Whether the chat runs a turn now, such as one still saying a report. */
+  chatBusy?: () => boolean;
   /** Runs `fn` after `ms`, and returns the cancel. */
   schedule?: (ms: number, fn: () => void) => () => void;
   now?: () => number;
@@ -108,6 +113,8 @@ export interface Conversation {
   heard(settled: string, pending: string): void;
   /** The guardian finished a turn. */
   endpoint(): void;
+  /** The client can play Rome's audio now. Nothing is offered before. */
+  ready(): void;
   /** A message the chat got, from any turn. One outside the guardian's spoken turns is offered. */
   arrived(message: AddedMessage): void;
   /** Stops speaking and reading. Nothing is sent after this. */
@@ -144,13 +151,6 @@ const realSchedule = (ms: number, fn: () => void) => {
 
 const languageOf = (text: string): ReplyLanguage => (/\p{Script=Han}/u.test(text) ? "zh" : "en");
 
-/** A late message waiting to be offered. */
-interface Offer {
-  message: LateMessage;
-  /** Its name is looked up. */
-  ready: boolean;
-}
-
 export function createConversation(deps: ConversationDeps): Conversation {
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? Date.now;
@@ -182,7 +182,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
   const ownTurns = new Set<string>();
   let sending = 0;
   const unsorted: AddedMessage[] = [];
-  const offers: Offer[] = [];
+  const offers: LateMessage[] = [];
+  let clientReady = false;
   // What was offered in this conversation, by key: each is offered once.
   const offered = new Set<string>();
   // The message Rome asked about and how, until the guardian's next turn.
@@ -238,60 +239,75 @@ export function createConversation(deps: ConversationDeps): Conversation {
   function considerOffer() {
     stopOffering?.();
     stopOffering = null;
-    if (closed || !speaker) return;
-    const next = offers.find((o) => o.ready);
+    // One question at a time: the next waits for the answer to the last.
+    if (closed || !speaker || !clientReady || asked) return;
+    const next = offers[0];
     if (!next) return;
     const working = reply !== null && (!reply.ended || queue.length > 0);
     if (begun || working || now() < playsUntil) return;
+    if (deps.chatBusy?.()) {
+      stopOffering = schedule(CHAT_BUSY_RECHECK_MS, considerOffer);
+      return;
+    }
     const wait = Math.max(lastHeardAt, playsUntil) + OFFER_AFTER_QUIET_MS - now();
     if (wait > 0) {
       stopOffering = schedule(wait, considerOffer);
       return;
     }
-    offers.splice(offers.indexOf(next), 1);
-    offered.add(next.message.key);
+    offers.shift();
+    offered.add(next.key);
     replies++;
-    const to = newReply(lastLanguage ?? languageOf(next.message.text));
+    const to = newReply(lastLanguage ?? languageOf(next.text));
     reply = to;
-    const question = offerLine(next.message, to.language);
-    asked = { message: next.message, question };
+    const question = offerLine(next, to.language);
+    asked = { message: next, question };
     say(to, question);
     to.ended = true;
     update();
   }
 
+  // Files a late message under its task, with the reports waiting before it.
+  const place = (message: LateMessage) => {
+    if (closed || offered.has(message.key)) return;
+    const waiting = offers.find((o) => o.key === message.key);
+    if (waiting && waiting.turnId === message.turnId) {
+      // More of the same turn's report, such as its card.
+      waiting.events.push(...message.events);
+      waiting.ids.push(...message.ids);
+      waiting.text = `${waiting.text}\n${message.text}`;
+      waiting.name ??= message.name;
+    } else if (waiting) {
+      // A newer report on the same task: the one before it is out of date.
+      offers[offers.indexOf(waiting)] = { ...message, name: message.name ?? waiting.name };
+    } else {
+      offers.push(message);
+    }
+    considerOffer();
+  };
+
   const take = (added: AddedMessage) => {
     if (added.turnId && ownTurns.has(added.turnId)) return;
-    const message = lateMessage(added.content, added.turnId, added.id);
-    if (!message || offered.has(message.key)) return;
-    const waiting = offers.find((o) => o.message.key === message.key);
-    if (waiting && waiting.message.turnId === message.turnId) {
-      // More of the same turn's report, such as its card.
-      waiting.message.events.push(...message.events);
-      waiting.message.ids.push(...message.ids);
-      waiting.message.text = `${waiting.message.text}\n${message.text}`;
-      return;
-    }
-    if (waiting) {
-      // A newer report on the same task: the one before it is out of date.
-      waiting.message = { ...message, name: message.name ?? waiting.message.name };
-      return;
-    }
-    const offer: Offer = { message, ready: false };
-    offers.push(offer);
-    const named = (name: string | null) => {
-      offer.message.name ??= name;
-      offer.ready = true;
-      considerOffer();
-    };
-    if (message.name || !message.replyTo || !deps.nameOf) named(null);
-    else
-      deps.nameOf(message.replyTo).then(named, (err: unknown) => {
-        log.warn("late message's task not named", {
+    const message = lateMessage(added.content, added.turnId, added.id, added.chatThreadId);
+    if (!message) return;
+    if (!message.start || !deps.taskOf) return place(message);
+    // A text result replies to its task's start message, and its card names
+    // the task chat: both are filed under the task chat, so one task is one offer.
+    deps.taskOf(message.start).then(
+      (task) => {
+        if (task) {
+          message.key = `task:${task.chatId}`;
+          message.name ??= task.name;
+          message.task = true;
+        }
+        place(message);
+      },
+      (err: unknown) => {
+        log.warn("late message's task not found", {
           error: err instanceof Error ? err.message : String(err),
         });
-        named(null);
-      });
+        place(message);
+      },
+    );
   };
 
   // A spoken turn was sent, or failed to be: what waited on it is sorted.
@@ -446,6 +462,13 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     attach(session) {
       speaker = session;
+    },
+
+    ready() {
+      if (closed) return;
+      clientReady = true;
+      // The quiet before a first offer counts from here.
+      lastHeardAt = Math.max(lastHeardAt, now());
       considerOffer();
     },
 
