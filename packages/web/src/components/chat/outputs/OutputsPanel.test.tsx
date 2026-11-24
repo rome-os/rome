@@ -503,6 +503,10 @@ describe("OutputsPanel", () => {
         mimeType: "text/html",
         kind: "shown",
         link: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html",
+        links: [
+          "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html",
+          "/projects/demo/trip-map.html",
+        ],
       }),
     ];
     renderPanel();
@@ -831,20 +835,47 @@ describe("previewOf", () => {
 });
 
 describe("pageHrefOf", () => {
-  it("opens a page in the projects or memory folder on its own page, and nothing else", () => {
-    const page = { name: "trip map.html", mimeType: "text/html" };
-    expect(pageHrefOf({ ...page, link: "/projects/demo/trip map.html" })).toBe(
-      "/projects/demo/trip%20map.html",
-    );
-    expect(pageHrefOf({ ...page, link: "/memory/notes/trip map.html" })).toBe(
-      "/memory/notes/trip%20map.html",
-    );
-    expect(pageHrefOf({ ...page, link: "/api/assets/0f3c.html" })).toBeNull();
-    expect(pageHrefOf({ ...page, link: null })).toBeNull();
+  const page = { name: "trip map.html", mimeType: "text/html", kind: "written" as const };
+
+  it("opens a written page in the projects folder on its own page", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        link: "/projects/demo/trip map.html",
+        links: ["/home/rome/projects/demo/trip map.html", "/projects/demo/trip map.html"],
+      }),
+    ).toBe("/projects/demo/trip%20map.html");
+  });
+
+  it("opens a written page in the memory folder from its links, as the server gives it", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        link: null,
+        links: ["/home/rome/memory/notes/trip map.html", "/memory/notes/trip map.html"],
+      }),
+    ).toBe("/memory/notes/trip%20map.html");
+  });
+
+  it("leaves a shown copy, a page outside both folders and any other file alone", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        kind: "shown",
+        link: "/api/assets/0f3c.html",
+        links: [
+          "/api/assets/0f3c.html",
+          "/home/rome/projects/demo/trip map.html",
+          "/projects/demo/trip map.html",
+        ],
+      }),
+    ).toBeNull();
+    expect(pageHrefOf({ ...page, link: null, links: ["/tmp/trip map.html"] })).toBeNull();
     expect(
       pageHrefOf({
         name: "bundle.zip",
         mimeType: "application/zip",
+        kind: "written",
         link: "/projects/demo/bundle.zip",
       }),
     ).toBeNull();
