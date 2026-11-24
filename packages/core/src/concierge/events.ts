@@ -114,7 +114,8 @@ function decisionOf(status: string | undefined, resolvedBy: string | null | unde
   if (resolvedBy === RESOLVED_BY_EXPIRY) return "turned down: nobody answered in time";
   if (resolvedBy === RESOLVED_BY_STOP) return "turned down: the task was stopped";
   if (resolvedBy?.startsWith("rome:")) return "turned down by Rome";
-  return status === "approved" ? "approved by the guardian" : "rejected by the guardian";
+  const who = resolvedBy?.startsWith("visitor:") ? "a teammate" : "the guardian";
+  return `${status === "approved" ? "approved" : "rejected"} by ${who}`;
 }
 
 /**

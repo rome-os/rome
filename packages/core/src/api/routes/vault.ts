@@ -125,7 +125,11 @@ export function vaultRoutes(
     return reply.status === 200 ? c.json({ ok: true }) : relayFailure(c, reply, PIN_FAILED);
   });
 
+  // A reset deletes every secret and replaces the PIN without the old one, and
+  // the PIN is the guardian's credential, so a dashboard admin may not reset.
   app.post("/vault/reset", async (c) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "Only the guardian can reset the vault." }, 403);
     const { pin } = await c.req.json<{ pin?: unknown }>().catch(() => ({}) as { pin?: unknown });
     const reply = await signerCall("POST", "/v1/reset", { pin });
     return reply.status === 200 ? c.json({ ok: true }) : relayFailure(c, reply, PIN_FAILED);
