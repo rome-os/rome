@@ -3,7 +3,7 @@
 // own tests make, so a tool's tests cover only its operation.
 
 import { describe, expect, it } from "@rstest/core";
-import type { Action, ActionResult, PreviewPayload } from "@rome-os/app-runtime";
+import type { Action, ActionResult } from "@rome-os/app-runtime";
 import type { AgentTool, ToolTurn } from "./agent-tool.js";
 import { actionExecutionContext } from "./context.js";
 import { type OwnerOfChat, whoMayAsk } from "./who-may-ask.js";
@@ -36,18 +36,6 @@ export function callTool<D>(
 ): Promise<ActionResult> {
   const action = actionOf(tool, deps);
   return asTurn(turn, () => action.execute(input));
-}
-
-/** The approval card `tool` shows for `input`, or undefined for a tool the
- * guardian does not approve. */
-export async function approvalOf<D>(
-  tool: AgentTool<D>,
-  deps: D,
-  input: Record<string, unknown>,
-): Promise<PreviewPayload | undefined> {
-  const action = actionOf(tool, deps);
-  if (!action.config.requiresApproval) return undefined;
-  return action.preview?.(input);
 }
 
 const visitor = { kind: "visitor", accountId: "visitor", email: "v@example.test" } as const;
