@@ -168,6 +168,15 @@ export class AgentInputQueue {
     return this.active?.handle.id === turnId;
   }
 
+  /** Supersedes the queue's active turn while preserving carry-over bookkeeping for its inputs. */
+  supersedeActive(): boolean {
+    const active = this.active;
+    if (!active || active.turn.superseded) return false;
+    active.turn = supersede(active.turn);
+    void active.handle.stop(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
+    return true;
+  }
+
   private start(first: Entry): void {
     const { turn, queued } = startInputTurn(first, this.queued, this.carried);
     this.queued = queued;

@@ -115,19 +115,19 @@ const computerUseTargetSchema = z
 export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;
 
 export async function getChatComputerUseTarget(sessionId: string, signal: AbortSignal) {
+  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
+    credentials: "include",
+    signal,
+  });
   return computerUseTargetSchema
     .and(
       z.object({
         targets: z.array(computerUseTargetSchema).optional(),
         persistentAccess: z.literal(true).optional(),
+        discoveryDegraded: z.literal(true).optional(),
       }),
     )
-    .parse(
-      await fetchJson<unknown>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
-        signal,
-        fallback: "Computer use is unavailable.",
-      }),
-    );
+    .parse(await jsonOrThrow<unknown>(res));
 }
 
 export async function setChatComputerUseAccess(

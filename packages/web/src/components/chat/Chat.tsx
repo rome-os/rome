@@ -698,10 +698,28 @@ export function Chat({
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
   const computerUseSession = isArchived || shareMode ? null : mainSessionId;
+  const computerUseQueryClient = useQueryClient();
   const computerUseEligibility = useQuery({
     queryKey: ["chat-computer-use", computerUseSession],
-    queryFn: ({ signal }) =>
-      computerUseSession ? getChatComputerUseTarget(computerUseSession, signal) : null,
+    queryFn: async ({ signal }) => {
+      if (!computerUseSession) return null;
+      const next = await getChatComputerUseTarget(computerUseSession, signal);
+      if (next.discoveryDegraded) {
+        const previous = computerUseQueryClient.getQueryData<
+          Awaited<ReturnType<typeof getChatComputerUseTarget>>
+        >(["chat-computer-use", computerUseSession]);
+        if (previous) {
+          const prevList = previous.targets ?? [previous];
+          const nextList = next.targets ?? [next];
+          const seen = new Set(nextList.map(({ deviceId }) => deviceId));
+          const preserved = prevList.filter(({ deviceId }) => !seen.has(deviceId));
+          if (preserved.length > 0) {
+            return { ...next, targets: [...nextList, ...preserved] };
+          }
+        }
+      }
+      return next;
+    },
     enabled: computerUseSession !== null,
     staleTime: 0,
     retry: false,

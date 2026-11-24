@@ -2587,6 +2587,7 @@ class AgentSessionImpl implements AgentSession {
   private toolCount: number;
   private subagentToolNames: Set<string>;
   private readonly turnMutex = new Mutex();
+  private readonly activeExternalTurns = new Set<string>();
   private readonly inputs = new AgentInputQueue(
     (input, options) => this.startTurn(input, options),
     () => this.steering(),
@@ -3684,6 +3685,7 @@ class AgentSessionImpl implements AgentSession {
     if (this.currentSink === sink) {
       this.currentSink = null;
     }
+    this.activeExternalTurns.delete(sink.turnId);
     this.lastActiveAt = Date.now();
     this.status = "idle";
     this.currentTurnId = undefined;
@@ -4114,13 +4116,18 @@ class AgentSessionImpl implements AgentSession {
         // starting one; in both cases the caller's hold ends here.
         this.release();
       }
+      this.activeExternalTurns.add(handle.id);
       if (supersedeRunning && sink && !sink.done && sink.turnId !== handle.id) {
-        void this.stopRunning(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
-          this.log.warn("superseding the running turn failed", {
-            sessionId: this.sessionId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+        if (this.inputs.owns(sink.turnId)) {
+          this.inputs.supersedeActive();
+        } else {
+          void this.stopRunning(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+            this.log.warn("superseding the running turn failed", {
+              sessionId: this.sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
       }
       return {
         ...(input.inputId ? { inputId: input.inputId } : {}),
@@ -4140,7 +4147,7 @@ class AgentSessionImpl implements AgentSession {
     ) {
       this.currentSink.taskInputContinues = true;
     }
-    const mutexBusy = this.turnMutex.isLocked();
+    const behindExternal = this.activeExternalTurns.size > 0;
     let receipt: AgentInputReceipt;
     try {
       receipt = this.inputs.submit(
@@ -4169,7 +4176,9 @@ class AgentSessionImpl implements AgentSession {
         }),
       );
     }
-    return mutexBusy && receipt.landed === "started" ? { ...receipt, landed: "queued" } : receipt;
+    return behindExternal && receipt.landed === "started"
+      ? { ...receipt, landed: "queued" }
+      : receipt;
   }
 
   /** Starts a turn behind the running one: an `after` input's, or the input queue's. */
@@ -4338,6 +4347,7 @@ class AgentSessionImpl implements AgentSession {
         }
       }, mutexPriority)
       .finally(() => {
+        this.activeExternalTurns.delete(turnId);
         this.admitted -= 1;
         this.emitStatus();
       });

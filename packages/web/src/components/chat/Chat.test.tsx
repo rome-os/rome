@@ -42,6 +42,7 @@ import {
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 import {
+  ChatApiError,
   createSession,
   deleteSession,
   getChatComputerUseTarget,
@@ -908,6 +909,91 @@ describe("computer use", () => {
     fireEvent.click(screen.getByTestId("send-button"));
     await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
     expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("computerUseDeviceId")).toBe(deviceId);
+  });
+
+  it("keeps computer-use controls on 503 but clears them on 404/403 ChatApiError refetches", async () => {
+    const target = {
+      deviceId,
+      name: "Test Mac",
+      authorized: true as const,
+      persistentAccess: true as const,
+    };
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce(target)
+      .mockRejectedValueOnce(new ChatApiError("Device discovery unavailable", 503, null))
+      .mockRejectedValueOnce(new ChatApiError("Not found", 404, null));
+    const client = queries();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    // 503 is transient: keep cached control and active selection.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "composer.computerUseActive" })).toBeTruthy();
+
+    // 404 is terminal: hide cached control immediately.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(3));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "composer.computerUseActive" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "composer.computerUseAccess" })).toBeNull();
+    });
+  });
+
+  it("preserves previously cached remote targets when a refetch returns discoveryDegraded", async () => {
+    const remoteDeviceId = "992a6210-71d8-4233-858b-764acbbcfe30";
+    const localTarget = {
+      deviceId,
+      name: "This computer",
+      persistentAccess: true as const,
+    };
+    const remoteTarget = {
+      deviceId: remoteDeviceId,
+      name: "Office Mac",
+      authorized: true as const,
+      persistentAccess: true as const,
+    };
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce({
+        ...localTarget,
+        targets: [localTarget, remoteTarget],
+      })
+      .mockResolvedValueOnce({
+        ...localTarget,
+        targets: [localTarget],
+        discoveryDegraded: true,
+      });
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: { turnId: "remote-kept-turn" },
+    });
+    const client = queries();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    // Refetch returns only local target with discoveryDegraded: true.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+
+    // Remote target selection stays intact and is still attached on send.
+    expect(screen.getByRole("button", { name: "composer.computerUseActive" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("computerUseDeviceId")).toBe(
+      remoteDeviceId,
+    );
   });
 
   it("clears stale selection and refreshes targets when a turn returns computer_use_denied", async () => {

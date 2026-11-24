@@ -685,7 +685,9 @@ describe("Webchat API", () => {
       }),
     );
 
-    // Approve remote Mac, then take it offline/unlisted, and verify DELETE still revokes & cancels.
+    // Approve remote Mac, then take it offline/unlisted, and verify DELETE still revokes & cancels
+    // without blocking on remote cancelDevice round-trips and scoped to the revoking actor.
+    cancelDevice.mockImplementationOnce(() => new Promise<void>(() => {}));
     expect(
       (
         await runWithSessionActor(guardian, () =>
@@ -704,9 +706,84 @@ describe("Webchat API", () => {
       }),
     );
     expect(revokedOffline.status).toBe(204);
-    expect(cancelDevice).toHaveBeenCalledWith(remoteId);
+    expect(cancelDevice).toHaveBeenCalledWith(
+      remoteId,
+      expect.objectContaining({ userId: "seat" }),
+    );
     const approvalKey = computerUseApprovalKey(guardian, remoteId, "mac");
     expect(await deps.settingsRepo.get(approvalKey)).toBeNull();
+  });
+
+  it("returns 503 or discoveryDegraded when remote Mac device discovery fails transiently", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const local = {
+      deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02",
+      name: "This computer",
+    };
+    const remoteId = "992a6210-71d8-4233-858b-764acbbcfe30";
+    deps.nodeDevices.listDevices = rs.fn(async () => null);
+
+    // 1. Remote-only instance: discovery failure must surface 503 instead of 404.
+    const remoteOnlyApp = createWebchatRuntime({
+      ...deps,
+      computerUseSigningSecretReady: true,
+      placeAudience: async () => "private",
+    }).routes;
+    const { id: remoteChatId } = (await (
+      await runWithSessionActor(guardian, () =>
+        remoteOnlyApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Remote only" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request(`/chat/sessions/${remoteChatId}/computer-use`),
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request(
+            `http://rome.test/chat/sessions/${remoteChatId}/computer-use/${remoteId}`,
+            { method: "PUT", headers: { origin: "http://rome.test" } },
+          ),
+        )
+      ).status,
+    ).toBe(503);
+
+    // 2. Local + remote instance: returns 200 with local target and discoveryDegraded: true.
+    const hybridApp = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      computerUseSigningSecretReady: true,
+      placeAudience: async () => "private",
+    }).routes;
+    const { id: hybridChatId } = (await (
+      await runWithSessionActor(guardian, () =>
+        hybridApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Hybrid chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    const degraded = await runWithSessionActor(guardian, () =>
+      hybridApp.request(`/chat/sessions/${hybridChatId}/computer-use`),
+    );
+    expect(degraded.status).toBe(200);
+    expect(await degraded.json()).toMatchObject({
+      deviceId: local.deviceId,
+      name: local.name,
+      discoveryDegraded: true,
+    });
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {

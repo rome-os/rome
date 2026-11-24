@@ -650,10 +650,26 @@ final class NativeWindow: @unchecked Sendable {
         case unavailable
     }
 
-    private func resolveOnScreenAXWindows(pid: pid_t) -> OnScreenAXResolution {
+    private func resolveOnScreenAXWindows(pid: pid_t, deadline: TimeInterval) -> OnScreenAXResolution {
+        let initialRemaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard initialRemaining > 0 else { return .transientFailure }
         do {
-            let roots = try readWindowRoots(pid: pid, allowOffscreen: false)
-            let mapped = roots.compactMap { try? AXSnapshotReader.verifyExactWindow($0, pid: pid) }
+            let roots = try readWindowRoots(pid: pid, allowOffscreen: false, timeout: Float(min(0.08, initialRemaining)))
+            var mapped: [CGWindowID] = []
+            mapped.reserveCapacity(roots.count)
+            for root in roots {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { return .transientFailure }
+                AXUIElementSetMessagingTimeout(root, Float(min(0.04, remaining)))
+                do {
+                    mapped.append(try AXSnapshotReader.verifyExactWindow(root, pid: pid))
+                } catch let failure as NativeFailure {
+                    if failure.details["windowError"] as? Int32 == AXError.cannotComplete.rawValue ||
+                       failure.details["ownerError"] as? Int32 == AXError.cannotComplete.rawValue {
+                        return .transientFailure
+                    }
+                } catch {}
+            }
             let unique = Set(Dictionary(grouping: mapped, by: { $0 }).compactMap { $0.value.count == 1 ? $0.key : nil })
             return .exact(unique)
         } catch let failure as NativeFailure {
@@ -705,7 +721,7 @@ final class NativeWindow: @unchecked Sendable {
             if let cached = axWindowsByPID[pid] {
                 resolution = cached
             } else if ProcessInfo.processInfo.systemUptime < onScreenDeadline {
-                resolution = resolveOnScreenAXWindows(pid: pid)
+                resolution = resolveOnScreenAXWindows(pid: pid, deadline: onScreenDeadline)
                 axWindowsByPID[pid] = resolution
             } else {
                 resolution = .transientFailure
@@ -770,7 +786,7 @@ final class NativeWindow: @unchecked Sendable {
         return matches[0]
     }
 
-    private func readWindowRoots(pid: pid_t, allowOffscreen: Bool) throws -> [AXUIElement] {
+    private func readWindowRoots(pid: pid_t, allowOffscreen: Bool, timeout: Float = 0.08) throws -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
         if allowOffscreen {
             // Some apps return an empty AXWindows list in another Space while retaining their main window.
@@ -790,7 +806,7 @@ final class NativeWindow: @unchecked Sendable {
             }
             return roots
         }
-        AXUIElementSetMessagingTimeout(app, 0.08)
+        AXUIElementSetMessagingTimeout(app, max(0.005, timeout))
         var count: CFIndex = 0, raw: CFArray?
         let countError = AXUIElementGetAttributeValueCount(app, kAXWindowsAttribute as CFString, &count)
         guard countError == .success, count > 0, count <= 128 else {

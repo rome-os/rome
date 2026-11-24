@@ -5525,17 +5525,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const COMPUTER_USE_DEVICE_ID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  const listRemoteMacDevices = async () => {
+  const listRemoteMacDevices = async (): Promise<
+    | { ok: true; devices: Array<{ id: string; name: string; platform: string | null }> }
+    | { ok: false }
+  > => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
+      const listed = await Promise.race([
         deps.nodeDevices.listDevices(),
         new Promise<null>((resolve) => {
           timer = setTimeout(() => resolve(null), COMPUTER_USE_LIST_DEVICES_TIMEOUT_MS);
         }),
       ]);
+      if (!listed) return { ok: false };
+      return { ok: true, devices: listed.devices };
     } catch {
-      return null;
+      return { ok: false };
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -5572,9 +5577,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   const computerUseTargets = async (c: Context, requestedDeviceId?: string) => {
-    if (deps.computerUseSigningSecretReady === false) return [];
+    if (deps.computerUseSigningSecretReady === false) {
+      return { targets: [], discoveryUnavailable: false };
+    }
     const context = await computerUseSessionContext(c);
-    if (!context) return [];
+    if (!context) return { targets: [], discoveryUnavailable: false };
     const { actor } = context;
     const targets: Array<{
       deviceId: string;
@@ -5590,29 +5597,41 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       deps.computerUseLocal &&
       deps.computerUseLocal.deviceId === requestedDeviceId
     ) {
-      return targets.map(({ scope, ...target }) => ({
-        ...target,
-        approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
-      }));
+      return {
+        targets: targets.map(({ scope, ...target }) => ({
+          ...target,
+          approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
+        })),
+        discoveryUnavailable: false,
+      };
     }
     const seen = new Set<string>(targets.map(({ deviceId }) => deviceId));
     const listed = await listRemoteMacDevices();
-    for (const device of listed?.devices ?? []) {
-      if ((device.platform === "macos" || device.platform === "darwin") && !seen.has(device.id)) {
-        seen.add(device.id);
-        targets.push({ deviceId: device.id, name: device.name, scope: "mac" });
+    if (listed.ok) {
+      for (const device of listed.devices) {
+        if ((device.platform === "macos" || device.platform === "darwin") && !seen.has(device.id)) {
+          seen.add(device.id);
+          targets.push({ deviceId: device.id, name: device.name, scope: "mac" });
+        }
       }
     }
-    if (targets.length === 0) return [];
-    return targets.map(({ scope, ...target }) => ({
-      ...target,
-      approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
-    }));
+    return {
+      targets: targets.map(({ scope, ...target }) => ({
+        ...target,
+        approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
+      })),
+      discoveryUnavailable: !listed.ok,
+    };
   };
 
   app.get("/chat/sessions/:id/computer-use", async (c) => {
-    const targets = await computerUseTargets(c);
-    if (targets.length === 0) return c.json({ error: "Computer use is unavailable" }, 404);
+    const { targets, discoveryUnavailable } = await computerUseTargets(c);
+    if (targets.length === 0) {
+      if (discoveryUnavailable) {
+        return c.json({ error: "Computer use device discovery is unavailable" }, 503);
+      }
+      return c.json({ error: "Computer use is unavailable" }, 404);
+    }
     const advertised = await Promise.all(
       targets.map(async ({ approvalKey, ...target }) => ({
         ...target,
@@ -5626,6 +5645,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       ...primary,
       persistentAccess: true,
       ...(advertised.length > 1 ? { targets: advertised } : {}),
+      ...(discoveryUnavailable ? { discoveryDegraded: true as const } : {}),
     });
   });
 
@@ -5634,15 +5654,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "Computer-use approval requires the same origin." }, 403);
     const deviceId = c.req.param("deviceId");
     if (c.req.method === "PUT") {
-      const target = (await computerUseTargets(c, deviceId)).find(
-        (candidate) => candidate.deviceId === deviceId,
-      );
-      if (!target) return c.json({ error: "Computer use is unavailable" }, 404);
+      const { targets, discoveryUnavailable } = await computerUseTargets(c, deviceId);
+      const target = targets.find((candidate) => candidate.deviceId === deviceId);
+      if (!target) {
+        if (discoveryUnavailable) {
+          return c.json({ error: "Computer use device discovery is unavailable" }, 503);
+        }
+        return c.json({ error: "Computer use is unavailable" }, 404);
+      }
       await grantComputerUseApproval(deps.settingsRepo, target.approvalKey);
       return c.body(null, 204);
     }
     // DELETE must succeed even when a previously approved Mac is currently offline or unlisted,
-    // and must proactively cancel any in-flight native bindings for that device.
+    // and must proactively cancel any in-flight native bindings for that actor and device.
     const context = await computerUseSessionContext(c);
     if (!context || !deviceId || !COMPUTER_USE_DEVICE_ID_RE.test(deviceId))
       return c.json({ error: "Computer use is unavailable" }, 404);
@@ -5651,13 +5675,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const approvalKey = computerUseApprovalKey(context.actor, deviceId, scope);
     const stored = await deps.settingsRepo.get(approvalKey);
     if (stored === null && !isLocal) {
-      const listed = (await computerUseTargets(c, deviceId)).some(
-        (candidate) => candidate.deviceId === deviceId,
-      );
-      if (!listed) return c.json({ error: "Computer use is unavailable" }, 404);
+      const { targets, discoveryUnavailable } = await computerUseTargets(c, deviceId);
+      const listed = targets.some((candidate) => candidate.deviceId === deviceId);
+      if (!listed) {
+        if (discoveryUnavailable) {
+          return c.json({ error: "Computer use device discovery is unavailable" }, 503);
+        }
+        return c.json({ error: "Computer use is unavailable" }, 404);
+      }
     }
     await deps.settingsRepo.delete(approvalKey);
-    await deps.nativeComputerUse?.cancelDevice(deviceId).catch(() => {});
+    void deps.nativeComputerUse?.cancelDevice(deviceId, context.actor).catch(() => {});
     return c.body(null, 204);
   });
 
@@ -5679,12 +5707,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.computerUseDeviceId !== undefined) {
       const requestedDeviceId =
         typeof body.computerUseDeviceId === "string" ? body.computerUseDeviceId : undefined;
+      const lookup =
+        requestedDeviceId !== undefined
+          ? await computerUseTargets(c, requestedDeviceId)
+          : { targets: [], discoveryUnavailable: false };
       const target =
         requestedDeviceId !== undefined
-          ? (await computerUseTargets(c, requestedDeviceId)).find(
-              ({ deviceId }) => deviceId === requestedDeviceId,
-            )
+          ? lookup.targets.find(({ deviceId }) => deviceId === requestedDeviceId)
           : undefined;
+      if (!target && lookup.discoveryUnavailable) {
+        return c.json(
+          {
+            error: "Computer use device discovery is unavailable",
+            code: "computer_use_unavailable",
+          },
+          503,
+        );
+      }
       if (
         !target ||
         !isSameOriginMutationRequest(c.req.raw) ||

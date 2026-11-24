@@ -229,6 +229,8 @@ type Client = Pick<
 >;
 interface Binding {
   owner: string;
+  actorUserId?: string;
+  actorAccountId?: string;
   agentSessionId: string;
   turnId: string | undefined;
   deviceId: string;
@@ -250,6 +252,8 @@ interface Binding {
 }
 interface WindowReference {
   owner: string;
+  actorUserId?: string;
+  actorAccountId?: string;
   agentSessionId: string;
   turnId: string | undefined;
   deviceId: string;
@@ -482,7 +486,7 @@ function adoptTerminal(binding: Binding, response: ActionResponse): void {
 /** A call never retries. Native sessions remain bound to the admitting actor, agent and device. */
 export function createNativeComputerUseService(options: Options = {}): AgentComputerUse & {
   listDevices(): Promise<unknown>;
-  cancelDevice(deviceId: string): Promise<void>;
+  cancelDevice(deviceId: string, actor?: { userId: string; accountId?: string }): Promise<void>;
   close(): Promise<void>;
 } {
   let client: Client | undefined;
@@ -647,11 +651,14 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
     }
     for (const [ref, entry] of windows) if (matches(entry)) windows.delete(ref);
     const selected = [...bindings].filter(([, binding]) => matches(binding));
+    for (const [id, binding] of selected) {
+      stopBindingLocally(binding, "cancel_requested");
+      bindings.delete(id);
+    }
     await Promise.allSettled([
       ...pending,
       ...selected.flatMap(([, binding]) => (binding.stopConfirmed ? [] : [cancelBinding(binding)])),
     ]);
-    for (const [id] of selected) bindings.delete(id);
   };
   const cancelScope = (agentSessionId: string, turnId?: string) =>
     cancelMatching(
@@ -659,7 +666,14 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
         entry.agentSessionId === agentSessionId &&
         (turnId === undefined || entry.turnId === turnId),
     );
-  const cancelDevice = (deviceId: string) => cancelMatching((entry) => entry.deviceId === deviceId);
+  const cancelDevice = (deviceId: string, actor?: { userId: string; accountId?: string }) =>
+    cancelMatching(
+      (entry) =>
+        entry.deviceId === deviceId &&
+        (!actor ||
+          (entry.actorUserId === actor.userId &&
+            (entry.actorAccountId ?? undefined) === (actor.accountId ?? undefined))),
+    );
   return {
     permits,
     listDevices,
@@ -846,10 +860,13 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
               "The window reference budget is full. Wait for old references to expire.",
             );
           const expiresAt = started + 15_000;
+          const admittingActor = turn.actor();
           const refs = eligible.map(({ window, applicationNames }) => {
             const ref = randomUUID();
             windows.set(ref, {
               owner: admittingOwner,
+              actorUserId: admittingActor?.userId,
+              actorAccountId: admittingActor?.accountId,
               agentSessionId: turn.sessionId,
               turnId: admittingTurn,
               deviceId,
@@ -1086,6 +1103,8 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
           const sessionId = randomUUID();
           const binding: Binding = {
             owner: admittingOwner,
+            actorUserId: reference.actorUserId,
+            actorAccountId: reference.actorAccountId,
             agentSessionId: turn.sessionId,
             turnId: admittingTurn,
             deviceId: String(args.deviceId),
@@ -1502,8 +1521,8 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
     cancelSession(agentSessionId) {
       return cancelScope(agentSessionId);
     },
-    cancelDevice(deviceId) {
-      return cancelDevice(deviceId);
+    cancelDevice(deviceId, actor) {
+      return cancelDevice(deviceId, actor);
     },
     close() {
       return (closing ??= (async () => {

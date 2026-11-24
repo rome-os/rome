@@ -2058,6 +2058,76 @@ describe("native computer-use agent admission", () => {
     expect(content(afterRevoke)).toMatchObject({ error: { code: "invalid_session" } });
   });
 
+  it("scopes cancelDevice to the revoking guardian actor and invalidates locally before remote cancel settles", async () => {
+    const f = fixture();
+    const defaultGrant = { deviceId: "device", expiresAt: Number.MAX_SAFE_INTEGER };
+    const guardianA = turn({
+      sessionId: "session-a",
+      actor: () => ({ kind: "guardian", userId: "guardian-a" }),
+      computerUseGrant: () => defaultGrant,
+    });
+    const guardianB = turn({
+      sessionId: "session-b",
+      actor: () => ({ kind: "guardian", userId: "guardian-b" }),
+      computerUseGrant: () => defaultGrant,
+    });
+
+    let bindCounter = 0;
+    let resolveRemoteCancel!: (value: ActionResponse) => void;
+    const remoteCancelPending = new Promise<ActionResponse>((resolve) => {
+      resolveRemoteCancel = resolve;
+    });
+    f.client.run.mockImplementation(async (_device, action, args) => {
+      if (action === "computer.windows") {
+        return ok({ windows: [{ windowRef: "native-window", title: "Synthetic window" }] });
+      }
+      if (action === "computer.bind") {
+        bindCounter += 1;
+        return ok({ sessionId: `native-session-${bindCounter}`, scope: "background" });
+      }
+      if (action === "computer.observe") {
+        return ok(observed({ sessionId: (args as { sessionId: string }).sessionId }));
+      }
+      if (action === "computer.cancel") {
+        return remoteCancelPending;
+      }
+      return ok({});
+    });
+
+    const windowsA = await f.call("windows", { deviceId: "device" }, guardianA);
+    const refA = content(windowsA).result.windows[0].windowRef as string;
+    const boundA = await f.call("bind", { deviceId: "device", windowRef: refA }, guardianA);
+    const sessionA = content(boundA).result.sessionId as string;
+
+    const windowsB = await f.call("windows", { deviceId: "device" }, guardianB);
+    const refB = content(windowsB).result.windows[0].windowRef as string;
+    const boundB = await f.call("bind", { deviceId: "device", windowRef: refB }, guardianB);
+    const sessionB = content(boundB).result.sessionId as string;
+
+    // Start cancelDevice for guardian A while remote cancel is still pending.
+    const cancelPromise = f.service.cancelDevice("device", { userId: "guardian-a" });
+
+    // Guardian A's local binding is invalidated immediately without waiting for remote RPC.
+    const afterA = await f.call("observe", { sessionId: sessionA }, guardianA);
+    expect(afterA.isError).toBe(true);
+    expect(content(afterA)).toMatchObject({ error: { code: "invalid_session" } });
+
+    // Guardian B's binding on the same device remains active.
+    const afterB = await f.call("observe", { sessionId: sessionB }, guardianB);
+    expect(content(afterB).error).toBeUndefined();
+    expect(afterB.isError).toBeUndefined();
+
+    resolveRemoteCancel(
+      ok({ sessionId: "native-session-1", terminalCause: "cancelled", stopConfirmed: true }),
+    );
+    await cancelPromise;
+
+    const cancelCalls = f.client.run.mock.calls.filter(
+      ([, action]) => action === "computer.cancel",
+    );
+    expect(cancelCalls).toEqual([["device", "computer.cancel", { sessionId: "native-session-1" }]]);
+  });
+
   it("returns session_stopped (not unknown_outcome) when mid-call revocation cancel transport throws", async () => {
     let current = true;
     const expiresAt = Date.now() + 30_000;

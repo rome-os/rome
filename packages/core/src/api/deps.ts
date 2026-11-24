@@ -115,7 +115,9 @@ export interface ApiDeps {
   /** True when ROME_JWT_SECRET meets protected approval strength. Defaults to true when omitted in unit tests. */
   computerUseSigningSecretReady?: boolean;
   /** Native macOS computer-use controller used to proactively cancel bindings on revocation. */
-  nativeComputerUse?: { cancelDevice(deviceId: string): Promise<void> };
+  nativeComputerUse?: {
+    cancelDevice(deviceId: string, actor?: { userId: string; accountId?: string }): Promise<void>;
+  };
   agentNameEvents?: AgentNameEvents;
   /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
