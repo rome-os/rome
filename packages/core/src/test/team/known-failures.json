@@ -3,8 +3,6 @@
   "routes": [
     "DELETE /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",
     "GET /api/chat/sessions/:id/computer-use in the caller's own Concierge chat",
-    "PUT /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",
-    "WS /ws/node",
-    "WS /ws/voice-conversation"
+    "PUT /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat"
   ]
 }
