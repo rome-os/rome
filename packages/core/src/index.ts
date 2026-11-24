@@ -1935,6 +1935,8 @@ async function main() {
       },
       publicOrigin: () => getConfiguredInstanceOrigin(),
     },
+    // The Chat page's routes, once the API layer that serves them is up.
+    chat: { page: () => internalApi?.chatPage ?? null },
     // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {
       routines: routinesRepo,

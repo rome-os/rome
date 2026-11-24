@@ -4,7 +4,8 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
-import { ownerOf } from "../../webchat/owner.js";
+import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
+import type { ChatPage } from "../../webchat/agent-tools.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
   canOpenChat,
@@ -324,6 +325,13 @@ export interface ChatStart {
   model?: ModelSelectionId;
   /** The effort its messages run at when they name none. */
   reasoningEffort?: ModelReasoningEffort;
+}
+
+/** What `PATCH /chat/sessions/:id/archive` takes. */
+interface ChatArchiveBody {
+  archived?: unknown;
+  followsAndTasks?: unknown;
+  follows?: unknown;
 }
 
 export interface NewChatBody {
@@ -1141,6 +1149,8 @@ export interface WebchatRuntime {
   startChat(input: ChatStart, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
+  /** The Chat page's operations for the guardian, as its routes run them (webchat/agent-tools.ts). */
+  chatPage: ChatPage;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /**
@@ -1479,12 +1489,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { session };
   };
 
+  /** Dashboard chat `sessionId`, or null for none: a fork chat or a chat on a connection is none. */
+  const findTopLevelSession = async (sessionId: string): Promise<StoredWebchatSession | null> => {
+    const session = await deps.webchatRepo.getSession(sessionId);
+    return session && session.type === "webchat" ? session : null;
+  };
+
   const getTopLevelWebchatSession = async (
     c: Context,
     sessionId: string,
   ): Promise<SessionLookupResult> => {
-    const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session || session.type !== "webchat") {
+    const session = await findTopLevelSession(sessionId);
+    if (!session) {
       return { response: c.json({ error: "Session not found" }, 404) as Response };
     }
     return { session };
@@ -3195,14 +3211,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(started.body, started.status);
   });
 
-  app.patch("/chat/sessions/:id/project", async (c) => {
-    const sessionId = c.req.param("id");
-    const body = await c.req
-      .json<{ projectName?: string | null; projectPath?: string | null }>()
-      .catch(() => ({}) as { projectName?: string | null; projectPath?: string | null });
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const { session } = lookup;
+  /** Moves a chat that has no message yet to another project, as `PATCH /chat/sessions/:id/project` does. */
+  const setChatProject = async (
+    sessionId: string,
+    body: { projectName?: string | null; projectPath?: string | null },
+  ): Promise<RouteAnswer> => {
+    const session = await findTopLevelSession(sessionId);
+    if (!session) return answer({ error: "Session not found" }, 404);
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     let project;
@@ -3215,21 +3230,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         session.projectPath ?? session.projectName,
       );
       if (messageCount > 0 && requestedProjectPath !== currentProjectPath) {
-        return c.json({ error: "Project cannot be changed after the first message" }, 409);
+        return answer({ error: "Project cannot be changed after the first message" }, 409);
       }
       project = await ensureStoredProjectSelection(requestedProjectPath);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
-      return c.json({ error: message }, getWebchatProjectErrorStatus(message));
+      return answer({ error: message }, getWebchatProjectErrorStatus(message));
     }
 
     await deps.webchatRepo.updateSessionProject(sessionId, project.name, project.path);
-    return c.json(
+    return answer(
       sessionResponse(
         { ...session, projectName: project.name, projectPath: project.path },
         messageCount,
       ),
     );
+  };
+
+  app.patch("/chat/sessions/:id/project", async (c) => {
+    const body = await c.req
+      .json<{ projectName?: string | null; projectPath?: string | null }>()
+      .catch(() => ({}) as { projectName?: string | null; projectPath?: string | null });
+    const changed = await setChatProject(c.req.param("id"), body);
+    return c.json(changed.body, changed.status);
   });
 
   app.post("/chat/sessions/:id/read", async (c) => {
@@ -3278,19 +3301,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
-  app.delete("/chat/sessions/:id", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const { session } = lookup;
+  /** Deletes a chat, as `DELETE /chat/sessions/:id` does. `followsAndTasks`
+   *  "stop" ends a topic chat's follows and open tasks instead of handing them
+   *  to the main Concierge chat. */
+  const deleteChat = async (
+    sessionId: string,
+    followsAndTasks: string | undefined,
+  ): Promise<RouteAnswer> => {
+    const session = await findTopLevelSession(sessionId);
+    if (!session) return answer({ error: "Session not found" }, 404);
     // The main Concierge chat stays; a topic chat hands its follows and open
     // tasks to it first (docs/domains/chats.md#topic-chat).
     if (isMainConciergeChat(session)) {
-      return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
+      return answer({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
     // `followsAndTasks=stop` ends them first, so retireChat has nothing to move.
     const isTopic = isConciergeChat(session);
-    if (isTopic && c.req.query("followsAndTasks") === "stop") {
+    if (isTopic && followsAndTasks === "stop") {
       await deps.concierge?.endChatWork(sessionId);
     }
     const retiredTo = isTopic
@@ -3326,25 +3353,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       reason: "user",
       ...(await sessionActorLogAttributes()),
     });
-    return c.json({ ok: true });
+    return answer({ ok: true });
+  };
+
+  app.delete("/chat/sessions/:id", async (c) => {
+    const deleted = await deleteChat(c.req.param("id"), c.req.query("followsAndTasks"));
+    return c.json(deleted.body, deleted.status);
   });
 
-  app.patch("/chat/sessions/:id/archive", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const body = await c.req
-      .json<{ archived?: unknown; followsAndTasks?: unknown; follows?: unknown }>()
-      .catch(() => ({}) as { archived?: unknown; followsAndTasks?: unknown; follows?: unknown });
+  /** Archives a chat or brings it back, as `PATCH /chat/sessions/:id/archive` does. */
+  const archiveChat = async (sessionId: string, body: ChatArchiveBody): Promise<RouteAnswer> => {
+    const session = await findTopLevelSession(sessionId);
+    if (!session) return answer({ error: "Session not found" }, 404);
     if (typeof body.archived !== "boolean") {
-      return c.json({ error: "archived must be a boolean" }, 400);
+      return answer({ error: "archived must be a boolean" }, 400);
     }
-    if (body.archived && isMainConciergeChat(lookup.session)) {
-      return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
+    if (body.archived && isMainConciergeChat(session)) {
+      return answer({ error: "The main Concierge chat cannot be archived" }, 409);
     }
-    const isTopic = isConciergeChat(lookup.session);
+    const isTopic = isConciergeChat(session);
     // A repeated archive changes nothing, so a topic chat is not retired twice.
-    if (body.archived && !lookup.session.archivedAt) {
+    if (body.archived && !session.archivedAt) {
       // `followsAndTasks: "stop"` ends a topic chat's follows and open tasks
       // first, as a delete's does, so retireChat has nothing to move.
       if (isTopic && body.followsAndTasks === "stop") await deps.concierge?.endChatWork(sessionId);
@@ -3358,10 +3387,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // `follows: "moveBack"` moves back the follows its archive moved to the main chat.
       if (isTopic) await deps.concierge?.restoreChat(sessionId, body.follows === "moveBack");
     }
-    const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session) return c.json({ error: "Session not found" }, 404);
+    const changed = await deps.webchatRepo.getSession(sessionId);
+    if (!changed) return answer({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(sessionResponse(session, messageCount));
+    return answer(sessionResponse(changed, messageCount));
+  };
+
+  app.patch("/chat/sessions/:id/archive", async (c) => {
+    const body = await c.req.json<ChatArchiveBody>().catch(() => ({}) as ChatArchiveBody);
+    const changed = await archiveChat(c.req.param("id"), body);
+    return c.json(changed.body, changed.status);
   });
 
   // The checks pending in a chat, which its owner can cancel there.
@@ -3391,17 +3426,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json({ ok: true });
   });
 
-  app.patch("/chat/sessions/:id/pin", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const body = await c.req.json<unknown>().catch(() => undefined);
-    if (typeof body !== "object" || body === null) {
-      return c.json({ error: "pinned must be a boolean" }, 400);
-    }
-    const pinned = (body as { pinned?: unknown }).pinned;
+  /** Pins a chat or unpins it, as `PATCH /chat/sessions/:id/pin` does. */
+  const pinChat = async (sessionId: string, pinned: unknown): Promise<RouteAnswer> => {
+    if (!(await findTopLevelSession(sessionId))) return answer({ error: "Session not found" }, 404);
     if (typeof pinned !== "boolean") {
-      return c.json({ error: "pinned must be a boolean" }, 400);
+      return answer({ error: "pinned must be a boolean" }, 400);
     }
     if (pinned) {
       await deps.webchatRepo.pinSession(sessionId);
@@ -3409,40 +3438,43 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       await deps.webchatRepo.unpinSession(sessionId);
     }
     const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session) return c.json({ error: "Session not found" }, 404);
+    if (!session) return answer({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(sessionResponse(session, messageCount));
+    return answer(sessionResponse(session, messageCount));
+  };
+
+  app.patch("/chat/sessions/:id/pin", async (c) => {
+    const body = await c.req.json<unknown>().catch(() => undefined);
+    const pinned =
+      typeof body === "object" && body !== null ? (body as { pinned?: unknown }).pinned : undefined;
+    const changed = await pinChat(c.req.param("id"), pinned);
+    return c.json(changed.body, changed.status);
   });
 
   // The model picker of an open chat. The pick is stored on the chat and the
   // next turn runs on it, also when the chat's session is open; its successful
   // turn re-pins the session (docs/concepts/sessions.md#model-pin). "auto"
   // clears the pick.
-  app.patch("/chat/sessions/:id/model", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
+  /** Picks the model a chat runs on, as `PATCH /chat/sessions/:id/model` does. */
+  const pickChatModel = async (sessionId: string, requested: unknown): Promise<RouteAnswer> => {
+    const found = await findTopLevelSession(sessionId);
+    if (!found) return answer({ error: "Session not found" }, 404);
     // A fork chat promoted to a chat runs on its branch's thread; picking a
     // model for it waits on the fork-chat review (#1384).
-    if (lookup.session.parentSessionId) {
-      return c.json({ error: "A fork chat keeps the model it branched with" }, 409);
+    if (found.parentSessionId) {
+      return answer({ error: "A fork chat keeps the model it branched with" }, 409);
     }
-    const body = await c.req.json<unknown>().catch(() => undefined);
-    const requested =
-      typeof body === "object" && body !== null
-        ? (body as { largeModelSelection?: unknown }).largeModelSelection
-        : undefined;
     if (
       typeof requested !== "string" ||
       normalizeWebchatLargeModelSelectionId(requested) !== requested
     ) {
-      return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
+      return answer({ error: "largeModelSelection must be a model selection id" }, 400);
     }
     if (
-      !isConciergeChat(lookup.session) &&
+      !isConciergeChat(found) &&
       (await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true
     ) {
-      return c.json({ error: "The model selector is turned off" }, 409);
+      return answer({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
     // One transition with the chat's hold: Auto lets a held conversation go,
@@ -3456,9 +3488,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
     }
     const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session) return c.json({ error: "Session not found" }, 404);
+    if (!session) return answer({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(sessionResponse(session, messageCount));
+    return answer(sessionResponse(session, messageCount));
+  };
+
+  app.patch("/chat/sessions/:id/model", async (c) => {
+    const body = await c.req.json<unknown>().catch(() => undefined);
+    const requested =
+      typeof body === "object" && body !== null
+        ? (body as { largeModelSelection?: unknown }).largeModelSelection
+        : undefined;
+    const changed = await pickChatModel(c.req.param("id"), requested);
+    return c.json(changed.body, changed.status);
   });
 
   // "Back to default": a chat pinned to a model, kept by a card or a change of
@@ -3477,35 +3519,37 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(sessionResponse(session, messageCount));
   });
 
-  app.patch("/chat/sessions/:id/name", async (c) => {
-    const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const { session } = lookup;
-    // `c.req.json()` resolves to `null` for a literal `null` body (and the
-    // catch only handles malformed JSON), so guard for a non-null object
-    // before reading `name` — otherwise the property access would 500.
-    const body = await c.req.json<unknown>().catch(() => undefined);
-    if (typeof body !== "object" || body === null) {
-      return c.json({ error: "name must be a string" }, 400);
-    }
-    const rawName = (body as { name?: unknown }).name;
+  /** Renames a chat, as `PATCH /chat/sessions/:id/name` does. */
+  const renameChat = async (sessionId: string, rawName: unknown): Promise<RouteAnswer> => {
+    const session = await findTopLevelSession(sessionId);
+    if (!session) return answer({ error: "Session not found" }, 404);
     if (typeof rawName !== "string") {
-      return c.json({ error: "name must be a string" }, 400);
+      return answer({ error: "name must be a string" }, 400);
     }
     const name = rawName.trim();
     if (name.length === 0) {
-      return c.json({ error: "name must not be empty" }, 400);
+      return answer({ error: "name must not be empty" }, 400);
     }
     if (conversationTitleLength(name) > CONVERSATION_TITLE_MAX_LENGTH) {
-      return c.json(
+      return answer(
         { error: `name must be at most ${CONVERSATION_TITLE_MAX_LENGTH} characters` },
         400,
       );
     }
     await deps.webchatRepo.updateSessionName(sessionId, name);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(sessionResponse({ ...session, name }, messageCount));
+    return answer(sessionResponse({ ...session, name }, messageCount));
+  };
+
+  app.patch("/chat/sessions/:id/name", async (c) => {
+    // `c.req.json()` resolves to `null` for a literal `null` body (and the
+    // catch only handles malformed JSON), so guard for a non-null object
+    // before reading `name` — otherwise the property access would 500.
+    const body = await c.req.json<unknown>().catch(() => undefined);
+    const name =
+      typeof body === "object" && body !== null ? (body as { name?: unknown }).name : undefined;
+    const changed = await renameChat(c.req.param("id"), name);
+    return c.json(changed.body, changed.status);
   });
 
   app.get("/chat/sessions/:id/layout", async (c) => {
@@ -5791,7 +5835,34 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       ? null
       : "Session not found";
 
+  // A chat the guardian's dashboard does not open is not found, as the routes' gate answers.
+  const guardianOpens = (chatId: string) =>
+    canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, GUARDIAN_OWNER);
+  const asGuardian =
+    <A extends unknown[]>(op: (chatId: string, ...args: A) => Promise<RouteAnswer>) =>
+    async (chatId: string, ...args: A): Promise<RouteAnswer> =>
+      (await guardianOpens(chatId))
+        ? op(chatId, ...args)
+        : answer({ error: "Session not found" }, 404);
+  const chatPage: ChatPage = {
+    startChat: (chat) => startChat(chat, GUARDIAN_OWNER),
+    sendAsGuardian: (chatId, text) => runtime.sendAsGuardian(chatId, text),
+    renameChat: asGuardian(renameChat),
+    pinChat: asGuardian(pinChat),
+    archiveChat: asGuardian((chatId, archived: boolean) => archiveChat(chatId, { archived })),
+    pickChatModel: asGuardian(pickChatModel),
+    setChatProject: asGuardian((chatId, projectPath: string) =>
+      setChatProject(chatId, { projectPath }),
+    ),
+    deleteChat: asGuardian((chatId) => deleteChat(chatId, undefined)),
+    async chatName(chatId) {
+      if (!(await guardianOpens(chatId))) return null;
+      return (await findTopLevelSession(chatId))?.name ?? null;
+    },
+  };
+
   const runtime: WebchatRuntime = {
+    chatPage,
     activeStreams,
     async flushAll(): Promise<void> {
       const allStreams = [...activeStreams.values()].flat();

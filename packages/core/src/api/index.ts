@@ -363,6 +363,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         log.info("api listening", { port: info.port, host: config.host });
         resolve({
           port: info.port,
+          chatPage: webchatRuntime.chatPage,
           close: async () => {
             terminalServer.close();
             liveEvents.close();

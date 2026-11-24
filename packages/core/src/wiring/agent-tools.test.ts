@@ -34,6 +34,9 @@ const NAMES = [
   "system:run_routine",
   "system:stop_routine_run",
   "system:stop_routine",
+  "system:start_chat",
+  "system:change_chat",
+  "system:delete_chat",
 ];
 
 describe("core's agent tools", () => {
