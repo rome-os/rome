@@ -410,6 +410,7 @@ describe("ActionEngine", () => {
         isFirstPartyAction?: (name: string) => boolean,
         maxWorkerProcesses = 8,
         autoRespond = true,
+        mainActions?: ReadonlySet<string>,
       ) {
         const registry = new ActionRegistryImpl();
         for (const action of actions) registry.register(action);
@@ -420,6 +421,7 @@ describe("ActionEngine", () => {
           maxWorkerProcesses,
           actionWorkerFork,
           isFirstPartyAction,
+          mainActions,
         });
         return { engine, children, actionWorkerFork };
       }
@@ -462,6 +464,22 @@ describe("ActionEngine", () => {
 
         children[0].completeNext();
         await expect(busy).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("runs an action core registers in main alone, such as an agent tool, in main", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:pause_routine", { type: "system", execute: inMain })],
+          () => true,
+          8,
+          true,
+          new Set(["system:pause_routine"]),
+        );
+
+        await expect(engine.run("system:pause_routine", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).not.toHaveBeenCalled();
       });
 
       it("forks a worker for a first-party action outside the allowlist", async () => {

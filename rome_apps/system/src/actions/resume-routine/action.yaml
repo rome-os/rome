@@ -1,7 +1,0 @@
-name: resume_routine
-type: system
-description: Turn a paused routine back on, so it fires on its schedule or event again. Use it when the guardian asks to resume or restart a routine. A one-off whose time has passed cannot come back on. Only in the guardian's private chat, in a turn their own message started, so a routine cannot use it as its action. Find the routine's id with system:search_routine
-complexity: simple
-speed: fast
-reliability: high
-sideEffects: write
