@@ -32,6 +32,9 @@ import {
 import { renderOgSvg, type OgIcon } from "./og/template.js";
 import { svgToPng } from "./og/rasterize.js";
 import type { SpecSource } from "./lockfile.js";
+import type { AppCatalog } from "./catalog.js";
+import { SYSTEM_APP_ID } from "./manager.js";
+import { isValidAppId } from "./packaging/app-id.js";
 import { cloudBearer } from "../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
@@ -113,6 +116,80 @@ function canonicalPath(p: string): string {
     return realpathSync(p);
   } catch {
     return resolve(p);
+  }
+}
+
+/** How publishing an installed app ended: the listing and version it
+ * published, or why not, as the error and the HTTP status the Apps page gets. */
+export type PublishInstalledAppOutcome =
+  | (Extract<PublishAppResult, { status: "ok" }> & { appId: string })
+  | { status: "refused"; httpStatus: 400 | 403 | 404 | 409 | 412 | 501 | 502; error: string }
+  | { status: "rejected"; httpStatus: number; error: string };
+
+/**
+ * Publishes an installed app to the Rome App Store, as the Apps page's Publish
+ * does. Only an app developed on this instance publishes; every other case is
+ * refused with what to do instead. `rejected` carries the store's own refusal,
+ * such as a version it already holds.
+ */
+export async function publishInstalledApp(
+  catalog: Pick<AppCatalog, "get">,
+  appId: string,
+  opts: PublishAppOptions = {},
+): Promise<PublishInstalledAppOutcome> {
+  const refused = (httpStatus: 400 | 403 | 404 | 409 | 412 | 501 | 502, error: string) =>
+    ({ status: "refused", httpStatus, error }) as const;
+  if (!isValidAppId(appId)) return refused(400, "Invalid app id");
+  if (appId === SYSTEM_APP_ID) {
+    return refused(400, 'SYSTEM_PROTECTED: App "system" cannot be published');
+  }
+  const view = catalog.get(appId);
+  if (!view) return refused(404, `App "${appId}" is not installed`);
+  if (view.state !== "installed") {
+    return refused(409, `App "${appId}" is ${view.state}; cannot publish`);
+  }
+  const artifactRoot = publishArtifactRoot(view.source);
+  if (artifactRoot == null || !isPublishableSource(appId, view.source)) {
+    return refused(
+      409,
+      `App "${appId}" was not developed on this instance; only locally developed apps can be published`,
+    );
+  }
+  if (view.installedHash == null) {
+    return refused(409, `App "${appId}" has no pinned install hash; re-install before publishing`);
+  }
+  // The pinned source artifact, never the install dir (module comment). Nothing
+  // here needs the app running, so a disabled app publishes too.
+  const result = await publishAppBundle(artifactRoot, view.installedHash, opts);
+  switch (result.status) {
+    case "ok":
+      return { ...result, appId };
+    case "artifact_missing":
+      return refused(
+        409,
+        `The source artifact for "${appId}" is no longer at ${artifactRoot}; re-install it before publishing`,
+      );
+    case "artifact_drifted":
+      return refused(
+        409,
+        `The source artifact for "${appId}" has changed since it was installed; install it again before publishing`,
+      );
+    case "no_token":
+      return refused(
+        412,
+        "This Rome instance is not connected to a Rome account, so it cannot publish to the App Store.",
+      );
+    case "auth_invalid":
+      return refused(
+        403,
+        "The App Store no longer accepts this Rome instance's credentials. Reconnect this instance to its Rome account and try again.",
+      );
+    case "unconfigured":
+      return refused(501, "App Store origin is not configured for this instance");
+    case "unreachable":
+      return refused(502, `Could not reach the App Store: ${result.message}`);
+    case "rejected":
+      return { status: "rejected", httpStatus: result.httpStatus, error: result.message };
   }
 }
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Parser } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { hashArtifact, packBundle } from "./packaging/index.js";
-import { isPublishableSource, publishAppBundle } from "./publish.js";
+import { isPublishableSource, publishAppBundle, publishInstalledApp } from "./publish.js";
 import { setInstanceTokenInMemory } from "../instance/instance-identity.js";
 
 // A packed source artifact dir — app.yaml at the root, build output beside
@@ -479,6 +479,43 @@ describe("publishAppBundle", () => {
     ).toEqual({
       status: "unreachable",
       message: "connect ECONNREFUSED",
+    });
+  });
+});
+
+describe("publishInstalledApp", () => {
+  const catalogOf = (view: unknown) => ({ get: () => view }) as never;
+  const installed = {
+    state: "installed",
+    source: { mode: "appstore", listingId: "notes", version: "1.0.0" },
+    installedHash: "a".repeat(64),
+  };
+
+  it("refuses the system app, an app not installed and one not developed here, in the page's words", async () => {
+    expect(await publishInstalledApp(catalogOf(installed), "system")).toEqual({
+      status: "refused",
+      httpStatus: 400,
+      error: 'SYSTEM_PROTECTED: App "system" cannot be published',
+    });
+    expect(await publishInstalledApp(catalogOf(undefined), "notes")).toEqual({
+      status: "refused",
+      httpStatus: 404,
+      error: 'App "notes" is not installed',
+    });
+    expect(await publishInstalledApp(catalogOf(installed), "notes")).toEqual({
+      status: "refused",
+      httpStatus: 409,
+      error:
+        'App "notes" was not developed on this instance; only locally developed apps can be published',
+    });
+  });
+
+  it("refuses an app that is still installing", async () => {
+    const view = { ...installed, state: "installing" };
+
+    expect(await publishInstalledApp(catalogOf(view), "notes")).toMatchObject({
+      httpStatus: 409,
+      error: 'App "notes" is installing; cannot publish',
     });
   });
 });

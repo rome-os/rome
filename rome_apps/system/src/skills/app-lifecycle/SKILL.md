@@ -5,7 +5,7 @@ description: Install, reinstall, uninstall, enable, or disable Rome apps, share 
 
 # App lifecycle
 
-Read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
+To see the installed apps and how each stands, call `system:read_apps`. To install an App Store app, update an app, turn one on or off, or remove one, call `system:manage_app`. To install or reinstall an app from its source workspace, or to scaffold one, read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
 
 ## Three different endpoints
 
@@ -14,8 +14,8 @@ An app can reach three separate states. Each one is a different decision. Do not
 | Endpoint | Who can use it | How |
 |---|---|---|
 | **Installed** | Only the guardian, in this Rome dashboard | `install` (below) |
-| **Shared** | Other people, through this Rome's public URL. A hosted Rome needs no extra hosting or domain. A desktop or local Rome may have no public URL. | Change the app's access mode. Read [`SHARING.md`](./SHARING.md). |
-| **In the App Store** | Anyone, who installs a copy into their own Rome | Publish a version. Read [`PUBLISHING.md`](./PUBLISHING.md). |
+| **Shared** | Other people, through this Rome's public URL. A hosted Rome needs no extra hosting or domain. A desktop or local Rome may have no public URL. | `system:share_app`. Read [`SHARING.md`](./SHARING.md). |
+| **In the App Store** | Anyone, who installs a copy into their own Rome | `system:publish_app`. Read [`PUBLISHING.md`](./PUBLISHING.md). |
 
 Installing does not share or publish. Sharing and publishing are visible outside this Rome, so do them only when the guardian asks for that app and that endpoint. When you describe how to release an app, name the endpoint first. Rome has no Apple App Store or Google Play path. Say that instead of improvising one.
 
@@ -41,7 +41,7 @@ The `bundle` source mode accepts an already-packed artifact, not a raw source wo
 
 If an install error carries a native-build hint or `ERR_PNPM_IGNORED_BUILDS`, follow the hint and `system:custom-dependencies`.
 
-For a Rome App Store install, discover the listing with `system:app_store_search` and follow the `appstore` source schema in `system:app_management`.
+For a Rome App Store install, find the listing with `system:search_app_store`, then call `system:manage_app` with `change: "install"` and its `listingId`. To update an installed app, call `system:manage_app` with `change: "update"`. `system:read_apps` shows which apps have an update.
 
 ## First-party apps
 
@@ -55,25 +55,25 @@ Do not pass a monorepo member as a `source` install. The daemon refuses to run p
 
 ## Uninstall a custom app
 
-Call `system:app_management` with:
+Call `system:manage_app` with:
 
 ```json
-{ "op": "uninstall", "appId": "<app id>", "purge": false }
+{ "change": "remove", "appId": "<app id>" }
 ```
 
-The default, `purge: false`, removes the lockfile entry and installed bundle but keeps the app's database tables and data. Reinstalling restores access to that state.
+The guardian approves it on a card first. By default it removes the lockfile entry and installed bundle but keeps the app's database tables and data. Reinstalling restores access to that state.
 
-Use `purge: true` only when the guardian requests deletion of the app's data as well. It drops the app's tables and data directory.
+Pass `deleteData: true` only when the guardian requests deletion of the app's data as well. It drops the app's tables and data directory.
 
 ## Enable or disable an app
 
-Call `system:app_management` with:
+Call `system:manage_app` with:
 
 ```json
-{ "op": "set_enabled", "appId": "<app id>", "enabled": false }
+{ "change": "turn_off", "appId": "<app id>" }
 ```
 
-Use `enabled: true` to enable the app. This does not reinstall it. The manager updates the lockfile and awaits the catalog subscribers before returning.
+Use `change: "turn_on"` to enable the app. This does not reinstall it. The manager updates the lockfile and awaits the catalog subscribers before returning.
 
 ## Runtime guarantees
 

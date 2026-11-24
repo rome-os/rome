@@ -80,6 +80,21 @@ export interface AppStoreReader {
   getListing(params: AppStoreGetParams): Promise<AppStoreServiceResult<AppStoreListingDetailBody>>;
 }
 
+/**
+ * The live version of a listing to install: `requested` when it is live, or
+ * null when it is not; with nothing requested, the listing's highest version
+ * when live, else the newest live one. Null when no version is live.
+ */
+export function liveVersionToInstall(
+  detail: AppStoreListingDetailBody,
+  requested?: string,
+): AppStoreVersion | null {
+  const live = (detail.versions ?? []).filter((version) => version.state === "live");
+  if (requested) return live.find((version) => version.version === requested) ?? null;
+  const highest = detail.listing?.highestVersion;
+  return live.find((version) => version.version === highest) ?? live[0] ?? null;
+}
+
 export interface CreateAppStoreServiceOptions {
   appCatalog?: Pick<AppCatalog, "get">;
   fetch?: typeof fetch;

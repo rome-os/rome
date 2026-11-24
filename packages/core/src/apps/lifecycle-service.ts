@@ -4,7 +4,7 @@ import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
 import { SpecSourceSchema } from "./lockfile.js";
 import { scaffoldDevApp } from "./scaffold.js";
-import { purgeAppUserData, resolveTablePrefixForPurge } from "./user-data-purge.js";
+import { uninstallApp } from "./uninstall.js";
 import { createBundleFetcher } from "./bundle-fetcher.js";
 import { remixApp } from "./remix.js";
 import type { BundleFetcher } from "./store-bundle.js";
@@ -54,19 +54,11 @@ export class AppLifecycleService implements AppLifecycle {
   }
 
   async uninstall(params: { appId: string; purge?: boolean }) {
-    const wantsPurge = params.purge === true;
-
-    const tablePrefix = wantsPurge
-      ? await resolveTablePrefixForPurge({ appId: params.appId, catalog: this.catalog })
-      : null;
-
-    const result = await this.manager.uninstall(params.appId, { purge: wantsPurge });
-
-    if (wantsPurge && !result.alreadyAbsent) {
-      await purgeAppUserData({ appId: params.appId, tablePrefix, db: this.db });
-    }
-
-    return result;
+    return await uninstallApp(
+      { manager: this.manager, catalog: this.catalog, db: this.db },
+      params.appId,
+      { purge: params.purge === true },
+    );
   }
 
   async setEnabled(params: { appId: string; enabled: boolean }) {

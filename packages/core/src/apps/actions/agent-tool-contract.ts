@@ -154,8 +154,11 @@ export function whoMayAskSuite(tool: AgentTool<never>, input: Record<string, unk
           onApprovalCreated: async (approval) => void cards.push(approval),
         });
 
-        // A turn let through reaches `approval`, which throws on the deps.
-        const result = await engine.run(tool.name, input, { initiator: "test", ...c.turn });
+        // A turn let through reaches `approval`, or `run` for an input that
+        // needs no approval, and either throws on the deps.
+        const result = await engine
+          .run(tool.name, input, { initiator: "test", ...c.turn })
+          .catch(() => null);
 
         if (code) {
           expectVerdict(watched, code, tool.name, result);
