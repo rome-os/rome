@@ -126,6 +126,12 @@ describe("searchActions", () => {
   it("rejects a query that is not a valid regex", () => {
     expect(() => names("(")).toThrow("Invalid regex query");
   });
+
+  it("names the accepted form when it rejects an inline flag", () => {
+    expect(() => names("(?i)github")).toThrow(
+      /JavaScript regular expression such as disconnect\|unlink.*\(\?i\) are not accepted/,
+    );
+  });
 });
 
 describe("actionToolOutput", () => {
