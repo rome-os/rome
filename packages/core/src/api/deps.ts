@@ -111,6 +111,7 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
+  computerUseLocal?: { deviceId: string; name: string };
   agentNameEvents?: AgentNameEvents;
   /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;

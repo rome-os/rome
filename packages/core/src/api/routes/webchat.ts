@@ -95,6 +95,7 @@ import {
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
 import {
+  declaresComputerUse,
   resolveAgentPolicy,
   type ModelSelection,
   type ModelSelectionId,
@@ -154,7 +155,14 @@ import type {
   BackendTurnOptions,
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
-import { withReplyContext } from "../../agent/index.js";
+import { withReplyContext, type ComputerUseGrant } from "../../agent/index.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import {
+  computerUseApprovalKey,
+  grantComputerUseApproval,
+  readComputerUseApproval,
+  type ComputerUseApprovalScope,
+} from "../../core/computer-use-approvals.js";
 import {
   answersFromQuestionCard,
   parseAskQuestionInput,
@@ -4129,6 +4137,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     personaId?: string;
     largeModelSelection?: string;
     reasoningEffort?: string;
+    computerUseDeviceId?: unknown;
+    computerUsePreemption?: unknown;
     files?: IncomingWebchatUpload[];
     /**
      * structured skill invocation. Set when the guardian picked a
@@ -4205,6 +4215,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
         } catch {}
       }
+      const preemption = form.get("computerUsePreemption");
       return {
         inputId: getString("inputId"),
         automatedSource: getString("automatedSource"),
@@ -4214,6 +4225,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         personaId: getString("personaId"),
         largeModelSelection: getString("largeModelSelection"),
         reasoningEffort: getString("reasoningEffort"),
+        computerUseDeviceId: form.get("computerUseDeviceId") ?? undefined,
+        computerUsePreemption: preemption === "true" ? true : (preemption ?? undefined),
         skillName: getString("skillName"),
         files,
         workspace,
@@ -4242,6 +4255,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       taskInput?: TaskInputClaim;
       /** Gets the turn this input starts or joins, once the input is submitted. */
       onTurn?: (turn: Promise<AgentTurnHandle>) => void;
+      computerUseGrant?: ComputerUseGrant;
     } = {},
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
@@ -5404,7 +5418,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       ...(actingActor ? { actor: actingActor } : {}),
       ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
-      priority: priority.data,
+      priority: said.computerUseGrant ? ("after" as const) : priority.data,
+      ...(said.computerUseGrant ? { computerUseGrant: said.computerUseGrant } : {}),
       threadContext,
       romeSessionId: sessionId,
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
@@ -5452,9 +5467,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return answer({ error: "Task input attribution is unavailable" }, 409);
       }
     }
-    const receipt = said.taskInput
-      ? admitTaskInput(said.taskInput, () => agentSess.submit(input, options))
-      : agentSess.submit(input, options);
+    let receipt: ReturnType<typeof agentSess.submit>;
+    try {
+      receipt = said.taskInput
+        ? admitTaskInput(said.taskInput, () => agentSess.submit(input, options))
+        : agentSess.submit(input, options);
+    } catch (error) {
+      if (!said.computerUseGrant) throw error;
+      log.warn("computer-use turn submission rejected", {
+        sessionId,
+        inputId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await deps.webchatRepo.updateUserInput(sessionId, {
+        type: "input_status",
+        inputId,
+        state: "failed",
+      });
+      return answer(
+        { error: "This message's computer-use authorization ended", code: "computer_use_denied" },
+        409,
+      );
+    }
     // The turn this input started gets its stream here, and so does one a
     // queued input starts later. A turn it was folded or steered into has one.
     said.onTurn?.(receipt.turn);
@@ -5486,11 +5520,140 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
+  const computerUseTargets = async (c: Context) => {
+    const actor = await currentSessionActor();
+    if (actor?.kind !== "guardian" || actor.via !== "cookie" || cameThroughWidgetEvent(c.env))
+      return [];
+    const sessionId = c.req.param("id");
+    if (!sessionId) return [];
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (
+      !session ||
+      session.type !== "webchat" ||
+      session.parentSessionId ||
+      session.archivedAt ||
+      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian"))
+    )
+      return [];
+    const agent = deps.agentLoader.find(session.agentName ?? "main");
+    if (!declaresComputerUse(agent?.definition.actions ?? [])) return [];
+    if (
+      (await deps.placeAudience({
+        channel: "webchat",
+        threadId: sessionId,
+        romeSessionId: sessionId,
+        channelUserId: actor.userId,
+        threadType: "private",
+      })) !== "private"
+    )
+      return [];
+    const targets: Array<{
+      deviceId: string;
+      name: string;
+      scope: ComputerUseApprovalScope;
+    }> = [
+      ...(deps.computerUseLocal ? [{ ...deps.computerUseLocal, scope: "local" as const }] : []),
+    ];
+    const seen = new Set<string>(targets.map(({ deviceId }) => deviceId));
+    const listed = await deps.nodeDevices.listDevices();
+    for (const device of listed?.devices ?? []) {
+      if ((device.platform === "macos" || device.platform === "darwin") && !seen.has(device.id)) {
+        seen.add(device.id);
+        targets.push({ deviceId: device.id, name: device.name, scope: "mac" });
+      }
+    }
+    if (targets.length === 0) return [];
+    return targets.map(({ scope, ...target }) => ({
+      ...target,
+      approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
+    }));
+  };
+
+  app.get("/chat/sessions/:id/computer-use", async (c) => {
+    const targets = await computerUseTargets(c);
+    if (targets.length === 0) return c.json({ error: "Computer use is unavailable" }, 404);
+    const advertised = await Promise.all(
+      targets.map(async ({ approvalKey, ...target }) => ({
+        ...target,
+        ...((await readComputerUseApproval(deps.settingsRepo, approvalKey))
+          ? { authorized: true as const }
+          : {}),
+      })),
+    );
+    const primary = advertised[0];
+    return c.json({
+      ...primary,
+      persistentAccess: true,
+      ...(advertised.length > 1 ? { targets: advertised } : {}),
+    });
+  });
+
+  app.on(["PUT", "DELETE"], "/chat/sessions/:id/computer-use/:deviceId", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw))
+      return c.json({ error: "Computer-use approval requires the same origin." }, 403);
+    const target = (await computerUseTargets(c)).find(
+      ({ deviceId }) => deviceId === c.req.param("deviceId"),
+    );
+    if (!target) return c.json({ error: "Computer use is unavailable" }, 404);
+    if (c.req.method === "PUT")
+      await grantComputerUseApproval(deps.settingsRepo, target.approvalKey);
+    else await deps.settingsRepo.delete(target.approvalKey);
+    return c.body(null, 204);
+  });
+
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
+    let computerUseGrant: ComputerUseGrant | undefined;
+    if (
+      body.computerUsePreemption !== undefined &&
+      (body.computerUseDeviceId === undefined || body.computerUsePreemption !== true)
+    ) {
+      return c.json(
+        {
+          error: "Preemption requires an explicit choice for an approved device",
+          code: "computer_use_denied",
+        },
+        403,
+      );
+    }
+    if (body.computerUseDeviceId !== undefined) {
+      const target = (await computerUseTargets(c)).find(
+        ({ deviceId }) => deviceId === body.computerUseDeviceId,
+      );
+      if (
+        !target ||
+        !isSameOriginMutationRequest(c.req.raw) ||
+        body.automatedSource !== undefined ||
+        body.automatedActorKind !== undefined ||
+        body.parts !== undefined ||
+        typeof body.text !== "string" ||
+        !body.text.trim()
+      ) {
+        return c.json(
+          { error: "This message cannot authorize computer use", code: "computer_use_denied" },
+          403,
+        );
+      }
+      const { approvalKey } = target;
+      const approval = await readComputerUseApproval(deps.settingsRepo, approvalKey);
+      if (!approval) {
+        return c.json(
+          { error: "Authorize this device before using it.", code: "computer_use_denied" },
+          403,
+        );
+      }
+      computerUseGrant = {
+        deviceId: target.deviceId,
+        expiresAt: Date.now() + 5 * 60_000,
+        isCurrent: async () =>
+          (await readComputerUseApproval(deps.settingsRepo, approvalKey)) === approval,
+        ...(body.computerUsePreemption === true ? { allowPreemption: true } : {}),
+      };
+    }
     const sent = await handleChatSend(c.req.param("id"), body, {
       fromWidgetEvent: cameThroughWidgetEvent(c.env),
       askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),
+      computerUseGrant,
     });
     return c.json(sent.body, sent.status);
   });
