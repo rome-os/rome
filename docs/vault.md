@@ -81,5 +81,5 @@ The dashboard routes under `/api/vault`:
 | `PUT /api/vault/:name` | Save a value | Yes, browser session only |
 | `DELETE /api/vault/:name` | Remove a secret | No |
 | `POST /api/vault/pin` | Set the first PIN | Browser session only |
-| `POST /api/vault/reset` | Delete every secret and set a new PIN | Browser session only |
+| `POST /api/vault/reset` | Delete every secret and set a new PIN | No, the guardian's browser session only |
 | `POST /api/vault/grants` | Grant a secret and approve its `vault_apply` request | Yes, browser session only |

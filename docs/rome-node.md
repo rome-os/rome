@@ -377,8 +377,8 @@ filter, search, and the detail of the selected command. The dashboard opens
 `/ws/node`, and Rome Core forwards the observation methods to the daemon
 unchanged through `openConsoleBridge` from `@rome-os/node-core/client`. A browser cannot send the daemon's Authorization
 header, so it never connects to the daemon directly. Other methods, such as
-`devices.run` and `daemon.stop`, do not pass. The socket admits only the
-guardian, as [access control](architecture/access-control.md) describes.
+`devices.run` and `daemon.stop`, do not pass. The socket admits the
+[team](concepts/people.md#team), as [access control](architecture/access-control.md) describes.
 
 The device pages live in `@rome-os/node-ui` (`packages/rome-node-ui`), separate
 from the dashboard. A host mounts `<NodeDevices />` for the overview and
