@@ -2,6 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { approvalOf, callTool, whoMayAskSuite } from "./agent-tool-contract.js";
 import { agentToolsOf, card, toolError } from "./agent-tool.js";
+import { decidesApprovalPerCall } from "./types.js";
 
 interface Deps {
   names: Map<string, string>;
@@ -60,6 +61,10 @@ describe("an agent tool's action", () => {
 
   it("asks for no approval when the tool declares none", () => {
     expect(showThing.action(deps(), async () => null).config.requiresApproval).toBeUndefined();
+  });
+
+  it("has the engine decide each call from its approval", () => {
+    expect(decidesApprovalPerCall(renameThing.action(deps(), async () => null))).toBe(true);
   });
 
   it("returns what run returns as the agent's data", async () => {
