@@ -247,5 +247,6 @@ describe("the prompts and device connections", () => {
     expect(prompt).toContain(
       "`rome-node` runs programs and reads files on the guardian's computers",
     );
+    expect(prompt).toContain("A paired Mac may also advertise window actions");
   });
 });
