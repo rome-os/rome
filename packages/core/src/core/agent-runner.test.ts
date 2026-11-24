@@ -2013,6 +2013,41 @@ describe("AgentRunner", () => {
       expect(onDashboard).not.toContain("You answer on a bot.");
     });
 
+    it("serves an agent that holds nothing no tool at all: no built-in, skill, question or session tool", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "{}", structuredOutput: { decision: "x" } } as never],
+        [{ type: "result", content: "{}", structuredOutput: { decision: "x" } } as never],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        sessionTools: async () => [
+          {
+            name: "session_tool",
+            description: "A session tool.",
+            inputSchema: { type: "object" },
+            handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+          },
+        ],
+      });
+      for (const agentName of ["test-toolless", "test-structured"]) {
+        await collectMessages(
+          runner.run({
+            agentName,
+            prompt: "Decide",
+            channelThreadKey: `webchat:${agentName}`,
+            threadContext: { channel: "webchat", threadId: agentName },
+          }),
+        );
+      }
+      const [toolless, structured] = provider.sessions;
+      expect(toolless?.config.builtinTools ?? []).toEqual([]);
+      for (const group of ROME_TOOL_GROUPS) expect(toolless?.tools.listTools(group)).toEqual([]);
+      // An agent that declares a tool still gets the shared ones.
+      expect(structured?.tools.listTools("skills").length).toBeGreaterThan(0);
+      expect(structured?.tools.listTools("ask_user").map((tool) => tool.name)).toContain(
+        "ask_question",
+      );
+    });
+
     it("lets the session's tools read its place while the session first opens", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const places: Array<string | undefined> = [];

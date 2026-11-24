@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { readAnswerShape } from "../../agent/index.js";
+import { type AgentDefinition, holdsNoTools, readAnswerShape } from "../../agent/index.js";
 import { readPatrolAgentFile } from "./agent-file.js";
 import type { Observation } from "../../db/repositories/concierge-observations.js";
 import {
@@ -89,6 +89,8 @@ describe("the patrol agent", () => {
     expect(agent.subagents).toBeUndefined();
     expect(agent.mcpServers).toBeUndefined();
     expect(agent.policy.loadMemory).toBe(false);
+    // So its sessions are served no Rome tool either: no skills, no ask_question.
+    expect(holdsNoTools(agent as unknown as AgentDefinition)).toBe(true);
   });
 
   it("declares an answer shape Rome accepts, which a silent answer fits", () => {

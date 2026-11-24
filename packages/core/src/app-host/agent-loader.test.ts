@@ -72,7 +72,7 @@ describe("AgentLoader", () => {
       await loader.loadAll(FIXTURES_DIR);
       const agents = byId(loader);
 
-      expect(agents.size).toBe(8);
+      expect(agents.size).toBe(9);
       expect(agents.has("core:test-all-actions")).toBe(true);
       expect(agents.has("core:test-main")).toBe(true);
       expect(agents.has("core:test-sentinel")).toBe(true);
@@ -80,6 +80,7 @@ describe("AgentLoader", () => {
       expect(agents.has("core:test-structured")).toBe(true);
       expect(agents.has("core:test-code-backed")).toBe(true);
       expect(agents.has("core:test-pinned")).toBe(true);
+      expect(agents.has("core:test-toolless")).toBe(true);
     });
 
     it("parses outputSchema when declared", async () => {
@@ -350,7 +351,7 @@ describe("AgentLoader", () => {
     it("returns a copy of all loaded agents", async () => {
       await loader.loadAll(FIXTURES_DIR);
       const all = loader.list();
-      expect(all).toHaveLength(8);
+      expect(all).toHaveLength(9);
       expect(all).not.toBe(loader.list());
     });
   });

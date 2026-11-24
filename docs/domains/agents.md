@@ -37,6 +37,7 @@ The tools Rome serves the model during a turn, in four groups: actions, subagent
 
 - How an agent finds actions and skills, what a call on an action hands back, and what `ask_question` and `defer` accept are rules in [`packages/core/src/agent/domain/`](../../packages/core/src/agent/domain/).
 - In code, the three sources are the ports `AgentActions`, `DeferTool` and `SessionTools`, each taking the turn's `TurnFacts`. Rome's adapters for them are in [`packages/core/src/core/rome-tool-ports.ts`](../../packages/core/src/core/rome-tool-ports.ts).
+- An agent that holds nothing it could call, with no built-in tool, an empty action list, no subagent, no server and an answer shape, is served no Rome tool at all: no skills, no `ask_question` and no session tools. The Concierge's triage and patrol are such agents. In code the rule is `holdsNoTools` in [`agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts).
 
 ## Session tools
 

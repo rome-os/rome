@@ -111,6 +111,7 @@ export {
   type TransientDeltaType,
 } from "./domain/turn-events.js";
 export {
+  holdsNoTools,
   requireAgent,
   resolveSubagents,
   type Agent,

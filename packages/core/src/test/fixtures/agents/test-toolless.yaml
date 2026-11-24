@@ -1,0 +1,16 @@
+name: test-toolless
+description: Test agent that holds nothing it could call and answers in a shape, as the Concierge's triage and patrol do.
+model: haiku
+permissionMode: bypassPermissions
+tools: []
+actions: []
+systemPromptPrefix: |
+  You are a test agent. Read the input and return the structured result.
+outputSchema:
+  type: object
+  required:
+    - decision
+  additionalProperties: false
+  properties:
+    decision:
+      type: string
