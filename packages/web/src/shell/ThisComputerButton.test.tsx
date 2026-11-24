@@ -55,6 +55,22 @@ function installBridge(initial: DesktopDeviceStatus, { auditLog = true } = {}) {
 const dot = () => document.querySelector('[data-slot="computer-dot"]');
 
 describe("ThisComputerButton", () => {
+  it("opens screen permissions only after an explicit click", async () => {
+    const { bridge } = installBridge(status("connected"));
+    const openPermissions = rs.fn(async () => undefined);
+    Object.assign(bridge, { openComputerUsePermissions: openPermissions });
+    render(<ThisComputerButton />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rome can use this computer" }),
+    );
+    expect(openPermissions).not.toHaveBeenCalled();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Screen control permissions" }),
+    );
+    expect(openPermissions).toHaveBeenCalledTimes(1);
+    expect(bridge.setEnabled).not.toHaveBeenCalled();
+  });
+
   it("renders nothing in a browser", () => {
     const { container } = render(<ThisComputerButton />);
     expect(container.innerHTML).toBe("");

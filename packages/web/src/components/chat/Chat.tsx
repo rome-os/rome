@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
 import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
 import {
@@ -125,6 +125,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
   LiveMessageStatusesProvider,
@@ -197,6 +198,7 @@ import {
   ChatApiError,
   createSession,
   deleteSession,
+  getChatComputerUseTarget,
   interruptTurn,
   isUnreachableStatus,
   listChatAgents,
@@ -207,6 +209,7 @@ import {
   plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
+  type ChatComputerUseTarget,
   type PostTurnResult,
   pinSession,
   renameSession,
@@ -229,6 +232,10 @@ const TIMELINE_JUMP_OFFSET_PX = 24;
 const MAX_JUMP_PAGES = 20;
 /** How many older pages a click on a quote loads before it gives up. */
 const QUOTE_JUMP_PAGES = 10;
+
+function rememberedWindows(targets: ChatComputerUseTarget[]) {
+  return targets.filter((target) => target.authorized);
+}
 
 // Chat Component
 
@@ -690,6 +697,49 @@ export function Chat({
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
+  const computerUseSession = isArchived || shareMode ? null : mainSessionId;
+  const computerUseEligibility = useQuery({
+    queryKey: ["chat-computer-use", computerUseSession],
+    queryFn: ({ signal }) =>
+      computerUseSession ? getChatComputerUseTarget(computerUseSession, signal) : null,
+    enabled: computerUseSession !== null,
+    staleTime: 0,
+    retry: false,
+  });
+  const computerUseTarget =
+    computerUseSession &&
+    computerUseEligibility.isSuccess &&
+    computerUseEligibility.isFetchedAfterMount
+      ? computerUseEligibility.data
+      : null;
+  const computerUseTargets =
+    computerUseTarget?.targets ?? (computerUseTarget ? [computerUseTarget] : []);
+  const rememberedTargets = rememberedWindows(computerUseTargets);
+  const [preferredComputer, setPreferredComputer] = useState<{
+    sessionId: string;
+    deviceId: string;
+  } | null>(null);
+  const selectedWindow =
+    preferredComputer?.sessionId === computerUseSession
+      ? rememberedTargets.find(({ deviceId }) => deviceId === preferredComputer.deviceId)
+      : undefined;
+  const computerUseDeviceIds = computerUseTargets
+    .map(({ deviceId, authorized }) => `${deviceId}:${authorized ?? ""}`)
+    .join(" ");
+  const [computerUseChoice, setComputerUseChoice] = useState<{
+    sessionId: string;
+    deviceId: string;
+    allowPreemption: true;
+  } | null>(null);
+  const computerUsePending = useRef(new WeakSet<NonNullable<typeof computerUseChoice>>());
+  const selectedComputerUse =
+    computerUseChoice?.sessionId === computerUseSession &&
+    computerUseChoice.deviceId === selectedWindow?.deviceId
+      ? computerUseChoice
+      : null;
+  useEffect(() => {
+    setComputerUseChoice(null);
+  }, [computerUseSession, computerUseDeviceIds]);
   const setArchived = useArchiveSession();
   // The override is only a momentary optimistic flip for the navbar handlers.
   // Once the session read reflects the server's archived state (including an
@@ -2035,7 +2085,7 @@ export function Chat({
               : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
-          ...(result.code ? { code: result.code } : {}),
+          ...(result.code && result.code !== "computer_use_denied" ? { code: result.code } : {}),
           ...(result.provider ? { provider: result.provider } : {}),
           ...(result.reason ? { reason: result.reason } : {}),
         });
@@ -2173,6 +2223,25 @@ export function Chat({
         onSessionCreated?.(sendingSessionId);
         notifySessionsChanged();
       }
+      const authorizedSend =
+        controls.userSubmitted && selectedComputerUse?.sessionId === sendingSessionId
+          ? selectedComputerUse
+          : null;
+      const computerUseDeviceId =
+        authorizedSend?.deviceId ??
+        (controls.userSubmitted && computerUseSession === sendingSessionId && snapshot.text.trim()
+          ? selectedWindow?.deviceId
+          : undefined);
+      if (
+        authorizedSend &&
+        (!snapshot.text.trim() || computerUsePending.current.has(authorizedSend))
+      ) {
+        const message = t(
+          snapshot.text.trim() ? "composer.computerUseSending" : "composer.computerUseNeedsText",
+        );
+        setStreamError(message);
+        throw new Error(message);
+      }
       const baseOptimisticText = buildOptimisticUserText(snapshot.text, snapshot.uploads);
       // Mirror the server's persisted form for a structured skill turn
       // (`/<name> task`) so the optimistic row matches what the reload shows.
@@ -2198,11 +2267,14 @@ export function Chat({
           : []),
         { type: "text", content: optimisticText },
       ]);
+      if (authorizedSend) computerUsePending.current.add(authorizedSend);
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
           const formData = new FormData();
           formData.set("text", snapshot.text);
+          if (computerUseDeviceId) formData.set("computerUseDeviceId", computerUseDeviceId);
+          if (authorizedSend?.allowPreemption) formData.set("computerUsePreemption", "true");
           if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
           if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
@@ -2229,13 +2301,32 @@ export function Chat({
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
+          if (accepted.ok && authorizedSend) {
+            setComputerUseChoice((current) => (current === authorizedSend ? null : current));
+          } else if (
+            !accepted.ok &&
+            computerUseDeviceId &&
+            accepted.code === "computer_use_denied"
+          ) {
+            setPreferredComputer((current) =>
+              current?.sessionId === sendingSessionId && current.deviceId === computerUseDeviceId
+                ? null
+                : current,
+            );
+            setComputerUseChoice((current) =>
+              current?.sessionId === sendingSessionId ? null : current,
+            );
+            void queryClient.invalidateQueries({ queryKey: ["chat-computer-use"] });
+          }
           return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
         // in the composer until the server accepts it, so its bubble waits too.
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
-      );
+      ).finally(() => {
+        if (authorizedSend) computerUsePending.current.delete(authorizedSend);
+      });
     },
     [
       runTurnLifecycle,
@@ -2246,6 +2337,10 @@ export function Chat({
       notifySessionsChanged,
       concierge,
       chain.focus,
+      queryClient,
+      computerUseSession,
+      selectedComputerUse,
+      selectedWindow?.deviceId,
     ],
   );
 
@@ -3159,6 +3254,40 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                    {computerUseTargets.length > 0 && computerUseSession ? (
+                      <div className="mb-2 flex min-w-0 flex-wrap gap-2">
+                        <ComputerUseAccess
+                          key={computerUseSession}
+                          sessionId={computerUseSession}
+                          targets={computerUseTargets}
+                          selected={selectedWindow}
+                          allowPreemption={selectedComputerUse?.allowPreemption === true}
+                          onSelect={(deviceId) => {
+                            setPreferredComputer((current) =>
+                              current?.sessionId === computerUseSession &&
+                              current.deviceId === deviceId
+                                ? null
+                                : { sessionId: computerUseSession, deviceId },
+                            );
+                            setComputerUseChoice(null);
+                          }}
+                          onTogglePreemption={() => {
+                            if (!selectedWindow) return;
+                            setComputerUseChoice((current) => {
+                              if (current && computerUsePending.current.has(current))
+                                return current;
+                              return current?.allowPreemption
+                                ? null
+                                : {
+                                    sessionId: computerUseSession,
+                                    deviceId: selectedWindow.deviceId,
+                                    allowPreemption: true,
+                                  };
+                            });
+                          }}
+                        />
+                      </div>
+                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
