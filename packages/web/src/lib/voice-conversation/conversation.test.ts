@@ -146,7 +146,7 @@ describe("a voice conversation in the browser", () => {
     expect(c.closedPlayer()).toBe(true);
   });
 
-  it("hands back the words Rome heard and never sent, but not while Rome speaks", async () => {
+  it("hands back the words Rome heard and never sent, but not what may be Rome's own voice", async () => {
     const c = setup();
     await settle();
     c.socket.open();
@@ -155,6 +155,27 @@ describe("a voice conversation in the browser", () => {
     c.socket.say({ type: "heard", settled: "for four ", pending: "at seven" });
     c.conversation.end();
     expect(c.unsent).toEqual(["for four at seven"]);
+
+    // Heard just after Rome spoke, it may still be its own voice.
+    const after = setup();
+    await settle();
+    after.socket.open();
+    after.socket.say({ type: "state", state: "speaking" });
+    after.socket.say({ type: "state", state: "listening" });
+    after.socket.say({ type: "heard", settled: "the place you liked", pending: "" });
+    after.conversation.end();
+    expect(after.unsent).toEqual([""]);
+
+    // Spoken over, Rome stops: what it hears is the guardian's.
+    const over = setup();
+    await settle();
+    over.socket.open();
+    over.socket.say({ type: "state", state: "speaking" });
+    over.socket.say({ type: "heard", settled: "No wait, ", pending: "make it eight" });
+    over.socket.say({ type: "clear" });
+    over.socket.say({ type: "state", state: "listening" });
+    over.conversation.end();
+    expect(over.unsent).toEqual(["No wait, make it eight"]);
 
     // While Rome speaks, what is heard may be its own voice.
     const speaking = setup();

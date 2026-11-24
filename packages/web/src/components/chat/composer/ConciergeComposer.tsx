@@ -196,8 +196,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     // above the box, and its mute and end take the place of send.
     const conversation = useVoiceConversation({
       chatId,
-      // Words the conversation ended before sending wait in the field, for the guardian to send or not.
-      onUnsent: (text) => setInputText((current) => current + spokenInsertion(current, text)),
+      // Words the conversation ended before sending wait in the field, for the
+      // guardian to send or not. They are saved as the draft at once, as the
+      // field may be going away with the chat.
+      onUnsent: (text) => {
+        const next = inputText + spokenInsertion(inputText, text);
+        draft.keep(next);
+        setInputText(next);
+      },
     });
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;

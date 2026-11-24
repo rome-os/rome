@@ -32,7 +32,8 @@ export interface ConversationHandlers {
   /**
    * Called once, last. `reason` is null when the guardian ended it. `unsent`
    * is what Rome heard of the guardian's turn and never sent, as the turn had
-   * not ended; empty while Rome was speaking, when it may be Rome's own voice.
+   * not ended. It is empty when the turn began while Rome spoke or just after,
+   * when it may be Rome's own voice, unless Rome stopped speaking for it.
    */
   onEnded(reason: ConversationStopReason | null, unsent: string): void;
   /** True while the browser asks the guardian for the microphone, false once answered. */
@@ -69,6 +70,9 @@ const QUIET_LIMIT_MS = VOICE_CONVERSATION_ALIVE_INTERVAL_MS * 3;
 // this long before the quiet limit applies.
 const OPEN_LIMIT_MS = 10_000;
 
+// Rome's own voice can still be heard this long after its audio, as Rome allows on its side.
+const ECHO_TAIL_MS = 2_000;
+
 // The socket states `WebSocket.CONNECTING` and `WebSocket.OPEN`, without needing the global.
 const CONNECTING = 0;
 const OPEN = 1;
@@ -103,12 +107,25 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
-  // What Rome heard of the guardian's turn so far, and whether Rome is speaking.
+  // What Rome heard of the guardian's turn so far, and whether it may be Rome's own voice.
   let unsent = "";
+  let mayBeEcho = false;
   let speaking = false;
+  // Until when what is heard may be Rome's own voice, once it stops speaking.
+  let echoUntil = 0;
   const stateChanged = (state: VoiceConversationState) => {
+    if (speaking && state !== "speaking") echoUntil = Date.now() + ECHO_TAIL_MS;
     speaking = state === "speaking";
     handlers.onState(state);
+  };
+  const heardSoFar = (text: string) => {
+    if (!unsent.trim()) mayBeEcho = speaking || Date.now() < echoUntil;
+    unsent = text;
+  };
+  // Rome stopped speaking because the guardian spoke over it: what it hears is theirs.
+  const spokenOver = () => {
+    player.clear();
+    mayBeEcho = false;
   };
 
   const teardown = () => {
@@ -127,7 +144,7 @@ export function startVoiceConversation(
   const finish = (reason: ConversationStopReason | null) => {
     if (done) return;
     teardown();
-    handlers.onEnded(reason, speaking ? "" : unsent.trim());
+    handlers.onEnded(reason, speaking || mayBeEcho ? "" : unsent.trim());
   };
   function lost() {
     finish("connection-lost");
@@ -182,9 +199,9 @@ export function startVoiceConversation(
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
         else if (data.type === "state") stateChanged(data.state);
-        else if (data.type === "heard") unsent = `${data.settled}${data.pending}`;
+        else if (data.type === "heard") heardSoFar(`${data.settled}${data.pending}`);
         else if (data.type === "turn") unsent = "";
-        else if (data.type === "clear") player.clear();
+        else if (data.type === "clear") spokenOver();
         else if (data.type === "ended") finish(null);
         else if (data.type === "error") finish(data.reason);
       };

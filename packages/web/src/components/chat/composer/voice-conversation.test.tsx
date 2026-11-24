@@ -47,6 +47,8 @@ afterEach(() => {
   conversation.muted = [];
   conversation.ended = 0;
   conversation.unsent = "";
+  // Drafts are saved per chat, and every test talks in the same one.
+  localStorage.clear();
 });
 
 function renderComposer(available: boolean, ref = createRef<ChatComposerHandle>()) {
@@ -58,7 +60,7 @@ function renderComposer(available: boolean, ref = createRef<ChatComposerHandle>(
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return render(
     <MemoryRouter>
       <QueryClientProvider client={client}>
         <ReplyDraftHarness>
@@ -123,6 +125,21 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(field.value).toBe("Also remind me at seven");
     // Nothing is sent: the guardian decides.
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+  });
+
+  it("saves the words as the chat's draft when leaving the chat ends the conversation", async () => {
+    const { unmount } = renderComposer(true);
+    const field = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Also" } });
+    fireEvent.click(screen.getByRole("button", { name: "Voice conversation" }));
+
+    conversation.unsent = "remind me at seven";
+    unmount();
+    expect(conversation.ended).toBe(1);
+
+    renderComposer(true);
+    const reopened = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    expect(reopened.value).toBe("Also remind me at seven");
   });
 
   it("ends the conversation when the host hides the composer without unmounting it", async () => {
