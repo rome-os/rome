@@ -247,6 +247,20 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_THIRD/U_GUARDIAN"]);
   });
 
+  it("names an author Slack places only in an Enterprise Grid org under their own workspace", async () => {
+    const mailbox = fakeMailbox();
+    const api = fakeApi({
+      userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" })),
+    });
+    const { adapter: a, delivered } = adapter(mailbox, api);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
+  });
+
   it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, faults } = adapter(mailbox, fakeApi(), { bound: async () => false });
