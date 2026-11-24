@@ -149,6 +149,19 @@ import Testing
         #expect(audio.closed)
     }
 
+    @Test func openingAThreadOrAReplyEndsTheConversationWithNoLine() async {
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        controller.fieldMoved(here: true)
+        #expect(controller.active)
+        // Its turns would go to the chat itself, where the thread hides them.
+        controller.fieldMoved(here: false)
+        #expect(!controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.closed)
+    }
+
     @Test func theBarsFollowWhoeverIsTalking() {
         let audio = FakeAudio(allowed: true)
         audio.microphoneLevel = 0.4

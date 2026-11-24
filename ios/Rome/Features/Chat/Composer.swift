@@ -218,6 +218,7 @@ struct Composer: View {
             conversation.leave()
         }
         .onChange(of: voice.state) { voice.stateShown() }
+        .onChange(of: conversationHere) { _, here in conversation.fieldMoved(here: here) }
         .onChange(of: onScreen) { _, now in
             if now {
                 voice.arrive(service: voiceInput, chat: voiceKey)

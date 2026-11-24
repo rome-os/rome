@@ -66,6 +66,14 @@ final class VoiceConversationController {
     /// The guardian's End.
     func end() { conversation?.end() }
 
+    /// The field now writes in the chat itself, or, `here` false, in a thread
+    /// or a reply to one message. A conversation's turns go to the chat itself,
+    /// where the thread would not show them, so it ends, as the guardian's End
+    /// does, with no line.
+    func fieldMoved(here: Bool) {
+        if !here { end() }
+    }
+
     func toggleMute() {
         guard let conversation else { return }
         muted.toggle()
