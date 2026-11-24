@@ -53,6 +53,16 @@ enum VoiceInputStopReason: String, Sendable, Equatable {
     /// The app closed while listening; told on the next launch.
     case appClosed = "app-closed"
 
+    /// Listening ended because Rome or the guardian moved on, not after a
+    /// fault: the words heard are in the draft, and the notice only says why
+    /// listening is off, so it goes by itself.
+    var endsWithoutFault: Bool {
+        switch self {
+        case .backgrounded, .interrupted, .leftChat, .appClosed: true
+        default: false
+        }
+    }
+
     /// The notice the field shows, in the dashboard's words.
     var notice: String {
         switch self {
@@ -90,6 +100,14 @@ struct VoiceInputStop: Sendable, Equatable {
         case "insufficient_credits": return String(localized: "Not enough Rome credits for voice input. Listening stopped")
         default: return reason.notice
         }
+    }
+
+    /// The notice to show after listening heard `heard`, or nil for none.
+    /// A stop without a fault with no words heard lost nothing, so there is
+    /// nothing to say.
+    func notice(afterHearing heard: String) -> VoiceInputStop? {
+        let nothingHeard = heard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return reason.endsWithoutFault && nothingHeard ? nil : self
     }
 }
 

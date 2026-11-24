@@ -278,7 +278,7 @@ export interface ApiDeps {
   phoneWatching?: PhoneWatching;
   /** Where each listening session's speech becomes text, as Rome Cloud grants it. */
   voiceInput?: VoiceInputSource;
-  /** Where voice conversation mode's speaking sessions come from. Opens none while `voice_mode` is off. */
+  /** Where voice conversation mode's speaking sessions come from. Only a conversation opens one. */
   speaker?: SpeakerSource;
   /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
   dashboardActivity?: DashboardActivity;
