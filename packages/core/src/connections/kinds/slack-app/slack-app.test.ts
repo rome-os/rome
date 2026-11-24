@@ -821,6 +821,28 @@ function historyAdapter(
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
+  it("reads a Grid member under the workspace they were heard under", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const userName = rs.fn(async () => ({
+      displayName: "Ouou",
+      username: "ouou",
+      teamId: "T_HOME",
+      teams: ["T_HOME", TEAM],
+    }));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(frame({ ...base, event: { ...base.event, user_team: "T_HOME" } }));
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_HOME/U_GUARDIAN",
+      "T_HOME/U_GUARDIAN",
+    ]);
+  });
+
   it("names an author from another workspace the same when read as when heard, while the directory fails", async () => {
     const slack = fakeSlackHistory();
     Object.assign(slack.say(1), { user: "U_EXTERNAL" });
