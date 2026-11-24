@@ -5,7 +5,7 @@ description: Install, reinstall, uninstall, enable, or disable Rome apps, share 
 
 # App lifecycle
 
-To see the installed apps and how each stands, call `system:read_apps`. To install an App Store app, update an app, turn one on or off, or remove one, call `system:manage_app`. To install or reinstall an app from its source workspace, or to scaffold one, read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
+To see the installed apps and how each stands, call `system:read_apps`. To install an App Store app, update an app, turn one on or off, or remove one, call `system:manage_app`. To install or reinstall an app from its source workspace, or to scaffold one, call `system:app_management` through `execute_action`, reading it with `read_action` when its signature does not say enough about an argument. For new app scaffolding, also read `coding:app_creation`.
 
 ## Three different endpoints
 
