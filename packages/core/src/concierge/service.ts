@@ -1467,6 +1467,7 @@ export class ConciergeService {
    */
   saidOutsideLedger(readAt: number): number {
     return this.saidCounts
+      .filter((count) => (count.firstAt ?? 0) > readAt - DAY_MS)
       .filter((count) => count.ledgeredAt === undefined || count.ledgeredAt >= readAt)
       .reduce((sum, count) => sum + count.said, 0);
   }

@@ -5,7 +5,9 @@ import type { AgentRunnerInterface, RunParams } from "../../core/types.js";
 import { ConciergeObservationsRepository } from "../../db/repositories/concierge-observations.js";
 import { ConciergeToldRepository } from "../../db/repositories/concierge-told.js";
 import type { Routine } from "../../routines/types.js";
-import { createTestDb } from "../../test/db.js";
+import { ActionEngine } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { createActionEngineRepos, createTestDb } from "../../test/db.js";
 import type { ConciergeService } from "../service.js";
 import {
   CONCIERGE_PATROL_ACTION,
@@ -632,5 +634,26 @@ describe("what Dream may keep in memory", () => {
       data: { observations: { topic: string }[] };
     };
     expect(result.data.observations.map((o) => o.topic)).toEqual(["pattern:weekly-report"]);
+  });
+});
+
+describe("the patrol's actions", () => {
+  it("run in main when the routine engine dispatches them, with no worker", async () => {
+    const s = setup({ tasks: [waitingTask], answer: () => speakAbout("task:task-1:waiting") });
+    const registry = new ActionRegistryImpl();
+    for (const action of s.actions) registry.register(action);
+    // No worker to fork: a root that left main would not find the action.
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      isFirstPartyAction: () => true,
+    });
+    await expect(engine.run(CONCIERGE_PATROL_ACTION, {})).resolves.toMatchObject({
+      status: "ok",
+      data: { status: "spoke", topicKey: "task:task-1:waiting" },
+    });
+    await expect(engine.run(CONCIERGE_PATROL_OBSERVATIONS_ACTION, {})).resolves.toMatchObject({
+      status: "ok",
+    });
   });
 });
