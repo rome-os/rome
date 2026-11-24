@@ -405,8 +405,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               muted={conversation.muted}
               level={conversation.level}
             />
-            {/* Speaking, Rome's sentence; otherwise the guardian's words not sent yet. */}
-            {conversation.state === "speaking" ? (
+            {/* Rome's sentence while its audio plays here; otherwise the guardian's words not sent yet. */}
+            {conversation.caption ? (
               <VoiceConversationText text={conversation.caption} />
             ) : (
               <VoiceConversationText text={conversation.heard} unsent />

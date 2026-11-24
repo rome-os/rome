@@ -112,7 +112,7 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(screen.getByRole("button", { name: "Voice conversation" })).toBeTruthy();
   });
 
-  it("shows the words not sent yet while listening, and Rome's sentence while it speaks", async () => {
+  it("shows the words not sent yet while listening, and Rome's sentence while its audio plays", async () => {
     renderComposer(true);
     fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
     const shown = () => document.querySelector("[data-voice-conversation-text]");
@@ -133,7 +133,10 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(shown()?.getAttribute("data-voice-conversation-text")).toBe("caption");
     expect(shown()?.textContent).toBe("For how many?");
 
+    // Rome says listening while its audio still plays here: the sentence stays until it ends.
     act(() => conversation.handlers?.onState("listening"));
+    expect(shown()?.textContent).toBe("For how many?");
+    act(() => conversation.handlers?.onCaption?.(""));
     expect(shown()).toBeNull();
   });
 

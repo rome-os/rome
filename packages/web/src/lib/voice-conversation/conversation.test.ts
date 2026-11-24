@@ -158,6 +158,42 @@ describe("a voice conversation in the browser", () => {
     }
   });
 
+  it("keeps the last caption until its audio has played here, though Rome already says listening", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.socket.say({ type: "caption", text: "Done." });
+      rs.advanceTimersByTime(0);
+      // Delivered late, all at once: the audio still has 2 s to play when Rome says listening.
+      c.setAhead(2);
+      c.socket.say({ type: "state", state: "listening" });
+      rs.advanceTimersByTime(1_900);
+      expect(c.captions).toEqual(["Done."]);
+      rs.advanceTimersByTime(100);
+      expect(c.captions).toEqual(["Done.", ""]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops a caption still waiting when the turn is sent", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.setAhead(0.5);
+      c.socket.say({ type: "caption", text: "Bye." });
+      c.socket.say({ type: "turn", text: "Wait" });
+      rs.advanceTimersByTime(1_000);
+      expect(c.captions).toEqual([""]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("sends no audio while muted", async () => {
     const c = setup();
     await settle();

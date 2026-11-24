@@ -35,7 +35,10 @@ export interface ConversationHandlers {
   onAsking?(asking: boolean): void;
   /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
   onHeard?(text: string): void;
-  /** The reply's sentence playing now, as its audio starts. Empty once the guardian speaks over it. */
+  /**
+   * The reply's sentence playing now, as its audio starts. Empty once the
+   * reply's audio has played here, or the guardian speaks over it.
+   */
   onCaption?(text: string): void;
 }
 
@@ -103,22 +106,41 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
-  // Each caption waits for the audio queued before its sentence.
+  // Each caption waits for the audio queued before its sentence. The last one
+  // stays until the audio queued here has played: Rome's state follows the
+  // audio it sent, which can be well ahead after a network stall.
   const captionTimers = new Set<ReturnType<typeof setTimeout>>();
+  let captionEnd: ReturnType<typeof setTimeout> | null = null;
+  const stopCaptionEnd = () => {
+    if (captionEnd) clearTimeout(captionEnd);
+    captionEnd = null;
+  };
   const clearCaptions = () => {
     for (const timer of captionTimers) clearTimeout(timer);
     captionTimers.clear();
+    stopCaptionEnd();
   };
   // A caption comes before its sentence's audio, which plays after the audio queued so far.
   const captionWhenPlayed = (text: string) => {
+    stopCaptionEnd();
     const timer = setTimeout(() => {
       captionTimers.delete(timer);
       handlers.onCaption?.(text);
     }, player.ahead() * 1000);
     captionTimers.add(timer);
   };
+  const stateChanged = (state: VoiceConversationState) => {
+    handlers.onState(state);
+    if (state === "speaking") return;
+    stopCaptionEnd();
+    captionEnd = setTimeout(() => {
+      captionEnd = null;
+      handlers.onCaption?.("");
+    }, player.ahead() * 1000);
+  };
   // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
   const turnSent = () => {
+    clearCaptions();
     handlers.onHeard?.("");
     handlers.onCaption?.("");
   };
@@ -200,7 +222,7 @@ export function startVoiceConversation(
         if (!message.success) return;
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
-        else if (data.type === "state") handlers.onState(data.state);
+        else if (data.type === "state") stateChanged(data.state);
         else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
         else if (data.type === "turn") turnSent();
         else if (data.type === "caption") captionWhenPlayed(data.text);
