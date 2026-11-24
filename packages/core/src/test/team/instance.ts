@@ -4,12 +4,15 @@
 // and a few seeded records whose ids fill route parameters.
 //
 // Every instance gets its own database, HOME and TMPDIR, so a call made on one
-// leaves the next instance in the same state as the first.
+// leaves the next instance in the same state as the first. A product module
+// that kept HOME when it loaded keeps the sandbox's (./sandbox.ts) instead.
 
+import { guardLaunches, SANDBOX } from "./sandbox.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Server as HttpServer, type Server } from "node:http";
+import { Server as HttpServer, type IncomingMessage, type Server } from "node:http";
+import type { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
 import type { Hono } from "hono";
 import { buildApp, startApi } from "../../api/index.js";
@@ -58,6 +61,14 @@ export interface InstanceOptions {
   guardianSeat?: boolean;
   /** Mounted after the daemon's features, for a stand-in product. */
   extraFeatures?: Feature[];
+  /** Upgrade handlers attached ahead of the product's, for a stand-in product.
+   *  Each answers only its own path. */
+  extraUpgrades?: ExtraUpgrade[];
+}
+
+export interface ExtraUpgrade {
+  path: string;
+  handle(req: IncomingMessage, socket: Duplex): void;
 }
 
 export interface SeededIds {
@@ -88,17 +99,6 @@ export interface Instance {
 }
 
 const SCOPED_ENV = ["HOME", "USERPROFILE", "TMPDIR", "ROME_PROFILE", "ROME_PROJECTS_ROOT", "PATH"];
-
-/** Stand-ins for the CLIs Rome may spawn (`claude`, `codex`): each exits 1, so no
- *  route reaches a real binary or the account it is signed in to. */
-function stubBin(root: string): string {
-  const bin = join(root, "bin");
-  mkdirSync(bin, { recursive: true });
-  for (const name of ["claude", "codex", "opencli"]) {
-    writeFileSync(join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-  }
-  return bin;
-}
 
 // Rome Cloud's voice side, as for an account allowed to use voice. The
 // verifier only opens the sockets, so no transcription or speech is reached.
@@ -144,10 +144,13 @@ function features(deps: ApiDeps): Feature[] {
   ];
 }
 
-const COMPUTER_USE_DEVICE = "verifier-mac";
+// A Mac's id as the node registry issues it. The computer-use routes refuse
+// any other shape before they reach the guard.
+const COMPUTER_USE_DEVICE = "7e57c0de-0000-4000-8000-00000000ac01";
 
 export async function createInstance(options: InstanceOptions): Promise<Instance> {
   const releaseNetwork = guardNetwork();
+  const releaseLaunches = guardLaunches();
   const root = mkdtempSync(join(tmpdir(), "rome-team-verifier-"));
   const saved = new Map(SCOPED_ENV.map((key) => [key, process.env[key]]));
   process.env.HOME = join(root, "home");
@@ -155,7 +158,9 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
   process.env.TMPDIR = join(root, "tmp");
   process.env.ROME_PROFILE = `team-verifier-${randomUUID()}`;
   process.env.ROME_PROJECTS_ROOT = join(root, "projects");
-  process.env.PATH = `${stubBin(root)}:${saved.get("PATH") ?? ""}`;
+  // Only the sandbox's stubs are on PATH, so a route that looks for a CLI
+  // finds the same programs on every host.
+  process.env.PATH = SANDBOX.bin;
   for (const dir of [process.env.HOME, process.env.TMPDIR, process.env.ROME_PROJECTS_ROOT]) {
     mkdirSync(dir, { recursive: true });
   }
@@ -304,6 +309,11 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       };
       servers.push({ ...handle, close });
       if (!server) throw new Error("startApi attached no upgrade handler");
+      for (const extra of options.extraUpgrades ?? []) {
+        server.prependListener("upgrade", (req: IncomingMessage, socket: Duplex) => {
+          if (req.url?.split("?")[0] === extra.path) extra.handle(req, socket);
+        });
+      }
       return { port: handle.port, server, close };
     },
     async restoreDashboardList() {
@@ -320,6 +330,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
         else process.env[key] = value;
       }
       rmSync(root, { recursive: true, force: true });
+      releaseLaunches();
       releaseNetwork();
     },
   };
