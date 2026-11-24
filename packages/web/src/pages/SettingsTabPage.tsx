@@ -1474,16 +1474,28 @@ function TeamSection() {
   const [draft, setDraft] = useState("");
   const [draftError, setDraftError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  // Every save sends the whole list, so nothing is added or removed until the
+  // saved list has loaded: a save over a list that failed to load would drop
+  // everyone on it.
+  const [load, setLoad] = useState<"loading" | "failed" | "loaded">("loading");
+
+  const loadEmails = useCallback(async () => {
+    setLoad("loading");
+    try {
+      const dashboardAccess = await fetchJson<DashboardAccessConfig>("/api/dashboard-access", {
+        fallback: "Failed to load dashboard access.",
+      });
+      setEmails(dashboardAccess.cloudEmailAccess);
+      setLoad("loaded");
+    } catch (error) {
+      console.error("Failed to load the team", error);
+      setLoad("failed");
+    }
+  }, []);
 
   useEffect(() => {
-    fetchJson<DashboardAccessConfig>("/api/dashboard-access", {
-      fallback: "Failed to load dashboard access.",
-    })
-      .catch((): DashboardAccessConfig => ({ cloudEmailAccess: [] }))
-      .then((dashboardAccess) => setEmails(dashboardAccess.cloudEmailAccess))
-      .finally(() => setLoaded(true));
-  }, []);
+    void loadEmails();
+  }, [loadEmails]);
 
   // A save past a limit names the limit. Anything else shows the server's message.
   async function saveErrorMessage(response: Response): Promise<string> {
@@ -1559,7 +1571,20 @@ function TeamSection() {
     void persistEmails(next, emails);
   }
 
-  if (!loaded) return null;
+  if (load === "loading") return null;
+  if (load === "failed") {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-start gap-3">
+          <p className="text-ui text-destructive">{t("team.members.loadFailed")}</p>
+          <Button type="button" size="sm" onClick={() => void loadEmails()}>
+            <RefreshCw data-icon="inline-start" />
+            {t("page.retry")}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <FormRows>

@@ -25,8 +25,11 @@ function mockSettingsBackend(options?: {
   cloudEmailAccess?: string[];
   failPut?: boolean;
   putError?: { error: string; limit: number };
+  /** How many loads of the list fail before one succeeds. */
+  failedLoads?: number;
 }) {
   const putBodies: unknown[] = [];
+  let failedLoads = options?.failedLoads ?? 0;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -47,6 +50,10 @@ function mockSettingsBackend(options?: {
           return { ok: false, status: 500, json: async () => ({ error: "boom" }) } as Response;
         }
         return ok({});
+      }
+      if (failedLoads > 0) {
+        failedLoads--;
+        return { ok: false, status: 502, json: async () => ({ error: "bad gateway" }) } as Response;
       }
       return ok({ cloudEmailAccess: options?.cloudEmailAccess ?? ["ada@example.com"] });
     }
@@ -191,6 +198,25 @@ describe("SettingsPage Team tab", () => {
     await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
     expect(screen.getByText("ada@example.com")).toBeTruthy();
     expect(screen.getByText("1 person")).toBeTruthy();
+  });
+
+  it("shows a failed load with a retry, and lets no one be added until the list loads", async () => {
+    const { putBodies } = mockSettingsBackend({ failedLoads: 1 });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Failed to load the team")).toBeTruthy();
+    expect(screen.queryByText("Only you can use this Rome until you add someone.")).toBeNull();
+    expect(screen.queryByLabelText("Email of their Rome account")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    const input = await screen.findByLabelText("Email of their Rome account");
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() =>
+      expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
+    );
   });
 
   it.each([

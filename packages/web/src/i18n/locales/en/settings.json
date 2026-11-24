@@ -640,6 +640,7 @@
       "invalidEmails": "Invalid email address: {{emails}}",
       "savedFlash": "Team saved",
       "saveFailedFallback": "Failed to save the team.",
+      "loadFailed": "Failed to load the team",
       "tooMany": "Up to {{limit}} emails allowed",
       "emailTooLong": "Email longer than {{limit}} characters"
     }
