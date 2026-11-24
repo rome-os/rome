@@ -70,6 +70,8 @@ export const readRoutines = agentTool({
         routines: listed.map(({ row, lastRun }) => {
           const routine = toRoutine(row);
           return {
+            routineId: routine.id,
+            // Apps that read routines through ctx.runAction may still read `id`.
             id: routine.id,
             name: routine.name,
             enabled: routine.enabled,
@@ -236,6 +238,7 @@ async function routineWithRuns(deps: RoutineToolDeps, id: string, limit: number 
   const runs = await listRoutineRuns(deps, id, { limit: limit ?? DEFAULT_RUNS });
   return {
     routine: {
+      routineId: routine.id,
       id: routine.id,
       name: routine.name,
       enabled: routine.enabled,

@@ -75,7 +75,7 @@ const list = read;
 const change = (args: Record<string, unknown>) => callTool(changeRoutineTool, deps, args);
 
 describe("listing the routines", () => {
-  it("lists every routine with what it runs, when, whether it is on, and its latest run", async () => {
+  it("lists every routine by the routineId the other routine tools take, with what it runs, when, whether it is on, and its latest run", async () => {
     const routineId = await createRoutine();
     const runId = await routineRuns.create({ routineId, executionId: "exec-1", status: "running" });
     await routineRuns.updateStatus(runId, { status: "error", error: "boom" });
@@ -87,6 +87,7 @@ describe("listing the routines", () => {
       data: {
         routines: [
           {
+            routineId,
             id: routineId,
             name: "Morning briefing",
             enabled: true,
@@ -136,7 +137,13 @@ describe("reading one routine and its runs", () => {
     expect(result).toMatchObject({
       status: "ok",
       data: {
-        routine: { id: routineId, name: "Morning briefing", enabled: true, nextRunAt: null },
+        routine: {
+          routineId,
+          id: routineId,
+          name: "Morning briefing",
+          enabled: true,
+          nextRunAt: null,
+        },
         runs: [
           { runId: second, status: "success", error: null },
           { runId: first, status: "error", durationMs: 40, error: "boom" },
