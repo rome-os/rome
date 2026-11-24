@@ -795,6 +795,16 @@ function historyAdapter(
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
+  it("reads Rome's own post in the app's workspace when Slack names only an org on it", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1, "bot"), { user_team: "E_ORG" });
+    const { adapter: a } = historyAdapter(fakeMailbox(), slack);
+    await a.start();
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect(read.map((m) => m.senderId)).toEqual(["T_A/U_BOT"]);
+  });
+
   it("reads from Slack on every read, since the connection keeps no copy of the chat", async () => {
     const slack = fakeSlackHistory();
     for (let i = 1; i <= 10; i++) slack.say(i, i % 2 === 0 ? "bot" : "member");

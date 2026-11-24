@@ -87,7 +87,7 @@ export function slackMessage(
     messageId: slackMessageId(wire.ts, wire.thread_ts),
     // Slack user ids are per workspace, so an author from another workspace
     // is named under their own.
-    senderId: slackSenderId(authorWorkspace(wire, name, context.teamId), author),
+    senderId: slackSenderId(authorWorkspace(wire, name, context), author),
     ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
     ...(name.username ? { senderUsername: name.username } : {}),
     text,
@@ -116,9 +116,16 @@ export class SlackWorkspaceUnknown extends Error {
  *  workspace but the app's own is from the app's workspace. Otherwise Slack's
  *  directory names the member's workspace, and until it does the workspace is
  *  not known. The message's own words come first, so an author keeps one id
- *  whether or not the directory answered. A bot, which the directory does
- *  not list, keeps what the message names. */
-function authorWorkspace(wire: SlackWireMessage, member: SlackMember, own: string): string {
+ *  whether or not the directory answered. The app's own posts are in its
+ *  workspace. A bot, which the directory does not list, keeps what the
+ *  message names. */
+function authorWorkspace(
+  wire: SlackWireMessage,
+  member: SlackMember,
+  app: { teamId: string; botUserId: string },
+): string {
+  const own = app.teamId;
+  if (wire.user === app.botUserId) return own;
   if (!wire.user) return wire.user_team ?? wire.team ?? own;
   if (wire.user_team?.startsWith("T")) return wire.user_team;
   const named = [wire.user_team, wire.team, wire.source_team].filter((team) => team !== undefined);
