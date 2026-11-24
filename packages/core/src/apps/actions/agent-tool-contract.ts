@@ -38,8 +38,8 @@ export function callTool<D>(
   return asTurn(turn, () => action.execute(input));
 }
 
-/** The approval card `tool` shows for `input`, or undefined for a tool the
- * guardian does not approve. */
+/** The approval card `tool` shows for `input`, or undefined for a call that
+ * runs without the guardian's approval. */
 export async function approvalOf<D>(
   tool: AgentTool<D>,
   deps: D,
