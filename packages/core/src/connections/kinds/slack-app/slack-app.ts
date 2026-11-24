@@ -33,6 +33,7 @@ import {
   inTimeline,
   isSaid,
   type SlackMember,
+  SlackWorkspaceUnknown,
   slackMessage,
   type SlackWireMessage,
 } from "./message.js";
@@ -285,7 +286,15 @@ export class SlackAppAdapter {
     const author = event.user ?? (mention ? authorOf(event) : undefined);
     if (!author || typeof event.text !== "string") return { status: 200 };
     const name = event.user ? await this.lookUpName(event.user) : {};
-    const said = slackMessage(this.context(event.channel), wire, name);
+    let said: ChannelMessage | null;
+    try {
+      said = slackMessage(this.context(event.channel), wire, name);
+    } catch (error) {
+      if (!(error instanceof SlackWorkspaceUnknown)) throw error;
+      // The mailbox delivers it again, and the directory is asked again.
+      log.info("slack app message held: author's workspace not known yet");
+      return { status: 500 };
+    }
     if (!said) return { status: 200 };
 
     const message: ChannelMessage = {

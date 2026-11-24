@@ -261,6 +261,23 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
   });
 
+  it("holds a message from an Enterprise Grid author until Slack's directory names their workspace", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockRejectedValueOnce(new Error("users.info timed out"))
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    const held = frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } });
+    await mailbox.deposit(held);
+    expect(delivered).toHaveLength(0);
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
+  });
+
   it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, faults } = adapter(mailbox, fakeApi(), { bound: async () => false });

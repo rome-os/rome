@@ -60,7 +60,9 @@ export function inTimeline(wire: SlackWireMessage): boolean {
 
 /**
  * `wire` as Rome reads it, or null when nobody said it (a join, an edit) or it
- * holds no text. A message the app's bot said reads as outbound.
+ * holds no text. A message the app's bot said reads as outbound. Throws
+ * {@link SlackWorkspaceUnknown} while its author's workspace is not known, so
+ * a history read fails and is read again rather than name the author wrongly.
  */
 export function slackMessage(
   context: { channel: string; teamId: string; botUserId: string; chatId: string },
@@ -96,10 +98,24 @@ export function slackMessage(
   };
 }
 
+/** A message whose author Slack placed only in an Enterprise Grid org, while
+ *  Slack's directory has not named their workspace. The author has no
+ *  account id yet, so the message is not handed over until it does. */
+export class SlackWorkspaceUnknown extends Error {
+  constructor(readonly author: string) {
+    super(
+      `Slack named only the org of author ${author}, and its directory has not named their workspace yet. Read again shortly.`,
+    );
+  }
+}
+
 /** The workspace `wire`'s author belongs to. Slack can name an Enterprise
  *  Grid org (`E…`) in `user_team` instead of a workspace (`T…`); the
- *  directory then names the author's workspace, where it was asked. */
+ *  directory then names the author's workspace. A bot, which the directory
+ *  does not list, keeps the org. */
 function authorWorkspace(wire: SlackWireMessage, member: SlackMember, own: string): string {
   const named = wire.user_team ?? wire.team ?? own;
-  return named.startsWith("E") && member.teamId ? member.teamId : named;
+  if (!named.startsWith("E") || !wire.user) return named;
+  if (!member.teamId) throw new SlackWorkspaceUnknown(wire.user);
+  return member.teamId;
 }
