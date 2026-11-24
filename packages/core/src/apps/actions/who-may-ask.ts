@@ -44,8 +44,11 @@ export function whoMayAsk(ownerOfChat: OwnerOfChat): WhoMayAsk {
  * dashboard. A visitor's turn, or a turn no one started in a visitor's chat, is
  * refused. A turn with neither an actor nor a chat cannot show it is the
  * guardian's and is refused too. A chat on a connection has no owner and is
- * the guardian's agent's. The same rule as `core:read_person`. */
-async function turnWorksForGuardian(ownerOfChat: OwnerOfChat, turn: ToolTurn): Promise<boolean> {
+ * the guardian's agent's. */
+export async function turnWorksForGuardian(
+  ownerOfChat: OwnerOfChat,
+  turn: ToolTurn,
+): Promise<boolean> {
   if (turn.actor && turn.actor.kind !== "guardian") return false;
   const thread = turn.channelContext;
   if (!turn.actor && !thread) return false;
@@ -60,9 +63,8 @@ async function turnWorksForGuardian(ownerOfChat: OwnerOfChat, turn: ToolTurn): P
  * dashboard, or null when it may. A change is the guardian's to ask for, in
  * their own private chat: never a routine, a followed event or another agent
  * acting on what it read. `not_private` is a chat someone else can read;
- * `not_guardian` is a turn the guardian's own signed-in message did not start.
- * The same rule as a write through `core:device_run`. */
-function changeRefusalReason(turn: ToolTurn): "not_private" | "not_guardian" | null {
+ * `not_guardian` is a turn the guardian's own signed-in message did not start. */
+export function changeRefusalReason(turn: ToolTurn): "not_private" | "not_guardian" | null {
   if (turn.audience !== "private") return "not_private";
   const actor = turn.actor;
   if (actor?.kind !== "guardian" || actor.via !== "cookie") return "not_guardian";
