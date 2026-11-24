@@ -186,6 +186,16 @@ describe("a voice conversation in the browser", () => {
     speaking.conversation.end();
     expect(speaking.unsent).toEqual([""]);
 
+    // Begun while Rome thinks, the turn is the guardian's, even once Rome speaks.
+    const thinking = setup();
+    await settle();
+    thinking.socket.open();
+    thinking.socket.say({ type: "state", state: "thinking" });
+    thinking.socket.say({ type: "heard", settled: "", pending: "Actually" });
+    thinking.socket.say({ type: "state", state: "speaking" });
+    thinking.conversation.end();
+    expect(thinking.unsent).toEqual(["Actually"]);
+
     // A conversation that stops on its own hands them back too.
     const lost = setup();
     await settle();

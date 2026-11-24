@@ -144,7 +144,7 @@ export function startVoiceConversation(
   const finish = (reason: ConversationStopReason | null) => {
     if (done) return;
     teardown();
-    handlers.onEnded(reason, speaking || mayBeEcho ? "" : unsent.trim());
+    handlers.onEnded(reason, mayBeEcho ? "" : unsent.trim());
   };
   function lost() {
     finish("connection-lost");
