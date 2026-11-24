@@ -324,8 +324,8 @@ interface ActionEngineOptions {
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
   /** Main-only: actions core registers in main alone, such as its agent tools
-   *  (agent-tool.ts), which run as a root in main as COORDINATION_ACTIONS do,
-   *  under the same first-party check. */
+   *  (agent-tool.ts). Each runs as a root in main while the registry says core
+   *  owns it, whatever any app's first-party flag says. */
   mainActions?: ReadonlySet<string>;
   /** Main-only: who can read a chat. A first-party root run given a chat and
    *  no audience, such as the inbox's message handler, takes the chat's. */
@@ -1916,13 +1916,18 @@ export class ActionEngine {
     }
   }
 
-  /** Whether a root runs in main: a first-party coordination action that is
-   * not cancellable. Cancellable actions keep their worker so process-level
+  /** Whether a root runs in main: a core-owned main action, or a first-party
+   * coordination action, that is not cancellable. Cancellable actions keep their worker so process-level
    * termination stays available. A failing or absent trust check means a
    * worker, as before. */
   private runsRootInMain(action: Action): boolean {
     if (action.config.cancellable) return false;
     const name = action.config.name;
+    // Core registers its own tools in main alone, so no app's trust decides
+    // where they run, and an app action of the same name is never placed here.
+    if (this.mainActions.has(name) && this.registry.getMetadata?.(name)?.ownerType === "core") {
+      return true;
+    }
     if (!COORDINATION_ACTIONS.has(name) && !this.mainActions.has(name)) return false;
     if (!this.isFirstPartyAction) return false;
     try {
