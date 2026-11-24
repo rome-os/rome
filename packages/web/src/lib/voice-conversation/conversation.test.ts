@@ -133,26 +133,46 @@ describe("a voice conversation in the browser", () => {
       const c = setup();
       await rs.advanceTimersByTimeAsync(0);
       c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
+      const audio = () => c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       c.socket.say({ type: "heard", settled: "Book a ", pending: "table" });
       c.socket.say({ type: "turn", text: "Book a table" });
       expect(c.heard).toEqual(["Book a table", ""]);
       expect(c.captions).toEqual([""]);
 
-      // The first sentence has nothing before it; the second waits for the first's audio.
+      // A caption waits for its sentence's audio, still being made.
       c.socket.say({ type: "caption", text: "Sure." });
+      rs.advanceTimersByTime(500);
+      expect(c.captions).toEqual([""]);
+      audio();
       rs.advanceTimersByTime(0);
+      expect(c.captions).toEqual(["", "Sure."]);
+
+      // The second sentence's audio plays after the first's.
       c.setAhead(1.5);
       c.socket.say({ type: "caption", text: "For how many?" });
+      audio();
       rs.advanceTimersByTime(1_400);
       expect(c.captions).toEqual(["", "Sure."]);
       rs.advanceTimersByTime(100);
       expect(c.captions).toEqual(["", "Sure.", "For how many?"]);
 
-      // Speaking over the reply drops the captions not shown yet.
+      // Rome thinks between sentences: the next caption still shows with its audio.
+      c.setAhead(0);
       c.socket.say({ type: "caption", text: "Indoors?" });
+      c.socket.say({ type: "state", state: "thinking" });
+      audio();
+      c.socket.say({ type: "state", state: "speaking" });
+      rs.advanceTimersByTime(1_000);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?", "Indoors?"]);
+
+      // Speaking over the reply drops the captions not shown yet.
+      c.setAhead(1);
+      c.socket.say({ type: "caption", text: "Or outside?" });
+      audio();
       c.socket.say({ type: "clear" });
       rs.advanceTimersByTime(2_000);
-      expect(c.captions).toEqual(["", "Sure.", "For how many?", ""]);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?", "Indoors?", ""]);
     } finally {
       rs.useRealTimers();
     }
@@ -164,7 +184,9 @@ describe("a voice conversation in the browser", () => {
       const c = setup();
       await rs.advanceTimersByTimeAsync(0);
       c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
       c.socket.say({ type: "caption", text: "Done." });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       rs.advanceTimersByTime(0);
       // Delivered late, all at once: the audio still has 2 s to play when Rome says listening.
       c.setAhead(2);
@@ -184,9 +206,13 @@ describe("a voice conversation in the browser", () => {
       const c = setup();
       await rs.advanceTimersByTimeAsync(0);
       c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
       c.setAhead(0.5);
       c.socket.say({ type: "caption", text: "Bye." });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
+      c.socket.say({ type: "caption", text: "See you." });
       c.socket.say({ type: "turn", text: "Wait" });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       rs.advanceTimersByTime(1_000);
       expect(c.captions).toEqual([""]);
     } finally {

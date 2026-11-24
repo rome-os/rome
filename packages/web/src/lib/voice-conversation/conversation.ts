@@ -106,9 +106,11 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
-  // Each caption waits for the audio queued before its sentence. The last one
-  // stays until the audio queued here has played: Rome's state follows the
-  // audio it sent, which can be well ahead after a network stall.
+  // Each caption waits for its sentence's first audio, then for the audio
+  // queued before it. The last one stays until the audio queued here has
+  // played: Rome's state follows the audio it sent, which can be well ahead
+  // after a network stall.
+  let waitingCaption: string | null = null;
   const captionTimers = new Set<ReturnType<typeof setTimeout>>();
   let captionEnd: ReturnType<typeof setTimeout> | null = null;
   const stopCaptionEnd = () => {
@@ -116,22 +118,34 @@ export function startVoiceConversation(
     captionEnd = null;
   };
   const clearCaptions = () => {
+    waitingCaption = null;
     for (const timer of captionTimers) clearTimeout(timer);
     captionTimers.clear();
     stopCaptionEnd();
   };
-  // A caption comes before its sentence's audio, which plays after the audio queued so far.
-  const captionWhenPlayed = (text: string) => {
+  // A caption comes before its sentence's audio, which may still be in the making.
+  const captionNext = (text: string) => {
     stopCaptionEnd();
-    const timer = setTimeout(() => {
-      captionTimers.delete(timer);
-      handlers.onCaption?.(text);
-    }, player.ahead() * 1000);
-    captionTimers.add(timer);
+    waitingCaption = text;
   };
+  // Audio after a caption is its sentence's, and plays after the audio queued so far.
+  const playReply = (chunk: ArrayBuffer) => {
+    const text = waitingCaption;
+    if (text !== null) {
+      waitingCaption = null;
+      const timer = setTimeout(() => {
+        captionTimers.delete(timer);
+        handlers.onCaption?.(text);
+      }, player.ahead() * 1000);
+      captionTimers.add(timer);
+    }
+    player.play(chunk, sampleRate);
+  };
+  // Rome thinks between sentences too; only once it listens has the reply ended.
   const stateChanged = (state: VoiceConversationState) => {
     handlers.onState(state);
-    if (state === "speaking") return;
+    if (state !== "listening") return;
+    waitingCaption = null;
     stopCaptionEnd();
     captionEnd = setTimeout(() => {
       captionEnd = null;
@@ -209,7 +223,7 @@ export function startVoiceConversation(
       socket.onmessage = (event: MessageEvent) => {
         heardFromRome();
         if (typeof event.data !== "string") {
-          if (event.data instanceof ArrayBuffer && sampleRate) player.play(event.data, sampleRate);
+          if (event.data instanceof ArrayBuffer && sampleRate) playReply(event.data);
           return;
         }
         let parsed: unknown;
@@ -225,7 +239,7 @@ export function startVoiceConversation(
         else if (data.type === "state") stateChanged(data.state);
         else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
         else if (data.type === "turn") turnSent();
-        else if (data.type === "caption") captionWhenPlayed(data.text);
+        else if (data.type === "caption") captionNext(data.text);
         else if (data.type === "clear") dropUnplayed();
         else if (data.type === "ended") finish(null);
         else if (data.type === "error") finish(data.reason);
