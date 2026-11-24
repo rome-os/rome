@@ -69,7 +69,7 @@ The vault also needs a signer that checks the PIN. Rome asks the signer for its 
 | --- | --- |
 | Store, grants and PIN | [`packages/signer/src/vault.ts`](../packages/signer/src/vault.ts), `secrets.json` and `vault-pin.json` in the signer's key directory (mode 0600) |
 | Signer routes | `GET /v1/secrets`, `PUT` and `DELETE /v1/secrets/:name`, `POST /v1/grants`, `POST /v1/pin`, `POST /v1/reset`, `GET /v1/health` |
-| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), guardian only |
+| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), the [team](concepts/people.md#team) only |
 | Actions | `vault_search` and `vault_apply` in [`rome_apps/system/src/actions/`](../rome_apps/system/src/actions/) |
 | CLI | [`packages/signer/src/vault-cli.ts`](../packages/signer/src/vault-cli.ts), linked as `vault` |
 
