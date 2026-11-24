@@ -503,10 +503,7 @@ describe("OutputsPanel", () => {
         mimeType: "text/html",
         kind: "shown",
         link: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html",
-        links: [
-          "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html",
-          "/projects/demo/trip-map.html",
-        ],
+        links: ["/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html"],
       }),
     ];
     renderPanel();
@@ -520,7 +517,7 @@ describe("OutputsPanel", () => {
     expect(open.getAttribute("rel")).toBe("noopener noreferrer");
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
-    // A shown copy only downloads, so it has nowhere to open.
+    // A copy of a file outside both folders only downloads, so it has nowhere to open.
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(screen.getByText("This file has no preview.")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
@@ -835,7 +832,7 @@ describe("previewOf", () => {
 });
 
 describe("pageHrefOf", () => {
-  const page = { name: "trip map.html", mimeType: "text/html", kind: "written" as const };
+  const page = { name: "trip map.html", mimeType: "text/html" };
 
   it("opens a written page in the projects folder on its own page", () => {
     expect(
@@ -857,11 +854,10 @@ describe("pageHrefOf", () => {
     ).toBe("/memory/notes/trip%20map.html");
   });
 
-  it("leaves a shown copy, a page outside both folders and any other file alone", () => {
+  it("opens the file a shown copy was made from, when it is in either folder", () => {
     expect(
       pageHrefOf({
         ...page,
-        kind: "shown",
         link: "/api/assets/0f3c.html",
         links: [
           "/api/assets/0f3c.html",
@@ -869,13 +865,18 @@ describe("pageHrefOf", () => {
           "/projects/demo/trip map.html",
         ],
       }),
+    ).toBe("/projects/demo/trip%20map.html");
+  });
+
+  it("leaves a copy with no such file, a page outside both folders and any other file alone", () => {
+    expect(
+      pageHrefOf({ ...page, link: "/api/assets/0f3c.html", links: ["/api/assets/0f3c.html"] }),
     ).toBeNull();
     expect(pageHrefOf({ ...page, link: null, links: ["/tmp/trip map.html"] })).toBeNull();
     expect(
       pageHrefOf({
         name: "bundle.zip",
         mimeType: "application/zip",
-        kind: "written",
         link: "/projects/demo/bundle.zip",
       }),
     ).toBeNull();

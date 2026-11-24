@@ -77,15 +77,16 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
 
 /**
  * Where an HTML output opens in a tab of its own: its page on the Projects or
- * Memory page, which shows it sandboxed. Null for any other output, and for a
- * shown copy, which only downloads. A written file's `link` names only its
- * project route, so its memory route is read from `links`. The route is the
- * file's path as it is, so each segment is encoded for the URL.
+ * Memory page, which shows it sandboxed. A shown copy opens the file it
+ * copied, as that file is now. Null for any other output, and for a copy of a
+ * file outside both folders, which only downloads. The route is read from
+ * `links` too, since `link` names only a written file's project route and a
+ * copy's asset URL. It is the file's path as it is, so each segment is
+ * encoded for the URL.
  */
 export function pageHrefOf(
-  output: Pick<ChatOutput, "name" | "mimeType" | "kind" | "link" | "links">,
+  output: Pick<ChatOutput, "name" | "mimeType" | "link" | "links">,
 ): string | null {
-  if (output.kind !== "written") return null;
   if (outputTypeOf(output) !== "page" && output.mimeType !== "text/html") return null;
   const route = [output.link, ...(output.links ?? [])].find(
     (link): link is string => link !== null && /^\/(projects|memory)\//.test(link),
