@@ -951,7 +951,9 @@ enum SnapshotRunner {
 /// When no step starts for `limit`, the watchdog names the last one in
 /// `HUNG` and on stderr, and starts a fresh copy of the app that goes on
 /// after it. This one freezes its stuck main thread and waits for the copy,
-/// so the command still ends when the pass does, and fails.
+/// so the command still ends when the pass does, and fails. A hang with no
+/// step to go on after (before the first one, or again before any step past
+/// the one a copy resumed after) ends the pass there instead.
 final class SnapshotWatchdog: @unchecked Sendable {
     static let shared = SnapshotWatchdog()
     static let resumeKey = "ROME_SNAPSHOT_RESUME_AFTER"
@@ -960,7 +962,9 @@ final class SnapshotWatchdog: @unchecked Sendable {
     static let limit: TimeInterval = 60
 
     private let lock = NSLock()
-    private var step: String?
+    /// Before the first step there is nothing to resume after.
+    private static let beforeFirstStep = "start"
+    private var step = beforeFirstStep
     private var since = Date.now
     private var timer: DispatchSourceTimer?
     private var mainThread: thread_act_t = 0
@@ -985,12 +989,15 @@ final class SnapshotWatchdog: @unchecked Sendable {
 
     private func check(_ directory: URL) {
         let stuck: String? = lock.withLock {
-            guard let step, Date.now.timeIntervalSince(since) > Self.limit else { return nil }
+            guard Date.now.timeIntervalSince(since) > Self.limit else { return nil }
             timer?.cancel()
             return step
         }
         guard let stuck else { return }
-        let line = "\(stuck) did not finish in \(Int(Self.limit)) s; starting again after it\n"
+        // Code between steps runs again in a copy, so a hang there comes
+        // back before any new step: going on would start copies forever.
+        let resumable = stuck != Self.beforeFirstStep && stuck != ProcessInfo.processInfo.environment[Self.resumeKey]
+        let line = "\(stuck) did not finish in \(Int(Self.limit)) s; \(resumable ? "starting again after it" : "stopping the pass")\n"
         FileHandle.standardError.write(Data(line.utf8))
         let hung = directory.appending(path: Self.hungFile)
         if let file = try? FileHandle(forWritingTo: hung) {
@@ -1000,6 +1007,7 @@ final class SnapshotWatchdog: @unchecked Sendable {
         } else {
             FileManager.default.createFile(atPath: hung.path, contents: Data("\(stuck)\n".utf8))
         }
+        guard resumable else { _exit(1) }
         // The same binary, arguments and environment, past the step that
         // hung. Replacing this process in place (exec) brings the app back
         // with no window on Mac Catalyst, so the copy is a new process.
