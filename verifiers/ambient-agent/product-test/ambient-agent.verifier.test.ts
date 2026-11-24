@@ -2,90 +2,24 @@
 // group chat, mentioned by a member who is not the guardian, recalls what
 // others said there without mentioning it, and says nothing when nobody
 // mentions it. The chat lives on a stand-in connection that does three things
-// only: it delivers the messages that mention Rome's account, sends a message
-// to a named chat and thread, and answers a read of a chat's messages from its
-// own log. So the agent can know the rest only by reading the platform at the
-// mention. The mention travels the path a real one takes, wired as index.ts
-// wires it: registry, channel ports, recording, the Inbox hook and its
-// message handler, the agent session, and the send back out. The model is
-// scripted, and answers with a value only when the text it was shown holds it.
+// only: it delivers messages, sends a message to a named chat and thread, and
+// answers a read of a chat's messages from its own log. So the agent can know
+// the rest only by reading the platform at the mention. Rome is booted by the
+// test kit's `bootWorkspaceAccount`, which wires the kind's account with the
+// Concierge as index.ts does. The model is scripted, and answers with a value
+// only when the text it was shown holds it.
 
-import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { Channel, ChannelMessage, ChatId, ThreadContext } from "@rome-os/app-runtime";
-import { stringify as stringifyYaml } from "yaml";
-import { createHook } from "../../../rome_apps/inbox/src/hooks/channel-message/index.js";
-import { createMessageHandlerAction } from "../../../rome_apps/inbox/src/actions/message-handler/index.js";
-import { createAction as createSendMessageAction } from "../../../rome_apps/system/src/actions/send-message/index.js";
-import {
-  createModelResolver,
-  createSessions,
-  DrizzleSessionRepository,
-  readAnswerShape,
-  romeSessionTracing,
-  TurnListeners,
-} from "./agent/index.js";
-import { createChannelsService } from "./app-host/accounts-service.js";
-import { AgentLoader } from "./app-host/agent-loader.js";
-import { AppTurnHooks } from "./app-host/app-turn-hooks.js";
-import { createAppRuntimeRepositories } from "./app-host/repositories.js";
-import { SkillLoader } from "./app-host/skill-loader.js";
-import { TurnUsageReporter } from "./app-host/turn-usage-reporter.js";
-import { ActionEngine } from "./apps/actions/engine.js";
-import { ActionRegistryImpl } from "./apps/actions/registry.js";
-import type { ActionConfig } from "./apps/actions/types.js";
-import { createEmptyLegacyArtifactBindings } from "./apps/artifact-id.js";
-import {
-  legacyChatIdChannels,
-  legacyChatIdChannelsService,
-  legacyChatIdSettings,
-  legacyChatIdStop,
-} from "./apps/legacy-chat-id.js";
-import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
-import { channelList } from "./chats/connected-accounts/connected-account-list.js";
-import { romeAccounts } from "./chats/connected-accounts/rome-accounts.js";
-import { ChatEvents } from "./chats/storage/events.js";
-import { chatsWiring } from "./chats-wiring.js";
-import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
-import { STRANGER_PERSON_ID } from "./constants.js";
-import { connectionPorts } from "./chats/connected-accounts/connection-ports.js";
-import { inboundRecording } from "./connections/inbound-recording.js";
-import type { Message } from "./connections/message.js";
-import { openChannelChat } from "./connections/open-chat.js";
-import { ConnectionRegistry } from "./connections/registry.js";
-import { DrizzleConnectionsRepository } from "./connections/repository-db.js";
-import type { ConnectionDescriptor, Talker } from "./connections/types.js";
-import { AgentRunner } from "./core/agent-runner.js";
-import { chatPromptFacts } from "./core/chat-prompt-facts.js";
-import { romeToolPorts } from "./core/rome-tool-ports.js";
-import { sessionOpeningFor, talkerChannelSurface } from "./core/session-opening.js";
-import { ActionExecutionsRepository } from "./apps/repositories/action-executions.js";
-import { ApprovalsRepository } from "./apps/repositories/approvals.js";
-import { ExecutionJournalRepository } from "./apps/repositories/execution-journal.js";
-import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
-import { PoliciesRepository } from "./db/repositories/policies.js";
-import { SettingsRepository } from "./db/repositories/settings.js";
-import { createLogger } from "./logger.js";
-import { guardedSend } from "./participation/send-gate/index.js";
-import { wakeGateLoader } from "./participation/wake-gate/index.js";
-import { agentFolders } from "./paths.js";
-import { appPersonMapping } from "./people/app-person-mapping.js";
-import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
-import { messagesSaid } from "./sessions/messages-said.js";
-import { createTestDb, type TestDb } from "./test/db.js";
-import { buildAgentConfig } from "./test/helpers.js";
+import { randomBytes } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { ConnectionDescriptor, Talker, TalkHistory } from "./connections/types.js";
 import { FakeModel, result } from "./test/kit/fake-model.js";
-import { bothAvailable, fakeAccounts } from "./test/kit/model-accounts.js";
-import { createTestSystemPrompts } from "./test/system-prompts.js";
-import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
+import { bootWorkspaceAccount } from "./test/kit/workspace-account.js";
 
 const KIND = "standin";
 const BOT = "standin-bot";
-const CHAT = "group-1" as ChatId;
+// A thread's address is `<chat>:<thread id>`, so a chat id holds no colon.
+const CHAT = "group-1";
 const GUARDIAN = { accountId: "u-grace", name: "Grace" };
 // Persons A and B of the rules: members of the workspace who are not the guardian.
 const ASKER = { accountId: "u-hal", name: "Hal" };
@@ -95,77 +29,68 @@ const MEMBERS = [
   { accountId: "u-mary", name: "Mary" },
 ];
 
-const config = (name: string): ActionConfig => ({
-  name,
-  type: "system",
-  description: name,
-  complexity: "simple",
-  speed: "fast",
-  reliability: "high",
-  sideEffects: "write",
-});
+type Person = { accountId: string; name: string };
 
-/** The platform: every message said in the group, oldest first, of which
- *  only mentions of Rome's account are delivered. */
+/** The platform: every message said in the group, oldest first, each with the
+ *  thread it was said in, if any. */
 function standInPlatform() {
-  const log: ChannelMessage[] = [];
-  const sent: { chatId: ChatId; threadId?: string; text: string }[] = [];
-  let deliver: ((message: Message) => void | Promise<void>) | undefined;
+  const log: (ChannelMessage & { inThread?: string })[] = [];
   let clock = Date.now() - 3_600_000;
-  const append = (
-    sender: { accountId: string; name: string },
-    text: string,
-    extra: Partial<ChannelMessage> = {},
-  ) => {
-    const message: ChannelMessage = {
+  const append = (sender: Person, text: string, inThread?: string) => {
+    const message = {
       channel: KIND,
       direction: sender.accountId === BOT ? "outbound" : "inbound",
       messageId: `m${log.length + 1}`,
-      chatId: CHAT,
+      chatId: CHAT as ChatId,
       senderId: sender.accountId,
       senderDisplayName: sender.name,
       text,
       attachments: [],
       timestamp: new Date((clock += 1000)),
       thread: { kind: "group", name: "Team" },
-      ...extra,
-    };
+      ...(inThread ? { inThread, replyTo: { messageId: inThread } } : {}),
+    } as ChannelMessage & { inThread?: string };
     log.push(message);
     return message;
   };
-  const talker: Talker = {
-    start(onMessage) {
-      deliver = onMessage;
-    },
-    stop() {},
-    async send(chatId, outgoing) {
-      sent.push({ chatId, threadId: outgoing.threadId, text: outgoing.text ?? "" });
-      const said = append({ accountId: BOT, name: "Rome" }, outgoing.text ?? "");
-      return { chatId, messageId: said.messageId };
-    },
-    history: {
-      async read(chatId, { since, until, olderThan, newerThan, limit }) {
-        let said = log.filter((m) => m.chatId === chatId);
-        if (olderThan !== undefined)
-          said = said.slice(
-            0,
-            said.findIndex((m) => m.messageId === olderThan),
-          );
-        if (newerThan !== undefined) {
-          said = said.slice(said.findIndex((m) => m.messageId === newerThan) + 1).slice(0, limit);
-        }
-        said = said.filter(
-          (m) =>
-            (!since || m.timestamp.getTime() >= since.getTime()) &&
-            (!until || m.timestamp.getTime() <= until.getTime()),
+  const history: TalkHistory = {
+    async read(address, { since, until, olderThan, newerThan, limit }) {
+      const [chat, thread] = String(address).split(":");
+      let said = log.filter(
+        (m) =>
+          m.chatId === chat &&
+          (thread === undefined || m.messageId === thread || m.inThread === thread),
+      );
+      if (olderThan !== undefined)
+        said = said.slice(
+          0,
+          said.findIndex((m) => m.messageId === olderThan),
         );
-        return said.slice(-limit).reverse();
-      },
+      if (newerThan !== undefined)
+        said = said.slice(said.findIndex((m) => m.messageId === newerThan) + 1).slice(0, limit);
+      said = said.filter(
+        (m) =>
+          (!since || m.timestamp.getTime() >= since.getTime()) &&
+          (!until || m.timestamp.getTime() <= until.getTime()),
+      );
+      return said.slice(-limit).reverse();
     },
   };
+  async function send(place: { chat: string; thread?: string }, text: string) {
+    const thread = place.thread?.split(":")[1];
+    return append({ accountId: BOT, name: "Rome" }, text, thread).messageId;
+  }
+  const talker: Talker = {
+    start() {},
+    stop() {},
+    async send(chatId, outgoing) {
+      const messageId = await send({ chat: chatId }, outgoing.text ?? "");
+      return { chatId, messageId };
+    },
+    history,
+  };
   // The fields a kind declares to serve a whole workspace from one session,
-  // with the Concierge on an account made for it. `servesWorkspace` is the
-  // feature's own opt-in; a Rome without it ignores the field.
+  // with the Concierge on an account made for it.
   const descriptor = {
     connectionKind: KIND,
     link: "own_account",
@@ -179,271 +104,57 @@ function standInPlatform() {
     accountIdOf: () => BOT,
     capabilities: { talker: { reads: true, build: () => talker } },
   } as ConnectionDescriptor;
-  return {
-    descriptor,
-    sent,
-    log,
-    /** Said in the group without mentioning Rome: the platform keeps it. */
-    say: append,
-    /** Said in the group mentioning Rome: the platform delivers it. */
-    mention(sender: { accountId: string; name: string }, text: string) {
-      const said = append(sender, `@Rome ${text}`);
-      void deliver?.({
-        id: said.messageId,
-        where: { chatId: CHAT, kind: "group", name: "Team" },
-        sender: { accountId: sender.accountId, name: sender.name },
-        content: { text: said.text ?? "", attachments: [] },
-        receivedBy: BOT,
-        mentions: [BOT],
-        saidAt: said.timestamp,
-      });
-    },
-  };
+  return { descriptor, log, append, ports: { history, send } };
 }
 
-type StandIn = ReturnType<typeof standInPlatform>;
+const TURN_MS = 30_000;
 
 /**
- * Rome as index.ts wires a group mention from `platform`'s connection to its
- * reply, over `db`, with `model` answering every turn. This is the one place
- * the test wires Rome: the tests use only what it returns (`settled`, `stop`)
- * and the stand-in platform, so a test-kit helper that boots a caller's
- * connection kind can take its place. Its Inbox hook gets no
- * `accountAgentOf`, so a turn runs on the `main` agent, not the Concierge.
+ * Rome serving the stand-in platform's workspace. This is the one place the
+ * test wires Rome: the tests use only `say`, `mention`, `sent` and `close`.
  */
-async function bootRome(platform: StandIn, db: TestDb["db"], root: string, model: FakeModel) {
-  const connectionsRepository = new DrizzleConnectionsRepository(db);
-  const registry = new ConnectionRegistry({ repository: connectionsRepository });
-  registry.register(platform.descriptor);
-  const channelOf = (connection: { connectionKind: string }) => connection.connectionKind;
-  const accounts = romeAccounts(connectionsRepository);
-  const chatsWired = chatsWiring(db, {
-    accountOf: (channel) => (channel === KIND ? { platform: KIND, id: BOT } : null),
-    platformOfChannel: (channel) => channel,
-    channelsOn: (p) => [p],
+async function bootRome(model: FakeModel) {
+  const platform = standInPlatform();
+  const account = await bootWorkspaceAccount({
+    kind: platform.descriptor,
+    ports: platform.ports,
+    model,
   });
-  const chatEvents = new ChatEvents();
-  const webchatRepo = new ChatsWebChatRepository(db, {
-    chats: chatsWired.chats,
-    lines: chatsWired.messages,
-    links: chatsWired.links,
-  });
-  const people = new DrizzlePeopleRepository(db);
-  await people.create({
+  await account.rome.repos.people.create({
     displayName: GUARDIAN.name,
     bondLevel: "guardian",
     links: [{ platform: KIND, id: GUARDIAN.accountId }],
-  });
-  const settingsRepo = new SettingsRepository(db);
-  const policiesRepo = new PoliciesRepository(db);
-
-  let recorder: ReturnType<typeof inboundRecording> | undefined;
-  let builtChannels: ReturnType<typeof channelList> | undefined;
-  const channels = channelList({
-    db,
-    whatsAppAccounts: { list: async () => [] } as never,
-    linkedInAccounts: { list: async () => [] } as never,
-    connections: {
-      registry,
-      channelOf,
-      accountOf: (connectionId) => accounts.accountOf(connectionId),
-      accepted: (channel, ref) => recorder?.accepted(channel, ref) ?? Promise.resolve(),
-    },
-  });
-  builtChannels = channels;
-  const channelsService = createChannelsService({
-    channels: () => builtChannels,
-    registry,
-    channelOf,
-    accounts,
-  });
-  const chatSettings = legacyChatIdSettings(
-    new ChatSettingsService({
-      repository: new ChatSettingsRepository(db, chatsWired),
-      connections: registry,
-      channelOf,
-      channels: () => builtChannels,
-      listAgents: () => ["main"],
-      onChanged: () => {},
-    }),
-  );
-  const wakeGateFor = wakeGateLoader({
-    chatSettings: (chat) => chatSettings.get(chat),
-    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
-    policies: () => policiesRepo.findAll(),
-    connectionKindOf: (channel) => channel,
-  });
-
-  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const agentsDir = join(root, "agents");
-  await mkdir(agentsDir, { recursive: true });
-  await writeFile(join(agentsDir, "main.yaml"), stringifyYaml(buildAgentConfig({ name: "main" })));
-  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
-  await agentLoader.loadAll(agentsDir);
-  const actionRegistry = new ActionRegistryImpl();
-  const approvalsRepo = new ApprovalsRepository(db);
-  const actionEngine = new ActionEngine(
-    actionRegistry,
-    {
-      executions: new ActionExecutionsRepository(db),
-      approvals: approvalsRepo,
-      journal: new ExecutionJournalRepository(db),
-    },
-    { processRole: "worker" },
-  );
-
-  const channelSurface = (channel: string) => {
-    const talker = registry.getDescriptor(channel)?.capabilities.talker;
-    return talker ? talkerChannelSurface(talker) : null;
-  };
-  const sessions = createSessions(
-    {
-      agentLoader,
-      sessionRepository: new DrizzleSessionRepository(db),
-      systemPrompts: createTestSystemPrompts(),
-      modelResolver: createModelResolver({
-        providers: [model],
-        accounts: fakeAccounts(bothAvailable()),
-      }),
-      networkMcpServers: () => ({}),
-      skillCatalog: new SkillLoader(artifactIdentity),
-      turnLifecycle: new TurnListeners(new AppTurnHooks()),
-      readAnswerShape,
-      promptFacts: chatPromptFacts({
-        facts: chatsWired.links,
-        messages: chatsWired.messages,
-        labels: chatsWired.labels,
-        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
-        channelSurface,
-        latest: (place: ThreadContext, { limit, until, olderThan, newerThan }) =>
-          channelsService.query(place.channel, {
-            chatId: place.threadId as ChatId,
-            until,
-            ...(olderThan === undefined ? {} : { olderThan }),
-            ...(newerThan === undefined ? {} : { newerThan }),
-            limit,
-          }),
-      }),
-      sessionTracing: romeSessionTracing,
-      turnUsage: new TurnUsageReporter(),
-      folders: agentFolders(),
-      log: createLogger("agent-session"),
-      ...romeToolPorts({ actionRegistry, actionEngine }),
-    },
-    { keepAliveAcrossTurns: true },
-  );
-  const agentRunner = new AgentRunner(
-    sessions,
-    agentLoader,
-    webchatRepo,
-    undefined,
-    actionRegistry,
-    { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
-    undefined,
-    sessionOpeningFor({ channelSurface }),
-  );
-
-  const speakers = {
-    chats: chatsWired.chats,
-    adapters: chatsWired.adapters,
-    speakers: chatsWired.speakers,
-  };
-  const repositories = createAppRuntimeRepositories({
-    settingsRepo,
-    webchatRepo,
-    speakers,
-    inChats: {
-      reads: { db, reads: chatsWired.reads, webchatRepo },
-      writes: {
-        webchatRepo,
-        chats: chatsWired.chats,
-        messages: chatsWired.messages,
-        speakers: chatsWired.speakers,
-        replies: chatsWired.replies,
-        links: chatsWired.links,
-        lines: chatsWired.speakerMessages,
-        adapters: chatsWired.adapters,
-        channel: (name) => builtChannels?.find((channel) => channel.name === name) ?? null,
-        open: (input) => openChannelChat({ records: webchatRepo, speakers }, input),
-      },
-    },
-  });
-  // An app's context as its actions use it: its repositories, and running
-  // another action through the engine.
-  const appContext = (appId: string) =>
-    ({
-      repositories,
-      runAction: (name: string, args: Record<string, unknown>) =>
-        actionEngine.run(name, args, { initiator: `app:${appId}`, callerAppId: appId }),
-    }) as never;
-  actionRegistry.register(
-    createMessageHandlerAction(config("inbox:message_handler"), {
-      agentRunner,
-      sendGate: guardedSend,
-      personMappingRepo: appPersonMapping(people, (channel) => channel),
-      sentinelLogRepo: new SentinelLogRepository(db, (channel) => channel),
-      approvalsRepo,
-      wakeGateFor,
-      resolveProfilePath: (path) => join(root, path),
-      strangerPersonId: STRANGER_PERSON_ID,
-      appContext: appContext("inbox"),
-    } as never),
-  );
-  actionRegistry.register(
-    createSendMessageAction(config("system:send_message"), {
-      channelsService: legacyChatIdChannelsService(channelsService),
-      appContext: appContext("system"),
-    } as never),
-  );
-
-  const hookChannels = legacyChatIdChannels(chatsWired.recordedSends(channels)) as Channel[];
-  recorder = inboundRecording(
-    {
-      chats: chatsWired.chats,
-      messages: chatsWired.messages,
-      events: chatEvents,
-      adapters: chatsWired.adapters,
-      hold: (messageId) => {
-        chatsWired.links.wakeUndecided(messageId);
-        return () => chatsWired.links.wakeDecided(messageId);
-      },
-    },
-    hookChannels,
-  );
-  const hook = createHook({
-    actionEngine,
-    chatSettings,
-    conversationSettings: chatSettings,
-    chatStop: legacyChatIdStop(async () => ({ status: "nothing_running" }) as never),
-    channels: hookChannels,
-    messagesSaid: messagesSaid({
-      chats: chatsWired.chats,
-      sessions: webchatRepo,
-      recording: recorder,
-      events: chatEvents,
-      wakes: chatsWired.links,
-      labels: chatsWired.labels,
-    }),
-    wakeGateFor,
   } as never);
-  await hook.register();
-
-  const connection = await registry.connect(KIND);
-  await registry.giveGrant(KIND, connection.id, "bot", { material: {}, expiresAt: "never" }, {});
-
+  const deliver = async (sender: Person, text: string, mentionsRome: boolean, thread?: string) => {
+    const said = platform.append(sender, text, thread);
+    const turn = account.deliver({
+      id: said.messageId,
+      sender: sender.accountId,
+      senderName: sender.name,
+      chat: CHAT,
+      ...(thread ? { thread: `${CHAT}:${thread}` } : {}),
+      text,
+      mentionsRome,
+    });
+    const timeout = new Promise<{ woke: boolean }>((resolve) =>
+      setTimeout(() => resolve({ woke: true }), TURN_MS),
+    );
+    return Promise.race([turn, timeout]);
+  };
   return {
-    platform,
-    settled: () => recorder?.settled() ?? Promise.resolve(),
-    async stop() {
-      hook.unregister();
-      await sessions.shutdown();
-      await actionEngine.stopWorkerWarmPool();
-      await registry.stopAll?.();
+    log: platform.log,
+    /** What Rome sent, oldest first. */
+    get sent() {
+      return account.sent;
     },
+    /** Said in the group without mentioning Rome; the platform keeps it. */
+    say: (sender: Person, text: string, thread?: string) => deliver(sender, text, false, thread),
+    /** Said in the group mentioning Rome; resolves when the turn ends. */
+    mention: (sender: Person, text: string) => deliver(sender, `@Rome ${text}`, true),
+    close: () => account.close(),
   };
 }
 
-const REPLY_MS = 5_000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A value no model could guess. */
@@ -463,33 +174,22 @@ const CHATTER = [
 ];
 
 describe("an agent in a shared group chat", () => {
-  let testDb: TestDb;
-  let root: string;
   let model: FakeModel;
   let rome: Awaited<ReturnType<typeof bootRome>>;
 
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), "rome-ambient-"));
-    rs.stubEnv("HOME", root);
-    rs.stubEnv("ROME_PROFILE", `ambient-${randomUUID()}`);
-    rs.stubEnv("ROME_PROJECTS_ROOT", join(root, "projects"));
-    testDb = createTestDb();
     model = new FakeModel().setDefaultReply(result("I don't know."));
-    rome = await bootRome(standInPlatform(), testDb.db, root, model);
+    rome = await bootRome(model);
   });
 
   afterEach(async () => {
-    await rome.stop();
-    testDb.close();
-    rs.unstubAllEnvs();
-    rmSync(root, { recursive: true, force: true });
+    await rome.close();
   });
 
   /**
    * Ten rounds: a member writes a fact, others write ten more messages, then
    * `asker` mentions Rome and asks for it. A round holds the fact when a send
-   * after the mention, to the chat that asked, holds its value. A mention
-   * left unanswered for `REPLY_MS` counts against the rounds.
+   * after the mention, to the chat that asked, holds its value.
    */
   async function recallRounds(asker: { accountId: string; name: string }) {
     const values = Array.from({ length: 10 }, fresh);
@@ -500,21 +200,18 @@ describe("an agent in a shared group chat", () => {
         .when((p) => p.prompt.includes(value) || p.systemPrompt.includes(value))
         .reply(result(`It is ${value}`));
     }
-    const { platform } = rome;
     let held = 0;
     let answered = 0;
     for (const [round, value] of values.entries()) {
-      platform.say(
+      await rome.say(
         MEMBERS[round % MEMBERS.length],
         `the order number for the office chairs is now ${value}`,
       );
       for (const [i, line] of CHATTER.entries())
-        platform.say(MEMBERS[(round + i + 1) % MEMBERS.length], line);
-      const before = platform.sent.length;
-      platform.mention(asker, "what is the order number for the office chairs now?");
-      const deadline = Date.now() + REPLY_MS;
-      while (platform.sent.length === before && Date.now() < deadline) await sleep(10);
-      const replies = platform.sent.slice(before).filter((s) => s.chatId === CHAT);
+        await rome.say(MEMBERS[(round + i + 1) % MEMBERS.length], line);
+      const before = rome.sent.length;
+      await rome.mention(asker, "what is the order number for the office chairs now?");
+      const replies = rome.sent.slice(before).filter((s) => s.chat === CHAT);
       if (replies.length) answered++;
       if (replies.some((s) => s.text.includes(value))) held++;
     }
@@ -530,30 +227,28 @@ describe("an agent in a shared group chat", () => {
   }, 120_000);
 
   it("silence: 0 sends across 50 unmentioned messages", async () => {
-    const { platform } = rome;
+    let woke = 0;
+    const said = async (sending: Promise<{ woke: boolean }>) => {
+      if ((await sending).woke) woke++;
+    };
     for (let i = 0; i < 50; i++) {
       const sender = MEMBERS[i % MEMBERS.length];
-      const earlier = platform.log.at(-1);
+      const earlier = rome.log.at(-1);
       switch (i % 4) {
         case 0:
-          platform.say(sender, CHATTER[i % CHATTER.length]);
+          await said(rome.say(sender, CHATTER[i % CHATTER.length]));
           break;
         case 1:
-          platform.say(sender, `does anyone know where the ${i}th report went?`);
+          await said(rome.say(sender, `does anyone know where the ${i}th report went?`));
           break;
         case 2:
-          platform.say(
-            sender,
-            "agreed",
-            earlier ? { replyTo: { messageId: earlier.messageId } } : {},
-          );
+          await said(rome.say(sender, "agreed", earlier?.messageId));
           break;
         default:
-          platform.say(sender, "Rome would know this, I bet");
+          await said(rome.say(sender, "Rome would know this, I bet"));
       }
     }
-    await rome.settled();
     await sleep(500);
-    expect(platform.sent).toHaveLength(0);
+    expect({ woke, sent: rome.sent.length }).toEqual({ woke: 0, sent: 0 });
   });
 });

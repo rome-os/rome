@@ -31,7 +31,7 @@ No fact or question is about a password, code, PIN, key, secret, token, lock, do
 
 ## The in-process test (rule 4(b))
 
-The test boots the production path a group mention takes, from a connection's delivery to the agent's reply, over an in-memory database: a stand-in connection kind that only delivers mentions, sends a message to a named chat and thread, and answers `TalkHistory` reads from its own log, and a `FakeModel` that replies with a fact only when the text it was given holds it. The stand-in's descriptor declares `link: "own_account"`, `startsWithConcierge: true` and `servesWorkspace: true`, the feature's opt-in, which a Rome without the field ignores. The test wires the Inbox hook as index.ts does but passes it no `accountAgentOf`, so the turn runs on the `main` agent, not the Concierge; the Concierge's own wiring (its service and `say` tool) is not booted, and a failing 4(b) says so in its reason. All the wiring is in one function, `bootRome(platform, …)`, so a test-kit helper that boots a caller's connection kind with the Concierge can replace it. Unmentioned messages enter only the stand-in's log. The asker is a member who is not the guardian. It asserts 10 of 10 facts held after 10 other messages each, and 0 sends across 50 unmentioned messages. The product files and exports it imports are its import lines.
+The test boots Rome with the product's test-kit helper `bootWorkspaceAccount` (`packages/core/src/test/kit/workspace-account.ts`), which wires a connection kind's account serving its workspace with the Concierge, as index.ts does. A product commit without that file fails 4(b) with that reason, and the test is not run. The connection is a stand-in kind that does three things only: it delivers messages, sends a message to a named chat and thread, and answers `TalkHistory` reads from its own log. Its descriptor declares `link: "own_account"`, `startsWithConcierge: true` and `servesWorkspace: true`. A `FakeModel` replies with a fact only when the text it was given holds it. Unmentioned messages are delivered with `mentionsRome: false` and must neither wake the agent nor send; the facts in them reach the agent only through a history read. The asker is a member who is not the guardian. It asserts 10 of 10 facts held after 10 other messages each, and 0 sends across 50 unmentioned messages. The product files and exports it imports are its import lines.
 
 ## Proving it without the product
 
@@ -49,6 +49,7 @@ The test boots the production path a group mention takes, from a connection's de
 | `stopped` | Answers only from what was said after it started | 3 fails |
 | `kinds` | The product commit changes a file under `connections/kinds/` | 4 fails |
 | `needs-more` | The in-process test needs more than the three things | 4 fails |
+| `no-helper` | The product commit lacks the test-kit helper `bootWorkspaceAccount` | 4 fails, naming the missing file |
 | `no-history` | Never reads the history | 1, 3 and 6 fail, answered without the fact |
 | `guardian-only` | Answers only the guardian, as main does | 1, 3, 5, 6, 7 and 8 fail: a member's mention gets no reply |
 | `silent` | Never replies | agent not answering, nothing checked |

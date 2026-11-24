@@ -49,9 +49,10 @@ const git = (cwd, ...args) =>
  * product's commit on top. `kinds` puts the product's change under
  * connections/kinds/. Its test runner stands in for rstest: it runs no
  * TypeScript, and reports the verifier's two tests as named in the file it is
- * given, passing both, or with `needsMore` failing the recall test.
+ * given, passing both, or with `needsMore` failing the recall test. The
+ * product commit holds the test-kit helper unless `noHelper`.
  */
-function productCheckout(dir, { kinds, needsMore }) {
+function productCheckout(dir, { kinds, needsMore, noHelper }) {
   const repo = join(dir, "rome");
   mkdirSync(join(repo, "packages/core/src/connections/kinds/standin"), { recursive: true });
   mkdirSync(join(repo, "scripts"), { recursive: true });
@@ -73,6 +74,13 @@ function productCheckout(dir, { kinds, needsMore }) {
       "export const kind = 'standin';\nexport const readsGroups = true;\n",
     );
   else writeFileSync(join(repo, "packages/core/src/ambient.ts"), "export const ambient = true;\n");
+  if (!noHelper) {
+    mkdirSync(join(repo, "packages/core/src/test/kit"), { recursive: true });
+    writeFileSync(
+      join(repo, "packages/core/src/test/kit/workspace-account.ts"),
+      "export async function bootWorkspaceAccount() {}\n",
+    );
+  }
   git(repo, "-c", "user.email=standin@test", "-c", "user.name=standin", "add", ".");
   git(repo, "-c", "user.email=standin@test", "-c", "user.name=standin", "commit", "-qm", "product");
   writeFileSync(join(repo, ".standin-4b"), needsMore ? "needs-more" : "pass");
@@ -87,7 +95,14 @@ function productCheckout(dir, { kinds, needsMore }) {
  */
 export async function up(
   dir,
-  { breaks = "", kinds = false, needsMore = false, windowMs = 1500, workMs = 2000 } = {},
+  {
+    breaks = "",
+    kinds = false,
+    needsMore = false,
+    noHelper = false,
+    windowMs = 1500,
+    workMs = 2000,
+  } = {},
 ) {
   mkdirSync(dir, { recursive: true });
   const { repo, commit } = fakeSource();
@@ -175,7 +190,7 @@ export async function up(
   const started = spawnSync(ctl[0], [...ctl.slice(1), "start"]);
   if (started.status !== 0) throw new Error(`stand-in instance did not start: ${started.stderr}`);
 
-  const rome = productCheckout(dir, { kinds, needsMore });
+  const rome = productCheckout(dir, { kinds, needsMore, noHelper });
   const env = {
     version: 1,
     commits: { environment: commit, rome: git(rome, "rev-parse", "HEAD"), rome_ref: "standin" },

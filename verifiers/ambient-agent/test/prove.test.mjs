@@ -99,6 +99,14 @@ const CASES = [
     what: "its in-process test needs more than the three things",
   },
   {
+    name: "no-helper",
+    up: { noHelper: true },
+    want: failing(4),
+    exit: 1,
+    what: "lacks the test-kit helper that boots a workspace account",
+    reason: [4, /has no packages\/core\/src\/test\/kit\/workspace-account\.ts/],
+  },
+  {
     name: "no-history",
     up: { breaks: "no-history" },
     want: failing(1, 3, 6),

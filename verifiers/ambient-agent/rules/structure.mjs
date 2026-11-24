@@ -2,7 +2,8 @@
 // merge-base with origin/main touches nothing under connections/kinds/.
 // (b) The verifier's own in-process test, run in the product's checkout with
 // the product's own test runner: a stand-in connection that only delivers
-// mentions, sends replies and answers a history read, and a scripted model.
+// messages, sends replies and answers a history read, and a scripted model,
+// with Rome booted by the product's test-kit helper.
 
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,6 +17,9 @@ export const TEST_SOURCE = fileURLToPath(
   new URL("../product-test/ambient-agent.verifier.test.ts", import.meta.url),
 );
 export const TEST_PATH = "packages/core/src/ambient-agent.verifier.test.ts";
+// The test-kit helper the test boots Rome with: a connection kind's account
+// serving its workspace, wired with the Concierge as index.ts wires it.
+export const HELPER_PATH = "packages/core/src/test/kit/workspace-account.ts";
 export const TEST_NAMES = {
   recall: "recall: 10 of 10 facts held after 10 other messages each",
   silence: "silence: 0 sends across 50 unmentioned messages",
@@ -83,6 +87,13 @@ export function readRunner(output) {
 export async function inProcess(env, { timeoutMs = 1_800_000, prefix = [] } = {}) {
   const repo = env.rome;
   const target = join(repo, TEST_PATH);
+  const helper = await git(repo, ["cat-file", "-e", `HEAD:${HELPER_PATH}`]);
+  if (helper.code !== 0)
+    return {
+      pass: false,
+      reason: `the product commit has no ${HELPER_PATH} (export bootWorkspaceAccount), which the test boots Rome with, so the test was not run`,
+      evidence: { helper: HELPER_PATH, present: false },
+    };
   if (existsSync(target))
     return {
       result: "not checked",
@@ -134,9 +145,6 @@ export async function inProcess(env, { timeoutMs = 1_800_000, prefix = [] } = {}
   const pass = outcome.recall === "passed" && outcome.silence === "passed";
   const parts = [`recall test ${outcome.recall}`, `silence test ${outcome.silence}`];
   if (outcome.guardian) parts.push(`the guardian asking (not scored) ${outcome.guardian}`);
-  // Until the test boots the Concierge, a product that answers only through
-  // it fails here for the wiring, not the product; the reason says so.
-  if (!pass) parts.push("note: the test wires the turn on the main agent, not the Concierge");
   return { pass, reason: parts.join(", "), evidence };
 }
 
