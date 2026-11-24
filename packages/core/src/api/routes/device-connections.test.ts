@@ -1,3 +1,4 @@
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
@@ -44,6 +45,7 @@ describe("/device-connections routes", () => {
     now = NOW;
     app = deviceConnectionRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       deviceConnections: new DeviceConnectionsRepository(testDb.db),
       now: () => now,
     });
@@ -130,8 +132,9 @@ describe("/device-connections routes", () => {
     expect((await send({}, null)).status).toBe(403);
     const loopback = deviceConnectionRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       deviceConnections: new DeviceConnectionsRepository(testDb.db),
-      guardianSession: async () => ({ userId: "guardian-seat", via: "loopback" }),
+      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
     });
     expect((await loopback.request("/device-connections")).status).toBe(403);
   });

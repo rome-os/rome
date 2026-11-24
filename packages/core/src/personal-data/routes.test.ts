@@ -1,3 +1,4 @@
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -17,6 +18,7 @@ describe("/personal-data routes", () => {
     testDb = createTestDb();
     app = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
       now: () => NOV_10 + 86_400_000,
     });
@@ -44,14 +46,16 @@ describe("/personal-data routes", () => {
   it("refuses the guardian's loopback session, which an agent's shell has", async () => {
     const loopback = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      guardianSession: async () => ({ userId: "guardian-seat", via: "loopback" }),
+      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
     });
     expect((await loopback.request("/personal-data/sources")).status).toBe(403);
     const cookie = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      guardianSession: async () => ({ userId: "guardian-seat", via: "cookie" }),
+      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "cookie" }),
     });
     expect((await cookie.request("/personal-data/sources")).status).toBe(200);
   });

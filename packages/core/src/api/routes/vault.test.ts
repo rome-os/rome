@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
@@ -61,7 +62,11 @@ function appFor(actor: SessionActor | null): Hono {
   app.use("*", (_c, next) => (actor ? runWithSessionActor(actor, next) : next()));
   app.route(
     "/",
-    vaultRoutes({ approvalsRepo: new ApprovalsRepository(testDb.db), approvalHandler }),
+    vaultRoutes({
+      approvalsRepo: new ApprovalsRepository(testDb.db),
+      approvalHandler,
+      dashboardAccessState: new DashboardAccessState(),
+    }),
   );
   return app;
 }

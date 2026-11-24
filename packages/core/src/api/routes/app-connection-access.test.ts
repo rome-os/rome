@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { createTestDb } from "../../test/db.js";
 import { AppConnectionAccessRepository } from "../../connections/app-connection-access.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -90,6 +91,7 @@ function makeApp(
         })),
     },
     appConnectionAccessRepo: access,
+    dashboardAccessState: new DashboardAccessState(),
   } as unknown as ApiDeps;
   const app = new Hono();
   app.route("/", appConnectionAccessRoutes(deps));
@@ -385,7 +387,13 @@ describe("Document access discovery", () => {
       });
       expect(JSON.stringify(value)).not.toContain("SYNTHETIC_NOT_FOR_UI");
       expect(
-        (await h.request(path, undefined, { kind: "visitor", userId: "visitor" } as never)).status,
+        (
+          await h.request(path, undefined, {
+            kind: "visitor",
+            accountId: "visitor",
+            email: "visitor@example.com",
+          })
+        ).status,
       ).toBe(403);
       expect((await h.request("/app-connection-access/missing/documents")).status).toBe(404);
       expect((await h.request("/app-connection-access/notes/documents?limit=101")).status).toBe(
