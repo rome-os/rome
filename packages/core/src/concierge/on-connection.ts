@@ -90,7 +90,8 @@ export function agentOfKindIn(
  * act for the chat's owner, and off the dashboard there is no such chat, so
  * they would act for the guardian whoever wrote. Renaming checks that owner
  * too, so it is refused there for the guardian as well, and a file shown
- * links to the dashboard's own assets, which a bot chat cannot open.
+ * links to the dashboard's own assets, which a bot chat cannot open. Listing
+ * routines shows every routine with what it sends, for the guardian alone.
  */
 export const CONCIERGE_CHAT_ACTIONS = [
   "core:set_agent_name",
@@ -100,6 +101,7 @@ export const CONCIERGE_CHAT_ACTIONS = [
   "core:concierge_following_list",
   "core:concierge_following_configure",
   "system:search_routine",
+  "system:read_routines",
   "system:delete_routine",
 ] as const;
 

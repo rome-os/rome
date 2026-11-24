@@ -375,6 +375,34 @@ describe("changing a routine", () => {
     expect(await change({ routineId, name: "Dream check" })).toMatchObject({ status: "ok" });
   });
 
+  it.each([
+    "concierge-task-schedule:chat-1",
+    "concierge-digest:09:00",
+    "concierge-follow:github:repo:push",
+  ])("leaves what core's %s routine runs and when to the Concierge's records, but renames it", async (key) => {
+    const routineId = await createSendRoutine({ key });
+
+    expect(await change({ routineId, args: { threadId: "chat-1", text: "x" } })).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("follows the Concierge's own records"),
+    });
+    expect(
+      await change({
+        routineId,
+        trigger: { type: "schedule", tzid: "UTC", localTime: "10:00", rrule: "FREQ=DAILY" },
+      }),
+    ).toMatchObject({ status: "error" });
+    expect(await change({ routineId, name: "Morning check" })).toMatchObject({ status: "ok" });
+  });
+
+  it("changes a routine an agent created with its own key", async () => {
+    const routineId = await createSendRoutine({ key: "chat-routine:turn-1:tool-1" });
+
+    expect(
+      await change({ routineId, args: { threadId: "chat-1", text: "Drink tea" } }),
+    ).toMatchObject({ status: "ok" });
+  });
+
   it("asks for what changes, and for a routine that exists", async () => {
     const routineId = await createSendRoutine();
 
