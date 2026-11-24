@@ -257,6 +257,23 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_EXTERNAL/U_ANN"]);
   });
 
+  it("asks Slack's directory again when its answer named no workspace", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockResolvedValueOnce({ displayName: "Ouou", username: "ouou" })
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } }),
+    );
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
+  });
+
   it("names an author of the app's workspace there, whatever workspace the directory gives", async () => {
     const mailbox = fakeMailbox();
     const api = fakeApi({
