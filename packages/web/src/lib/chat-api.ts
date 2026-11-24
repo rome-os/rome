@@ -101,20 +101,27 @@ export type SessionStatusFilter = "active" | "archived" | "all";
 
 export type SessionScope = "mine" | "all";
 
-const computerUseTargetSchema = z.object({
-  deviceId: z.string().uuid(),
-  name: z.string().trim().min(1).max(200),
-  authorized: z.literal(true).optional(),
-});
+const computerUseTargetSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    name: z.string().trim().max(200),
+    authorized: z.literal(true).optional(),
+  })
+  .transform(({ name, ...target }) => ({
+    ...target,
+    name: name || target.deviceId,
+  }));
 
 export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;
 
 export async function getChatComputerUseTarget(sessionId: string, signal: AbortSignal) {
   return computerUseTargetSchema
-    .extend({
-      targets: z.array(computerUseTargetSchema).max(4).optional(),
-      persistentAccess: z.literal(true).optional(),
-    })
+    .and(
+      z.object({
+        targets: z.array(computerUseTargetSchema).optional(),
+        persistentAccess: z.literal(true).optional(),
+      }),
+    )
     .parse(
       await fetchJson<unknown>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
         signal,
@@ -580,13 +587,15 @@ export async function createProject(name: string): Promise<ProjectOption> {
   return jsonOrThrow<ProjectOption>(res);
 }
 
+type PostTurnErrorCode = ChatErrorCode | "computer_use_denied";
+
 export type PostTurnResult =
   | { ok: true; data: CreateTurnResponse }
   | {
       ok: false;
       status: number;
       message: string;
-      code?: ChatErrorCode;
+      code?: PostTurnErrorCode;
       provider?: ChatErrorProvider;
       reason?: ChatErrorReason;
     };
@@ -684,7 +693,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
     }
   }
   let message = "";
-  let code: ChatErrorCode | undefined;
+  let code: PostTurnErrorCode | undefined;
   let provider: ChatErrorProvider | undefined;
   let reason: ChatErrorReason | undefined;
   const trimmed = raw.trim();
@@ -693,7 +702,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
       const payload = JSON.parse(trimmed) as {
         error?: string;
         message?: string;
-        code?: ChatErrorCode;
+        code?: PostTurnErrorCode;
         provider?: ChatErrorProvider;
         reason?: ChatErrorReason;
       };

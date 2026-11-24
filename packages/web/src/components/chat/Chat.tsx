@@ -719,12 +719,10 @@ export function Chat({
     sessionId: string;
     deviceId: string;
   } | null>(null);
-  const preferredWindow =
+  const selectedWindow =
     preferredComputer?.sessionId === computerUseSession
       ? rememberedTargets.find(({ deviceId }) => deviceId === preferredComputer.deviceId)
       : undefined;
-  const selectedWindow =
-    preferredWindow ?? (rememberedTargets.length === 1 ? rememberedTargets[0] : undefined);
   const computerUseDeviceIds = computerUseTargets
     .map(({ deviceId, authorized }) => `${deviceId}:${authorized ?? ""}`)
     .join(" ");
@@ -2087,7 +2085,7 @@ export function Chat({
               : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
-          ...(result.code ? { code: result.code } : {}),
+          ...(result.code && result.code !== "computer_use_denied" ? { code: result.code } : {}),
           ...(result.provider ? { provider: result.provider } : {}),
           ...(result.reason ? { reason: result.reason } : {}),
         });
@@ -2180,7 +2178,6 @@ export function Chat({
   const handleComposerSend = useCallback(
     async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       let sendingSessionId = mainSessionIdRef.current;
-      let firstMessageTargetId: string | undefined;
       if (!sendingSessionId) {
         // A repeat submit (a double Enter) would otherwise create a second session.
         if (creatingSessionRef.current) return;
@@ -2201,20 +2198,6 @@ export function Chat({
                     : undefined,
                 })
               ).id;
-          if (controls.userSubmitted && snapshot.text.trim()) {
-            const sessionId = sendingSessionId;
-            const offer = await queryClient
-              .fetchQuery({
-                queryKey: ["chat-computer-use", sessionId],
-                queryFn: ({ signal }) => getChatComputerUseTarget(sessionId, signal),
-                retry: false,
-              })
-              .catch(() => null);
-            if (offer?.persistentAccess) {
-              const targets = rememberedWindows(offer.targets ?? [offer]);
-              if (targets.length === 1) firstMessageTargetId = targets[0]?.deviceId;
-            }
-          }
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
@@ -2246,7 +2229,6 @@ export function Chat({
           : null;
       const computerUseDeviceId =
         authorizedSend?.deviceId ??
-        firstMessageTargetId ??
         (controls.userSubmitted && computerUseSession === sendingSessionId && snapshot.text.trim()
           ? selectedWindow?.deviceId
           : undefined);
@@ -2321,6 +2303,20 @@ export function Chat({
           });
           if (accepted.ok && authorizedSend) {
             setComputerUseChoice((current) => (current === authorizedSend ? null : current));
+          } else if (
+            !accepted.ok &&
+            computerUseDeviceId &&
+            accepted.code === "computer_use_denied"
+          ) {
+            setPreferredComputer((current) =>
+              current?.sessionId === sendingSessionId && current.deviceId === computerUseDeviceId
+                ? null
+                : current,
+            );
+            setComputerUseChoice((current) =>
+              current?.sessionId === sendingSessionId ? null : current,
+            );
+            void queryClient.invalidateQueries({ queryKey: ["chat-computer-use"] });
           }
           return accepted;
         },
@@ -3267,7 +3263,12 @@ export function Chat({
                           selected={selectedWindow}
                           allowPreemption={selectedComputerUse?.allowPreemption === true}
                           onSelect={(deviceId) => {
-                            setPreferredComputer({ sessionId: computerUseSession, deviceId });
+                            setPreferredComputer((current) =>
+                              current?.sessionId === computerUseSession &&
+                              current.deviceId === deviceId
+                                ? null
+                                : { sessionId: computerUseSession, deviceId },
+                            );
                             setComputerUseChoice(null);
                           }}
                           onTogglePreemption={() => {

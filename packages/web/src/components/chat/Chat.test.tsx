@@ -498,7 +498,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
                   // As the real composer does: its reply.
                   ...(draft?.target ? { replyTo: draft.target } : {}),
                 },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
+                {
+                  onUploadProgress: () => {},
+                  signal: new AbortController().signal,
+                  userSubmitted: true,
+                },
               )
               .catch(() => {})
           }
@@ -694,13 +698,13 @@ describe("the sibling composer floor's wheel path", () => {
 describe("computer use", () => {
   const deviceId = "11111111-1111-4111-8111-111111111111";
 
-  it("remembers a confirmed grant across human sends and stops using it after revocation", async () => {
+  it("requires explicit selection after a confirmed grant, toggles off, and clears on revocation", async () => {
     const target = { deviceId, name: "Test Mac", persistentAccess: true as const };
     rs.mocked(getChatComputerUseTarget)
       .mockResolvedValueOnce(target)
       .mockResolvedValueOnce({ ...target, authorized: true })
       .mockResolvedValueOnce(target);
-    for (const turnId of ["first", "imperative", "second", "revoked"])
+    for (const turnId of ["before-use", "first", "imperative", "toggled-off", "revoked"])
       rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId } });
     renderChat(<Chat sessionId="session-1" />);
 
@@ -708,26 +712,69 @@ describe("computer use", () => {
     fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAllowLabel" }));
     expect(setChatComputerUseAccess).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAllow" }));
+    await waitFor(() =>
+      expect(setChatComputerUseAccess).toHaveBeenCalledWith("session-1", deviceId, true),
+    );
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+
+    // Remembering a device does not implicitly attach it to ordinary messages.
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+
+    // Explicitly turn on the device for this chat.
+    fireEvent.click(screen.getByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
     await screen.findByRole("button", { name: "composer.computerUseActive" });
-    expect(setChatComputerUseAccess).toHaveBeenCalledWith("session-1", deviceId, true);
 
-    for (const [index, button] of ["send-button", "send-text-button", "send-button"].entries()) {
+    for (const [index, button] of ["send-button", "send-text-button"].entries()) {
       fireEvent.click(screen.getByTestId(button));
-      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(index + 1));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(index + 2));
     }
-    const postedTargets = () =>
-      rs.mocked(postSessionTurn).mock.calls.map(([, form]) => form.get("computerUseDeviceId"));
-    expect(postedTargets()).toEqual([deviceId, null, deviceId]);
-    expect(setChatComputerUseAccess).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "composer.computerUseActive" }));
+    // Toggle the device back off without revoking the remembered approval.
+    fireEvent.click(screen.getByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(4));
+
+    // Re-select then revoke: clears active selection and stops sending the device.
+    fireEvent.click(screen.getByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
     fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevokeLabel" }));
     fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseRevoke" }));
     await screen.findByRole("button", { name: "composer.computerUseAccess" });
     expect(setChatComputerUseAccess).toHaveBeenLastCalledWith("session-1", deviceId, false);
     fireEvent.click(screen.getByTestId("send-button"));
-    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(4));
-    expect(postedTargets()).toEqual([deviceId, null, deviceId, null]);
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(5));
+
+    const postedTargets = rs
+      .mocked(postSessionTurn)
+      .mock.calls.map(([, form]) => form.get("computerUseDeviceId"));
+    expect(postedTargets).toEqual([null, deviceId, null, null, null]);
+  });
+
+  it("keeps Concierge priority now when a device is remembered until explicitly selected", async () => {
+    rs.mocked(getChatComputerUseTarget).mockResolvedValueOnce({
+      deviceId,
+      name: "Test Mac",
+      authorized: true,
+      persistentAccess: true,
+    });
+    for (const turnId of ["concierge-now", "concierge-selected"])
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId } });
+    renderChat(<Chat sessionId="session-1" variant="concierge" />);
+
+    const trigger = await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    fireEvent.click(screen.getByTestId("concierge-send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("priority")).toBe("now");
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].has("computerUseDeviceId")).toBe(false);
+
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    fireEvent.click(screen.getByTestId("concierge-send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(2));
+    expect(rs.mocked(postSessionTurn).mock.calls[1]?.[1].get("computerUseDeviceId")).toBe(deviceId);
   });
 
   it("selects explicitly among remembered devices and spends preemption on one send", async () => {
@@ -777,26 +824,21 @@ describe("computer use", () => {
     expect(setChatComputerUseAccess).not.toHaveBeenCalled();
   });
 
-  it("routes the first human message of a new chat to its only remembered target", async () => {
+  it("does not block the first message of a new chat on a computer-use lookup", async () => {
     rs.mocked(createSession).mockResolvedValueOnce({ id: "created-1" } as Awaited<
       ReturnType<typeof createSession>
     >);
-    rs.mocked(getChatComputerUseTarget).mockResolvedValueOnce({
-      deviceId,
-      name: "Test Mac",
-      authorized: true,
-      persistentAccess: true,
-    });
+    rs.mocked(getChatComputerUseTarget).mockReturnValueOnce(new Promise(() => undefined));
     rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "first" } });
     renderChat(<Chat />);
 
     fireEvent.click(screen.getByTestId("send-button"));
     await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
-    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("computerUseDeviceId")).toBe(deviceId);
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].has("computerUseDeviceId")).toBe(false);
     expect(setChatComputerUseAccess).not.toHaveBeenCalled();
   });
 
-  it("clears preemption when switching chats even when both chats remember the same device", async () => {
+  it("clears selection and preemption when switching chats even when both remember the same device", async () => {
     const target = {
       deviceId,
       name: "Test Mac",
@@ -809,7 +851,8 @@ describe("computer use", () => {
       data: { turnId: "ordinary-turn" },
     });
     const { rerender } = renderChat(<Chat sessionId="session-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseActive" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
     const preemption = await screen.findByRole("button", {
       name: "composer.computerUsePreemption",
     });
@@ -817,7 +860,9 @@ describe("computer use", () => {
     expect(preemption.getAttribute("aria-pressed")).toBe("true");
 
     rerender(<MemoryRouter>{pane(<Chat sessionId="session-2" />)}</MemoryRouter>);
-    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseActive" }));
+    const nextTrigger = await screen.findByRole("button", { name: "composer.computerUseAccess" });
+    fireEvent.click(nextTrigger);
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
     const nextPreemption = await screen.findByRole("button", {
       name: "composer.computerUsePreemption",
     });
@@ -828,6 +873,43 @@ describe("computer use", () => {
     expect(posted?.[0]).toBe("session-2");
     expect(posted?.[1].get("computerUseDeviceId")).toBe(deviceId);
     expect(posted?.[1].has("computerUsePreemption")).toBe(false);
+  });
+
+  it("clears stale selection and refreshes targets when a turn returns computer_use_denied", async () => {
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce({
+        deviceId,
+        name: "Test Mac",
+        authorized: true,
+        persistentAccess: true,
+      })
+      .mockResolvedValueOnce({
+        deviceId,
+        name: "Test Mac",
+        persistentAccess: true,
+      });
+    rs.mocked(postSessionTurn)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        message: "Authorize this device before using it.",
+        code: "computer_use_denied",
+      })
+      .mockResolvedValueOnce({ ok: true, data: { turnId: "retry-ok" } });
+
+    renderChat(<Chat sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+    await screen.findByRole("button", { name: "composer.computerUseAccess" });
+
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(2));
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("computerUseDeviceId")).toBe(deviceId);
+    expect(rs.mocked(postSessionTurn).mock.calls[1]?.[1].has("computerUseDeviceId")).toBe(false);
   });
 });
 

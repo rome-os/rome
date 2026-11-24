@@ -13,34 +13,34 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
-it("validates computer-use target responses and rejects malformed payloads", async () => {
+it("validates computer-use target responses, accepts >4 targets, and rejects malformed payloads", async () => {
   const valid = [
     { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: " This computer ", authorized: true },
     {
       deviceId: "992a6210-71d8-4233-858b-764acbbcfe30",
-      name: "Remote Mac",
+      name: "   ",
     },
+  ];
+  const fiveTargets = [
+    ...valid,
+    { deviceId: "11111111-1111-4111-8111-111111111111", name: "Mac Studio" },
+    { deviceId: "22222222-2222-4222-8222-222222222222", name: "MacBook Pro" },
+    { deviceId: "33333333-3333-4333-8333-333333333333", name: "Mac mini" },
   ];
   rs.stubGlobal(
     "fetch",
     rs
       .fn()
-      .mockResolvedValueOnce(Response.json({ ...valid[0], targets: valid, persistentAccess: true }))
-      .mockResolvedValueOnce(Response.json({ deviceId: "not-a-uuid", name: "Bad" }))
       .mockResolvedValueOnce(
-        Response.json({
-          ...valid[0],
-          targets: Array.from({ length: 5 }, () => valid[0]),
-        }),
-      ),
+        Response.json({ ...valid[0], targets: fiveTargets, persistentAccess: true }),
+      )
+      .mockResolvedValueOnce(Response.json({ deviceId: "not-a-uuid", name: "Bad" })),
   );
   const parsed = await getChatComputerUseTarget("session-1", new AbortController().signal);
   expect(parsed.name).toBe("This computer");
+  expect(parsed.targets).toHaveLength(5);
   expect(parsed.targets?.[0]?.name).toBe("This computer");
-  expect(parsed.targets?.[1]?.name).toBe("Remote Mac");
-  await expect(
-    getChatComputerUseTarget("session-1", new AbortController().signal),
-  ).rejects.toThrow();
+  expect(parsed.targets?.[1]?.name).toBe("992a6210-71d8-4233-858b-764acbbcfe30");
   await expect(
     getChatComputerUseTarget("session-1", new AbortController().signal),
   ).rejects.toThrow();
