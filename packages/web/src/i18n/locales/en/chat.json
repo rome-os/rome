@@ -856,6 +856,8 @@
     "missing": "Moved or deleted",
     "download": "Download",
     "noPreview": "This file has no preview.",
+    "pageNoPreview": "This page does not run here. Open it in a new tab to see it.",
+    "openInNewTab": "Open in new tab",
     "unavailable": "This file cannot be opened here.",
     "previewFailed": "Failed to load the file",
     "truncated": "Showing the first {{count}} characters.",

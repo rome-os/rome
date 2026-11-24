@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Download,
+  ExternalLink,
   File as FileIcon,
   FileAudio,
   FileCode,
@@ -72,6 +73,18 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
   if (type === "text/markdown" || /\.(md|markdown)$/i.test(output.name)) return "markdown";
   if (TEXT_TYPES.test(type) && type !== "text/html") return "text";
   return "file";
+}
+
+/**
+ * Where an HTML output opens in a tab of its own: its page on the Projects or
+ * Memory page, which shows it sandboxed. Null for any other output, and for an
+ * HTML copy outside those folders, which only downloads. The link is the
+ * file's path as it is, so each segment is encoded for the URL.
+ */
+export function pageHrefOf(output: Pick<ChatOutput, "name" | "mimeType" | "link">): string | null {
+  if (outputTypeOf(output) !== "page" && output.mimeType !== "text/html") return null;
+  if (!output.link || !/^\/(projects|memory)\//.test(output.link)) return null;
+  return output.link.split("/").map(encodeURIComponent).join("/");
 }
 
 /**
@@ -869,10 +882,21 @@ function OutputPreview({
     );
   }
   if (kind === "file") {
+    const page = pageHrefOf(output);
     return (
       <div className={frame}>
         {header}
-        <p className="px-4 text-ui text-muted-foreground">{t("outputs.noPreview")}</p>
+        <p className="px-4 text-ui text-muted-foreground">
+          {page ? t("outputs.pageNoPreview") : t("outputs.noPreview")}
+        </p>
+        {page && (
+          <Button asChild variant="outline" size="sm" className="mx-4 self-start">
+            <a href={page} target="_blank" rel="noopener noreferrer">
+              <ExternalLink data-icon="inline-start" />
+              {t("outputs.openInNewTab")}
+            </a>
+          </Button>
+        )}
       </div>
     );
   }

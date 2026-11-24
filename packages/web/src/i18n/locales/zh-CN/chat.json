@@ -856,6 +856,8 @@
     "missing": "已移动或删除",
     "download": "下载",
     "noPreview": "这个文件没有预览。",
+    "pageNoPreview": "网页不能在这里显示，请在新标签页打开。",
+    "openInNewTab": "在新标签页打开",
     "unavailable": "这个文件无法在这里打开。",
     "previewFailed": "无法加载文件",
     "truncated": "只显示前 {{count}} 个字符。",
