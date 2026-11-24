@@ -38,6 +38,8 @@ export default defineConfig({
     "rome_sessions",
     "task_chats",
     "concierge_follow_items",
+    "concierge_told",
+    "concierge_observations",
     "linkedin_threads",
     "linkedin_messages",
     "linkedin_participants",

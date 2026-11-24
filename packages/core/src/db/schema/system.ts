@@ -912,6 +912,73 @@ export const conciergeFollowItems = sqliteTable(
   ],
 );
 
+/**
+ * What the Concierge told its owner on its own: one row per alert, digest or
+ * patrol turn that said at least one message. The patrol reads it before it
+ * speaks, and counts its messages against the daily cap of proactive
+ * messages. docs/architecture/concierge-patrol.md
+ */
+export const conciergeTold = sqliteTable(
+  "concierge_told",
+  {
+    id: text("id").primaryKey(),
+    /** Whose Concierge told it: "guardian" or "visitor:<account>". */
+    ownerKey: text("owner_key").notNull().default("guardian"),
+    kind: text("kind", { enum: ["alert", "digest", "patrol"] }).notNull(),
+    /** The Concierge chat the turn ran in. */
+    chatId: text("chat_id").notNull(),
+    /** How many messages the Concierge said in the turn, at least one. */
+    messages: integer("messages").notNull(),
+    /** What the turn was about: one topic key and one short line each, as JSON. */
+    items: text("items").notNull().default("[]"),
+    toldAt: integer("told_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_concierge_told_owner_at").on(table.ownerKey, table.toldAt)],
+);
+
+/**
+ * What the patrol noticed about its owner, one row per topic. A row holds a
+ * pointer to what it is about, never the content of personal data, which the
+ * patrol reads again on every run. docs/architecture/concierge-patrol.md
+ */
+export const conciergeObservations = sqliteTable(
+  "concierge_observations",
+  {
+    id: text("id").primaryKey(),
+    ownerKey: text("owner_key").notNull().default("guardian"),
+    /** The topic, as the patrol names it, such as `task:<id>:stalled`. Unique per owner. */
+    topicKey: text("topic_key").notNull(),
+    kind: text("kind", {
+      enum: ["open_loop", "state_change", "anticipated_need", "pattern"],
+    }).notNull(),
+    source: text("source", {
+      enum: ["memory", "main_chat", "tasks", "schedules", "calendar"],
+    }).notNull(),
+    /** Whether Rome holds the fact (`observed`) or the patrol drew it (`inferred`). */
+    basis: text("basis", { enum: ["observed", "inferred"] }).notNull(),
+    /** From 0 to 1. */
+    confidence: real("confidence").notNull(),
+    status: text("status", { enum: ["open", "done", "expired"] }).notNull(),
+    /** What it is about, in one short line. */
+    summary: text("summary").notNull(),
+    /** The task it is about, when it is about one. */
+    taskId: text("task_id"),
+    /** When it is due, when it has a time. */
+    dueAt: integer("due_at", { mode: "timestamp_ms" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    /** Each time it was told and what came of it, oldest first, as JSON. */
+    outcomes: text("outcomes").notNull().default("[]"),
+    toldCount: integer("told_count").notNull().default(0),
+    ignoredCount: integer("ignored_count").notNull().default(0),
+    lastToldAt: integer("last_told_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_concierge_observations_owner_topic").on(table.ownerKey, table.topicKey),
+  ],
+);
+
 export const webchatWorkspaceLayouts = sqliteTable("webchat_workspace_layouts", {
   sessionId: text("session_id")
     .primaryKey()

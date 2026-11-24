@@ -315,7 +315,15 @@ export type ResolvedTurn = TurnParams & {
   inputLabel?: string;
 };
 
+/** What a counted turn said: the chat it ran in, and how many messages. */
+interface SaidCount {
+  said: number;
+  chatId: string;
+}
+
 export interface SystemTurnOptions {
+  /** Checked right before the turn runs, after the turns queued before it. False drops it. */
+  shouldRun?: () => boolean;
   quiet?: boolean;
   inputLabel?: string;
   /** Who sent the input, when something sent it into the chat (RunParams.inputSource). */
@@ -383,6 +391,8 @@ export class ConciergeService {
   private readonly saidByKey = new Map<string, Map<string, string>>();
   /** Per chat on a connection, how many turns of Rome's own run there now. */
   private readonly systemTurns = new Map<string, number>();
+  /** Per Concierge chat, the counted turn running there now and what it said so far. */
+  private readonly countedTurns = new Map<string, SaidCount>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -414,6 +424,8 @@ export class ConciergeService {
    * or a visitor, by the rules of {@link ConciergePush}.
    */
   said(said: SaidInTurn): void {
+    const counted = this.countedTurns.get(said.chatId);
+    if (counted) counted.said++;
     this.push?.said(said);
   }
 
@@ -1153,11 +1165,29 @@ export class ConciergeService {
     return (await this.systemTurnOutcome(chatId, prompt, options)) === "completed";
   }
 
+  /**
+   * {@link runSystemTurn}, also answering the chat it ran in and how many
+   * messages the Concierge said while it ran. The count starts when the turn
+   * starts, after any turn queued before it, so it holds what this turn said,
+   * and what a guardian message steered into it said. A turn in a chat on a
+   * connection counts nothing.
+   */
+  async runCountedTurn(
+    chatId: string,
+    prompt: string,
+    options: SystemTurnOptions = {},
+  ): Promise<{ ran: boolean; said: number; chatId: string }> {
+    const count: SaidCount = { said: 0, chatId };
+    const outcome = await this.systemTurnOutcome(chatId, prompt, options, count);
+    return { ran: outcome === "completed", said: count.said, chatId: count.chatId };
+  }
+
   /** {@link runSystemTurn}, telling a turn cut short by a Stop or a newer message from one that failed. */
   async systemTurnOutcome(
     chatId: string,
     prompt: string,
     options: SystemTurnOptions = {},
+    count?: SaidCount,
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const onConnection = await this.connectionChat(chatId);
     if (onConnection) return this.connectionTurnOutcome(onConnection, prompt, options);
@@ -1170,7 +1200,21 @@ export class ConciergeService {
       ...(options.taskIds ? { taskIds: options.taskIds } : {}),
     });
     if (!params.sessionId) return "failed";
-    const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    const outcome =
+      (await (count
+        ? this.countingSaid(params.threadId, count, () =>
+            this.deps.runBackendTurn(params, {
+              ...options,
+              // Checked right before the turn runs, once the turns queued
+              // before it ended: from then on, what the chat says is its own.
+              shouldRun: () => {
+                if (options.shouldRun && !options.shouldRun()) return false;
+                this.countedTurns.set(params.threadId, count);
+                return true;
+              },
+            }),
+          )
+        : this.deps.runBackendTurn(params, options))) ?? "failed";
     // A newer input took a report over before the Concierge said it: the
     // turn that took over also carries every task's news it held, one task's
     // or a batch's.
@@ -1182,6 +1226,21 @@ export class ConciergeService {
     // coalescer settles exactly the news a completed turn carried
     // (docs/domains/chats.md#reaction).
     return outcome;
+  }
+
+  /** Runs `run` with `count` as chat `chatId`'s, and drops it once the turn ended. */
+  private async countingSaid<T>(
+    chatId: string,
+    count: SaidCount,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    count.chatId = chatId;
+    try {
+      return await run();
+    } finally {
+      // The next counted turn in the chat may have started already.
+      if (this.countedTurns.get(chatId) === count) this.countedTurns.delete(chatId);
+    }
   }
 
   /**
