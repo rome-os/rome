@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { MODEL_SELECTIONS } from "../packages/core/src/agent/domain/model-selection.js";
 import { LARGE_MODEL_OPTIONS } from "../packages/web/src/lib/model-options.js";
+import { modelDisplayName } from "../packages/web/src/lib/model-display.js";
 
 describe("model selection fallback", () => {
   it("keeps every stored selection on the agent domain's exact wire identity", () => {
@@ -8,6 +9,7 @@ describe("model selection fallback", () => {
     expect(options.map((option) => option.id).sort()).toEqual(Object.keys(MODEL_SELECTIONS).sort());
     for (const option of options) {
       expect(option).toMatchObject(MODEL_SELECTIONS[option.id]);
+      expect(modelDisplayName(option.model)).not.toBe(option.model);
     }
   });
 
