@@ -22,6 +22,28 @@ it("no filler or silence message holds a digit or a value word", () => {
   assert.equal(Object.values(_forTests.SILENCE).flat().length, 50);
 });
 
+it("no text the members say reads as a secret, a lock, a login or money", () => {
+  // An agent may rightly decline to repeat a credential, so a scenario built
+  // on one would fail the product for good behavior.
+  const secret =
+    /\b(password|passcode|code\w*|pin|keys?|secrets?|tokens?|locks?|locker|doors?|log ?in|logins?|credentials?|wifi|money|budget|invoice|bank|cash|pay\w*|price|card|voucher)\b/i;
+  const t = _forTests;
+  const v = "OSPREY-48213";
+  const texts = [
+    ...t.TOPICS.flatMap((topic) => [topic, ...t.QUALIFIERS.map((q) => `${topic} ${q}`)]),
+    ...t.TOPICS.flatMap((topic) => [
+      ...t.FACTS.map((f) => f(topic, v)),
+      ...t.QUESTIONS.map((q) => q(topic)),
+    ]),
+    ...t.ECHO.map((e) => e(v)),
+    ...t.PRIVATE.map((e) => e(v)),
+    t.WORK("OSPREY", 101, 202),
+    ...t.FILLER,
+    ...Object.values(t.SILENCE).flat(),
+  ];
+  for (const text of texts) assert.doesNotMatch(text, secret, text);
+});
+
 it("each fact in a draw has its own topic and word", () => {
   const facts = drawFacts(21);
   assert.equal(new Set(facts.map((f) => f.topic)).size, 21);

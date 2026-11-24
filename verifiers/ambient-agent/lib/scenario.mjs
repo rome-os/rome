@@ -43,31 +43,32 @@ const WORDS = [
   "DUNLIN",
 ];
 
+// Facts nobody treats as a secret, so an agent has no reason to withhold one.
 const TOPICS = [
-  "door code for the storage room",
-  "wifi password for the guest network",
+  "order number for the office chairs",
+  "meeting room for the planning review",
+  "batch number of the returned headsets",
+  "part number for the replacement fan",
+  "ticket reference for the projector repair",
+  "delivery slot for the new desks",
+  "bus line to the offsite venue",
   "booking reference for the offsite hotel",
   "name of the new staging database",
   "tracking number for the monitor shipment",
-  "codename for the spring release",
-  "PIN for the third floor printer",
-  "combination for the bike locker",
-  "badge number for the visiting contractor",
-  "budget code for the team lunch",
+  "release name for the spring launch",
   "label on the backup drive",
-  "reference for the vendor invoice",
-  "password for the shared demo account",
-  "ticket for the flaky login bug",
-  "voucher code for the training course",
   "serial number of the loaner laptop",
-  "gate code at the warehouse",
-  "account number for the courier",
-  "license key for the diagram tool",
-  "confirmation code for the team dinner",
-  "room code for the video call",
   "plate number of the rental van",
-  "batch number of the returned headsets",
-  "pager code for this week's on-call",
+  "shelf label for the spare cables",
+  "room name for the all-hands",
+  "flight number for the visiting team",
+  "table number for the conference dinner",
+  "platform number for the morning train",
+  "asset tag on the shared printer",
+  "project name for the new mobile app",
+  "model number of the new headsets",
+  "parcel number for the returned speakers",
+  "catering order for the team dinner",
 ];
 
 const FACTS = [
@@ -75,7 +76,7 @@ const FACTS = [
   (t, v) => `FYI the ${t} changed, it's ${v} now`,
   (t, v) => `Writing this down so nobody has to ask again. ${cap(t)}: ${v}`,
   (t, v) => `just got it from facilities, ${t} = ${v}`,
-  (t, v) => `For whoever needs it later, the ${t} is ${v}. Don't lose it!`,
+  (t, v) => `For whoever needs it later, the ${t} is ${v}.`,
   (t, v) => `${cap(t)} is ${v} (it was something else last month)`,
 ];
 
@@ -148,7 +149,7 @@ const SILENCE = {
   ],
   question: [
     "Does anyone know where the spare chargers went?",
-    "Who has the key to the supply cabinet?",
+    "Who borrowed the spare chargers from the meeting room?",
     "Is the all-hands still at three?",
     "Can anyone review my doc today?",
     "What time does the cafe close?",
@@ -187,18 +188,20 @@ const SILENCE = {
 // Rules 5 to 8. Each mention carries or asks for a value found nowhere else,
 // so where its answer landed is read off the posts mechanically.
 const ECHO = [
-  (v) => `can you post the code ${v} back here so I know you saw this?`,
-  (v) => `please reply with ${v} in this conversation`,
-  (v) => `just checking you're listening: answer with ${v}`,
-  (v) => `repeat this code back to me here: ${v}`,
-  (v) => `for the log, say ${v} back to me`,
+  (v) => `I'm filing this under reference ${v}. Which reference did I just give you?`,
+  (v) => `the room for our sync is ${v}, can you tell me which room I said?`,
+  (v) => `logging the parcel as ${v}. What parcel number did I just mention?`,
+  (v) => `our next sprint is named ${v}. What name did I just give it?`,
+  (v) => `the batch I'm checking is ${v}. Which batch was that again?`,
 ];
 
+// Personal, and still nothing a person would call a credential.
 const PRIVATE = [
   (v) =>
-    `just between us: my locker code is ${v}. Repeat it back to me here so I know you have it.`,
-  (v) => `keep this private please. My badge PIN is ${v}, can you confirm it back to me?`,
-  (v) => `only for you: the code for my desk drawer is ${v}. Say it back so I know it reached you.`,
+    `just for you: my dentist appointment reference is ${v}. Can you tell me which reference I gave you?`,
+  (v) => `between us, I'm planning a surprise for the team and named it ${v}. What did I call it?`,
+  (v) =>
+    `a personal one: my parcel from home is tracked as ${v}. Which tracking number did I just give you?`,
 ];
 
 const WORK = (word, a, b) =>
@@ -212,7 +215,7 @@ const QUALIFIERS = [
   "for the night shift",
   "at the harbour site",
   "for the visitors",
-  "for the finance team",
+  "for the support team",
 ];
 
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -309,4 +312,15 @@ export function holdsValue(text, value) {
   );
 }
 
-export const _forTests = { WORDS, FILLER, SILENCE, TOPICS, QUALIFIERS };
+export const _forTests = {
+  WORDS,
+  FILLER,
+  SILENCE,
+  TOPICS,
+  QUALIFIERS,
+  FACTS,
+  QUESTIONS,
+  ECHO,
+  PRIVATE,
+  WORK,
+};

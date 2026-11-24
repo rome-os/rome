@@ -201,9 +201,17 @@ function standInPlatform() {
   };
 }
 
-/** Rome as index.ts wires a group mention from its connection to its reply. */
-async function bootRome(db: TestDb["db"], root: string, model: FakeModel) {
-  const platform = standInPlatform();
+type StandIn = ReturnType<typeof standInPlatform>;
+
+/**
+ * Rome as index.ts wires a group mention from `platform`'s connection to its
+ * reply, over `db`, with `model` answering every turn. This is the one place
+ * the test wires Rome: the tests use only what it returns (`settled`, `stop`)
+ * and the stand-in platform, so a test-kit helper that boots a caller's
+ * connection kind can take its place. Its Inbox hook gets no
+ * `accountAgentOf`, so a turn runs on the `main` agent, not the Concierge.
+ */
+async function bootRome(platform: StandIn, db: TestDb["db"], root: string, model: FakeModel) {
   const connectionsRepository = new DrizzleConnectionsRepository(db);
   const registry = new ConnectionRegistry({ repository: connectionsRepository });
   registry.register(platform.descriptor);
@@ -467,7 +475,7 @@ describe("an agent in a shared group chat", () => {
     rs.stubEnv("ROME_PROJECTS_ROOT", join(root, "projects"));
     testDb = createTestDb();
     model = new FakeModel().setDefaultReply(result("I don't know."));
-    rome = await bootRome(testDb.db, root, model);
+    rome = await bootRome(standInPlatform(), testDb.db, root, model);
   });
 
   afterEach(async () => {
@@ -496,11 +504,14 @@ describe("an agent in a shared group chat", () => {
     let held = 0;
     let answered = 0;
     for (const [round, value] of values.entries()) {
-      platform.say(MEMBERS[round % MEMBERS.length], `the door code is now ${value}`);
+      platform.say(
+        MEMBERS[round % MEMBERS.length],
+        `the order number for the office chairs is now ${value}`,
+      );
       for (const [i, line] of CHATTER.entries())
         platform.say(MEMBERS[(round + i + 1) % MEMBERS.length], line);
       const before = platform.sent.length;
-      platform.mention(asker, "what is the door code now?");
+      platform.mention(asker, "what is the order number for the office chairs now?");
       const deadline = Date.now() + REPLY_MS;
       while (platform.sent.length === before && Date.now() < deadline) await sleep(10);
       const replies = platform.sent.slice(before).filter((s) => s.chatId === CHAT);

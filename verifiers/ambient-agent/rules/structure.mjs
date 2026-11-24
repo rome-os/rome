@@ -134,6 +134,9 @@ export async function inProcess(env, { timeoutMs = 1_800_000, prefix = [] } = {}
   const pass = outcome.recall === "passed" && outcome.silence === "passed";
   const parts = [`recall test ${outcome.recall}`, `silence test ${outcome.silence}`];
   if (outcome.guardian) parts.push(`the guardian asking (not scored) ${outcome.guardian}`);
+  // Until the test boots the Concierge, a product that answers only through
+  // it fails here for the wiring, not the product; the reason says so.
+  if (!pass) parts.push("note: the test wires the turn on the main agent, not the Concierge");
   return { pass, reason: parts.join(", "), evidence };
 }
 
