@@ -27,7 +27,11 @@ import {
 import { SCENARIOS, SCENARIOS_VERSION, type Scenario } from "./scenarios.js";
 import { Stack, checkSnapshotName } from "./stack.js";
 
+// The patrol's scenarios need no stack: they play the patrol agent directly (patrol.ts).
+const PATROL = process.argv.includes("--patrol");
+
 const USAGE = `pnpm concierge:eval --snapshot [--name <snapshot>]
+pnpm concierge:eval --patrol --label <name> [--rounds N]   (see patrol.ts)
 pnpm concierge:eval --label <name> [--rounds N] [--compare <label>] [--only id,id] [--name <snapshot>]
 pnpm concierge:eval --report <label> [--compare <label>]
 
@@ -68,6 +72,8 @@ const { values: args } = parseArgs({
     "no-restore": { type: "boolean" },
     help: { type: "boolean" },
   },
+  // The patrol reads its own options.
+  strict: !PATROL,
 });
 
 const stack = new Stack({ container: args.container, baseUrl: args["base-url"] });
@@ -462,7 +468,9 @@ async function main(): Promise<void> {
   writeSummary(label);
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.stack : error);
-  process.exitCode = 1;
-});
+(PATROL ? import("./patrol.js").then((patrol) => patrol.patrolEval()) : main()).catch(
+  (error: unknown) => {
+    console.error(error instanceof Error ? error.stack : error);
+    process.exitCode = 1;
+  },
+);
