@@ -38,6 +38,7 @@ import { ownerOfChat } from "../../webchat/owner.js";
 import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
+import { allowVerifierServer, guardNetwork } from "./network.js";
 
 export const GUARDIAN = {
   userId: "acct-guardian",
@@ -147,25 +148,8 @@ function features(deps: ApiDeps): Feature[] {
 
 const COMPUTER_USE_DEVICE = "verifier-mac";
 
-let networkGuarded = false;
-
-/** Lets `fetch` reach loopback only, where the stand-ins listen. A route that
- *  calls Rome Cloud or a provider gets a network error instead of the internet. */
-function guardNetwork(): void {
-  if (networkGuarded) return;
-  networkGuarded = true;
-  const loopbackFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
-      throw new TypeError(`fetch failed: the team verifier keeps ${url.host} unreachable`);
-    }
-    return loopbackFetch(input, init);
-  }) as typeof fetch;
-}
-
 export async function createInstance(options: InstanceOptions): Promise<Instance> {
-  guardNetwork();
+  const releaseNetwork = guardNetwork();
   const root = mkdtempSync(join(tmpdir(), "rome-team-verifier-"));
   const saved = new Map(SCOPED_ENV.map((key) => [key, process.env[key]]));
   process.env.HOME = join(root, "home");
@@ -317,9 +301,14 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       } finally {
         HttpServer.prototype.on = original;
       }
-      servers.push(handle);
+      const disallow = allowVerifierServer(handle.port);
+      const close = async () => {
+        disallow();
+        await handle.close();
+      };
+      servers.push({ ...handle, close });
       if (!server) throw new Error("startApi attached no upgrade handler");
-      return { port: handle.port, server, close: () => handle.close() };
+      return { port: handle.port, server, close };
     },
     async restoreDashboardList() {
       await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
@@ -335,6 +324,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
         else process.env[key] = value;
       }
       rmSync(root, { recursive: true, force: true });
+      releaseNetwork();
     },
   };
 }
