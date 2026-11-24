@@ -60,7 +60,7 @@ export function actionTools(
     {
       name: "read_action",
       description:
-        "Read one available action with each argument's full description. Search results already show the arguments as a signature; read an action when that is not enough.",
+        "Read one available action with each argument's full description. Search results already show the arguments as a signature; read an action when that is not enough, such as an argument shown as object or unknown, or one that depends on another argument.",
       inputSchema: {
         type: "object",
         properties: {
