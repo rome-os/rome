@@ -5,7 +5,7 @@ import { textMessageContent, transcriptMessageId } from "../../core/agent-trace-
 import type { AgentRunnerInterface } from "../../core/types.js";
 import type { TriageRecordStore } from "../triage.js";
 
-export const PATROL_AGENT = "core:concierge-patrol";
+const PATROL_AGENT = "core:concierge-patrol";
 /**
  * The one session every patrol run is recorded in, so Sessions shows
  * "Concierge patrol" with one run per patrol that passed its pre-check. It is

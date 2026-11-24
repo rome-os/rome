@@ -41,6 +41,7 @@ import {
   HOUR_MS,
   holdReason,
   mayRaise,
+  nextSpeakingRun,
   settleOutcome,
 } from "./volume.js";
 
@@ -51,11 +52,11 @@ export const CONCIERGE_PATROL_ACTION = "core:concierge_patrol";
 /** What Dream reads of the patrol's observations. Read-only; only Dream lists it. */
 export const CONCIERGE_PATROL_OBSERVATIONS_ACTION = "core:concierge_patrol_observations";
 /** Routine keys of the patrol: `concierge-patrol:<owner>`, and its own wake-up. */
-export const PATROL_KEY_PREFIX = "concierge-patrol:";
+const PATROL_KEY_PREFIX = "concierge-patrol:";
 const PATROL_ROUTINE_KEY = `${PATROL_KEY_PREFIX}${GUARDIAN_OWNER}`;
 const RECHECK_ROUTINE_KEY = `${PATROL_KEY_PREFIX}${GUARDIAN_OWNER}:recheck`;
 /** The setting that holds the patrol's own state. */
-export const PATROL_STATE_SETTING_KEY = "conciergePatrol";
+const PATROL_STATE_SETTING_KEY = "conciergePatrol";
 /** The minute past the hour the patrol fires, clear of digest times on the hour. */
 const PATROL_MINUTE = "00:45";
 /** What one run reads of the main chat. */
@@ -108,7 +109,7 @@ export interface ConciergePatrolDeps {
 }
 
 /** Whether an agent definition holds no tool, action, subagent or server: nothing it could call. */
-export function holdsNothing(definition: AgentDefinition): boolean {
+function holdsNothing(definition: AgentDefinition): boolean {
   return (
     definition.tools.length === 0 &&
     (definition.actions ?? []).length === 0 &&
@@ -410,6 +411,9 @@ export function startConciergePatrol(
     const told = await deps.told.since(new Date(at - TOLD_LOOKBACK_MS));
     const input: PatrolInput = {
       now: guardianNow(at, zone),
+      nextRun: ((next) => (next === null ? null : guardianNow(next, zone)))(
+        nextSpeakingRun(at, intervalMs, quietHours, digestTimes, zone),
+      ),
       memory: memory.text.slice(0, MAX_MEMORY_CHARS),
       mainChat: recent.slice(-MAX_CHAT_LINES).map((line) => ({
         at: new Date(line.at).toISOString(),
@@ -425,7 +429,7 @@ export function startConciergePatrol(
           ? { waitingDays: Math.floor((at - status.waitingSince) / DAY_MS) }
           : {}),
         updated: task.row.updatedAt.toISOString(),
-        inMainChat: task.conciergeChat.main,
+        ...(task.conciergeChat.main ? {} : { fromTopicChat: true as const }),
       })),
       schedules,
       calendar,
@@ -571,7 +575,7 @@ export function startConciergePatrol(
  * The observations Dream may keep in memory: observed ones, from no
  * personal-data source, with how often each was told and what came of it.
  */
-export function forMemory(observations: readonly Observation[]) {
+function forMemory(observations: readonly Observation[]) {
   return observations
     .filter(
       (o) => o.basis === "observed" && !NAMED_SOURCES.includes(o.source) && o.status !== "expired",

@@ -8,6 +8,7 @@ import {
   type HoldFacts,
   mayRaise,
   nearDigest,
+  nextSpeakingRun,
   patrolQuietUntil,
   restGap,
   settleOutcome,
@@ -61,6 +62,17 @@ describe("when the patrol holds", () => {
     // Across midnight.
     expect(nearDigest(at("23:50"), ["00:10"], zone)).toBe(true);
     expect(holdReason(facts({ now: at("17:45") }))).toBe("near_digest");
+  });
+
+  it("knows its next run that may speak, past the night and the digest", () => {
+    const interval = 3 * HOUR_MS;
+    expect(nextSpeakingRun(at("12:45"), interval, null, ["09:00", "18:00"], zone)).toBe(
+      at("15:45"),
+    );
+    // 23:45, 02:45 and 05:45 are quiet: the next is 08:45, then near the 09:00 digest.
+    expect(nextSpeakingRun(at("20:45"), interval, null, ["09:00", "18:00"], zone)).toBe(
+      at("11:45") + DAY_MS,
+    );
   });
 
   it("slows down while the owner is away, and a wake-up it set itself is never held for it", () => {

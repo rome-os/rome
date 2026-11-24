@@ -13,15 +13,15 @@ export const DAILY_MESSAGE_CAP = 3;
 /** A topic told is not told again for this long, unless it changed materially. */
 export const COOLDOWN_MS = 3 * DAY_MS;
 /** A topic ignored this many times is not told again until it changes materially. */
-export const IGNORED_LIMIT = 2;
+const IGNORED_LIMIT = 2;
 /** A reply in the main chat within this long of a tell adopts it; none ignores it. */
-export const OUTCOME_WINDOW_MS = 6 * HOUR_MS;
+const OUTCOME_WINDOW_MS = 6 * HOUR_MS;
 /** A due time this close counts as near: it can bring a told topic back. */
-export const DEADLINE_NEAR_MS = DAY_MS;
+const DEADLINE_NEAR_MS = DAY_MS;
 /** The patrol says nothing this close to a digest time, before or after it. */
-export const DIGEST_MARGIN_MS = 30 * 60_000;
+const DIGEST_MARGIN_MS = 30 * 60_000;
 /** Quiet hours the patrol keeps when its owner set none: it never speaks at night. */
-export const DEFAULT_PATROL_QUIET: QuietHours = { start: "22:00", end: "08:00" };
+const DEFAULT_PATROL_QUIET: QuietHours = { start: "22:00", end: "08:00" };
 
 /** Why the patrol may not speak now, or null when it may. */
 export type HoldReason = "quiet_hours" | "near_digest" | "daily_cap" | "resting";
@@ -92,6 +92,26 @@ export interface HoldFacts {
   recheck: boolean;
 }
 
+/**
+ * When the patrol next runs at a time it may speak, epoch milliseconds: the
+ * first of its next fires, `intervalMs` apart, that is outside quiet hours
+ * and clear of every digest time. Null when none is within a day.
+ */
+export function nextSpeakingRun(
+  now: number,
+  intervalMs: number,
+  quietHours: QuietHours | null,
+  digestTimes: readonly string[],
+  timeZone: string,
+): number | null {
+  for (let at = now + intervalMs; at <= now + DAY_MS; at += intervalMs) {
+    if (patrolQuietUntil(at, quietHours, timeZone) !== null) continue;
+    if (nearDigest(at, digestTimes, timeZone)) continue;
+    return at;
+  }
+  return null;
+}
+
 /** Why the patrol holds now, checked before anything is read, or null. */
 export function holdReason(facts: HoldFacts): HoldReason | null {
   if (patrolQuietUntil(facts.now, facts.quietHours, facts.timeZone) !== null) return "quiet_hours";
@@ -130,7 +150,7 @@ export type RaiseVerdict =
     };
 
 /** The least confidence an observation needs to be told. */
-export const MIN_CONFIDENCE = 0.6;
+const MIN_CONFIDENCE = 0.6;
 
 /**
  * Whether the patrol may tell an observation now, by its own record. An

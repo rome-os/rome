@@ -28,8 +28,8 @@ export interface PatrolTask {
   /** Days its owner has kept it waiting, when it waits on them. */
   waitingDays?: number;
   updated: string;
-  /** Whether its Concierge chat is the main chat. A topic chat's task is listed without its chat's details. */
-  inMainChat: boolean;
+  /** Set when a topic chat started it: the patrol names it by its title only, never by that chat's details. */
+  fromTopicChat?: true;
 }
 
 /** A calendar event, as the patrol reads it: personal data, told only with its source named. */
@@ -73,12 +73,14 @@ export interface PatrolInput {
   observations: PatrolObservationView[];
   /** What alerts, digests and the patrol told lately. For understanding only. */
   alreadyTold: { kind: string; at: string; topic: string; line: string }[];
+  /** When the patrol next runs at a time it may speak, in the owner's zone, or null when not within a day. */
+  nextRun: string | null;
   /** Messages the patrol may still send today. */
   messagesLeftToday: number;
 }
 
 /** The sources a patrol message may be about. Follow events and topic chats are for understanding only. */
-export const SPEAKABLE_SOURCES: readonly ObservationSource[] = [
+const SPEAKABLE_SOURCES: readonly ObservationSource[] = [
   "memory",
   "main_chat",
   "tasks",
@@ -89,7 +91,7 @@ export const SPEAKABLE_SOURCES: readonly ObservationSource[] = [
 export const NAMED_SOURCES: readonly ObservationSource[] = ["calendar"];
 
 /** Observations one run writes at most. */
-export const MAX_OBSERVATIONS_PER_RUN = 20;
+const MAX_OBSERVATIONS_PER_RUN = 20;
 /** The longest line a brief hands the Concierge, and the longest message it may send. */
 export const MAX_BRIEF_CHARS = 280;
 const MAX_SUMMARY_CHARS = 160;
@@ -105,7 +107,7 @@ const MAX_RECHECK_MS = 24 * 60 * 60_000;
 /** The run's prompt: the rules' facts first, everything else as JSON data. */
 export function buildPatrolPrompt(input: PatrolInput): string {
   return [
-    `Now: ${input.now}. Messages you may still send today: ${input.messagesLeftToday}.`,
+    `Now: ${input.now}. Your next run that may speak: ${input.nextRun ?? "not within a day"}. Messages you may still send today: ${input.messagesLeftToday}.`,
     "Your observations so far, each with `held` set when code will not let it be told now:",
     JSON.stringify({ observations: input.observations }, null, 1),
     "What the guardian was told lately by alerts, digests and you. It is for understanding only: never raise it again.",
@@ -126,7 +128,7 @@ export function buildPatrolPrompt(input: PatrolInput): string {
 }
 
 /** An observation as the patrol wrote it, checked and bounded. */
-export type ObservationDraft = ObservationWrite;
+type ObservationDraft = ObservationWrite;
 
 /** What the patrol decided, checked and bounded. */
 export interface PatrolOutput {

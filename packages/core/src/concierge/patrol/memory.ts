@@ -6,7 +6,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /** The files the patrol reads, relative to the memory directory. */
-export const PATROL_MEMORY_FILES = ["MEMORY.md", "relationship/GUARDIAN.md"] as const;
+const PATROL_MEMORY_FILES = ["MEMORY.md", "relationship/GUARDIAN.md"] as const;
 
 /**
  * The notes' text, each under its file name, and when the newest of them
