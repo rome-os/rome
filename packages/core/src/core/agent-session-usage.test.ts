@@ -375,7 +375,6 @@ describe("AgentSession turn usage", () => {
       "defer",
       "say",
       "propose_routine",
-      "connect_account",
       "share_location",
       "show_card",
     ]);
@@ -395,8 +394,6 @@ describe("AgentSession turn usage", () => {
     });
     expect(propose).toMatchObject({ isError: true });
     expect(propose.content[0].text).toContain("NOT shown");
-    const connect = await fork.tools.callTool("ask_user", "connect_account", { kind: "github" });
-    expect(connect).toMatchObject({ isError: true });
     // Asking for the guardian's location would park the fork on a card nobody sees.
     const location = await fork.tools.callTool("ask_user", "share_location", { reason: "Why" });
     expect(location).toMatchObject({ isError: true });

@@ -7,6 +7,7 @@ import {
   type Action,
   type ActionConfig,
   type ActionResult,
+  type PendingInteraction,
   type PreviewPayload,
 } from "@rome-os/app-runtime";
 import type { z } from "zod";
@@ -55,7 +56,7 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
     context: ToolContext<D>,
   ) => ToolApproval | undefined | Promise<ToolApproval | undefined>;
   /** The operation, once the turn may ask and the input fits. Returns plain
-   *  data for the agent, or `toolError(...)`. */
+   *  data for the agent, `card(...)`, or `toolError(...)`. */
   run: (input: z.output<S>, context: ToolContext<D>) => Promise<ToolOutcome>;
 }
 
@@ -68,15 +69,39 @@ export interface AgentTool<D> {
   action(deps: D, whoMayAsk: WhoMayAsk): Action;
 }
 
-/** What `run` returns: data the agent reads, or an error. */
-export type ToolOutcome = ToolError | Record<string, unknown>;
+/** What `run` returns: data the agent reads, a card, or an error. */
+export type ToolOutcome = ToolCard | ToolError | Record<string, unknown>;
 
 const OUTCOME = Symbol("agent-tool-outcome");
+
+/** A card core draws in the chat, which the agent waits on. */
+export interface ToolCard {
+  readonly [OUTCOME]: "card";
+  readonly interaction: PendingInteraction;
+}
 
 /** An answer the agent reads as an error. */
 export interface ToolError {
   readonly [OUTCOME]: "error";
   readonly error: string;
+}
+
+/** A card of core's own, such as the connect card, shown in the chat the tool
+ * runs in. The chat draws it only for the tool its entry in `BUILTIN_CARDS`
+ * names (api/routes/webchat.ts). `ask` is what the agent says in its place
+ * where the chat draws no card. */
+export function card(spec: {
+  componentId: string;
+  props: Record<string, unknown>;
+  ask: string;
+}): ToolCard {
+  const render = {
+    kind: "inline",
+    componentId: spec.componentId,
+    props: spec.props,
+    builtin: true,
+  } as PendingInteraction["render"];
+  return { [OUTCOME]: "card", interaction: { appId: "core", promptText: spec.ask, render } };
 }
 
 /** An error the agent can act on, such as a thing the input names that does
@@ -144,7 +169,11 @@ function toolAction<D, S extends z.ZodType>(
 }
 
 function resultOf(outcome: ToolOutcome): ActionResult {
-  if (OUTCOME in outcome) return { status: "error", error: (outcome as ToolError).error };
+  if (OUTCOME in outcome) {
+    return outcome[OUTCOME] === "card"
+      ? { status: "pending_interaction", interaction: (outcome as ToolCard).interaction }
+      : { status: "error", error: (outcome as ToolError).error };
+  }
   return { status: "ok", data: outcome };
 }
 

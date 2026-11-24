@@ -1619,12 +1619,6 @@ async function main() {
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
           (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
-        deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
-        guardianLanguage: async () => {
-          const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
-          return typeof stored === "string" ? stored : null;
-        },
-        deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
         // The turn's audience, narrowed by the chat's as it stands now, so a
         // chat that opens to visitors after the turn started is no longer private.
         privateTurn: async (turn) =>
@@ -1946,6 +1940,13 @@ async function main() {
     connections: {
       connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
       registry: connectionRegistry,
+      deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+      deviceState: (kind, askingDeviceId) =>
+        deviceKindState(deviceLiveRoutes.forKind(kind, { askingDeviceId }), { askingDeviceId }),
+      guardianLanguage: async () => {
+        const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+        return typeof stored === "string" ? stored : null;
+      },
     },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {

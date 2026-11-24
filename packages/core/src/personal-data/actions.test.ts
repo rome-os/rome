@@ -197,7 +197,7 @@ describe("personal-data actions", () => {
     reportHealth("unknown", false);
     const off = (await query()) as { data: { connection: { next?: string } } };
     expect(off).toMatchObject({ data: { connection: { state: "off", kind: "apple_health" } } });
-    expect(off.data.connection.next).toContain('connect_account and kind "apple_health"');
+    expect(off.data.connection.next).toContain('system:connect_service and kind "apple_health"');
     reportHealth("denied", true);
     const broken = (await query()) as { data: { connection: { next?: string } } };
     expect(broken).toMatchObject({ data: { connection: { state: "broken" } } });
@@ -270,7 +270,7 @@ describe("personal-data actions", () => {
         connection: {
           device: { id: "dev-asking" },
           state: "off",
-          next: expect.stringContaining('connect_account and kind "apple_health"'),
+          next: expect.stringContaining('system:connect_service and kind "apple_health"'),
         },
       },
     });

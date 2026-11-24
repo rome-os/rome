@@ -104,7 +104,7 @@ describe("device actions", () => {
                 title: "Apple Health",
                 personal: true,
                 state: "off",
-                next: expect.stringContaining('connect_account and kind "apple_health"'),
+                next: expect.stringContaining('system:connect_service and kind "apple_health"'),
                 operations: [{ name: "health.stats", access: "read", description: "Aggregates." }],
               },
               {
@@ -305,7 +305,7 @@ describe("device actions", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with connect_account and kind "device" when connect_account lists it, otherwise ask the guardian to turn on Live access in the Rome app on their device.',
+        'live_off: Live access to Device on iPhone is off. Offer to turn it on: in the guardian\'s own private chat, show the card with system:connect_service and kind "device", otherwise ask the guardian to turn on Live access in the Rome app on their device.',
     });
     expect(calls).toEqual([]);
   });
@@ -366,7 +366,7 @@ describe("device actions", () => {
     );
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^live_off: .*connect_account and kind "device"/),
+      error: expect.stringMatching(/^live_off: .*system:connect_service and kind "device"/),
     });
     expect(calls).toEqual([]);
   });
@@ -467,6 +467,24 @@ describe("device actions", () => {
     expect(result).toEqual({
       status: "error",
       error: "invalid_args: device.status takes no arguments.",
+    });
+  });
+
+  it("names the connect card's tool by its name in a shipped phone's error", async () => {
+    devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
+    answer = {
+      ok: false,
+      code: "live_off",
+      message: 'Offer the connect card: connect_account with kind "apple_health".',
+    };
+    const result = await engine.run(
+      DEVICE_RUN_ACTION,
+      { operation: "device.status", args: {} },
+      { audience: "private" },
+    );
+    expect(result).toEqual({
+      status: "error",
+      error: 'live_off: Offer the connect card: system:connect_service with kind "apple_health".',
     });
   });
 });

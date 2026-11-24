@@ -10,6 +10,7 @@ import type { ActionRegistry, ActionResult } from "../../apps/actions/types.js";
 import { changeRefusalReason, type ToolTurn } from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
+import { CONNECT_SERVICE } from "../agent-tools.js";
 import { connectStep } from "./connect-step.js";
 import {
   askingDeviceOf,
@@ -246,7 +247,10 @@ async function runOperation(
           : "Answer from what you have, such as synced personal data, and say how fresh it is."),
     };
   }
-  return { status: "error", error: `${answer.code}: ${answer.message}` };
+  // Shipped phone apps name the connect card's tool by its older name, which
+  // no session offers as a tool of its own.
+  const message = answer.message.replaceAll("connect_account", CONNECT_SERVICE);
+  return { status: "error", error: `${answer.code}: ${message}` };
 }
 
 function target(connection: DeviceConnection) {

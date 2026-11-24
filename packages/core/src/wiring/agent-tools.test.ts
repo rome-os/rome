@@ -10,6 +10,7 @@ import {
 // Agents, agent prompts and saved routines call these names.
 const NAMES = [
   "system:read_connections",
+  "system:connect_service",
   "system:disconnect_service",
   "system:list_routine_runs",
   "system:read_routine_run",
@@ -22,6 +23,10 @@ const NAMES = [
 describe("core's agent tools", () => {
   it("lists every tool under the name agents and saved routines call it by", () => {
     expect([...agentToolNames].sort()).toEqual([...NAMES].sort());
+  });
+
+  it("runs connect_account, which shipped phones name, as system:connect_service", () => {
+    expect(agentToolOlderNames.get("connect_account")).toBe("system:connect_service");
   });
 
   it("maps each older name to one tool, never to another tool's own name", () => {

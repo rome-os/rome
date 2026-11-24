@@ -28,9 +28,6 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
-import { connectAccountTools } from "./connect-account-tool.js";
-import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
-import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
 import { showCardTools } from "./show-card-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
@@ -57,12 +54,6 @@ export interface RomeToolPortsDeps {
   /** Each older name a core agent tool took over, to the tool's name
    *  (wiring/agent-tools.ts). When absent, none. */
   olderNames?: ReadonlyMap<string, string>;
-  /** The device kinds `connect_account` connects. When absent, none. */
-  deviceKinds?: () => readonly DeviceKind[];
-  /** How a device kind stands for a turn, on its asking device alone when it has one. */
-  deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
-  /** The guardian's language (`en`, `zh-CN`), which a device connect card's words follow. */
-  guardianLanguage?: () => Promise<string | null>;
   /** Whether a turn is read by the guardian alone. When absent, none is. */
   privateTurn?: PrivateTurn;
 }
@@ -320,20 +311,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           gate: routineActivation(turn),
           runAction: (name: string, input: unknown): Promise<ActionResult> =>
             actions.run(turn, name, input),
-        }),
-        // A session whose own tools already show a connect card (the
-        // Concierge's `connect_card`) keeps that one for the kinds Rome
-        // connects itself, so the agent has one way to ask for each, and gets
-        // `connect_account` for device kinds alone, which that card does not
-        // connect.
-        ...connectAccountTools({
-          widgets: turn.widgets,
-          hasSpeaker,
-          devices: deps.deviceKinds?.(),
-          deviceState: (kind) =>
-            deps.deviceState?.(kind, { askingDeviceId: askingDeviceOf(turn.threadContext()) }),
-          language: deps.guardianLanguage,
-          devicesOnly: provided.some((tool) => tool.name === "connect_card"),
         }),
         ...shareLocationTools({
           turn,

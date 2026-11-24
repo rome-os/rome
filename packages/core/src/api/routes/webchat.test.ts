@@ -9922,18 +9922,81 @@ describe("Webchat API", () => {
       }
     });
 
-    // Core's connect card: only connect_account may mount it, and core builds
-    // its description from the connection kind, so no tool can supply one.
+    // Core's connect card comes only from `system:connect_service`, which core
+    // registers, run through `execute_action` by its name or its older name.
+    // Core builds its description from the connection kind, so no tool can
+    // supply one.
     it.each([
-      ["persists", "connect_account", true],
-      ["rejects", "connector:connector_connect", false],
-    ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
-      const sessionId = `sess-connect-${tool}`;
+      [
+        "persists",
+        "execute_action",
+        "system:connect_service",
+        "system:connect_service",
+        "core",
+        true,
+      ],
+      ["persists", "execute_action", "connect_account", "system:connect_service", "core", true],
+      [
+        "rejects",
+        "execute_action",
+        "system:connect_service",
+        "system:connect_service",
+        "system",
+        false,
+      ],
+      [
+        "rejects",
+        "execute_action",
+        "system:read_connections",
+        "system:read_connections",
+        "core",
+        false,
+      ],
+      ["rejects", "execute_action", "core:device_run", "core:device_run", "core", false],
+      ["rejects", "connect_account", undefined, "system:connect_service", "core", false],
+      [
+        "rejects",
+        "connector:connector_connect",
+        undefined,
+        "system:connect_service",
+        "core",
+        false,
+      ],
+    ])("%s a connect card from %s naming %s, with %s owned by %s", async (_label, tool, called, registered, ownerId, persisted) => {
+      deps.actionRegistry.register(
+        {
+          config: {
+            name: registered,
+            type: "system",
+            description: registered,
+            complexity: "simple",
+            speed: "fast",
+            reliability: "high",
+            sideEffects: "write",
+          },
+          inputSchema: { type: "object", properties: {} },
+          execute: async () => ({ status: "ok", data: {} }),
+        },
+        ownerId === "core"
+          ? undefined
+          : {
+              kind: "action",
+              ownerType: "app",
+              ownerId,
+              publicName: registered,
+              aliases: [],
+              sourcePath: "",
+            },
+      );
+      const sessionId = `sess-connect-${tool}-${called}-${ownerId}`;
       await deps.webchatRepo.createSession(sessionId, "Connect card");
       const { runtime, routes } = createWebchatRuntime(deps);
-      const toolUseId = `connect-${tool}`;
+      const toolUseId = `connect-${tool}-${called}-${ownerId}`;
 
       await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        if (called) {
+          emit({ type: "tool_use", id: toolUseId, tool, input: { action_name: called } });
+        }
         emit({
           type: "tool_result",
           tool,

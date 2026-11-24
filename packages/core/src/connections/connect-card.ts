@@ -39,7 +39,7 @@ export interface DeviceKindState {
   askingDeviceId?: string;
 }
 
-/** A live route's pointer as `connect_account` reads it. */
+/** A live route's pointer as `system:connect_service` reads it. */
 export function deviceKindState(pointer: LivePointer, turn: LiveTurn): DeviceKindState {
   return {
     state: pointer.state,
@@ -168,7 +168,7 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   const rank = { working: 0, off: 1, broken: 2 } as const;
   const kinds = new Map<string, DeviceKind>();
   // A kind's summary is the first one reported in device-id order, whatever
-  // each connection's state, so `connect_account`'s description does not
+  // each connection's state, so `system:connect_service`'s description does not
   // change when the devices' states do.
   const summaries = new Map<string, string>();
   for (const connection of connections) {
@@ -196,32 +196,35 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   return [...kinds.values()];
 }
 
-/** The connection kind `connect_account` was asked for, or why it can't connect it. */
+/** The connection kind `system:connect_service` was asked for, or why it can't connect it. */
 export function parseConnectAccountInput(
   input: unknown,
   devices: readonly DeviceKind[] = [],
-  options: { devicesOnly?: boolean } = {},
 ):
   | { ok: true; kind: OAuthProvider; device?: undefined }
   | { ok: true; kind: string; device: DeviceKind }
   | { ok: false; error: string } {
   const kind = (input as { kind?: unknown } | null)?.kind;
-  const kinds = options.devicesOnly ? [] : connectableKinds();
+  const kinds = connectableKinds();
   if (typeof kind === "string" && kinds.includes(kind as OAuthProvider)) {
     return { ok: true, kind: kind as OAuthProvider };
   }
   const device = devices.find((d) => d.kind === kind);
   if (device) return { ok: true, kind: device.kind, device };
   const all = [...kinds, ...devices.map((d) => d.kind)];
-  return { ok: false, error: `kind must be one of ${all.map((k) => `"${k}"`).join(", ")}.` };
+  return {
+    ok: false,
+    error:
+      `kind must be one of ${all.map((k) => `"${k}"`).join(", ")}. ` +
+      "Any other kind, the guardian connects in Settings › Connections.",
+  };
 }
 
 /**
  * What asking the guardian to connect one kind comes to, wherever it is
- * asked from. `card` is the connect card's props, for the chat to draw;
- * `noCard` is what the agent says instead where no card draws; `shown` is what
- * it reads once the card is up. `answer` is said with no card: the kind
- * already works, or it cannot be connected here.
+ * asked from. `card` is the connect card's props, for the chat to draw, and
+ * `ask` what the card asks of the guardian, in their words. `answer` is said
+ * with no card: the kind already works, or it cannot be connected here.
  */
 export type ConnectCardRequest =
   | { status: "refused"; error: string }
@@ -229,8 +232,7 @@ export type ConnectCardRequest =
   | {
       status: "card";
       props: Record<string, unknown>;
-      noCard: string;
-      shown: string;
+      ask: string;
     };
 
 /** A request that names a kind the card connects. */
@@ -244,8 +246,6 @@ export interface ConnectCardSources {
   deviceState?: (kind: string) => DeviceKindState | undefined;
   /** The guardian's language, which a device card's words follow. */
   language?: () => Promise<string | null>;
-  /** Only device kinds, beside a session's own card for the rest. */
-  devicesOnly?: boolean;
 }
 
 /** The connect card for the kind `input` names, or why there is none. */
@@ -254,7 +254,7 @@ export async function connectCardRequest(
   sources: ConnectCardSources,
 ): Promise<ConnectCardRequest> {
   const devices = sources.devices ?? [];
-  const parsed = parseConnectAccountInput(input, devices, { devicesOnly: sources.devicesOnly });
+  const parsed = parseConnectAccountInput(input, devices);
   if (!parsed.ok) return { status: "refused", error: parsed.error };
   if (!parsed.device) return oauthCardRequest(parsed.kind);
   // A device kind that already works needs no card: read as it stands now.
@@ -266,15 +266,6 @@ export async function connectCardRequest(
     };
   }
   return deviceCardRequest(parsed.device, now?.askingDeviceId, await sources.language?.());
-}
-
-/** The card's closing words for the agent: it waits for the guardian. */
-function cardShown(label: string): string {
-  return (
-    `The card to connect ${label} has been shown to the guardian. Whether they connected it ` +
-    "or dismissed the card arrives as the next turn's prompt — do not call any further tools " +
-    "or send another message until then."
-  );
 }
 
 /** The connect card for a device kind. Its Connect opens the device's page,
@@ -298,10 +289,7 @@ function deviceCardRequest(
       device: true,
       ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
     },
-    noCard:
-      "This conversation cannot show the connect card. Ask the guardian, in a message, " +
-      `to turn on ${device.label} in the Rome app on their device, then wait for their reply.`,
-    shown: cardShown(device.label),
+    ask: `Turn on ${device.label} in the Rome app on your device.`,
   };
 }
 
@@ -322,32 +310,7 @@ function oauthCardRequest(kind: OAuthProvider): ConnectCardAnswer {
   return {
     status: "card",
     props: { kind },
-    noCard:
-      "This conversation cannot show the connect card. Ask the guardian, in a message, " +
-      `to connect ${label} in Settings › Connections, then wait for their reply.`,
-    shown: cardShown(label),
-  };
-}
-
-/**
- * What `connect_account` hands back for a request. Where a widget shows, the
- * turn waits on the connect card; `builtin: true` marks it as core's own,
- * which the drain checks against the tool that emitted it. Otherwise the
- * model asks the guardian in a message.
- */
-export function connectCardToolOutput(request: ConnectCardAnswer, widgetsShow: boolean): unknown {
-  if (request.status === "answer") return request.message;
-  if (!widgetsShow) return request.noCard;
-  return {
-    pendingInteraction: true,
-    appId: "core",
-    render: {
-      kind: "inline",
-      componentId: CONNECT_CARD_ID,
-      props: request.props,
-      builtin: true,
-    },
-    message: request.shown,
+    ask: `Connect ${label} to Rome, from Settings › Connections.`,
   };
 }
 

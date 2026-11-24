@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   type ConnectCardSources,
   connectCardRequest,
-  connectCardToolOutput,
   connectCardUiFromProps,
   type DeviceKind,
   deviceKinds,
@@ -12,26 +11,19 @@ import {
 } from "./connect-card.js";
 import type { DeviceConnection } from "./device/repository.js";
 
-/** What `connect_account` hands back for `kind`, where a card shows or not. */
-async function toolOutput(
-  kind: string,
-  widgetsShow: boolean,
-  sources: ConnectCardSources = {},
-): Promise<unknown> {
+/** The connect card asked for `kind`, where a card connects it. */
+async function cardFor(kind: string, sources: ConnectCardSources = {}) {
   const request = await connectCardRequest({ kind }, sources);
-  if (request.status === "refused") throw new Error(request.error);
-  return connectCardToolOutput(request, widgetsShow);
+  if (request.status !== "card") throw new Error(`expected a card, got ${request.status}`);
+  return request;
 }
 
 /** The same for a device kind, in the guardian's `language`. */
-function deviceOutput(device: DeviceKind, widgetsShow: boolean, language?: string | null) {
-  return toolOutput(device.kind, widgetsShow, {
-    devices: [device],
-    language: async () => language ?? null,
-  });
+function deviceCard(device: DeviceKind, language?: string | null) {
+  return cardFor(device.kind, { devices: [device], language: async () => language ?? null });
 }
 
-describe("connect_account", () => {
+describe("the connect card", () => {
   // Where Rome Cloud is set up, as on a provisioned instance.
   beforeEach(() => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
@@ -40,26 +32,24 @@ describe("connect_account", () => {
     rs.unstubAllEnvs();
   });
 
-  it("shows a card every reader can draw, which the agent waits on", async () => {
-    expect(await toolOutput("github", true)).toMatchObject({
-      pendingInteraction: true,
-      appId: "core",
-      render: { componentId: "connect-card", props: { kind: "github" }, builtin: true },
-    });
+  it("shows a card every reader can draw", async () => {
+    expect((await cardFor("github")).props).toEqual({ kind: "github" });
     const ui = connectCardUiFromProps({ kind: "github" });
     expect(ui && checkWidgetUi(ui)).toEqual([]);
   });
 
-  it("asks the model to send the guardian to Settings where no card shows", async () => {
-    expect(await toolOutput("github", false)).toContain("Settings › Connections");
+  it("asks the guardian to connect in Settings where no card shows", async () => {
+    expect((await cardFor("github")).ask).toContain("Settings › Connections");
   });
 
   it("says why instead of showing a card whose Connect could only fail", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
     rs.stubEnv("PANTHEON_DOMAIN", "");
-    const output = await toolOutput("github", true);
-    expect(typeof output).toBe("string");
-    expect(output).toContain("Settings › Connections");
+    const request = await connectCardRequest({ kind: "github" }, {});
+    expect(request).toMatchObject({
+      status: "answer",
+      message: expect.stringContaining("Settings › Connections"),
+    });
   });
 
   it("refuses a kind Rome does not connect itself", () => {
@@ -68,7 +58,7 @@ describe("connect_account", () => {
   });
 });
 
-describe("connect_account for a device kind", () => {
+describe("the connect card for a device kind", () => {
   const row = (
     deviceId: string,
     capability: string,
@@ -129,12 +119,10 @@ describe("connect_account for a device kind", () => {
 
   it("shows a card every reader can draw, whose events say the kind is a device's", async () => {
     const device = { kind: "apple_health", label: "Apple Health" };
-    expect(await deviceOutput(device, true)).toMatchObject({
-      pendingInteraction: true,
-      render: {
-        componentId: "connect-card",
-        props: { kind: "apple_health", label: "Apple Health", device: true },
-      },
+    expect((await deviceCard(device)).props).toMatchObject({
+      kind: "apple_health",
+      label: "Apple Health",
+      device: true,
     });
     const ui = connectCardUiFromProps({
       kind: "apple_health",
@@ -159,7 +147,7 @@ describe("connect_account for a device kind", () => {
         connect: "Connect",
       },
     });
-    expect(await deviceOutput(device, false)).toContain("Rome app");
+    expect((await deviceCard(device)).ask).toContain("Rome app");
   });
 
   it("words the card as the capability's page does, in the guardian's language where the device has it", async () => {
@@ -173,12 +161,7 @@ describe("connect_account for a device kind", () => {
         "zh-CN": { title: "日历", summary: "你的 Rome 会读取你的日历。" },
       },
     };
-    const props = async (language: string | null) =>
-      (
-        (await deviceOutput(device, true, language)) as {
-          render: { props: Record<string, unknown> };
-        }
-      ).render.props;
+    const props = async (language: string | null) => (await deviceCard(device, language)).props;
     expect(await props("zh-CN")).toMatchObject({
       title: "日历",
       summary: "你的 Rome 会读取你的日历。",

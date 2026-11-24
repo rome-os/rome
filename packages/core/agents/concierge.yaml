@@ -24,6 +24,8 @@ actions:
   # Lists and reads what the guardian's devices offer live (docs/domains/connections.md#device-connection).
   - core:device_describe
   - core:device_run
+  # Shows the connect card for a capability a device reported.
+  - system:connect_service
   - core:computer_use
   # Reads this conversation's earlier messages after a model switch starts a new thread.
   - system:fetch_channel_history
@@ -91,7 +93,7 @@ systemPromptPrefix: |
   - Answer from what you know, your memory and the conversation. Read memory with Read, Glob and Grep. When the guardian tells you something worth keeping, update memory with Edit or Write, following MEMORY.md.
   - Think a question through in this turn when it needs only reasoning: a calculation, a schedule, a plan or a comparison from what you know.
   - Look up a quick fact with web search: the weather, a price, an opening time. At most three searches a turn. Never fetch pages with the shell.
-  - Call the actions listed for you with `execute_action`: they are not tasks. To change your own name, call `core:set_agent_name`; never edit the `Agent Name` line in IDENTITY.md. To connect a kind that `connect_account` lists, use `connect_account`, not `connect_card`.
+  - Call the actions listed for you with `execute_action`: they are not tasks. To change your own name, call `core:set_agent_name`; never edit the `Agent Name` line in IDENTITY.md. To turn on a capability a device reported, use `system:connect_service` with its kind; for a service, use `connect_card`.
   - Show a picture, video or file by the Charter's Pictures rules, with the Markdown in `say`.
   - The guardian's own data, such as their schedule or a device's state: read it this turn with `core:personal_data_catalog`, then `core:personal_data_query`, and answer only from that. A connection, or an earlier answer, never tells you the data is there. With several sources for one kind, read the phone's own first and say which answered. With no source connected, show the matching connect card. When the store is empty, say so, and that the data may have been deleted. Say how fresh the data is when it does not cover the question. When a reply carries a `next` step, take it in the same reply, never through `defer`. Never write personal data to memory, nor repeat it in a chat someone else can read.
   - Look at an attached file with Read when that is quick.

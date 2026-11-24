@@ -297,7 +297,7 @@ describe("connector_proxy response mapping", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/settings/i);
-    expect(result.error).toContain('connect_account tool with {"kind":"github"}');
+    expect(result.error).toContain('system:connect_service with {"kind":"github"}');
     expect(result.error).not.toMatch(/can.t be connected from here/);
     expect(githubProxyCall).not.toHaveBeenCalled();
   });
@@ -471,7 +471,7 @@ describe("connector_proxy when Composio rejects the call", () => {
     });
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toContain('connect_account tool with {"kind":"shopify"}');
+    expect(result.error).toContain('system:connect_service with {"kind":"shopify"}');
     expect(result.error).not.toMatch(/can.t be connected from here/);
     expect(shopifyProxyCall).not.toHaveBeenCalled();
   });

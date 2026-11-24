@@ -46,7 +46,7 @@ export interface LiveTurn {
 export type LivePointer =
   | {
       id: string;
-      /** The connection's capability, the kind `connect_account` takes for it. */
+      /** The connection's capability, the kind `system:connect_service` takes for it. */
       kind: string;
       title: string;
       device: { id: string; name: string | null };
@@ -59,7 +59,7 @@ export type LivePointer =
   | {
       state: "not_connected";
       connect: string;
-      /** The kind `connect_account` takes, when another device names it. */
+      /** The kind `system:connect_service` takes, when another device names it. */
       kind?: string;
       /** The asking device, which has no such connection. */
       device?: { id: string };

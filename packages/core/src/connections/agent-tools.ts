@@ -1,12 +1,20 @@
 // What agents do with connections: read what is connected and whether it
-// works, and disconnect one. The Connections page reads the same projection
-// (`GET /api/connections`) and disconnects through the same operation
-// (disconnect.ts). Connecting is `connect_account`'s card (connect-card.ts).
-// Vocabulary: docs/domains/connections.md. How a tool is declared:
+// works, ask the guardian to connect a service, and disconnect one. The
+// Connections page reads the same projection (`GET /api/connections`) and
+// disconnects through the same operation (disconnect.ts); the connect card
+// (connect-card.ts) starts the page's setup. Vocabulary:
+// docs/domains/connections.md. How a tool is declared:
 // docs/concepts/actions.md#core-agent-tools.
 
 import { z } from "zod";
-import { agentToolsOf, toolError } from "../apps/actions/agent-tool.js";
+import { agentToolsOf, card, toolError } from "../apps/actions/agent-tool.js";
+import {
+  CONNECT_CARD_ID,
+  connectCardRequest,
+  type DeviceKind,
+  type DeviceKindState,
+} from "./connect-card.js";
+import { askingDeviceOf } from "./device/live-route.js";
 import { disconnectConnection } from "./disconnect.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { CapabilityStatus, ConnectionState } from "./types.js";
@@ -33,6 +41,12 @@ export interface ConnectionToolDeps {
   /** The connections, as `GET /api/connections` lists them. */
   connections: () => Promise<ListedConnection[]>;
   registry: Pick<ConnectionRegistry, "all" | "getDescriptor" | "disconnect" | "remove">;
+  /** The device kinds devices reported, which the connect card connects too. */
+  deviceKinds?: () => readonly DeviceKind[];
+  /** How a device kind stands, on the device the guardian asks from alone when there is one. */
+  deviceState?: (kind: string, askingDeviceId: string | undefined) => DeviceKindState | undefined;
+  /** The guardian's language, which a device card's words follow. */
+  guardianLanguage?: () => Promise<string | null>;
 }
 
 const agentTool = agentToolsOf<ConnectionToolDeps>();
@@ -42,7 +56,7 @@ const connectionId = z.string().describe("The connection's id, from read_connect
 export const readConnections = agentTool({
   name: "system:read_connections",
   description:
-    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it. To connect a kind listed under notConnected, call connect_account with that kind; for a kind connect_account does not take, the guardian connects it in Settings › Connections",
+    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it. To connect a kind listed under notConnected, call system:connect_service with that kind; for a kind it does not take, the guardian connects it in Settings › Connections",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps }) => {
@@ -53,6 +67,37 @@ export const readConnections = agentTool({
         .filter((c) => c.id === null)
         .map((c) => ({ kind: c.connectionKind, name: c.kindLabel })),
     };
+  },
+});
+
+/** The name the connect card's entry in `BUILTIN_CARDS` names (api/routes/webchat.ts). */
+export const CONNECT_SERVICE = "system:connect_service";
+
+export const connectService = agentTool({
+  name: CONNECT_SERVICE,
+  // Shipped phone apps still tell the agent to call `connect_account`.
+  olderNames: ["connect_account"],
+  description:
+    "Ask the guardian to connect an account Rome connects itself, such as GitHub or Google, or to turn on a capability one of their devices reported, such as Apple Health on an iPhone, through a card in the chat they press to finish. Use it when a task needs one of these and it is not connected, when the guardian asks to connect one, or when a call or a device says not_connected or live_off. It answers at once that a device kind already works, with no card. Whether the guardian connected it or dismissed the card comes back as the next turn. A kind it does not take, such as Slack or Telegram, the guardian connects in Settings › Connections. A device kind turns on one capability, in the Rome app of a device that already reported it: it never adds, pairs or wakes a device, so for an offline device ask the guardian to bring it online instead. Only in the guardian's private chat, in a turn their own message started. Check what is connected with system:read_connections",
+  sideEffects: "write",
+  input: z.object({
+    kind: z
+      .string()
+      .describe(
+        'The kind to connect: one Rome connects itself, such as "github" or "google", or a device kind such as "apple_health". A kind it does not take is answered with the kinds it does.',
+      ),
+  }),
+  // Where the chat draws no card, the agent asks the guardian in a message.
+  run: async (input, { deps, turn }) => {
+    const askingDeviceId = askingDeviceOf(turn.channelContext);
+    const request = await connectCardRequest(input, {
+      devices: deps.deviceKinds?.() ?? [],
+      deviceState: (kind) => deps.deviceState?.(kind, askingDeviceId),
+      language: deps.guardianLanguage,
+    });
+    if (request.status === "refused") return toolError(request.error);
+    if (request.status === "answer") return { message: request.message };
+    return card({ componentId: CONNECT_CARD_ID, props: request.props, ask: request.ask });
   },
 });
 
@@ -92,7 +137,7 @@ export const disconnectService = agentTool({
 });
 
 /** The Connections page's agent tools. */
-export const connectionTools = [readConnections, disconnectService];
+export const connectionTools = [readConnections, connectService, disconnectService];
 
 /** What the agent needs of one connection: what it is, whether it works,
  *  the account it reaches and what it lets Rome do. No credential is listed. */
