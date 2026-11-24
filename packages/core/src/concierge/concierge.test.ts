@@ -4078,6 +4078,21 @@ describe("Concierge system turns", () => {
     // A plain system turn counts nothing.
     expect(await service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(true);
   });
+
+  it("counts a question card the host showed in the counted turn's chat", async () => {
+    let service: ConciergeService | null = null;
+    service = new ConciergeService({
+      sessionRepository: { current: async () => ({ id: "runtime-1" }) },
+      webchatRepo: { getSession: async () => null },
+      settingsRepo: { get: async () => null },
+      runBackendTurn: async (_params: BackendTurnParams, options?: SystemTurnOptions) => {
+        options?.shouldRun?.();
+        service?.cardShown(CONCIERGE_CHAT_ID);
+        return "completed";
+      },
+    } as unknown as ConciergeDeps);
+    expect((await service.runCountedTurn(CONCIERGE_CHAT_ID, "lines")).said).toBe(1);
+  });
 });
 
 describe("Concierge pushes", () => {

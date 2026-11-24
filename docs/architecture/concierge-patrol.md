@@ -34,7 +34,7 @@ Solid lines are one run. Dashed lines are what a run reads or sets for a later o
 
 ### Trigger
 
-- **One patrol routine serves the guardian.** It fires `core:concierge_patrol` every `CONCIERGE_PATROL_INTERVAL_HOURS` hours, three by default, at 45 minutes past the hour in the guardian's zone. It shows in the routine list like the digest's routines and works for no chat, so no task list shows it.
+- **One patrol routine serves the guardian.** It fires `core:concierge_patrol` every `CONCIERGE_PATROL_INTERVAL_HOURS` hours, three by default and always a divisor of 24 below it, at 45 minutes past the hour in the guardian's zone. It shows in the routine list like the digest's routines and works for no chat, so no task list shows it.
 - **The guardian's pause is final.** Boot keeps the routine's trigger in step with the interval and never turns it back on. A routine the guardian deleted comes back paused. A paused patrol also skips the wake-ups it set itself.
 - **The patrol serves only the guardian.** A dashboard admin's Concierge has no patrol.
 
@@ -62,13 +62,13 @@ Solid lines are one run. Dashed lines are what a run reads or sets for a later o
 ### Observations
 
 - **The patrol keeps one observation per topic,** with its kind, its source, whether Rome holds the fact or the patrol drew it, a confidence, a status, an expiry and the history of each time it was told and what came of it.
-- **An observation holds a pointer, never the content of personal data.** Code replaces a calendar event's title or place in its summary, and the patrol reads the calendar again on every run.
+- **An observation holds a pointer, never the content of personal data.** Code takes a calendar event's title or place out of every summary, whatever source the patrol named, and the patrol reads the calendar again on every run.
 - **A tell is adopted when the guardian writes in the main chat within six hours, and ignored when they do not.** Dream reads the observed ones from no personal-data source, and keeps only stable patterns in `GUARDIAN.md`.
 
 ### Speaking
 
-- **Code decides whether the patrol may say what it chose.** The item must be an open observation the patrol holds, observed rather than inferred, with a confidence of at least 0.6, from a speakable source, with a message left today. A topic told is not told again for three days, a topic ignored twice not until it changes, and a muted one not at all. A topic changes when its due time comes within a day since it was told, or its task moved on.
-- **The Concierge gets one brief and says one thing.** The brief holds the line, the topic, its kind and source, the length cap, and a task the Concierge may offer with a Start button, inside a fence marked untrusted. The Concierge tells it in one `say` in its own words, or as one question card when a task is offered, and starts that task only when the guardian taps Start. The patrol starts no task.
+- **Code decides whether the patrol may say what it chose.** The item must be an open observation the patrol holds, observed rather than inferred, with a confidence of at least 0.6, from a speakable source, with a message left today. A topic told is not told again for three days, a topic ignored twice not until it changes, and a muted one not at all. A topic changes when its due time comes within a day since it was told, or its task moved on. Code keeps what the patrol may not rewrite: observations of one task share their told history under any topic key, a told topic keeps its due time, and a topic that ended stays ended.
+- **The Concierge gets one brief and says one thing.** The brief holds the line, the topic, its kind and source, the length cap, and whether to offer a task with a Start button, inside a fence marked untrusted. The Concierge tells it in one `say` in its own words, or as one question card that names the task when one is offered, and starts that task only when the guardian taps Start, with a brief it writes from what the card showed. The patrol writes no task brief and starts no task. A card counts as a message, and a tell that offered a task is counted as said.
 - **The speaking turn is the Concierge's own.** It is quiet, its input stays in its trace under "Concierge patrol", it carries no source label, and it pushes at the level of an alert.
 
 ### Volume

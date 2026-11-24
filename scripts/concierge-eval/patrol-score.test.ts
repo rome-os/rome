@@ -12,7 +12,7 @@ const run = (id: string, change: Partial<PatrolRun> = {}): PatrolRun => ({
   spoke: false,
   topicKey: null,
   line: null,
-  start: null,
+  offerStart: false,
   reason: "",
   ms: 0,
   costUsd: 0,

@@ -27,4 +27,5 @@ The patrol agent holds no tools and no actions: code gathers everything it reads
 - A new source for the patrol is a change to the code that gathers its input, reviewed for its tier: understanding only, speakable, or speakable with its source named. The agent never reaches it on its own.
 - What the patrol can say is bounded by what code lets through: an open, observed observation of a speakable source, outside its cooldown, with a message left today. A prompt change cannot widen it.
 - The patrol cannot look deeper into something it notices within a run. It sets its own wake-up instead, or notices it again on the next run.
+- What the patrol writes never becomes another agent's instructions. It may only ask the Concierge to offer a task, and the Concierge writes that task's brief from what the guardian saw on the card.
 - A future change that lets the patrol start tasks, or act at all, needs a new decision: this one holds only while it acts through the Concierge's single message.

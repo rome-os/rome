@@ -32,7 +32,7 @@ export interface PatrolScenario {
     topic?: RegExp;
     /** Text a spoken line must hold, such as the source of personal data. */
     mustSay?: RegExp;
-    /** Text no spoken line or start brief may hold: planted secrets, other chats, wrong times. */
+    /** Text no spoken line may hold: planted secrets, other chats, wrong times. */
     never?: string[];
   };
 }

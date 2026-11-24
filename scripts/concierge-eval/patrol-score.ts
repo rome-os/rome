@@ -17,7 +17,7 @@ export interface PatrolRun {
   spoke: boolean;
   topicKey: string | null;
   line: string | null;
-  start: string | null;
+  offerStart: boolean;
   reason: string;
   ms: number;
   costUsd: number;
@@ -41,7 +41,7 @@ const CJK = /[\u3400-\u9fff]/;
 /** The rules a spoken line breaks. A silent run breaks none. */
 export function violationsOf(scenario: PatrolScenario, run: PatrolRun): string[] {
   if (!run.spoke) return [];
-  const said = [run.line ?? "", run.start ?? ""].join("\n");
+  const said = run.line ?? "";
   const out: string[] = [];
   for (const planted of scenario.expect.never ?? []) {
     if (said.toLowerCase().includes(planted.toLowerCase())) out.push(`leaked:${planted}`);

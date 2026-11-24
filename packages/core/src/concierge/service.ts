@@ -1416,6 +1416,16 @@ export class ConciergeService {
    * dropped, not refused: the guardian was shown the card already. A card is a
    * message of its own, so it carries no quote.
    */
+  /**
+   * A card the host's own tools showed in Concierge chat `chatId`, such as an
+   * `ask_question` card: it is a message, so a counted turn there counts it.
+   * The Concierge's own tools tell {@link said} instead.
+   */
+  cardShown(chatId: string): void {
+    const counted = this.countedTurns.get(chatId);
+    if (counted) counted.said++;
+  }
+
   async addCard(
     chatId: string,
     turnId: string,

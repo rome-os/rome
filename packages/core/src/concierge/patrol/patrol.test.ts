@@ -60,7 +60,7 @@ function setup(options: Options = {}) {
               observations: [],
               decision: "silent",
               reason: "nothing",
-              speak: { topicKey: "", line: "", start: "" },
+              speak: { topicKey: "", line: "", offerStart: false },
               recheckAt: "",
             },
           ),
@@ -210,7 +210,7 @@ const speakAbout = (topicKey: string, line = "Task task-1 has waited on you for 
   ],
   decision: "speak",
   reason: "a task waits",
-  speak: { topicKey, line, start: "" },
+  speak: { topicKey, line, offerStart: false },
   recheckAt: "",
 });
 
@@ -419,6 +419,84 @@ describe("a patrol run", () => {
       (r) => r.key === "concierge-patrol:guardian:recheck",
     );
     expect(fired?.enabled).toBe(false);
+  });
+});
+
+describe("what code keeps of a tell", () => {
+  it("counts a tell sent as a Start card, which no say counted, against the ledger and the cooldown", async () => {
+    const answer = speakAbout("task:task-1:waiting");
+    const s = setup({
+      says: 0,
+      tasks: [waitingTask],
+      answer: () => ({ ...answer, speak: { ...answer.speak, offerStart: true } }),
+    });
+    expect(await s.patrol.run()).toMatchObject({ status: "spoke", said: 1 });
+    expect(s.turns[0]?.prompt).toContain("<offer_start/>");
+    expect(await s.told.messagesSince(new Date(0))).toBe(1);
+    expect((await s.observations.list())[0]?.toldCount).toBe(1);
+  });
+
+  it("records nothing when the Concierge stayed silent on a plain tell", async () => {
+    const s = setup({
+      says: 0,
+      tasks: [waitingTask],
+      answer: () => speakAbout("task:task-1:waiting"),
+    });
+    expect(await s.patrol.run()).toMatchObject({ status: "spoke", said: 0 });
+    expect(await s.told.since(new Date(0))).toEqual([]);
+  });
+
+  it("keeps a task's cooldown when the next run words its topic key anew", async () => {
+    let key = "task:task-1:waiting";
+    const s = setup({
+      ownerMessages: [NOON - HOUR],
+      tasks: [waitingTask],
+      answer: () => speakAbout(key),
+    });
+    await s.patrol.run();
+    key = "task:task-1:needs-you";
+    s.ownerMessages.push(NOON + 2 * HOUR);
+    s.setClock(NOON + 3 * HOUR);
+    expect(await s.patrol.run()).toMatchObject({ status: "silent", hold: "cooldown" });
+    expect(s.turns).toHaveLength(1);
+  });
+
+  it("keeps a told topic's due time, and never reopens one that ended", async () => {
+    const due = (iso: string) => {
+      const answer = speakAbout("loop:tax");
+      answer.observations[0]!.due = iso;
+      answer.observations[0]!.taskId = "";
+      return answer;
+    };
+    let answer = due(new Date(NOON + 5 * 24 * HOUR).toISOString());
+    const s = setup({ ownerMessages: [NOON - HOUR], answer: () => answer });
+    await s.patrol.run();
+    // The next run moves the deadline near, which would end the cooldown.
+    answer = due(new Date(NOON + 6 * HOUR).toISOString());
+    s.ownerMessages.push(NOON + 2 * HOUR);
+    s.setClock(NOON + 3 * HOUR);
+    expect(await s.patrol.run()).toMatchObject({ status: "silent", hold: "cooldown" });
+    const [kept] = await s.observations.list();
+    expect(kept?.dueAt?.getTime()).toBe(NOON + 5 * 24 * HOUR);
+    const { topicKey, kind, source, basis, confidence, summary, taskId, dueAt, expiresAt } = kept!;
+    await s.observations.upsert(
+      {
+        topicKey,
+        kind,
+        source,
+        basis,
+        confidence,
+        summary,
+        taskId,
+        dueAt,
+        expiresAt,
+        status: "done",
+      },
+      new Date(NOON + 3 * HOUR),
+    );
+    s.ownerMessages.push(NOON + 4 * HOUR);
+    s.setClock(NOON + 6 * HOUR);
+    expect(await s.patrol.run()).toMatchObject({ status: "silent", hold: "not_open" });
   });
 });
 

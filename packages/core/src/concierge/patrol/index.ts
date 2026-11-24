@@ -11,6 +11,7 @@ import type { AgentRunnerInterface } from "../../core/types.js";
 import type {
   ConciergeObservationsRepository,
   Observation,
+  ObservationWrite,
 } from "../../db/repositories/concierge-observations.js";
 import type { ConciergeToldRepository } from "../../db/repositories/concierge-told.js";
 import { type RoutinesRepository, toRoutine } from "../../db/repositories/routines.js";
@@ -472,7 +473,13 @@ export function startConciergePatrol(
     }
     await writeState({ lastRunAt: at });
     const output = parsePatrolOutput(raw, { now: at, taskIds, calendar: calendar ?? [] });
-    for (const draft of output.observations) await deps.observations.upsert(draft, new Date(at));
+    const known = new Map(observations.map((o) => [o.topicKey, o] as const));
+    for (const draft of output.observations) {
+      await deps.observations.upsert(
+        keepWhatCodeOwns(draft, known.get(draft.topicKey)),
+        new Date(at),
+      );
+    }
     if (output.recheckAt !== null) {
       await scheduleRecheck(output.recheckAt).catch((error: unknown) =>
         log.warn("patrol could not set its check", { error: messageOf(error) }),
@@ -498,7 +505,7 @@ export function startConciergePatrol(
     if (!observation) return { status: "silent", reason: output.reason, hold: "no_observation" };
     const brief = renderPatrolBrief(
       { ...observation, line: output.speak.line },
-      output.speak.start,
+      output.speak.offerStart,
       guardianNow(at, zone),
     );
     const turn = await service.runCountedTurn(mainChat, brief, {
@@ -508,18 +515,21 @@ export function startConciergePatrol(
       inputLabel: "Concierge patrol",
       pushLevel: "active",
     });
-    if (turn.said > 0) {
+    // A Start card counts as said even where no count reached it: the safe
+    // side is a tell counted that was not, never one missed.
+    const said = Math.max(turn.said, turn.ran && output.speak.offerStart ? 1 : 0);
+    if (said > 0) {
       await deps.told.record({
         kind: "patrol",
         chatId: turn.chatId,
-        messages: turn.said,
+        messages: said,
         items: [{ topic: observation.topicKey, line: output.speak.line }],
         at: new Date(now()),
       });
       await deps.observations.recordOutcome(observation.topicKey, { outcome: "told", at: now() });
     }
-    log.info("patrol spoke", { ran: turn.ran, said: turn.said, kind: observation.kind });
-    return { status: "spoke", topicKey: observation.topicKey, said: turn.said };
+    log.info("patrol spoke", { ran: turn.ran, said, kind: observation.kind });
+    return { status: "spoke", topicKey: observation.topicKey, said };
   };
 
   // One patrol at a time: a fire while one runs waits for it and runs after.
@@ -581,6 +591,23 @@ export function startConciergePatrol(
   );
 
   return { stop: () => {}, run: runOnce };
+}
+
+/**
+ * What the patrol may change of an observation it holds. A topic that ended
+ * stays ended, and one already told keeps its due time, so a rewrite can
+ * neither reopen it nor bring its deadline near to end its cooldown.
+ */
+function keepWhatCodeOwns(
+  draft: ObservationWrite,
+  before: Observation | undefined,
+): ObservationWrite {
+  if (!before) return draft;
+  return {
+    ...draft,
+    ...(before.status !== "open" ? { status: before.status } : {}),
+    ...(before.toldCount > 0 ? { dueAt: before.dueAt } : {}),
+  };
 }
 
 /**

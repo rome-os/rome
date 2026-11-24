@@ -95,7 +95,6 @@ const MAX_OBSERVATIONS_PER_RUN = 20;
 /** The longest line a brief hands the Concierge, and the longest message it may send. */
 export const MAX_BRIEF_CHARS = 280;
 const MAX_SUMMARY_CHARS = 160;
-const MAX_START_BRIEF_CHARS = 1200;
 const MAX_TOPIC_CHARS = 80;
 const MIN_EXPIRY_MS = 60 * 60_000;
 const MAX_EXPIRY_MS = 30 * 24 * 60 * 60_000;
@@ -135,7 +134,8 @@ export interface PatrolOutput {
   observations: ObservationDraft[];
   decision: "silent" | "speak";
   reason: string;
-  speak: { topicKey: string; line: string; start: string | null } | null;
+  /** `offerStart`: a task would help, which the Concierge offers and writes the brief of itself. */
+  speak: { topicKey: string; line: string; offerStart: boolean } | null;
   /** When to look again, epoch milliseconds, or null. */
   recheckAt: number | null;
 }
@@ -216,10 +216,9 @@ export function parsePatrolOutput(
     if (typeof o.summary !== "string" || !o.summary.trim()) continue;
     seen.add(topicKey);
     const source = o.source as ObservationSource;
-    const summary = oneLine(
-      source === "calendar" ? pointerOnly(o.summary, context.calendar) : o.summary,
-      MAX_SUMMARY_CHARS,
-    );
+    // Every summary, whatever source the model named: an observation never
+    // holds a calendar event's words.
+    const summary = oneLine(pointerOnly(o.summary, context.calendar), MAX_SUMMARY_CHARS);
     const confidence = Math.min(1, Math.max(0, Number(o.confidence) || 0));
     const dueAt = timeOf(o.due);
     const asked = timeOf(o.expires);
@@ -244,17 +243,13 @@ export function parsePatrolOutput(
   const said = (value.speak ?? {}) as Record<string, unknown>;
   const topicKey = topicKeyOf(said.topicKey);
   const line = typeof said.line === "string" ? oneLine(said.line, MAX_BRIEF_CHARS) : "";
-  const start =
-    typeof said.start === "string" && said.start.trim()
-      ? said.start.trim().slice(0, MAX_START_BRIEF_CHARS)
-      : null;
   const speaks = value.decision === "speak" && topicKey !== null && line !== "";
   const recheck = timeOf(value.recheckAt);
   return {
     observations,
     decision: speaks ? "speak" : "silent",
     reason: typeof value.reason === "string" ? oneLine(value.reason, 300) : "",
-    speak: speaks ? { topicKey, line, start } : null,
+    speak: speaks ? { topicKey, line, offerStart: said.offerStart === true } : null,
     recheckAt:
       recheck !== null &&
       recheck >= context.now + MIN_RECHECK_MS &&
@@ -267,7 +262,6 @@ export function parsePatrolOutput(
 /** Why code keeps the patrol silent on what it chose, or null when it may speak. */
 export type SpeechHold =
   | "no_observation"
-  | "not_speakable"
   | "no_budget"
   | Exclude<RaiseVerdict, { ok: true }>["reason"];
 
@@ -276,6 +270,27 @@ export type SpeechHold =
  * it holds, from a source it may speak of, that the cooldown lets it tell,
  * with a message left today.
  */
+/**
+ * An observation with the told history of every observation about the same
+ * task, under whatever topic key the patrol wrote: the latest tell, the most
+ * ignores and every outcome. A topic key the model rewords for a task never
+ * starts its cooldown over.
+ */
+export function withToldHistoryOfTask(
+  observation: Observation,
+  observations: readonly Observation[],
+): Observation {
+  if (!observation.taskId) return observation;
+  const same = observations.filter((o) => o.taskId === observation.taskId);
+  const told = same.flatMap((o) => (o.lastToldAt ? [o.lastToldAt.getTime()] : []));
+  return {
+    ...observation,
+    lastToldAt: told.length > 0 ? new Date(Math.max(...told)) : null,
+    ignoredCount: Math.max(...same.map((o) => o.ignoredCount)),
+    outcomes: same.flatMap((o) => o.outcomes),
+  };
+}
+
 export function speechHold(
   speak: PatrolOutput["speak"],
   observations: readonly Observation[],
@@ -284,10 +299,9 @@ export function speechHold(
   if (!speak) return null;
   const observation = observations.find((o) => o.topicKey === speak.topicKey);
   if (!observation) return "no_observation";
-  if (!SPEAKABLE_SOURCES.includes(observation.source)) return "not_speakable";
   if (facts.messagesLeftToday < 1) return "no_budget";
   const verdict = mayRaise(
-    observation,
+    withToldHistoryOfTask(observation, observations),
     facts.now,
     observation.taskId ? facts.taskUpdatedAt(observation.taskId) : null,
   );
@@ -310,12 +324,13 @@ const FENCE_NOTE =
 
 /**
  * The Concierge's quiet turn when the patrol speaks: the one item, its
- * source, the length cap and the task it may suggest, inside an untrusted
- * fence. No text of the item can close the fence early.
+ * source, the length cap and whether to offer a task, inside an untrusted
+ * fence. No text of the item can close the fence early. The patrol writes no
+ * task brief: the Concierge writes its own from the line the guardian sees.
  */
 export function renderPatrolBrief(
   item: { topicKey: string; kind: ObservationKind; source: ObservationSource; line: string },
-  start: string | null,
+  offerStart: boolean,
   now: string,
 ): string {
   const named = NAMED_SOURCES.includes(item.source);
@@ -323,7 +338,7 @@ export function renderPatrolBrief(
     `<patrol_brief untrusted="true" now="${attr(now)}">`,
     FENCE_NOTE,
     `<item topic="${attr(item.topicKey)}" kind="${item.kind}" source="${item.source}"${named ? ' name_source="true"' : ""} max_chars="${MAX_BRIEF_CHARS}">${text(item.line)}</item>`,
-    ...(start ? [`<start>${text(start)}</start>`] : []),
+    ...(offerStart ? ["<offer_start/>"] : []),
     "</patrol_brief>",
   ].join("\n");
 }
