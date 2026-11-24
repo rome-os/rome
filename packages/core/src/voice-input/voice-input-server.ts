@@ -1,7 +1,8 @@
 // The dictation socket: the client streams microphone audio to Rome, Rome
 // relays it to the transcriber and streams the text back. Messages are in
-// `@rome/api-types/voice-input`. Rome keeps no audio: frames go straight to
-// the provider and only their count and size reach the log.
+// `@rome/api-types/voice-input`. A person dropped from the allow-list loses
+// the dictation at the next membership check. Rome keeps no audio: frames go
+// straight to the provider and only their count and size reach the log.
 
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -15,8 +16,8 @@ import {
   voiceInputClientMessageSchema,
 } from "@rome/api-types/voice-input";
 import type { DrizzleDb } from "../db/index.js";
-import { gateUpgrade } from "../access/ws-guardian-gate.js";
-import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { type DashboardAllowList, isOnTeam } from "../access/team.js";
+import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
@@ -45,6 +46,8 @@ export const OPEN_TIMEOUT_MS = 12_000;
 const AUDIO_SLACK_MS = 5_000;
 // The most audio a client may say it recorded before its socket opened.
 const MAX_BUFFERED_MS = 15_000;
+// How often an open dictation rereads the allow-list, as `/ws/events` does on its ping.
+const TEAM_CHECK_INTERVAL_MS = 25_000;
 
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
@@ -63,7 +66,7 @@ export function attachVoiceInputServer(
   db: DrizzleDb,
   source: VoiceInputSource,
   usage: TranscriptionUsageSink | null,
-  dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess?: DashboardAllowList,
   voiceTerms: () => Promise<string[]> = readVoiceTerms,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
@@ -79,7 +82,12 @@ export function attachVoiceInputServer(
     void gateUpgrade(req, socket, db, dashboardAccess)
       .then((caller) => {
         if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { source, usage, voiceTerms }));
+        const actor = actorOfUpgrade(caller);
+        // Without an allow-list only the guardian gets in, who never leaves the team.
+        const onTeam = () => !dashboardAccess || isOnTeam(actor, dashboardAccess);
+        wss.handleUpgrade(req, socket, head, (ws) =>
+          serve(ws, { source, usage, voiceTerms, onTeam }),
+        );
       })
       .catch((err) => {
         log.error("voice input upgrade failed", {
@@ -105,6 +113,12 @@ export interface ServeOptions {
   finishTimeoutMs?: number;
   openTimeoutMs?: number;
   quietLimitMs?: number;
+  /**
+   * Whether the person on the socket is still on the team. Asked at `start`
+   * and every 25 s, and the socket closes with 1008 and no stop reason once it
+   * answers false. Default: always on the team.
+   */
+  onTeam?: () => boolean;
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
@@ -142,6 +156,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
   };
   const settle = (outcome: string) => {
+    clearInterval(teamCheck);
     if (limit) clearTimeout(limit);
     if (quiet) clearTimeout(quiet);
     if (finishing) clearTimeout(finishing);
@@ -170,6 +185,19 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     // answers would hold the provider open for ws's 30 s close timeout.
     stream?.abort();
   };
+  // No stop reason fits a person who left the team, and a reason an older
+  // client does not know would not decode, so the socket closes bare.
+  const leaveTeam = () => {
+    if (closed) return;
+    closed = true;
+    ws.close(1008);
+    settle("off-team");
+    stream?.abort();
+  };
+  const onTeam = options.onTeam ?? (() => true);
+  const teamCheck = setInterval(() => {
+    if (!onTeam()) leaveTeam();
+  }, TEAM_CHECK_INTERVAL_MS);
 
   // Every listening session is a Rome Cloud session, so each one reports.
   function reportUsage(status: string) {
@@ -312,6 +340,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     if (!message.success) return close({ type: "error", reason: "bad-request" });
     if (message.data.type === "start") {
       if (stream || starting) return close({ type: "error", reason: "bad-request" });
+      if (!onTeam()) return leaveTeam();
       // Audio recorded while the socket connected counts as if it had come in real time.
       const buffered = Math.min(message.data.bufferedMs ?? 0, MAX_BUFFERED_MS);
       pace = { since: Date.now() - buffered, sampleRate: message.data.sampleRate };

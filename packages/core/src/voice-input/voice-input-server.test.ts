@@ -812,6 +812,69 @@ describe("voice input socket", () => {
   });
 });
 
+describe("a person taken off the team", () => {
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  /** A dictation that is listening, for a person whose place on the team the test sets. */
+  async function listening() {
+    const team = { on: true };
+    const fake = await fakeSoniox();
+    const socket = await dictation(fake, undefined, undefined, { onTeam: () => team.on });
+    const code = new Promise<number>((resolve) => socket.client.on("close", resolve));
+    socket.client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+    await until(() => fake.received.length === 1);
+    return { ...socket, team, fake, code };
+  }
+
+  it("loses the dictation at the next membership check", async () => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { team, fake, messages, code } = await listening();
+
+    team.on = false;
+    rs.advanceTimersByTime(25_000);
+
+    expect(await code).toBe(1008);
+    expect(messages).toEqual([]);
+    await until(() => fake.closed());
+  });
+
+  it("keeps the dictation while the person stays on the team", async () => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { client, fake, closed, messages } = await listening();
+    fake.onText = (text) => (text === "" ? [{ tokens: [], finished: true }] : []);
+
+    rs.advanceTimersByTime(25_000);
+    client.send(JSON.stringify({ type: "stop" }));
+
+    await closed;
+    expect(messages).toEqual([{ type: "ended" }]);
+  });
+
+  it("opens no session once off the team", async () => {
+    const fake = await fakeSoniox();
+    let opened = 0;
+    const { client, closed, messages } = await dictation(fake, undefined, undefined, {
+      source: {
+        open: async () => {
+          opened++;
+          return { ok: false, reason: "service-unavailable" };
+        },
+      },
+      onTeam: () => false,
+    });
+    const code = new Promise<number>((resolve) => client.on("close", resolve));
+
+    client.send(JSON.stringify({ type: "start", sampleRate: 16000 }));
+
+    await closed;
+    expect(await code).toBe(1008);
+    expect(messages).toEqual([]);
+    expect(opened).toBe(0);
+  });
+});
+
 describe("voice input on Rome Cloud", () => {
   /** Rome Cloud's session route, answering `answer`, after `delayMs`. */
   function romeCloud(answer: () => Response, delayMs = 0) {
