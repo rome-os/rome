@@ -54,11 +54,7 @@ const CASES: ChannelCase[] = [
   },
   {
     connectionKind: "discord",
-    descriptor: makeDiscordDescriptor({
-      chatSettings: stub,
-      peopleRepo: stub,
-      listAgents: () => [],
-    }),
+    descriptor: makeDiscordDescriptor({ chatSettings: stub }),
     grant: "bot",
     full: { botId: "999", botUsername: "rome" },
     expectedDisplay: {

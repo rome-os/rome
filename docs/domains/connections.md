@@ -94,6 +94,13 @@ What a platform delivered through a connection: where it was said, who said it, 
 - Some facts only the platform has, such as whether a bot said it or who said the message it replies to. The connection reports them when the platform tells, and leaves them out when it does not.
 - Two of Rome's accounts in one chat each receive the same message through their own connection.
 
+## Command
+
+What someone ran on a platform's own command menu, such as a Discord slash command, through a connection: who ran it, in which chat, the command and each option given, in the platform's own ids. It comes with one way to answer.
+
+- The connection puts on its platform the commands it is given, reports each one run, and delivers the answer it gets back, where the platform allows only to the person who ran it. Who may run a command, what it does and what the answer says are decided above the connection (zhangfan, 2026-11-24).
+- A command is not a message: it is not recorded in the chat, and it wakes no agent.
+
 ## Decided against
 
 - **Giving tools direct access to the Google or Microsoft grant.** It would let a tool send mail without the guardian approving the exact message. Gmail and Outlook access stay behind the read-only and approved-send operations.

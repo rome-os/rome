@@ -250,11 +250,6 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     why: "A refused widget is sent as text written by Chats, until the fallback moves to Chats.",
   },
   {
-    from: "connections/integrations/discord.ts",
-    to: ["people/model/people-repository.ts"],
-    why: "The Discord wiring hands the People repository to the kind, until it gets a port.",
-  },
-  {
     from: "connections/integrations/email.ts",
     to: ["people/model/people-repository.ts"],
     why: "The email wiring hands the People repository to the kind, until it gets a port.",
@@ -266,8 +261,8 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
   },
   {
     from: "connections/kinds/discord/discord.ts",
-    to: ["chats/connected-accounts/account-agents.ts", "people/link-code/index.ts"],
-    why: "Discord still reads a chat's agent and link codes, until those move up.",
+    to: ["people/link-code/index.ts"],
+    why: "Discord still reads link codes, until that moves up.",
   },
   {
     from: "connections/kinds/email/email.ts",

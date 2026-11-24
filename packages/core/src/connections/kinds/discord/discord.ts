@@ -13,7 +13,7 @@ import type {
   AutocompleteInteraction,
 } from "discord.js";
 import { randomBytes } from "node:crypto";
-import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
+import { SendRefused, isStopCommand } from "@rome-os/app-runtime";
 import type {
   APIRequest,
   RateLimitData,
@@ -21,7 +21,6 @@ import type {
   ResponseLike,
   RESTOptions,
 } from "discord.js";
-import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import {
@@ -36,9 +35,7 @@ import type {
   ChatId,
   ChatSettingsControl,
   ChatSettingsSnapshot,
-  ChatStopHandler,
   MessageReceipt,
-  PersonRecord,
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
@@ -56,11 +53,6 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
-import {
-  answeringAgentOf,
-  describeAnsweringAgent,
-  storedAgentChoice,
-} from "../../../chats/connected-accounts/account-agents.js";
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import { archivedDiscordThreads } from "./discord-threads.js";
 import type { TalkHistoryRead } from "../../types.js";
@@ -68,6 +60,7 @@ import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord
 import { botReadsHistory } from "./discord-permissions.js";
 import { discordAttachment } from "./discord-attachment.js";
 import type * as connections from "../../message.js";
+import type { Command, CommandSpec, Commands } from "../../command.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
@@ -76,25 +69,11 @@ const log = createLogger("discord");
 
 type SendableChannel = TextChannel | DMChannel | NewsChannel | ThreadChannel;
 
-interface DiscordChannelConfig {
-  channelName?: string;
-  mode?: "allow" | "ignore";
-  requireMention?: boolean;
-  allowBots?: "none" | "mentions" | "all";
-  ignoreNoMention?: boolean;
-  autoThread?: boolean;
-  /**
-   * Name of the agent to route messages from this channel to on the trusted
-   * path. When unset (default), messages go to the main agent — the historical
-   * behaviour. When set, the inbox message handler invokes the named agent
-   * instead, falling back to "main" with a warning if the agent is no longer
-   * loaded (e.g. its app was uninstalled). Untrusted messages still go through
-   * sentinel regardless of this setting.
-   */
-  agentName?: string;
-  updatedAt?: string;
-  updatedBy?: string;
-}
+/** The chat settings the bot reads: which chats it sees, by their names and
+ *  the channel a thread was opened under, and where a chat's replies go. */
+type DiscordChatSettings = Pick<ChatSettingsControl, "get"> & {
+  observe?(descriptor: ChatDescriptor): void;
+};
 
 /**
  * Return the referenced message only for an actual Discord reply.
@@ -119,119 +98,53 @@ function isThreadType(type: ChannelType): boolean {
   );
 }
 
-export function buildDiscordSlashCommands() {
-  const stop = new (discordJs().SlashCommandBuilder)()
-    .setName("stop")
-    .setDescription("Stop the active Rome response in this conversation");
-
-  const channel = new (discordJs().SlashCommandBuilder)()
-    .setName("channel")
-    .setDescription("Configure Rome Bot behavior for this channel")
-    .addSubcommand((sub) =>
-      sub.setName("ignore").setDescription("Permanently silence the bot in this channel"),
-    )
-    .addSubcommand((sub) =>
-      sub.setName("allow").setDescription("Restore bot responses in this channel (clear ignore)"),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("mention")
-        .setDescription("Toggle @mention requirement")
-        .addStringOption((opt) =>
-          opt
-            .setName("setting")
-            .setDescription("on = require @mention (default), off = respond freely")
-            .setRequired(true)
-            .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("bots")
-        .setDescription("Control how the bot handles messages from other bots")
-        .addStringOption((opt) =>
-          opt
-            .setName("mode")
-            .setDescription(
-              "none = ignore bots, mentions = only if bot is @mentioned, all = always",
-            )
-            .setRequired(true)
-            .addChoices(
-              { name: "none", value: "none" },
-              { name: "mentions", value: "mentions" },
-              { name: "all", value: "all" },
-            ),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("quiet")
-        .setDescription("Toggle quiet mode: ignore messages that @mention others")
-        .addStringOption((opt) =>
-          opt
-            .setName("setting")
-            .setDescription(
-              "on = stay silent when others are @mentioned (default), off = always respond",
-            )
-            .setRequired(true)
-            .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("thread")
-        .setDescription("Toggle auto-thread for bot replies")
-        .addStringOption((opt) =>
-          opt
-            .setName("setting")
-            .setDescription("on = reply in a thread (default), off = reply inline")
-            .setRequired(true)
-            .addChoices({ name: "on", value: "on" }, { name: "off", value: "off" }),
-        ),
-    )
-    .addSubcommandGroup((group) =>
-      group
-        .setName("agent")
-        .setDescription("Route this channel to a specific agent (default = main)")
-        .addSubcommand((sub) =>
-          sub
-            .setName("set")
-            .setDescription("Bind this channel to the named agent")
-            .addStringOption((opt) =>
-              opt
-                .setName("name")
-                .setDescription("Agent name (e.g. main, or an agent shipped by an installed app)")
-                .setRequired(true)
-                // Enables Discord's typeahead UI: as the guardian types, the
-                // client calls our autocomplete handler (see the
-                // `interactionCreate` listener) and renders the choices we
-                // return. They can still hit Tab/Enter on a custom value if
-                // they really want — the slash handler still validates the
-                // final string against the catalog.
-                .setAutocomplete(true),
-            ),
-        )
-        .addSubcommand((sub) =>
-          sub.setName("clear").setDescription("Stop routing to a custom agent — fall back to main"),
-        ),
-    )
-    .addSubcommand((sub) =>
-      sub.setName("reset").setDescription("Clear all overrides for this channel, restore defaults"),
-    )
-    .addSubcommand((sub) =>
-      sub.setName("status").setDescription("Show current configuration for this channel"),
-    );
-
-  const bot = new (discordJs().SlashCommandBuilder)()
-    .setName("bot")
-    .setDescription("Global Rome Bot status and management")
-    .addSubcommand((sub) => sub.setName("status").setDescription("Show all channel overrides"));
-
-  const help = new (discordJs().SlashCommandBuilder)()
-    .setName("help")
-    .setDescription("Show available Rome Bot commands");
-
-  return [stop.toJSON(), channel.toJSON(), bot.toJSON(), help.toJSON()];
+/** `list` as Discord's slash commands, in the shape its API registers. A
+ *  command's subcommands that have subcommands of their own are groups. */
+export function discordSlashCommands(list: readonly CommandSpec[]) {
+  type Builder = {
+    addStringOption(build: (option: StringOption) => StringOption): Builder;
+  };
+  type StringOption = import("discord.js").SlashCommandStringOption;
+  const withOptions = <B extends Builder>(builder: B, spec: CommandSpec): B => {
+    for (const option of spec.options ?? []) {
+      builder.addStringOption((built) => {
+        built
+          .setName(option.name)
+          .setDescription(option.description)
+          .setRequired(option.required ?? false);
+        if (option.choices) {
+          built.addChoices(...option.choices.map((choice) => ({ name: choice, value: choice })));
+        }
+        if (option.suggested) built.setAutocomplete(true);
+        return built;
+      });
+    }
+    return builder;
+  };
+  return list.map((spec) => {
+    const command = new (discordJs().SlashCommandBuilder)()
+      .setName(spec.name)
+      .setDescription(spec.description);
+    for (const sub of spec.subcommands ?? []) {
+      if (sub.subcommands) {
+        command.addSubcommandGroup((group) => {
+          group.setName(sub.name).setDescription(sub.description);
+          for (const leaf of sub.subcommands ?? []) {
+            group.addSubcommand((built) =>
+              withOptions(built.setName(leaf.name).setDescription(leaf.description), leaf),
+            );
+          }
+          return group;
+        });
+      } else {
+        command.addSubcommand((built) =>
+          withOptions(built.setName(sub.name).setDescription(sub.description), sub),
+        );
+      }
+    }
+    withOptions(command as unknown as Builder, spec);
+    return command.toJSON();
+  });
 }
 
 export function normalizeDiscordMessageText(content: string, botId?: string): string {
@@ -340,25 +253,11 @@ export class DiscordAdapter {
   private handler?: (msg: connections.Message) => Promise<void>;
   /** Holds each chat's messages in arrival order until they are delivered. */
   private readonly hearing = new KeyedMutex();
-  private chatSettings?: ChatSettingsControl & {
-    observe?(descriptor: ChatDescriptor): void;
-  };
+  private chatSettings?: DiscordChatSettings;
   private connectionId?: string;
   private slashCommandsRegistered = false;
-  /**
-   * Returns the names of all agents currently loaded in the catalog. Used by
-   * `/channel agent set <name>` to validate the guardian's input and reject
-   * typos with a helpful list. Optional: when omitted, the validation step is
-   * skipped (the message handler still falls back to main if the agent
-   * disappears later).
-   */
-  private listAgents?: () => string[];
-  private accountAgent?: () => string | null | undefined;
-  private hasAgent?: (name: string) => boolean;
-  private resolveDiscordPerson?: (
-    channelUserId: string,
-  ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
-  private chatStop?: ChatStopHandler;
+  /** The commands this bot offers as slash commands, and who answers them. */
+  private commands?: Commands;
 
   /**
    * Reports terminal gateway faults so the grant-epoch lifecycle can react:
@@ -379,20 +278,10 @@ export class DiscordAdapter {
   constructor(config: {
     botToken: string;
     connectionId?: string;
-    chatSettings?: ChatSettingsControl & {
-      observe?(descriptor: ChatDescriptor): void;
-    };
-    listAgents?: () => string[];
-    /** The agent linked to this adapter's channel, as `accountAgentResolver`
-     *  answers it. Absent, the channel reads as one that takes no link. */
-    accountAgent?: () => string | null | undefined;
-    /** Whether an agent is loaded, aliases included. Absent, every agent
-     *  counts as loaded. */
-    hasAgent?: (name: string) => boolean;
-    resolveDiscordPerson?: (
-      channelUserId: string,
-    ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
-    chatStop?: ChatStopHandler;
+    chatSettings?: DiscordChatSettings;
+    /** The commands to offer as slash commands. Absent, the bot offers
+     *  none. */
+    commands?: Commands;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
     /** Where the gateway client and the broker send REST requests. Defaults to
      *  Discord's API; tests point it at a local peer. */
@@ -400,11 +289,7 @@ export class DiscordAdapter {
   }) {
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.listAgents = config.listAgents;
-    this.accountAgent = config.accountAgent;
-    this.hasAgent = config.hasAgent;
-    this.resolveDiscordPerson = config.resolveDiscordPerson;
-    this.chatStop = config.chatStop;
+    this.commands = config.commands;
     this.onGatewayFault = config.onGatewayFault;
     this.client = new (discordJs().Client)({
       intents: [
@@ -739,23 +624,6 @@ export class DiscordAdapter {
     );
   }
 
-  private legacyConfig(snapshot: ChatSettingsSnapshot | null): DiscordChannelConfig {
-    if (!snapshot) return {};
-    return {
-      mode: snapshot.effective.enabled ? "allow" : "ignore",
-      requireMention: snapshot.effective.activation.mode === "mention",
-      allowBots:
-        snapshot.effective.activation.botMessages === "ignore"
-          ? "none"
-          : snapshot.effective.activation.botMessages,
-      ignoreNoMention: snapshot.effective.activation.whenOthersMentioned === "ignore",
-      autoThread: snapshot.effective.replies.placement === "thread",
-      agentName: snapshot.effective.routing.agentName ?? undefined,
-      updatedAt: snapshot.updatedAt,
-      updatedBy: snapshot.updatedBy?.displayName ?? snapshot.updatedBy?.id,
-    };
-  }
-
   async start(): Promise<void> {
     this.client.on("error", (err) => {
       log.error("discord client error", { error: err.message, stack: err.stack });
@@ -790,11 +658,12 @@ export class DiscordAdapter {
         guilds: client.guilds.cache.map((g) => g.name),
       });
 
-      // Register slash commands globally.
+      // Register slash commands globally. A bot given no commands registers
+      // none, which takes down any it offered before.
       if (!this.slashCommandsRegistered) {
         this.slashCommandsRegistered = true;
         try {
-          const commands = buildDiscordSlashCommands();
+          const commands = discordSlashCommands(this.commands?.list ?? []);
           await this.rest.put(discordJs().Routes.applicationCommands(client.user.id), {
             body: commands,
           });
@@ -809,6 +678,7 @@ export class DiscordAdapter {
     });
 
     this.client.on("interactionCreate", async (interaction) => {
+      if (!this.commands) return;
       if (interaction.isAutocomplete()) {
         await this.handleAutocomplete(interaction);
         return;
@@ -968,282 +838,15 @@ export class DiscordAdapter {
     }
   }
 
+  /** Reports a slash command someone ran and answers it, so that only they
+   *  see the answer. */
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    const commands = this.commands;
+    if (!commands) return;
     await interaction.deferReply({ ephemeral: true });
-
     try {
-      const cmd = interaction.commandName;
-      if (cmd === "stop") {
-        if (!this.chatStop || !this.connectionId) {
-          await interaction.editReply({ content: "Stop is unavailable for this connection." });
-          return;
-        }
-        const result = await this.chatStop({
-          ref: {
-            connectionId: this.connectionId,
-            chatId: interaction.channelId as ChatId,
-          },
-          service: "discord",
-          senderId: interaction.user.id,
-        });
-        await interaction.editReply({ content: chatStopReceipt(result.status) });
-        return;
-      }
-
-      if (!(await this.canConfigure(interaction.user.id, interaction.commandName))) {
-        await interaction.editReply({
-          content: "Only the linked guardian can configure this Discord conversation.",
-        });
-        return;
-      }
-      const subGroup = interaction.options.getSubcommandGroup(false);
-      const sub = interaction.options.getSubcommand(false);
-
-      if (cmd === "help") {
-        await interaction.editReply({
-          content: [
-            "**Rome Bot Commands**",
-            "",
-            "Channel configuration (run inside the target channel):",
-            "  `/channel ignore` — silence the bot in this channel",
-            "  `/channel allow` — restore bot responses (clear ignore)",
-            "  `/channel mention off|on` — disable/enable @mention requirement",
-            "  `/channel bots none|mentions|all` — how to handle messages from other bots",
-            "  `/channel quiet on|off` — stay silent when others are @mentioned",
-            "  `/channel thread off|on` — disable/enable auto-thread for replies",
-            "  `/channel agent set <name>` — route this channel to a specific agent, or pin it to main (default: the account's agent)",
-            "  `/channel agent clear` — clear the agent binding for this channel",
-            "  `/channel reset` — clear all overrides for this channel",
-            "  `/channel status` — show current channel configuration",
-            "",
-            "Global overview:",
-            "  `/bot status` — list all channel overrides",
-            "  `/stop` — stop the active Rome response in this conversation",
-            "",
-            "Tip: you can also tell the bot what you want in plain language",
-          ].join("\n"),
-        });
-        return;
-      }
-
-      if (cmd === "bot" && sub === "status") {
-        const entries =
-          this.chatSettings && this.connectionId
-            ? (
-                await this.chatSettings.list({
-                  connectionId: this.connectionId,
-                  limit: 100,
-                })
-              ).items.filter((item) => Object.keys(item.snapshot.overrides).length > 0)
-            : [];
-        await interaction.editReply({
-          content:
-            entries.length === 0
-              ? "**Rome Bot Status**\n\nAll conversations use defaults."
-              : `**Rome Bot Status**\n\n${entries.length} conversation(s) have explicit overrides. Manage them on the Discord connection's page in Settings → Connections.`,
-        });
-        return;
-      }
-
-      if (cmd === "channel") {
-        const channelId = interaction.channelId;
-        const parentId =
-          interaction.channel && "isThread" in interaction.channel && interaction.channel.isThread()
-            ? (interaction.channel.parentId ?? null)
-            : null;
-        const channelName =
-          interaction.channel && "name" in interaction.channel
-            ? (interaction.channel.name as string)
-            : undefined;
-        const mention = `${channelName ? `#${channelName}` : `<#${channelId}>`}`;
-        const answering = (choice: string | undefined) =>
-          answeringAgentOf(
-            this.accountAgent?.(),
-            choice,
-            interaction.guildId ? "group" : "private",
-            this.hasAgent,
-          );
-
-        if (sub === "status") {
-          const snapshot = await this.getConversationSettings(
-            channelId,
-            channelName,
-            parentId,
-            interaction.guild?.name,
-          );
-          const cfg = this.legacyConfig(snapshot);
-          const agent = answering(snapshot ? storedAgentChoice(snapshot) : undefined);
-          const agentLine = `agent: ${describeAnsweringAgent(agent)}${
-            snapshot?.inheritedFrom ? " (inherited)" : ""
-          }`;
-          const lines = [
-            `mode: ${cfg.mode}`,
-            `requireMention: ${cfg.requireMention}`,
-            `allowBots: ${cfg.allowBots}`,
-            `ignoreNoMention: ${cfg.ignoreNoMention}`,
-            `autoThread: ${cfg.autoThread}`,
-            agentLine,
-          ];
-          const updatedInfo = cfg.updatedAt
-            ? `\nLast updated: ${cfg.updatedAt.slice(0, 10)} by ${cfg.updatedBy ?? "unknown"}`
-            : "";
-          await interaction.editReply({
-            content: `**${mention} configuration**\n\n${lines.join("\n")}${updatedInfo}`,
-          });
-          return;
-        }
-
-        if (parentId) {
-          await interaction.editReply({
-            content: `This thread follows the settings for parent <#${parentId}>. Run the command in the parent channel to change them.`,
-          });
-          return;
-        }
-
-        if (sub === "reset") {
-          await this.updateChannelConfig(
-            channelId,
-            null,
-            channelName,
-            parentId,
-            interaction.guild?.name,
-          );
-          await interaction.editReply({
-            content: `✓ ${mention} configuration cleared\nRestored all defaults (require @mention, ignore other bots, auto-thread on)`,
-          });
-          return;
-        }
-
-        const now = new Date().toISOString();
-        const audit = { channelName, updatedAt: now, updatedBy: "slash" };
-
-        if (sub === "ignore") {
-          await this.updateChannelConfig(channelId, { mode: "ignore", ...audit });
-          await interaction.editReply({
-            content: `✓ ${mention} is now ignored\nThe bot will not respond here, even if @mentioned\nUse \`/channel allow\` to undo`,
-          });
-          return;
-        }
-
-        if (sub === "allow") {
-          // Clear mode; if nothing meaningful remains the record is auto-deleted
-          await this.updateChannelConfig(channelId, { mode: undefined, ...audit });
-          await interaction.editReply({
-            content: `✓ ${mention} ignore cleared — bot will respond again`,
-          });
-          return;
-        }
-
-        if (sub === "mention") {
-          const setting = interaction.options.getString("setting", true);
-          // "on" restores default → remove the override
-          await this.updateChannelConfig(channelId, {
-            requireMention: setting === "off" ? false : undefined,
-            ...audit,
-          });
-          const msg =
-            setting === "off"
-              ? `✓ ${mention} @mention requirement disabled\nThe bot will respond to all messages here\n⚠ Use with caution in high-traffic channels`
-              : `✓ ${mention} @mention requirement enabled (default restored)`;
-          await interaction.editReply({ content: msg });
-          return;
-        }
-
-        if (sub === "bots") {
-          const mode = interaction.options.getString("mode", true) as "none" | "mentions" | "all";
-          // "none" is the default → remove the override
-          await this.updateChannelConfig(channelId, {
-            allowBots: mode === "none" ? undefined : mode,
-            ...audit,
-          });
-          await interaction.editReply({
-            content: `✓ ${mention} bot filter set to "${mode}"`,
-          });
-          return;
-        }
-
-        if (sub === "quiet") {
-          const setting = interaction.options.getString("setting", true);
-          // "on" is the default → remove the override
-          await this.updateChannelConfig(channelId, {
-            ignoreNoMention: setting === "off" ? false : undefined,
-            ...audit,
-          });
-          const msg =
-            setting === "off"
-              ? `✓ ${mention} quiet mode disabled\nThe bot will respond even when others are @mentioned\n⚠ Not recommended in multi-user channels`
-              : `✓ ${mention} quiet mode enabled (stays silent when others are @mentioned)`;
-          await interaction.editReply({ content: msg });
-          return;
-        }
-
-        if (sub === "thread") {
-          const setting = interaction.options.getString("setting", true);
-          // "on" is the default → remove the override
-          await this.updateChannelConfig(channelId, {
-            autoThread: setting === "off" ? false : undefined,
-            ...audit,
-          });
-          const msg =
-            setting === "off"
-              ? `✓ ${mention} auto-thread disabled\nThe bot will reply directly in the channel`
-              : `✓ ${mention} auto-thread enabled (default restored)`;
-          await interaction.editReply({ content: msg });
-          return;
-        }
-
-        if (subGroup === "agent") {
-          if (sub === "clear") {
-            await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
-            await interaction.editReply({
-              content: `✓ ${mention} agent binding removed — ${answersLine(answering(undefined))}`,
-            });
-            return;
-          }
-
-          if (sub === "set") {
-            const name = interaction.options.getString("name", true).trim();
-            if (!name) {
-              await interaction.editReply({
-                content: `Agent name is required. Try \`/channel agent clear\` to remove the binding.`,
-              });
-              return;
-            }
-            // `set main` pins the channel to main, so it stops following the
-            // account's agent. `clear` is how it follows the link again.
-            if (isCoreMainAgentId(name)) {
-              await this.updateChannelConfig(channelId, { agentName: "main", ...audit });
-              await interaction.editReply({
-                content: `✓ ${mention} pinned to main — ${answersLine(answering("main"))}
-Use \`/channel agent clear\` to undo.`,
-              });
-              return;
-            }
-            const available = this.listAgents?.();
-            if (available && !available.includes(name)) {
-              const sample = available.slice(0, 20).sort().join(", ");
-              await interaction.editReply({
-                content:
-                  `✗ Agent \`${name}\` is not loaded.\n` +
-                  `Available agents: ${sample || "(none)"}`,
-              });
-              return;
-            }
-            await this.updateChannelConfig(channelId, { agentName: name, ...audit });
-            const agent = answering(name);
-            await interaction.editReply({
-              content:
-                (agent === name
-                  ? `✓ ${mention} now routes to agent \`${name}\`\n`
-                  : `✓ ${mention} stored agent \`${name}\`, but ${answersLine(agent)}\n`) +
-                `Use \`/channel agent clear\` to undo.`,
-            });
-            return;
-          }
-        }
-      }
-
-      await interaction.editReply({ content: "Unknown command" });
+      const command = await this.commandOf(interaction);
+      await interaction.editReply({ content: await commands.ran(command) });
     } catch (err) {
       log.error("slash command error", {
         command: interaction.commandName,
@@ -1259,79 +862,23 @@ Use \`/channel agent clear\` to undo.`,
     }
   }
 
-  private async canConfigure(discordUserId: string, command: string): Promise<boolean> {
-    let person: Pick<PersonRecord, "id" | "bondLevel"> | null = null;
-    let authorizationResult = "unlinked";
-
-    try {
-      if (this.resolveDiscordPerson) {
-        person = await this.resolveDiscordPerson(discordUserId);
-        authorizationResult = person ? "bond_level_not_guardian" : "unlinked";
-      } else {
-        authorizationResult = "resolver_unavailable";
-      }
-    } catch {
-      authorizationResult = "resolution_failed";
-      log.warn("discord configuration command authorization rejected", {
-        connectionId: this.connectionId ?? null,
-        discordUserId,
-        command,
-        authorized: false,
-        decision: "deny",
-        authorizationResult,
-      });
-      return false;
-    }
-
-    if (person?.bondLevel === "guardian") return true;
-
-    log.warn("discord configuration command authorization rejected", {
-      connectionId: this.connectionId ?? null,
-      discordUserId,
-      command,
-      authorized: false,
-      decision: "deny",
-      authorizationResult,
-      personId: person?.id ?? null,
-      bondLevel: person?.bondLevel ?? null,
-    });
-    return false;
-  }
-
   /**
-   * Discord typeahead for slash-command string options that have
-   * `.setAutocomplete(true)`. Currently only `/channel agent set <name>` opts
-   * in: as the guardian types, we return the catalog of loaded agent names
-   * filtered by what's already in the input. Returning the full list when the
-   * input is empty doubles as a discovery affordance.
-   *
-   * Failures (Discord ack timeout, listAgents throwing) are swallowed — the
-   * worst case is the user sees no suggestions and falls back to typing the
-   * name themselves, which the slash handler still validates.
+   * Discord's typeahead for an option that asks for suggestions while it is
+   * typed. A failure (Discord's acknowledgement timing out, or no
+   * suggestions) shows none, and the person types the value themselves.
    */
   private async handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+    const commands = this.commands;
+    if (!commands) return;
     try {
-      if (interaction.commandName !== "channel") return;
-      const subGroup = interaction.options.getSubcommandGroup(false);
-      const sub = interaction.options.getSubcommand(false);
       const focused = interaction.options.getFocused(true);
-      if (subGroup !== "agent" || sub !== "set" || focused.name !== "name") return;
-      if (!(await this.canConfigure(interaction.user.id, interaction.commandName))) {
-        await interaction.respond([]);
-        return;
-      }
-
-      const all = this.listAgents?.() ?? [];
-      // Hide "main" from typeahead — it's the default; if the guardian wants
-      // to clear the binding they have `/channel agent clear` for that.
-      const candidates = all.filter((name) => !isCoreMainAgentId(name));
-
-      const query = focused.value?.toString().toLowerCase() ?? "";
-      const matches = (
-        query ? candidates.filter((name) => name.toLowerCase().includes(query)) : candidates
-      ).slice(0, 25); // Discord caps autocomplete responses at 25 choices.
-
-      await interaction.respond(matches.map((name) => ({ name, value: name })));
+      const suggestions = await commands.suggest(
+        await this.commandOf(interaction),
+        focused.name,
+        focused.value?.toString() ?? "",
+      );
+      // Discord shows at most 25.
+      await interaction.respond(suggestions.slice(0, 25).map((value) => ({ name: value, value })));
     } catch (err) {
       log.warn("autocomplete handler failed", {
         command: interaction.commandName,
@@ -1345,70 +892,49 @@ Use \`/channel agent clear\` to undo.`,
     }
   }
 
-  /**
-   * Merge a patch into the channel's DB-fresh config and write back.
-   * - null → delete the channel's config entirely (used by /channel reset)
-   * - patch → merged with the current DB state; undefined values remove the key;
-   *   if no real config keys remain after merge the record is auto-deleted
-   */
-  private async updateChannelConfig(
-    channelId: string,
-    patch: Partial<DiscordChannelConfig> | null,
-    channelName?: string,
-    parentId?: string | null,
-    containerName?: string,
-  ): Promise<void> {
-    if (!this.chatSettings) return;
-    const snapshot = await this.getConversationSettings(
-      channelId,
-      channelName,
-      parentId,
-      containerName,
-    );
-    if (!snapshot) return;
-    if (patch === null) {
-      await this.chatSettings.reset({
-        ref: snapshot.conversation.ref,
-        actor: { kind: "guardian", id: "discord-slash" },
-      });
-      return;
+  /** `interaction` as the command it reports. The chat it was run in is
+   *  observed first, so its settings read as that chat's. */
+  private async commandOf(
+    interaction: ChatInputCommandInteraction | AutocompleteInteraction,
+  ): Promise<Command> {
+    const channel =
+      interaction.channel ??
+      (await this.client.channels.fetch(interaction.channelId ?? "").catch(() => null));
+    const parentId = channel?.isThread() ? channel.parentId : null;
+    const name = channel && "name" in channel ? (channel.name ?? undefined) : undefined;
+    const chatId = interaction.channelId as ChatId;
+    if (this.chatSettings && this.connectionId) {
+      this.chatSettings.observe?.(this.descriptor(chatId, name, parentId, interaction.guild?.name));
     }
-
-    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
-    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
-    const owns = (key: keyof DiscordChannelConfig) => Object.hasOwn(patch, key);
-    if (owns("mode")) {
-      if (patch.mode === "ignore") set.enabled = false;
-      else clear.push("enabled");
-    }
-    if (owns("requireMention")) {
-      if (patch.requireMention === false) (set.activation ??= {}).mode = "all";
-      else clear.push("activation.mode");
-    }
-    if (owns("allowBots")) {
-      if (patch.allowBots && patch.allowBots !== "none") {
-        (set.activation ??= {}).botMessages = patch.allowBots;
-      } else clear.push("activation.botMessages");
-    }
-    if (owns("ignoreNoMention")) {
-      if (patch.ignoreNoMention === false) {
-        (set.activation ??= {}).whenOthersMentioned = "respond";
-      } else clear.push("activation.whenOthersMentioned");
-    }
-    if (owns("autoThread")) {
-      if (patch.autoThread === false) (set.replies ??= {}).placement = "inline";
-      else clear.push("replies.placement");
-    }
-    if (owns("agentName")) {
-      if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
-      else clear.push("routing.agentName");
-    }
-    await this.chatSettings.update({
-      ref: snapshot.conversation.ref,
-      set,
-      clear,
-      actor: { kind: "guardian", id: "discord-slash" },
-    });
+    const path = [interaction.commandName];
+    const options: Record<string, string> = {};
+    const { Subcommand, SubcommandGroup } = discordJs().ApplicationCommandOptionType;
+    const read = (data: readonly import("discord.js").CommandInteractionOption[]) => {
+      for (const option of data) {
+        if (option.type === Subcommand || option.type === SubcommandGroup) {
+          path.push(option.name);
+          read(option.options ?? []);
+        } else if (option.value !== undefined) {
+          options[option.name] = String(option.value);
+        }
+      }
+    };
+    read(interaction.options.data);
+    return {
+      where: {
+        chatId,
+        kind: interaction.guildId ? "group" : "direct",
+        ...(name ? { name } : {}),
+        ...(parentId ? { thread: { parentChatId: parentId as ChatId } } : {}),
+      },
+      sender: {
+        accountId: interaction.user.id,
+        name: interaction.user.displayName ?? interaction.user.username,
+      },
+      receivedBy: this.client.user?.id ?? interaction.applicationId,
+      path,
+      options,
+    };
   }
 
   private async getConversationSettings(
@@ -1769,12 +1295,6 @@ const ALL_MENTIONS = {
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;
-
-function answersLine(agent: string | null): string {
-  return agent
-    ? `messages now route to ${agent}`
-    : "no agent answers here: this account has no agent, or it is not loaded";
-}
 
 /** Breaks at newlines where possible. */
 export function splitMessage(text: string, maxLength = 2000): string[] {

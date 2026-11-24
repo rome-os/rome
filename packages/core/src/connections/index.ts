@@ -10,3 +10,4 @@ export * from "./repository.js";
 export { DrizzleConnectionsRepository } from "./repository-db.js";
 export { ConnectionRegistry, type ConnectionRegistryDeps } from "./registry.js";
 export type { ConnectParticipant } from "./setup/types.js";
+export type { Command, CommandOptionSpec, CommandSpec, Commands } from "./command.js";
