@@ -5,6 +5,7 @@
 #     (which copy, tools/copy.sh: default $SLACKENV_PROJECT, else slackenv)
 #
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
+#   environments/slack-app/ctl.sh connect rome-a|rome-b  (Rome's Slack app, as the guardian, in its workspace)
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
 #   environments/slack-app/ctl.sh port rome-a|rome-b send|read|thread|groups|call '<json>'
 #   environments/slack-app/ctl.sh record rome-a|rome-b '{"chat":"<conversation id>[:<thread ts>]"}'
@@ -20,6 +21,10 @@
 #   environments/slack-app/ctl.sh mailbox rome-a|rome-b  (the instance's relay mailbox: {depositUrl})
 #   environments/slack-app/ctl.sh find-secret rome-a|rome-b '["<string>", ...]'  (counts per place, never content)
 #
+# connect walks Connect for the slack_app bot grant as the instance's guardian
+# in its own workspace (Acme for rome-a, Bayside for rome-b) through Rome Cloud
+# and the fake Slack's approve screen (tools/connect-slack.mjs); an instance
+# already connected is left as it is.
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
 # the fake Slack keep running, so events for it wait in its mailbox.
 # wipe-chat stops the instance, wipes Rome's copy of the conversation
@@ -69,7 +74,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows | gateway-probe | as-instance | mailbox | find-secret) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | connect | wipe-chat | record | port | token-file | old-connections | old-rows | gateway-probe | as-instance | mailbox | find-secret) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -85,7 +90,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,54p' "$0"
+    sed -n '2,59p' "$0"
     exit 2
     ;;
 esac
@@ -246,6 +251,22 @@ case "$action" in
     ;;
   token-file)
     token_file
+    ;;
+  connect)
+    # The guardian's own workspace and member, and their Rome Cloud account.
+    read -r team guardian < <(INDEX="$([ "$svc" = rome-a ] && echo 0 || echo 1)" node -e '
+      const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).workspaces[+process.env.INDEX];
+      console.log(w.id, w.members.find((m) => m.is_owner).id);' "$ENV_DIR/config/workspaces.json")
+    fake="http://127.0.0.1:$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+    port_var="ROME_$(echo "${svc#rome-}" | tr a-z A-Z)_PORT"
+    cloud="$(sed -n 's/^CLOUD_ORIGIN=//p' "$STATE_DIR/compose.env")"
+    # The approve screen signs in as the guardian, as Slack's would.
+    curl -fsS -X POST -H 'content-type: application/json' -d "{\"team\":\"$team\",\"user\":\"$guardian\"}" \
+      "$fake/_control/sign-in" >/dev/null
+    NODE_EXTRA_CA_CERTS="$STATE_DIR/trust.pem" exec node "$ENV_DIR/tools/connect-slack.mjs" \
+      --name "$svc" --instance "http://127.0.0.1:$(sed -n "s/^$port_var=//p" "$STATE_DIR/compose.env")" \
+      --cookies "$STATE_DIR/$svc-cookies.json" --slack "$fake" \
+      --cloud-sign-in "$cloud/api/auth/dev/start?email=" --email "guardian-${svc#rome-}@slackenv.test"
     ;;
   old-connections)
     # The guardian's own workspace and member: the first workspace is

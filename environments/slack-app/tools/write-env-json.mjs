@@ -48,6 +48,10 @@ const instance = (name, port, guardian) => ({
     stop: ctlCmd("stop", name),
     start: ctlCmd("start", name),
     status: ctlCmd("status", name),
+    // Connects Rome's Slack app as the guardian in its own workspace (Acme for
+    // rome-a, Bayside for rome-b); prints {instance, outcome, connection_id},
+    // outcome "connected" or "already", exit 0 once connected.
+    connect: ctlCmd("connect", name),
     // Append a Slack conversation id. Stops the instance, wipes Rome's copy of
     // that chat, starts it again; exit 0 when no copy is left.
     wipe_chat: ctlCmd("wipe-chat", name),
