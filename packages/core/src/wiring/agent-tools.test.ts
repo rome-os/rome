@@ -4,6 +4,10 @@ import { type AgentToolDeps, agentToolNames, registerAgentTools } from "./agent-
 
 // Agents, agent prompts and saved routines call these names.
 const NAMES = [
+  "system:read_ai_tools",
+  "system:sign_in_ai_tool",
+  "system:sign_out_ai_tool",
+  "system:change_ai_tool",
   "system:read_connections",
   "system:connect_service",
   "system:disconnect_service",

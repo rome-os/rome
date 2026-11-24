@@ -31,7 +31,7 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 
 **Rules:**
 
-- Declare the tool in the `agent-tools.ts` file of the context that owns its operation, beside that operation, with the page's `agentTool` from [`agentToolsOf`](../../packages/core/src/apps/actions/agent-tool.ts). Add it to the page's list in the same file.
+- Declare the tool in the `agent-tools.ts` file of the context that owns its operation, beside that operation, with the page's `agentTool` from [`agentToolsOf`](../../packages/core/src/apps/actions/agent-tool.ts). Add it to the page's list in the same file. A context that may not import `apps/`, such as the agent context, keeps its operation, and the page's tools live in `api/agent-tools/<page>.ts`, beside the page's routes.
 - Give it a name, a description, `sideEffects`, `input`, and `run`. Add `approval` when the guardian approves each call on a card first.
 - Write the arguments once, as the Zod `input`, each with a `.describe()` the agent reads. `run` and `approval` get their argument types from it. An input that does not fit answers the agent with what is wrong.
 - Set `sideEffects` to `read-only` or `write`. It decides who may ask, in one check before `run` ([`who-may-ask.ts`](../../packages/core/src/apps/actions/who-may-ask.ts)). A read needs a turn that works for the guardian. A write needs the guardian's own message in their private chat. A tool holds no check of its own.
