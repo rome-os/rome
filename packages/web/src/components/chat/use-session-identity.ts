@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { AgentMention } from "@/lib/chat-types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgentMention, ChatSession } from "@/lib/chat-types";
 import { chatKind, isProjectChat } from "@/lib/chat-session";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
@@ -44,6 +44,30 @@ export interface SessionIdentity {
    * an archived topic chat, which no active list holds, counts too.
    */
   isConciergeSession: boolean;
+  /**
+   * What the chat is pinned to while it does not follow the default provider,
+   * or null while it follows it. docs/domains/agents.md#pinned-chat
+   */
+  pinnedModel: NonNullable<ChatSession["pinnedModel"]> | null;
+  /** Takes the chat as a write returned it, such as Back to default or a model pick. */
+  applySession: (session: ChatSession) => void;
+}
+
+/**
+ * The model the chat's selector shows: null (Auto) while the chat follows the
+ * default, even when Rome stored a model for it, such as a Concierge chat's
+ * strength or the one Back to default keeps. Only a pinned chat shows its
+ * model. An older server that says neither shows what it stored.
+ * docs/domains/agents.md#pinned-chat
+ */
+export function shownSelection(session: ChatSession | null | undefined): string | null {
+  if (session?.followsDefault === true) return null;
+  return session?.largeModelSelection ?? null;
+}
+
+/** The pin a session reports, or null while it follows the default. */
+function pinnedModelOf(session: ChatSession | null | undefined) {
+  return session?.followsDefault === false ? (session.pinnedModel ?? null) : null;
 }
 
 /**
@@ -74,6 +98,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [taskOf, setTaskOf] = useState<SessionIdentity["taskOf"]>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [isConciergeSession, setIsConciergeSession] = useState(false);
+  const [pinnedModel, setPinnedModel] = useState<SessionIdentity["pinnedModel"]>(null);
   // The session id whose first fetch has settled (success or failure). Keyed by
   // id so switching sessions is "loading" again with no reset-effect flash.
   const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
@@ -92,8 +117,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setForkable(false);
       setProjectPath(null);
       setIsConciergeSession(false);
+      setPinnedModel(null);
       return;
     }
+    setPinnedModel(null);
     setModel(null);
     setLargeModelSelection(null);
     setIsForkChat(false);
@@ -112,7 +139,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSettledSessionId(sessionId);
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
-        setLargeModelSelection(session?.largeModelSelection ?? null);
+        setLargeModelSelection(shownSelection(session));
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
@@ -122,6 +149,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
+        setPinnedModel(pinnedModelOf(session));
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -154,6 +182,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setIsTaskChat(false);
           setTaskOf(null);
           setIsConciergeSession(false);
+          setPinnedModel(null);
         }
       }
     })();
@@ -178,7 +207,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         if (generation !== sessionGeneration.current) return;
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
-        setLargeModelSelection(session?.largeModelSelection ?? null);
+        setLargeModelSelection(shownSelection(session));
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
@@ -188,11 +217,23 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
+        setPinnedModel(pinnedModelOf(session));
       } catch {
         // Best effort; the next mount / event reconciles.
       }
     })();
   });
+
+  // The chat open now, read when a write answers: a write made in chat A
+  // that answers after the guardian moved to B must not land on B.
+  const openSessionId = useRef(sessionId);
+  openSessionId.current = sessionId;
+  const applySession = useCallback((session: ChatSession) => {
+    if (session.id !== openSessionId.current) return;
+    setModel(session.model ?? null);
+    setLargeModelSelection(shownSelection(session));
+    setPinnedModel(pinnedModelOf(session));
+  }, []);
 
   return {
     loading: !!sessionId && settledSessionId !== sessionId,
@@ -209,5 +250,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     taskOf,
     projectPath,
     isConciergeSession,
+    pinnedModel,
+    applySession,
   };
 }

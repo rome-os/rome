@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ProviderFailurePart } from "@rome/api-types/chat";
 import i18n from "@/i18n";
+import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
 import { ProviderFailureCard, failureCardKind, formatUntil } from "./ProviderFailureCard";
 
 beforeAll(async () => {
@@ -273,6 +274,25 @@ describe("ProviderFailureCard", () => {
       }),
     );
     expect(await screen.findByText("Switched to GPT-6.1 Sol, continued")).toBeTruthy();
+  });
+
+  it("makes the open chat read itself again after a switch, so its pin shows", async () => {
+    mockApi();
+    const changed = rs.fn();
+    window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, changed);
+    try {
+      renderCard({
+        reason: "model_unavailable",
+        card: "model",
+        model: "gpt-6-astra",
+        replacement: { selection: "gpt-6-1-sol", model: "gpt-6.1-sol" },
+        followsDefault: false,
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Switch to GPT-6.1 Sol" }));
+      await waitFor(() => expect(changed).toHaveBeenCalled());
+    } finally {
+      window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, changed);
+    }
   });
 
   it("reads as one line once settled, with no buttons", () => {

@@ -1115,7 +1115,7 @@ interface RelayHealth {
   depositUrl: string | null;
   targetApp: string | null;
   backlog: number | null;
-  state: "connected" | "notConnected" | "reconnecting" | "retrying" | "blocked";
+  state: "connected" | "notConnected" | "reconnecting" | "retrying";
   nextAttemptAt: number | null;
   failure: {
     seq: number | null;
@@ -1126,7 +1126,6 @@ interface RelayHealth {
 
 function RelayHealthSection() {
   const { t } = useTranslation("settings");
-  const [resuming, setResuming] = useState(false);
   const query = useQuery({
     queryKey: ["integrations", "relay"] as const,
     refetchInterval: 5_000,
@@ -1137,22 +1136,6 @@ function RelayHealthSection() {
       }),
   });
   const relay = query.data?.relay ?? null;
-
-  async function resumeDelivery() {
-    setResuming(true);
-    try {
-      const result = await fetchJson<{ resumed: boolean }>("/api/integrations/relay/resume", {
-        method: "POST",
-        fallback: t("advanced.relayHealth.resumeFailed"),
-      });
-      if (result.resumed) toast.success(t("advanced.relayHealth.resumed"));
-      await query.refetch();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("advanced.relayHealth.resumeFailed"));
-    } finally {
-      setResuming(false);
-    }
-  }
 
   return (
     <div>
@@ -1166,42 +1149,27 @@ function RelayHealthSection() {
                     label: t("advanced.relayHealth.status.notConfigured"),
                     tone: "muted",
                   }
-                : relay.state === "blocked"
+                : relay.state === "retrying"
                   ? {
-                      label: t("advanced.relayHealth.status.blocked"),
+                      label: t("advanced.relayHealth.status.retrying"),
                       tone: "attention",
                     }
-                  : relay.state === "retrying"
+                  : relay.state === "reconnecting"
                     ? {
-                        label: t("advanced.relayHealth.status.retrying"),
+                        label: t("advanced.relayHealth.status.reconnecting"),
                         tone: "attention",
                       }
-                    : relay.state === "reconnecting"
+                    : relay.state === "connected"
                       ? {
-                          label: t("advanced.relayHealth.status.reconnecting"),
+                          label: t("advanced.relayHealth.status.connected"),
+                          tone: "success",
+                        }
+                      : {
+                          label: t("advanced.relayHealth.status.notConnected"),
                           tone: "attention",
                         }
-                      : relay.state === "connected"
-                        ? {
-                            label: t("advanced.relayHealth.status.connected"),
-                            tone: "success",
-                          }
-                        : {
-                            label: t("advanced.relayHealth.status.notConnected"),
-                            tone: "attention",
-                          }
             }
           />
-        )}
-        {relay?.state === "blocked" && (
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={resuming}
-            onClick={() => void resumeDelivery()}
-          >
-            {resuming ? t("advanced.relayHealth.resuming") : t("advanced.relayHealth.resume")}
-          </Button>
         )}
       </div>
       {query.isLoading ? (

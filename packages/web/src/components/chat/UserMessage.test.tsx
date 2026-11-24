@@ -466,7 +466,7 @@ describe("UserMessage reply", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "reply.jump" }));
 
-    expect(reply.jump).toHaveBeenCalledWith("a-9");
+    expect(reply.jump).toHaveBeenCalledWith("a-9", "input-1");
     expect(screen.getByText("Use a heap.")).toBeTruthy();
     expect(screen.getByText("Also include pseudocode.")).toBeTruthy();
   });

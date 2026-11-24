@@ -185,6 +185,18 @@ export async function updateSessionModel(
   return jsonOrThrow<ChatSession>(res);
 }
 
+/**
+ * "Back to default": a chat pinned to a model follows the default provider
+ * again from its next turn. docs/domains/agents.md#pinned-chat
+ */
+export async function followDefaultProvider(sessionId: string): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/model/follow-default`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return jsonOrThrow<ChatSession>(res);
+}
+
 const inFlightReads = new Map<string, Promise<unknown>>();
 
 /**
@@ -257,6 +269,34 @@ export async function listSessionMessagePage(
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessagePage>(res);
+}
+
+/** A window of one reply chain, oldest first. */
+export interface ChatThreadPage {
+  messages: ChatMessage[];
+  hasOlder: boolean;
+  hasNewer: boolean;
+}
+
+/**
+ * Part of the reply chain `messageId` belongs to: `limit` messages each side of
+ * it, or with `before`/`after` (a message id of the chain) the `limit` messages
+ * on that side of it. `null` means the server has no such message or endpoint (HTTP 404).
+ */
+export async function getThreadPage(
+  sessionId: string,
+  messageId: string,
+  options: { limit: number; before?: string; after?: string },
+): Promise<ChatThreadPage | null> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.before) params.set("before", options.before);
+  if (options.after) params.set("after", options.after);
+  const res = await fetch(
+    `/api/chat/sessions/${sessionId}/messages/${encodeURIComponent(messageId)}/thread?${params}`,
+    { credentials: "include" },
+  );
+  if (res.status === 404) return null;
+  return jsonOrThrow<ChatThreadPage>(res);
 }
 
 export interface ListRomeSessionsOptions {

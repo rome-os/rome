@@ -3,7 +3,11 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ComputerUseError } from "./protocol.js";
-import { createComputerUseNativeBridge, createNativeRpcTransport } from "./native-bridge.js";
+import {
+  computerUseAppPath,
+  createComputerUseNativeBridge,
+  createNativeRpcTransport,
+} from "./native-bridge.js";
 
 const assets = rs.hoisted(() => ({ inspect: rs.fn(), prepare: rs.fn(), launch: rs.fn() }));
 rs.mock("./native-assets.js", () => ({
@@ -545,5 +549,304 @@ describe("native computer-use transport", () => {
     await chmod(f.stateDir, 0o700);
     expect(await f.bridge.call("hello", {})).toEqual({ ok: true });
     expect(f.calls).toHaveLength(1);
+  });
+
+  it("hands off an idle older Rome helper via shutdown and stages the new version", async () => {
+    const source = {
+      path: "/bundled/app",
+      version: "0.1.9",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const installed = { ...source, path: "/stable/app" };
+    const oldHello = {
+      protocolVersion: 1,
+      version: "0.1.8",
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const newHello = {
+      ...oldHello,
+      version: source.version,
+      implementationSha256: source.implementationSha256,
+    };
+    let phase: "old" | "down" | "new" = "old";
+    const f = await server((request, send, fail) => {
+      if (phase === "old") {
+        if (request.method === "hello") send(oldHello);
+        else if (request.method === "shutdown") {
+          phase = "down";
+          send({ stopping: true });
+        }
+      } else if (phase === "down") {
+        fail({
+          code: "helper_unavailable",
+          message: "Old helper exited",
+          details: { socketCode: "ENOENT", effectStatus: "not_dispatched" },
+        });
+      } else {
+        send(newHello);
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    assets.prepare
+      .mockRejectedValueOnce(new ComputerUseError("helper_install_busy", "Lock still closing"))
+      .mockResolvedValueOnce(installed);
+    assets.launch.mockImplementation((...args: unknown[]) => {
+      phase = "new";
+      (args.at(-1) as (error: null, stdout: string, stderr: string) => void)(null, "", "");
+    });
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 2_000,
+    });
+    expect(await bridge.call("hello", {})).toEqual(newHello);
+    expect(f.connections).toEqual([
+      ["hello"],
+      ["hello", "shutdown"],
+      ["hello"],
+      ["hello"],
+      ["hello"],
+    ]);
+    expect(f.calls.find((call) => call.method === "shutdown")?.params).toEqual({ idleOnly: true });
+    expect(assets.prepare).toHaveBeenCalledTimes(2);
+    expect(assets.launch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands off an idle same-package-version helper when the bundled build number is newer", async () => {
+    const source = {
+      path: "/bundled/app",
+      version: "0.1.8.1795400200",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const installed = { ...source, path: "/stable/app" };
+    const oldHello = {
+      protocolVersion: 1,
+      version: "0.1.8.1795400100",
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const newHello = {
+      ...oldHello,
+      version: source.version,
+      implementationSha256: source.implementationSha256,
+    };
+    let phase: "old" | "down" | "new" = "old";
+    const f = await server((request, send, fail) => {
+      if (phase === "old") {
+        if (request.method === "hello") send(oldHello);
+        else if (request.method === "shutdown") {
+          phase = "down";
+          send({ stopping: true });
+        }
+      } else if (phase === "down") {
+        fail({
+          code: "helper_unavailable",
+          message: "Old helper exited",
+          details: { socketCode: "ENOENT", effectStatus: "not_dispatched" },
+        });
+      } else {
+        send(newHello);
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    assets.prepare.mockResolvedValue(installed);
+    assets.launch.mockImplementation((...args: unknown[]) => {
+      phase = "new";
+      (args.at(-1) as (error: null, stdout: string, stderr: string) => void)(null, "", "");
+    });
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 2_000,
+    });
+    expect(await bridge.call("hello", {})).toEqual(newHello);
+    expect(assets.prepare).toHaveBeenCalledTimes(1);
+    expect(assets.launch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to downgrade or replace an idle newer, same-version, or unversioned Rome helper", async () => {
+    for (const scenario of [
+      { bundledVersion: "0.1.9", runningVersion: "0.1.10" },
+      { bundledVersion: "0.1.8.1795400100", runningVersion: "0.1.8.1795400200" },
+      { bundledVersion: "0.1.9", runningVersion: "0.1.9" },
+      { bundledVersion: "0.1.9", runningVersion: undefined },
+      { bundledVersion: undefined, runningVersion: "0.1.8" },
+    ]) {
+      const source = {
+        path: "/bundled/app",
+        ...(scenario.bundledVersion ? { version: scenario.bundledVersion } : {}),
+        requirement: "stable",
+        implementationSha256: "a".repeat(64),
+        executableSha256: "b".repeat(64),
+        architecture: "arm64" as const,
+      };
+      const runningHello = {
+        protocolVersion: 1,
+        ...(scenario.runningVersion ? { version: scenario.runningVersion } : {}),
+        bundleId: "com.rome.computer-use",
+        permissions: { accessibility: true, screenCapture: true },
+        capabilities: { actions: [] },
+        architecture: "arm64",
+        implementationSha256: "9".repeat(64),
+        activeSessions: 0,
+        execution: { busy: false },
+      };
+      const f = await server((request, send) => {
+        if (request.method === "hello") send(runningHello);
+        else send({ stopping: true });
+      });
+      assets.inspect.mockResolvedValue(source);
+      const bridge = createComputerUseNativeBridge({
+        bundledAppPath: source.path,
+        stateDir: f.stateDir,
+        startupTimeoutMs: 500,
+      });
+      await expect(bridge.call("hello", {})).rejects.toMatchObject({
+        code: "helper_update_required",
+        details: { effectStatus: "not_dispatched" },
+      });
+      expect(f.calls.some((call) => call.method === "shutdown")).toBe(false);
+      expect(assets.prepare).not.toHaveBeenCalled();
+      expect(assets.launch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses shutdown and fails closed when a mismatched helper is busy or gains a session", async () => {
+    const source = {
+      path: "/bundled/app",
+      version: "0.1.9",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const oldHello = {
+      protocolVersion: 1,
+      version: "0.1.8",
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    let helloCount = 0;
+    let mode: "active_session" | "busy" | "raced" = "active_session";
+    const f = await server((request, send) => {
+      if (request.method === "hello") {
+        helloCount++;
+        if (mode === "active_session") send({ ...oldHello, activeSessions: 1 });
+        else if (mode === "busy") send({ ...oldHello, execution: { busy: true } });
+        else send(helloCount === 1 ? oldHello : { ...oldHello, activeSessions: 1 });
+      } else {
+        send({ stopping: true });
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    for (const nextMode of ["active_session", "busy", "raced"] as const) {
+      mode = nextMode;
+      helloCount = 0;
+      const bridge = createComputerUseNativeBridge({
+        bundledAppPath: source.path,
+        stateDir: f.stateDir,
+        startupTimeoutMs: 500,
+      });
+      await expect(bridge.call("hello", {})).rejects.toMatchObject({
+        code: "helper_update_required",
+        details: { effectStatus: "not_dispatched" },
+      });
+    }
+    expect(f.calls.some((call) => call.method === "shutdown")).toBe(false);
+    expect(assets.prepare).not.toHaveBeenCalled();
+    expect(assets.launch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "helper_busy",
+    "input_busy",
+  ])("fails closed when a concurrent bind lands after the verification hello (%s)", async (rejectionCode) => {
+    const source = {
+      path: "/bundled/app",
+      version: "0.1.9",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const oldHello = {
+      protocolVersion: 1,
+      version: "0.1.8",
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const f = await server((request, send, fail) => {
+      if (request.method === "hello") {
+        send(oldHello);
+      } else if (request.method === "shutdown") {
+        fail({
+          code: rejectionCode,
+          message: "Another host bound a session after verification hello.",
+        });
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 500,
+    });
+    await expect(bridge.call("hello", {})).rejects.toMatchObject({
+      code: "helper_update_required",
+      details: { effectStatus: "not_dispatched" },
+    });
+    expect(f.connections).toEqual([["hello"], ["hello", "shutdown"]]);
+    expect(f.calls.find((call) => call.method === "shutdown")?.params).toEqual({ idleOnly: true });
+    expect(assets.prepare).not.toHaveBeenCalled();
+    expect(assets.launch).not.toHaveBeenCalled();
+  });
+
+  it("resolves the helper path by precedence and discovers @rome-os/node-core-darwin-arm64 on Apple Silicon", () => {
+    rs.stubEnv("ROME_COMPUTER_USE_APP", undefined);
+    const defaultPath = computerUseAppPath({});
+    expect(defaultPath.endsWith(join("native", "Rome Computer Use.app"))).toBe(true);
+    if (process.platform === "darwin" && process.arch === "arm64") {
+      expect(defaultPath).toContain("rome-node-core-darwin-arm64");
+    }
+    expect(computerUseAppPath({ bundledAppPath: "/bundled/Rome Computer Use.app" })).toBe(
+      "/bundled/Rome Computer Use.app",
+    );
+    rs.stubEnv("ROME_COMPUTER_USE_APP", "/env/Rome Computer Use.app");
+    expect(computerUseAppPath({ bundledAppPath: "/bundled/Rome Computer Use.app" })).toBe(
+      "/env/Rome Computer Use.app",
+    );
+    expect(
+      computerUseAppPath({
+        appPath: "/explicit/Rome Computer Use.app",
+        bundledAppPath: "/bundled/Rome Computer Use.app",
+      }),
+    ).toBe("/explicit/Rome Computer Use.app");
   });
 });

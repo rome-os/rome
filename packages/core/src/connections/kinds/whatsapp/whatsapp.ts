@@ -568,7 +568,7 @@ export class WhatsAppAdapter {
       where: { chatId: chatId as ChatId, kind: isGroup ? "group" : "direct" },
       sender: {
         accountId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : chatId,
-        name: waMsg.pushName ?? "Unknown",
+        ...(waMsg.pushName ? { name: waMsg.pushName } : {}),
       },
       content: { text: content.text ?? "", attachments: this.extractAttachments(waMsg) },
       receivedBy: this.selfPnJid() ?? "",

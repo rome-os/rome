@@ -16,6 +16,7 @@ struct ChatScreen: View {
     @Environment(AppModel.self) private var model
     #endif
     @State private var draft = ""
+    @State private var transcriptScroll = TranscriptScroll()
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
 
@@ -48,6 +49,9 @@ struct ChatScreen: View {
         .pageBackground()
         // The task links in its messages draw the task chats' live status.
         .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        .task(id: "\(store.sessionId)|\(visible)") { if visible { await store.readChatSession() } }
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
@@ -67,13 +71,13 @@ struct ChatScreen: View {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatedNotice(agentName: workspace.agentName, visible: visible)
                     if store.showsQuoteBar {
-                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        QuoteBar(message: store.quotedMessage) { store.dismissQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
+                    Composer(text: $draft, placeholder: store.threadFocus == nil ? String(localized: "Message") : String(localized: "Message in thread"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
                         if store.send(draft, images: attachments.images, fromComposer: true, reply: store.composerReply) {
@@ -146,19 +150,24 @@ struct ChatScreen: View {
                         .foregroundStyle(Palette.sub)
                     Spacer()
                     Spacer()
+                    // A pinned chat always says so, an empty one too: its
+                    // last row, as the transcript would have it.
+                    if let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor) {
+                        hint
+                    }
                 }
                 .padding(.horizontal, 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
-                        .equatable()
-                        .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
+                TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, footer: PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.latestRequest) { row, previous in
+                    SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                 }
+                .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
+                .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
                 .onTapGesture { composerFocused = false }
-                .overlay(alignment: .top) { UnreadPillButton(store: store) }
+                .overlay(alignment: .bottom) { TranscriptBackToBottom(scroll: transcriptScroll, hidden: store.threadFocus != nil) }
                 .onAppear { store.arrived() }
                 .onChange(of: store.arrivals) { store.arrived() }
             }
@@ -182,7 +191,10 @@ private struct ChatLeaveWatch: View {
 
     var body: some View {
         Color.clear.onChange(of: offScreen) { _, hidden in
-            if hidden { store.endOpen() }
+            if hidden {
+                store.closeThread(animated: false)
+                store.endOpen()
+            }
         }
     }
 }
@@ -198,7 +210,7 @@ private struct ChatHeaderBar: View {
 
     var body: some View {
         // The main Chat is only shared: no Rename, Archive or Delete.
-        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), tasks: workspace.taskList(forChat: conciergeChatID))
+        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), tasks: workspace.taskList(forChat: conciergeChatID), onCloseThread: store.threadFocus == nil ? nil : { store.closeThread() })
             .shareModeHeader(store.share)
     }
 }
@@ -277,6 +289,24 @@ private struct ChatBanners: View {
     }
 }
 
+/// The same concrete content tree in both layout owners. Scope changes may
+/// update metadata and actions, but never replace a bubble's SwiftUI identity.
+struct SharedConciergeRow: View {
+    let row: TranscriptRow
+    let info: RowInfo
+    let store: TranscriptStore
+    let tasks: TaskChatsStore
+    var top: CGFloat = 0
+    var tinted = false
+    var quotesInteractive = true
+    var body: some View {
+        ConciergeRow(row: row, info: info, store: store, tasks: tasks, tinted: tinted, quotesInteractive: quotesInteractive)
+            .equatable()
+            .shareSelectable(row, share: store.share, top: top)
+            .padding(.top, -top)
+    }
+}
+
 /// One row of a Concierge chat, the main chat or a topic chat. It draws from
 /// values (`row`, `info`) and acts through the store's `ChatActions`, and so
 /// compares equal, and is not drawn again, while its message does not change.
@@ -289,9 +319,10 @@ struct ConciergeRow: View, Equatable {
     /// The row's message is the tinted one: its bubble or card draws the
     /// tint behind its own shape, never behind the whole row.
     var tinted = false
+    var quotesInteractive = true
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.tinted == rhs.tinted
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.tinted == rhs.tinted && lhs.quotesInteractive == rhs.quotesInteractive
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
@@ -300,10 +331,11 @@ struct ConciergeRow: View, Equatable {
         openTaskChat?.run((chatId: chatId, title: title))
     }
 
-    /// The tap of the quote a reply carries: it goes to the original.
+    /// A quote opens this message's chain. Quotes inside the chain stay plain.
     private func quoteAction() -> (() -> Void)? {
         let actions = store.actions
-        return info.quote.map { quote in { actions.quote(original: quote.messageId) } }
+        guard quotesInteractive, let from = row.ownMessageId else { return nil }
+        return info.quote.map { quote in { [rowID = row.id] in actions.quote(original: quote.messageId, from: from, row: rowID) } }
     }
 
     /// The message's time, and Reply where the message takes one
@@ -362,8 +394,10 @@ struct ConciergeRow: View, Equatable {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
+        case .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .tools, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage(_, let part):
+            ProviderOutageNotice(part: part)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):
@@ -396,6 +430,7 @@ struct ChatHeader: View {
     /// The chat's task list, for the dot on Tasks while a task needs the
     /// guardian; nil for a blank topic chat, which has none yet.
     var tasks: TaskListStore? = nil
+    var onCloseThread: (() -> Void)? = nil
     /// A topic chat's options in the "…" menu; the main Chat has none.
     var onRename: (() -> Void)? = nil
     /// Whether the topic chat is pinned, for Pin or Unpin.
@@ -418,7 +453,15 @@ struct ChatHeader: View {
             // As wide as the capsule on the right, so the identity stays in the middle.
             .frame(width: ChatHeaderButtons.width, alignment: .leading)
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
+            if let onCloseThread {
+                GlassCircleButton(accessibilityLabel: "Close reply chain", action: onCloseThread) {
+                    Image(systemName: "xmark").romeFont(15, .semibold)
+                }
+                .accessibilityIdentifier("close-reply-chain")
+                .frame(width: ChatHeaderButtons.width, alignment: .trailing)
+            } else {
             ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onUnarchive: onUnarchive, onDelete: onDelete)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)

@@ -50,7 +50,6 @@ struct InstancesScreen: View {
         .floatingTopBar { PageHeader(title: "Switch instance", inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task { await model.refreshInstances() }
     }
 

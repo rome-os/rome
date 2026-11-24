@@ -29,6 +29,10 @@ enum SettingsRoute: Hashable {
     case liveReads(String)
     /// A synced connection's Sync history, by its personal-data source.
     case syncHistory(String)
+    /// The default model and the AI accounts.
+    case aiModel
+    /// Every share link of the signed-in person.
+    case sharedLinks
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -100,6 +104,7 @@ struct MainShell: View {
     @State private var appPreview: InstalledApp?
     @State private var connectPreview: String?
     @State private var archivedPreview = false
+    @State private var loginPreview: AIAccount?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -199,6 +204,8 @@ struct MainShell: View {
                 connectPreview = id
             case .archivedSheet(let open):
                 archivedPreview = open
+            case .aiLoginSheet(let account):
+                loginPreview = account
             case .composerPhotos, .appIdeas, nil: break
             }
         }
@@ -273,10 +280,6 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        // The Archived sheet stops at half height and floats on iOS 26, and
-        // the system dims nothing behind a sheet there: the drawer and the
-        // chat would read clearly around it.
-        .overlay { archivedScrim }
         .fullScreenCover(item: $agentPage, onDismiss: {
             // Settings is a sheet of this view, so it waits for the cover to be gone.
             guard openUsageAfterCover else { return }
@@ -320,6 +323,10 @@ struct MainShell: View {
             closeDrawer()
         }) {
             archivedSheet
+                // It stops at half height and floats on iOS 26, where the
+                // system dims nothing behind it: the drawer and the chat
+                // would read clearly around it.
+                .background(SheetDim())
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Palette.sheet)
@@ -354,6 +361,23 @@ struct MainShell: View {
                     archivedSheet
                         .frame(height: 420)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+            if let loginPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    Group {
+                        switch loginPreview {
+                        case .chatgpt:
+                            ChatGPTLoginSheet(backend: workspace.backend, preview: .code("K7QF-2M9D", URL(string: "https://auth.openai.com/codex/device")))
+                        case .claude:
+                            ClaudeLoginSheet(backend: workspace.backend, preview: .ready(URL(string: "https://claude.ai/oauth/authorize")!), previewRejected: true)
+                        }
+                    }
+                    .frame(height: 560)
+                    .background(Palette.sheet)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
                 }
                 .ignoresSafeArea(edges: .bottom)
             }
@@ -637,15 +661,6 @@ struct MainShell: View {
         current == .topic(retired) ? .chat : nil
     }
 
-    /// The scrim behind the Archived sheet while it is up. Kept out of `body`,
-    /// whose modifier chain is already near the type checker's limit.
-    private var archivedScrim: some View {
-        ZStack {
-            if showArchived { SheetScrim().transition(.opacity) }
-        }
-        .animation(.easeOut(duration: 0.25), value: showArchived)
-    }
-
     /// The Archived sheet: a tapped row closes it, and its chat opens after.
     private var archivedSheet: some View {
         ArchivedTopicsSheet(workspace: workspace, onOpen: { id in
@@ -700,39 +715,50 @@ struct MainShell: View {
     }
 
     /// Settings slides up with its own stack, so its pages (instances,
-    /// Connections) push inside the sheet and the X closes all of it.
+    /// Connections, Shared links) push inside the sheet and the X closes all of it.
     private var settingsSheet: some View {
         NavigationStack(path: $settingsPath) {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
                 onConnections: { settingsPath.append(.connections) },
+                onAIModel: { settingsPath.append(.aiModel) },
+                onSharedLinks: { settingsPath.append(.sharedLinks) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
-                switch route {
-                case .instances:
-                    InstancesScreen(onSwitched: {
-                        showSettings = false
-                        show(.chat)
-                    })
-                case .connections:
-                    ConnectionsScreen(
-                        isVisitor: workspace.isVisitor,
-                        onConnection: { settingsPath.append(.connection($0)) },
-                        onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
-                    )
-                case .connection(let id):
-                    ConnectionScreen(
-                        id: id,
-                        onActivity: { settingsPath.append(.liveReads(id)) },
-                        onHistory: { source in settingsPath.append(.syncHistory(source)) }
-                    )
-                case .liveReads(let id):
-                    NodeRequestsScreen(capability: id)
-                case .syncHistory(let source):
-                    SyncHistoryScreen(source: source)
+                // Every page here hides the bar, which turns the edge swipe
+                // off; it comes back once for all of them, so no page misses it.
+                Group {
+                    switch route {
+                    case .instances:
+                        InstancesScreen(onSwitched: {
+                            showSettings = false
+                            show(.chat)
+                        })
+                    case .connections:
+                        ConnectionsScreen(
+                            isVisitor: workspace.isVisitor,
+                            onConnection: { settingsPath.append(.connection($0)) },
+                            onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
+                        )
+                    case .connection(let id):
+                        ConnectionScreen(
+                            id: id,
+                            onActivity: { settingsPath.append(.liveReads(id)) },
+                            onHistory: { source in settingsPath.append(.syncHistory(source)) }
+                        )
+                    case .liveReads(let id):
+                        NodeRequestsScreen(capability: id)
+                    case .syncHistory(let source):
+                        SyncHistoryScreen(source: source)
+                    case .aiModel:
+                        AIModelScreen(store: workspace.aiModel, backend: workspace.backend)
+                    case .sharedLinks:
+                        SharedLinksScreen(store: workspace.sharedLinks)
+                    }
                 }
+                .background(SwipeBackEnabler())
             }
         }
         .environment(\.pageBackground, Palette.secondaryPage)

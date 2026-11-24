@@ -378,7 +378,7 @@ jobs:
               # workspace dependencies (see packages/desktop/package.json).
               log="$(
                 git log --no-merges --format='- %s' "desktop-v${prev}..${TAG}" -- \
-                  packages/desktop packages/desktop-base-web packages/rome-node-core packages/lib
+                  packages/desktop packages/desktop-base-web packages/rome-node-core packages/rome-node-core-darwin-arm64 packages/lib
               )"
               changes="$(printf '%s\n' "$log" | grep -vE '^- chore(\([^)]*\))?: release' || true)"
               if [ -n "$changes" ]; then

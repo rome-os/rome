@@ -21,7 +21,7 @@ enum UpdateGate {
     /// The oldest instance release with every API the app calls. Every entry
     /// raises it; the update it asks for runs in the background. Never below
     /// `blockingMinimumInstanceVersion`.
-    static let minimumInstanceVersion = "1.1.216"
+    static let minimumInstanceVersion = "1.1.219"
 
     /// The first release with each feature's API, for a feature that checks
     /// the instance's version itself. A feature never checks against the

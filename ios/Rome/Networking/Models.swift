@@ -23,6 +23,21 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var largeModelSelection: String?
     /// When its owner pinned it; a topic chat only. Nil when not pinned.
     var pinnedAt: String?
+    /// Whether it follows the default provider; absent from an older server.
+    var followsDefault: Bool?
+    /// The model it is pinned to while it does not follow the default.
+    var pinnedModel: PinnedModel?
+
+    /// What a chat that does not follow the default is pinned to, and who
+    /// pinned it (docs/domains/agents.md#pinned-chat).
+    struct PinnedModel: Codable, Hashable, Sendable {
+        /// `owner` (a pick in the model menu) or `kept` (a card's switch, or a
+        /// change of the default that left the chat where it was).
+        var by: String
+        var providerId: String
+        var selection: String?
+        var model: String?
+    }
 
     /// The agent that answers a Concierge chat, a topic chat's included.
     static let conciergeAgent = "core:concierge"
@@ -56,6 +71,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Rome's status on a guardian message of its Chat: `working` or `failed`.
     /// It shows over the reaction. Nil when it has none, and from older instances.
     var status: String? = nil
+    var chatThreadId: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -71,7 +87,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status, chatThreadId
     }
 }
 
@@ -106,6 +122,7 @@ extension ChatMessage {
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
         reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -121,6 +138,7 @@ extension ChatMessage {
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
         try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(chatThreadId, forKey: .chatThreadId)
     }
 }
 
@@ -218,6 +236,13 @@ struct UpgradeStarted: Codable, Hashable, Sendable {
 struct BuildInfo: Codable, Hashable, Sendable {
     var version: String?
     var sha: String?
+}
+
+/// A window of one chain, in server order. The anchor stays the same while paging.
+struct ThreadPage: Codable, Sendable {
+    var messages: [ChatMessage]
+    var hasOlder: Bool
+    var hasNewer: Bool
 }
 
 /// `GET /chat/sessions/:id/messages?limit=&before=`.
@@ -646,24 +671,165 @@ enum ApprovalStatus: String, Sendable {
 
 /// `GET /ai-tools/status`: the two subscriptions Rome can run on.
 struct AIToolsStatus: Codable, Sendable {
-    struct Window: Codable, Sendable {
+    struct Window: Codable, Sendable, Equatable {
         var usedPercent: Double?
         var resetsAt: String?
     }
 
-    struct Usage: Codable, Sendable {
+    struct Usage: Codable, Sendable, Equatable {
         var fiveHour: Window?
         var sevenDay: Window?
     }
 
-    struct Provider: Codable, Sendable {
+    struct Provider: Codable, Sendable, Equatable {
         var loggedIn: Bool?
         var usage: Usage?
         var quotaExhausted: Bool?
+        /// The login expired or was revoked: logging in again fixes it.
+        var needsReauth: Bool?
+        /// When the usage limit ends, while `quotaExhausted`.
+        var quotaExhaustedUntil: String?
+        /// How Claude is let in: `stored-compatible` and `environment` are API
+        /// keys, which have no usage windows and no logout here.
+        var authMethod: String?
+
+        var usesAPIKey: Bool { authMethod == "stored-compatible" || authMethod == "environment" }
+    }
+
+    /// A ChatGPT device-code login in progress (`codexDeviceLogin`).
+    struct DeviceLogin: Codable, Sendable, Equatable {
+        var running: Bool?
+        var userCode: String?
+        var verificationUrl: String?
+        /// Why the last login did not complete: expired or declined.
+        var lastError: String?
+    }
+
+    /// `defaultProvider`: the provider chats that follow the default run on.
+    /// Absent from a server before the default existed.
+    struct DefaultState: Codable, Sendable, Equatable {
+        struct SignedIn: Codable, Sendable, Equatable {
+            var anthropic: Bool?
+            var openai: Bool?
+            var romeCredits: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case anthropic, openai
+                case romeCredits = "rome_credits"
+            }
+        }
+
+        /// `anthropic`, `openai` or `rome_credits`; nil while none is set.
+        var provider: DefaultModelProvider?
+        var signedIn: SignedIn?
+        /// Whether Rome credits could run chats once no AI account is logged in.
+        var romeCreditsUsable: Bool?
+        /// How many chats follow the default, so a change of it would move them.
+        var followingChats: Int?
     }
 
     var claude: Provider?
     var codex: Provider?
+    var codexDeviceLogin: DeviceLogin?
+    var defaultProvider: DefaultState?
+
+    func provider(_ provider: DefaultModelProvider) -> Provider? {
+        switch provider {
+        case .anthropic: return claude
+        case .openai: return codex
+        case .romeCredits, .unknown: return nil
+        }
+    }
+}
+
+/// A provider chats can run on, as the server names it
+/// (docs/domains/agents.md#default-provider). A name this build does not know
+/// decodes as `.unknown`, so a newer server keeps decoding.
+enum DefaultModelProvider: Hashable, Sendable, Codable, Identifiable {
+    case anthropic, openai, romeCredits, unknown(String)
+
+    init(wire: String) {
+        switch wire {
+        case "anthropic": self = .anthropic
+        case "openai": self = .openai
+        case "rome_credits": self = .romeCredits
+        default: self = .unknown(wire)
+        }
+    }
+
+    var wire: String {
+        switch self {
+        case .anthropic: return "anthropic"
+        case .openai: return "openai"
+        case .romeCredits: return "rome_credits"
+        case .unknown(let wire): return wire
+        }
+    }
+
+    var id: String { wire }
+
+    /// The name the guardian reads, as the web names it.
+    var name: String {
+        switch self {
+        case .anthropic: return "Claude"
+        case .openai: return "ChatGPT"
+        case .romeCredits: return String(localized: "Rome credits")
+        case .unknown(let wire): return wire
+        }
+    }
+
+    /// The account a guardian logs in to, for the two that have one.
+    var account: AIAccount? {
+        switch self {
+        case .anthropic: return .claude
+        case .openai: return .chatgpt
+        default: return nil
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(wire: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wire)
+    }
+}
+
+/// One of the two AI accounts the guardian logs in to from the phone.
+enum AIAccount: String, Hashable, Sendable, Identifiable, CaseIterable {
+    case chatgpt, claude
+
+    var id: String { rawValue }
+    var provider: DefaultModelProvider { self == .chatgpt ? .openai : .anthropic }
+    var name: String { provider.name }
+    /// The path segment of its logout route (`/ai-tools/<segment>/logout`).
+    var routeSegment: String { self == .chatgpt ? "codex" : "claude" }
+}
+
+/// `POST /ai-tools/codex/device-login/start`: the code to enter and where.
+struct DeviceLoginCode: Codable, Sendable, Equatable {
+    var userCode: String?
+    var verificationUrl: String?
+}
+
+/// `GET /ai-tools/rome-credits`: the account's Rome credits, in microdollars
+/// as decimal strings. `credits` is null when the instance has none.
+struct RomeCreditsResponse: Codable, Sendable {
+    struct Credits: Codable, Sendable, Equatable {
+        var availableMicros: String?
+        var balanceMicros: String?
+        var grantedMicros: String?
+        var enabled: Bool?
+
+        /// What is left, in dollars; nil when the server does not say.
+        var availableDollars: Double? {
+            (availableMicros ?? balanceMicros).flatMap(Double.init).map { $0 / 1_000_000 }
+        }
+    }
+
+    var credits: Credits?
 }
 
 // MARK: - Apps

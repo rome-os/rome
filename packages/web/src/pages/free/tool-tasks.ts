@@ -44,6 +44,11 @@ export interface TaskChatInPane {
   active: boolean;
   /** Closes the Chat tab, as deleting the chat does. */
   onClose: () => void;
+  /**
+   * Element in the pane's tab row for the task chat's own buttons, its ⋯
+   * menu: the tab is its header. Null while the tab is not the one showing.
+   */
+  actions: HTMLElement | null;
 }
 
 export const TaskChatInPaneContext = createContext<TaskChatInPane | null>(null);

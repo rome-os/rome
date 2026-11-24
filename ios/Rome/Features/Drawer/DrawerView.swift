@@ -10,7 +10,7 @@ struct DrawerView: View {
     let onSettings: () -> Void
     /// A topic chat was archived or deleted from its row.
     var onTopicGone: (String) -> Void = { _ in }
-    /// The Archived row under the topic chats: its sheet opens.
+    /// The Archived button in the topic chats header: its sheet opens.
     var onArchived: () -> Void = {}
     /// How many topic chats show; a scroll near the end adds a page.
     @State private var topicLimit = TopicChatsStore.pageSize
@@ -139,6 +139,18 @@ struct DrawerView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityValue(foldValue)
                 .accessibilityIdentifier("topic-chats-header")
+                if workspace.archivedTopics.count > 0 {
+                    Button(action: onArchived) {
+                        Image(systemName: "archivebox")
+                            .romeFont(15, .light)
+                            .foregroundStyle(Palette.sub.opacity(0.75))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScaleStyle())
+                    .accessibilityLabel("Archived")
+                    .accessibilityIdentifier("archived-topic-chats")
+                }
                 Button(action: onNewTopic) {
                     // Lighter and thinner than the header beside it, so it
                     // never outweighs the list.
@@ -181,12 +193,14 @@ struct DrawerView: View {
                             workspace.topics.setOlderExpanded(!olderExpanded)
                         }
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: olderExpanded ? "chevron.down" : "chevron.right")
-                                .romeFont(10, .bold)
-                                .frame(width: 22)
-                                .accessibilityHidden(true)
+                        // Text first, then the chevron, as the "Topic chats"
+                        // header above: the text starts where the chat names do.
+                        HStack(spacing: 6) {
                             Text("Older · \(groups.older.count)").romeFont(15)
+                            Image(systemName: "chevron.right")
+                                .romeFont(10, .bold)
+                                .rotationEffect(.degrees(olderExpanded ? 90 : 0))
+                                .accessibilityHidden(true)
                             Spacer(minLength: 0)
                         }
                         .foregroundStyle(Palette.sub)
@@ -210,12 +224,6 @@ struct DrawerView: View {
                                 .drawerRow()
                         }
                     }
-                }
-                let archived = workspace.archivedTopics.count
-                let shown = rows.count + (olderExpanded ? olderShown : groups.older.count)
-                if ArchivedTopicsStore.showsEntry(archived: archived, folded: folded, shownTopics: shown, topics: chats.count) {
-                    ArchivedTopicsEntry(count: archived, action: onArchived)
-                        .drawerRow()
                 }
             }
             .listStyle(.plain)

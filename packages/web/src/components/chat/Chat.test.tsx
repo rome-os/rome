@@ -16,6 +16,7 @@ import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
+import { taskLink } from "@rome/api-types/task-link";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
 import {
   CONCIERGE_LEADING_SLOT,
@@ -26,6 +27,7 @@ import {
   ToolTasksContext,
   type ToolTasksHost,
 } from "@/pages/free/tool-tasks";
+import { ThemeProvider } from "@/hooks/use-theme";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -43,6 +45,7 @@ import {
   createSession,
   deleteSession,
   interruptTurn,
+  getThreadPage,
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
@@ -210,11 +213,20 @@ function ReplyJump() {
   const reply = useReplyDraft();
   return (
     <>
-      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
+      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump?.("a2", "m-2")}>
         jump
       </button>
+      <button
+        type="button"
+        data-testid="pick-reply"
+        onClick={() =>
+          reply?.set({ messageId: "a2", author: "agent", preview: "Lisbon", quote: "Lisbon" })
+        }
+      >
+        reply
+      </button>
       {/* A click on the quote of a message, which names m-1. */}
-      <button type="button" data-testid="quote-jump" onClick={() => reply?.jump("m-1")}>
+      <button type="button" data-testid="quote-jump" onClick={() => reply?.jump?.("m-1", "m-2")}>
         quote
       </button>
       {/* An older message the timeline has not loaded. */}
@@ -331,6 +343,7 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   // the way the real composer's Stop button does.
   // Memoized, as the real one is: it renders again only for new props.
   ChatComposer: memo(function ChatComposer(props: {
+    placeholder?: string;
     isStreaming?: boolean;
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
@@ -338,7 +351,11 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   }) {
     renders.composer += 1;
     return (
-      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      <div
+        data-testid="chat-composer"
+        data-placeholder={props.placeholder ?? ""}
+        data-streaming={props.isStreaming ? "true" : "false"}
+      >
         {props.streamError ? (
           <div data-testid="stream-error">
             {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
@@ -442,6 +459,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       isStreaming?: boolean;
       onStop?: () => void;
       chatName?: string | null;
+      placeholder?: string;
     },
     ref,
   ) {
@@ -457,6 +475,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
         data-testid="chat-composer"
         data-streaming={props.isStreaming ? "true" : "false"}
         data-chat-name={props.chatName ?? ""}
+        data-placeholder={props.placeholder ?? ""}
       >
         <button
           type="button"
@@ -501,6 +520,8 @@ rs.mock("@/lib/chat-api", () => {
     pinSession: rs.fn().mockResolvedValue(undefined),
     interruptTurn: rs.fn(),
     listSessionMessages,
+    // A server with no reply chains to open, unless a test says otherwise.
+    getThreadPage: rs.fn().mockResolvedValue(null),
     // The newest page reads like the whole list unless a test says otherwise.
     listSessionMessagePage: rs.fn(async (id: string) => {
       const all = await listSessionMessages(id);
@@ -534,6 +555,7 @@ rs.mock("@/lib/chat-api", () => {
 function pane(children: ReactNode) {
   const host: ToolTraceHost = {
     outlet: null,
+    actions: null,
     paneOpen: !appsPanel.collapsed,
     setPaneCollapsed: appsPanel.setCollapsed,
     reveal: rs.fn(),
@@ -622,6 +644,45 @@ afterEach(() => {
   MockEventSource.instances = [];
 });
 
+describe("the sibling composer floor's wheel path", () => {
+  it("scrolls the list for a wheel over the floor but leaves zoom and horizontal gestures alone", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    const floor = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-chat-floor]");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    const scroller = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+    const scrollBy = rs.fn();
+    scroller.scrollBy = scrollBy;
+    expect(fireEvent.wheel(floor, { deltaY: -120, cancelable: true })).toBe(false);
+    expect(scrollBy).toHaveBeenCalledWith({ top: -120 });
+    scrollBy.mockClear();
+    expect(fireEvent.wheel(floor, { deltaY: -120, ctrlKey: true, cancelable: true })).toBe(true);
+    expect(fireEvent.wheel(floor, { deltaY: 1, deltaX: 120, cancelable: true })).toBe(true);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it("lets a scrollable input consume its wheel, then scrolls the list at the input's edge", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(document.querySelector("[data-chat-floor]")).not.toBeNull());
+    const floor = document.querySelector<HTMLElement>("[data-chat-floor]")!;
+    const scroller = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+    const scrollBy = rs.fn();
+    scroller.scrollBy = scrollBy;
+    const input = document.createElement("textarea");
+    input.style.overflowY = "auto";
+    Object.defineProperties(input, { scrollHeight: { value: 200 }, clientHeight: { value: 30 } });
+    floor.append(input);
+    input.scrollTop = 50;
+    expect(fireEvent.wheel(input, { deltaY: 40, cancelable: true })).toBe(true);
+    expect(scrollBy).not.toHaveBeenCalled();
+    input.scrollTop = 170;
+    expect(fireEvent.wheel(input, { deltaY: 40, cancelable: true })).toBe(false);
+    expect(scrollBy).toHaveBeenCalledWith({ top: 40 });
+  });
+});
+
 describe("Chat missing-session detection", () => {
   it("reports a confirmed missing session", async () => {
     rs.mocked(listSessionMessages).mockResolvedValueOnce(null);
@@ -666,6 +727,7 @@ describe("Chat trace in the tool pane", () => {
   function host(outlet: HTMLElement | null = null) {
     return {
       outlet,
+      actions: null,
       paneOpen: true,
       setPaneCollapsed: rs.fn(),
       reveal: rs.fn(),
@@ -2786,6 +2848,7 @@ describe("Chat Concierge empty state", () => {
           <ToolTraceContext.Provider
             value={{
               outlet: null,
+              actions: null,
               paneOpen,
               setPaneCollapsed: rs.fn(),
               reveal: rs.fn(),
@@ -2970,6 +3033,7 @@ describe("Chat Concierge empty state", () => {
             <ToolTraceContext.Provider
               value={{
                 outlet: null,
+                actions: null,
                 paneOpen,
                 setPaneCollapsed: rs.fn(),
                 reveal: rs.fn(),
@@ -3282,6 +3346,7 @@ describe("Chat Concierge empty state", () => {
           <ToolTraceContext.Provider
             value={{
               outlet: null,
+              actions: null,
               paneOpen,
               setPaneCollapsed: rs.fn(),
               reveal: rs.fn(),
@@ -3311,7 +3376,7 @@ describe("Chat Concierge empty state", () => {
     const at = (active: boolean) => (
       <MemoryRouter>
         {pane(
-          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn() }}>
+          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn(), actions: null }}>
             <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
           </TaskChatInPaneContext.Provider>,
         )}
@@ -3325,6 +3390,31 @@ describe("Chat Concierge empty state", () => {
     expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
     view.rerender(at(false));
     await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
+  it("draws no header in the side pane's tab, and puts its ⋯ in the tab row while it shows", async () => {
+    const actions = document.createElement("div");
+    document.body.append(actions);
+    const at = (shown: boolean) => (
+      <MemoryRouter>
+        {pane(
+          <TaskChatInPaneContext.Provider
+            value={{ active: shown, onClose: rs.fn(), actions: shown ? actions : null }}
+          >
+            <Chat sessionId="session-1" />
+          </TaskChatInPaneContext.Provider>,
+        )}
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    // The tab names the chat: no badge, no name tag, no header to clear.
+    expect(document.querySelector("[data-concierge-header]")).toBeNull();
+    expect(actions.querySelector("[data-chat-header-actions]")).not.toBeNull();
+    view.rerender(at(false));
+    expect(actions.querySelector("[data-chat-header-actions]")).toBeNull();
+    actions.remove();
   });
 
   it("stops listening when the task list's sheet covers the composer", async () => {
@@ -3639,6 +3729,295 @@ describe("Chat Concierge jump to a message", () => {
   });
 
   describe("a click on a quote", () => {
+    it("opens the reply's chain in place when the server has it, and a click on blank space closes it", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+
+      fireEvent.click(screen.getByTestId("quote-jump"));
+
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(getThreadPage).toHaveBeenCalledWith("concierge", "m-2", { limit: 10 });
+      expect(scrollTo).not.toHaveBeenCalled();
+      fireEvent.click(document.querySelector("[data-chain-layer] > div")!);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+    });
+
+    it("keeps task links live in the chain, as they are in the chat", async () => {
+      const result = {
+        id: "m-5",
+        sessionId: "concierge",
+        turnId: "turn-5",
+        role: "assistant" as const,
+        content: JSON.stringify([
+          { type: "text", content: `Done: ${taskLink("Book Lisbon", "task-9")}` },
+        ]),
+        createdAt: new Date(Date.UTC(2026, 9, 27, 12, 0, 5)).toISOString(),
+      };
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2), result],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-chain-layer] [data-task-link='task-9']"),
+        ).not.toBeNull(),
+      );
+    });
+
+    it("closes the chain when sharing starts, so the turns are picked on the chat", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      const row = document.querySelector<HTMLElement>(
+        '[data-testid="user-row"][data-timeline-anchor="m-2"]',
+      )!;
+      // The chat's own Share, which stays mounted under the chain.
+      fireEvent.click(row.querySelector('button[aria-label="message.share"]')!);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-2");
+    });
+
+    it("sends implicitly in the chain and restores the placeholder on close", async () => {
+      const messages = [message(1), message(2), { ...message(3), content: " " }];
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages,
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await screen.findByTestId("quote-jump");
+      const composer = screen.getByTestId("chat-composer");
+      expect(composer.dataset.placeholder).toBe("");
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+      expect(composer.dataset.placeholder).toBe("composer.placeholderInThread");
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
+      expect(form.get("replyToMessageId")).toBe("m-2");
+      expect(form.get("replyQuote")).toBeNull();
+      expect(document.querySelector("[data-reply-bar]")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect(composer.dataset.placeholder).toBe("");
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+    });
+
+    it("takes the implicit target from a live chain update without picking a reply draft", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      act(() => chatEvents()!.emit("message_insert", { ...message(4), chatThreadId: "m-2" }));
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+      expect(
+        (rs.mocked(postSessionTurn).mock.calls[0][1] as FormData).get("replyToMessageId"),
+      ).toBe("m-4");
+      expect(document.querySelector("[data-reply-bar]")).toBeNull();
+    });
+
+    it("keeps an explicitly selected reply ahead of the chain's implicit target", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("pick-reply"));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
+      expect(form.get("replyToMessageId")).toBe("a2");
+      expect(form.get("replyQuote")).toBe("Lisbon");
+    });
+
+    it("routes a floor wheel to the focused chain, not the hidden main scroller", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      const main = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+      const layer = document.querySelector<HTMLElement>("[data-chain-layer] > div")!;
+      const mainScroll = rs.fn(),
+        layerScroll = rs.fn();
+      main.scrollBy = mainScroll;
+      layer.scrollBy = layerScroll;
+      const floor = document.querySelector<HTMLElement>("[data-chat-floor]")!;
+      fireEvent.wheel(floor, { deltaY: -80, cancelable: true });
+      expect(layerScroll).toHaveBeenCalledWith({ top: -80 });
+      expect(mainScroll).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      fireEvent.wheel(floor, { deltaY: -80, cancelable: true });
+      expect(mainScroll).toHaveBeenCalledWith({ top: -80 });
+    });
+
+    it("uses one round back arrow in the header's leading column, keeping the phone outlet registered", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      const seen = { outlet: false };
+      function Probe() {
+        seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+        return null;
+      }
+      renderChat(
+        <ThemeProvider>
+          <SlotProvider>
+            <Probe />
+            <Chat sessionId="concierge" variant="concierge" />
+          </SlotProvider>
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      expect(seen.outlet).toBe(true);
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      const back = await screen.findByRole("button", { name: "reply.closeChain" });
+      const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
+      expect(within(header).getByRole("button", { name: "reply.closeChain" })).toBe(back);
+      expect(back.querySelector(".lucide-arrow-left")).not.toBeNull();
+      expect(back.textContent).toBe("");
+      expect(back.className).toContain("rounded-full");
+      expect(back.parentElement!.className).toContain("col-start-1 row-start-1");
+      expect(screen.getAllByRole("button", { name: "reply.closeChain" })).toHaveLength(1);
+      expect(seen.outlet).toBe(true);
+      expect(header.querySelector(".invisible.pointer-events-none")).not.toBeNull();
+      expect(
+        document.querySelector("[data-chain-layer] button[aria-label='reply.closeChain']"),
+      ).toBeNull();
+      fireEvent.click(back);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect(seen.outlet).toBe(true);
+    });
+
+    it("keeps one persistent message-list scope without capturing or remounting its header or shared composer", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      const scope = document.querySelector("[data-message-list]")!;
+      const header = document.querySelector("[data-concierge-header]")!;
+      const composer = screen.getByTestId("chat-composer");
+      const floor = composer.closest("[data-chat-floor]");
+      expect(scope.contains(header)).toBe(false);
+      expect(scope.contains(composer)).toBe(false);
+      expect(scope.querySelector("[data-chat-floor-space]")).not.toBeNull();
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(scope.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(document.querySelector("[data-message-list]")).toBe(scope);
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+      expect(composer.closest("[data-chat-floor]")).toBe(floor);
+      expect(header.isConnected).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(scope.querySelector("[data-chain-layer]")).toBeNull());
+      expect(document.querySelector("[data-message-list]")).toBe(scope);
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+    });
+
     // A message of the guardian's that replies to m-1.
     const reply = (n: number) => ({
       ...message(n),
@@ -3649,17 +4028,21 @@ describe("Chat Concierge jump to a message", () => {
     });
     const quoteAnchor = () => screen.getByTestId("quote-jump");
 
-    it("scrolls to the original and tints it when it is loaded, with no toast", async () => {
+    it("goes to the original and tints it when it is loaded, with no toast, where the server has no chain to open", async () => {
       rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
         messages: [message(1), message(2)],
         nextCursor: null,
       });
-      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
       await waitFor(() => expect(rows()).toBe(2));
 
       fireEvent.click(quoteAnchor());
 
-      expect(scrollTo).toHaveBeenCalledOnce();
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledOnce());
       expect(toast.loading).not.toHaveBeenCalled();
     });
 

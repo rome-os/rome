@@ -8,6 +8,11 @@ import Testing
         for _ in 0..<20 { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
+    /// Waits up to ten seconds for `condition`.
+    private func until(_ condition: () -> Bool) async {
+        for _ in 0..<1000 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
     private func workspace(_ backend: FakeBackend) -> Workspace {
         Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-tests-\(UUID().uuidString)/Drafts"), instance: "test"))
     }
@@ -371,7 +376,8 @@ import Testing
         ]
         let workspace = workspace(backend)
         workspace.topics.start()
-        await settle()
+        // Waits on the list, not a fixed time: a loaded CI clone is slow.
+        await until { workspace.topics.chats.count == 3 }
         #expect(await workspace.pinTopic("c", pinned: true))
         // At once, before the refetch.
         #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
@@ -380,7 +386,7 @@ import Testing
         #expect(await workspace.pinTopic("b", pinned: true))
         #expect(workspace.topics.chats.map(\.id) == ["b", "c", "a"])
         #expect(await workspace.pinTopic("c", pinned: false))
-        await settle()
+        await until { workspace.topics.chats.map(\.id) == ["b", "a", "c"] }
         #expect(workspace.topics.chats.map(\.id) == ["b", "a", "c"])
         #expect(backend.calls == ["pin c", "pin b", "unpin c"])
     }
