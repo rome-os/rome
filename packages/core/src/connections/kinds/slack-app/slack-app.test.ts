@@ -821,6 +821,25 @@ function historyAdapter(
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
+  it("names an author from another workspace the same when read as when heard, while the directory fails", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1), { user: "U_EXTERNAL" });
+    const userName = rs.fn<SlackAppWebApi["userName"]>().mockRejectedValue(new Error("timed out"));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, user: "U_EXTERNAL", user_team: "T_OTHER" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_OTHER/U_EXTERNAL",
+      "T_OTHER/U_EXTERNAL",
+    ]);
+  });
+
   it("names an author from another workspace the same when read as when heard", async () => {
     const slack = fakeSlackHistory();
     Object.assign(slack.say(1), { user: "U_EXTERNAL" });

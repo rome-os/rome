@@ -123,7 +123,8 @@ export class SlackWorkspaceUnknown extends Error {
  *  - the app's workspace, when the directory has not answered and the message
  *    names no other workspace. A history page names none, and a slow
  *    directory never holds up a read, so an author from another workspace
- *    reads as the app's until the directory answers.
+ *    that the app has not heard since it started reads as the app's until
+ *    the directory answers.
  *  Anything else is not known yet. A bot, which the directory does not list,
  *  keeps what the message names. */
 function authorWorkspace(

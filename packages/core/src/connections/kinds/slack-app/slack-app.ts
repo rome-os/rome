@@ -186,6 +186,9 @@ export class SlackAppAdapter {
   private readonly refusedWhileStopped = new Map<string, number>();
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackMember>();
+  /** The workspace each author from another workspace was heard under, so
+   *  a read names them the same while the directory has not answered. */
+  private readonly heardWorkspaces = new Map<string, string>();
   private abort = new AbortController();
   private depositKey: string;
   private readonly readGate: SlackReadGate;
@@ -296,6 +299,9 @@ export class SlackAppAdapter {
       return { status: 500 };
     }
     if (!said) return { status: 200 };
+    const workspace = said.senderId.slice(0, said.senderId.indexOf("/"));
+    if (event.user && workspace !== this.config.teamId)
+      this.rememberWorkspace(event.user, workspace);
 
     const message: ChannelMessage = {
       ...said,
@@ -469,7 +475,7 @@ export class SlackAppAdapter {
     );
     const messages: Array<{ ts: string; message: ChannelMessage }> = [];
     for (const wire of wires) {
-      const name = (wire.user && names.get(wire.user)) || {};
+      const name = this.memberOf(wire.user, names);
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) {
         messages.push({
@@ -557,7 +563,7 @@ export class SlackAppAdapter {
     const messages: ChannelMessage[] = [];
     for (const wire of wires) {
       if (!withinRead(wire.ts, read)) continue;
-      const name = (wire.user && names.get(wire.user)) || {};
+      const name = this.memberOf(wire.user, names);
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push(message);
     }
@@ -616,6 +622,24 @@ export class SlackAppAdapter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** What is known of `user`: the directory's answer, or the workspace they
+   *  were heard under when the directory has not answered. */
+  private memberOf(user: string | undefined, names: Map<string, SlackMember>): SlackMember {
+    if (!user) return {};
+    const named = names.get(user) ?? {};
+    const heard = this.heardWorkspaces.get(user);
+    return named.teamId || !heard ? named : { ...named, teamId: heard };
+  }
+
+  private rememberWorkspace(user: string, workspace: string): void {
+    this.heardWorkspaces.delete(user);
+    if (this.heardWorkspaces.size >= USER_NAME_CACHE_SIZE) {
+      const oldest = this.heardWorkspaces.keys().next().value;
+      if (oldest !== undefined) this.heardWorkspaces.delete(oldest);
+    }
+    this.heardWorkspaces.set(user, workspace);
   }
 
   /** A member's name, best effort: a failed lookup leaves the message unnamed. */
