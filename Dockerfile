@@ -11,6 +11,14 @@
 ARG APT_MIRROR=""
 ARG NPM_REGISTRY=""
 
+# Claude's standalone CLI has its own release stream and lockfile. Codex's
+# global command uses the Core dependency copied below, so it has no second pin.
+FROM node:24-slim AS agent-tools
+ARG NPM_REGISTRY=""
+COPY scripts/docker/agent-tools/package.json scripts/docker/agent-tools/package-lock.json /opt/rome-agent-tools/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefix /opt/rome-agent-tools --omit=dev ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"}
+
 # ---------------------------------------------------------------------------
 # Stage 0: Dependency cache inputs
 # ---------------------------------------------------------------------------
@@ -193,13 +201,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
-# Install AI tool CLIs globally (early for better layer caching).
-# @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
-# default registry. A scoped --@yunfanye:registry override on the mirrored install
-# does NOT work: npm's replace-registry-host rewrites the npmjs tarball host to the
-# top-level --registry (the mirror), producing a 404.
+# Keep the standalone Claude CLI separate from the Agent SDK's bundled CLI.
+COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools
+RUN ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude
+
+# OpenCLI is not mirrored on npmmirror, so use the default registry.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.293 @openai/codex@0.171.0 && \
     npm install -g @yunfanye/opencli@1.8.8
 
 RUN curl -fsSL --retry 5 --retry-delay 2 https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" && \
@@ -297,6 +304,11 @@ WORKDIR /opt/rome
 # Copy entire built application with correct ownership (avoids expensive chown -R layer)
 COPY --chown=rome:rome --from=builder /build/ ./
 
+# The shell and Core execute the same lockfile-selected Codex package.
+RUN ln -sf /opt/rome/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex && \
+    codex --version && \
+    claude --version
+
 ENV ROME_DOCKER_APP_CODE_MODE=${ROME_DOCKER_APP_CODE_MODE}
 # Where the boot script (scripts/generate-caddyfile.ts) writes the production
 # proxy config.
@@ -359,11 +371,11 @@ RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts
 
 # Restore the execute bit on vendored ripgrep binaries. The Anthropic npm
 # tarballs (@anthropic-ai/claude-agent-sdk as a pnpm dep, and the globally
-# installed @anthropic-ai/claude-code) publish vendor/ripgrep/<arch>/rg as
+# installed standalone Claude CLI) publish vendor/ripgrep/<arch>/rg as
 # 0644, so the SDK's Grep tool fails with EACCES when it spawns rg directly.
 # Mark every vendored rg executable in both the image node_modules (used at
 # runtime via the /app/node_modules symlink) and the npm-global tree.
-RUN find /opt/rome/node_modules /usr/local/lib/node_modules \
+RUN find /opt/rome/node_modules /opt/rome-agent-tools/node_modules /usr/local/lib/node_modules \
       -type f -path '*/vendor/ripgrep/*/rg' -exec chmod a+rx {} + 2>/dev/null || true
 
 # The container's browser is the server-side Chrome: BROWSER points every
