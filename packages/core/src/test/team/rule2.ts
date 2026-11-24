@@ -1,7 +1,8 @@
 // Rule 2: every dashboard operation, called once as the guardian and once as a
-// teammate on instances in the same state, comes to the same outcome. Also: a
-// visitor not on the dashboard list stays refused wherever the guardian is
-// admitted and a signed-out caller is not.
+// teammate on instances in the same state, comes to the same outcome. Also:
+// every operation refuses a signed-out caller, and refuses a visitor nobody put
+// on the dashboard list, except the operations public.json names as public.
+// Each role calls every operation in the same order on its own instance.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,6 @@ import {
   mountDrift,
   OUTSIDER,
   TEAMMATE,
-  type Instance,
   type InstanceOptions,
 } from "./instance.js";
 import {
@@ -21,7 +21,8 @@ import {
   type Role,
 } from "./callers.js";
 import { httpOperations, pathFor, upgradeOperations, type Operation } from "./surface.js";
-import { guardianOnlyFeature } from "./stand-in-routes.js";
+import { guardianOnlyFeature, openSocket, STAND_IN_OPEN_SOCKET_PATH } from "./stand-in-routes.js";
+import { refusedLaunches } from "./sandbox.js";
 
 /**
  * A product the verifier is proven against instead of the one in the tree.
@@ -30,21 +31,13 @@ import { guardianOnlyFeature } from "./stand-in-routes.js";
  * outsider's email is on the dashboard list too, so the product admits a
  * visitor nobody invited. "guardian-only-route": the product in the tree plus
  * the routes in `stand-in-routes.ts`, which refuse everyone but the guardian.
+ * "open-socket": the product in the tree plus a WebSocket path that admits
+ * everyone.
  */
-export type StandIn = "open-checks" | "admit-every-visitor" | "guardian-only-route";
-
-/**
- * "per-call" gives every call a fresh instance, so no call sees what another
- * changed: about 1,000 boots. "per-role" runs every operation in the same
- * order on one instance per role: 4 boots, and an operation after one that
- * changed state compares instances that went through the same calls.
- */
-export type Isolation = "per-call" | "per-role";
+export type StandIn = "open-checks" | "admit-every-visitor" | "guardian-only-route" | "open-socket";
 
 export interface Rule2Options {
   standIn?: StandIn;
-  /** Default "per-call". */
-  isolation?: Isolation;
 }
 
 export type Verdict =
@@ -55,6 +48,10 @@ export type Verdict =
   | "exception"
   | "out-of-scope";
 
+/** How an operation treats a caller it must refuse. "public": public.json
+ *  names the operation, so the caller may be admitted. */
+type Gate = "refused" | "admitted" | "public";
+
 export interface OperationResult {
   route: string;
   path: string;
@@ -63,8 +60,9 @@ export interface OperationResult {
   verdict: Verdict;
   exception?: string;
   outcomes: Partial<Record<Role, Outcome>>;
-  /** Set where the guardian is admitted and a signed-out caller is refused. */
-  outsider?: "refused" | "admitted";
+  /** Unset for an operation out of scope. */
+  anonymous?: Gate;
+  outsider?: Gate;
 }
 
 export interface Rule2Result {
@@ -76,7 +74,16 @@ export interface Rule2Result {
    *  timeout, so the call may never have reached the guard it would compare.
    *  Neither a match nor a failure. */
   unverified: string[];
+  /** Operations public.json does not name that answer a signed-out caller
+   *  with anything but 401 or 403. */
+  anonymousAdmitted: string[];
+  /** The same, for a visitor nobody put on the dashboard list. */
   outsiderAdmitted: string[];
+  /** Operations public.json names that refuse a signed-out caller, or that
+   *  the surface no longer has. */
+  stalePublic: string[];
+  /** Programs a call launched that the sandbox has no stub for. */
+  refusedLaunches: string[];
   unclaimedUpgradeHandlers: number[];
   mountDrift: string[];
   outOfScope: { route: string; reach: Operation["reach"] }[];
@@ -86,15 +93,22 @@ interface ExceptionsFile {
   exceptions: { name: string; routes: string[] }[];
 }
 
+const readTeamFile = <T>(name: string): T =>
+  JSON.parse(readFileSync(join(process.cwd(), "src", "test", "team", name), "utf8")) as T;
+
 function readExceptions(): Map<string, string> {
-  const file = JSON.parse(
-    readFileSync(join(process.cwd(), "src", "test", "team", "exceptions.json"), "utf8"),
-  ) as ExceptionsFile;
   const byRoute = new Map<string, string>();
-  for (const exception of file.exceptions) {
+  for (const exception of readTeamFile<ExceptionsFile>("exceptions.json").exceptions) {
     for (const route of exception.routes) byRoute.set(route, exception.name);
   }
   return byRoute;
+}
+
+/** The operations public.json names: each answers a signed-out caller by design. */
+function publicOperations(): string[] {
+  return readTeamFile<{ operations: { route: string }[] }>("public.json").operations.map(
+    (entry) => entry.route,
+  );
 }
 
 function instanceOptions(standIn: StandIn | undefined): InstanceOptions {
@@ -102,6 +116,7 @@ function instanceOptions(standIn: StandIn | undefined): InstanceOptions {
     dashboardEmails:
       standIn === "admit-every-visitor" ? [TEAMMATE.email, OUTSIDER.email] : [TEAMMATE.email],
     ...(standIn === "guardian-only-route" ? { extraFeatures: [guardianOnlyFeature()] } : {}),
+    ...(standIn === "open-socket" ? { extraUpgrades: [openSocket()] } : {}),
   };
 }
 
@@ -111,43 +126,18 @@ function sessionRole(role: Role, standIn: StandIn | undefined): Role {
   return role === "teammate" && standIn === "open-checks" ? "guardian" : role;
 }
 
-async function onFreshInstance<T>(
-  standIn: StandIn | undefined,
-  run: (instance: Instance) => Promise<T>,
-): Promise<T> {
-  const instance = await createInstance(instanceOptions(standIn));
-  try {
-    return await run(instance);
-  } finally {
-    await instance.close();
-  }
-}
-
-/** Calls `op` on `instance`, filling its parameters from that instance's seeded ids. */
-async function callOn(instance: Instance, port: number, op: Operation, as: Role): Promise<Outcome> {
-  if (op.kind === "http") {
-    const own = httpOperations(instance.app, instance.ids).find((o) => o.route === op.route) ?? op;
-    return callHttp(instance.app, { ...own, path: pathFor(own, instance.ids, as) }, as);
-  }
-  return callUpgrade(instance.app, port, op, as);
-}
-
-async function callOnFreshInstance(
-  op: Operation,
-  role: Role,
-  standIn: StandIn | undefined,
-): Promise<Outcome> {
-  return onFreshInstance(standIn, async (instance) => {
-    const as = sessionRole(role, standIn);
-    // Only an upgrade needs the instance on a port.
-    if (op.kind === "http") return callOn(instance, 0, op, as);
-    const listening = await instance.listen();
-    try {
-      return await callOn(instance, listening.port, op, as);
-    } finally {
-      await listening.close();
-    }
-  });
+function knownUpgrades(standIn: StandIn | undefined): Operation[] {
+  const ops = upgradeOperations();
+  if (standIn !== "open-socket") return ops;
+  return [
+    ...ops,
+    {
+      kind: "ws",
+      route: `WS ${STAND_IN_OPEN_SOCKET_PATH}`,
+      path: STAND_IN_OPEN_SOCKET_PATH,
+      reach: "edge-open",
+    },
+  ];
 }
 
 /** Every operation in order on one instance for `role`. A write that changes
@@ -159,22 +149,35 @@ async function callAllAs(
   role: Role,
   standIn: StandIn | undefined,
 ): Promise<Map<string, Outcome>> {
-  return onFreshInstance(standIn, async (instance) => {
+  const instance = await createInstance(instanceOptions(standIn));
+  try {
     const listening = await instance.listen();
     const outcomes = new Map<string, Outcome>();
+    const as = sessionRole(role, standIn);
     try {
       for (const op of ops) {
-        outcomes.set(
-          op.route,
-          await callOn(instance, listening.port, op, sessionRole(role, standIn)),
-        );
+        let outcome: Outcome;
+        if (op.kind === "http") {
+          const own =
+            httpOperations(instance.app, instance.ids).find((o) => o.route === op.route) ?? op;
+          outcome = await callHttp(
+            instance.app,
+            { ...own, path: pathFor(own, instance.ids, as) },
+            as,
+          );
+        } else {
+          outcome = await callUpgrade(instance.app, listening.port, op, as);
+        }
+        outcomes.set(op.route, outcome);
         await instance.restoreDashboardList();
       }
     } finally {
       await listening.close();
     }
     return outcomes;
-  });
+  } finally {
+    await instance.close();
+  }
 }
 
 // A 400 or 422 may come from body validation that runs before the guard.
@@ -189,48 +192,48 @@ function compare(guardian: Outcome, teammate: Outcome): Verdict {
 }
 
 export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result> {
-  const { standIn, isolation = "per-call" } = options;
+  const { standIn } = options;
   const exceptions = readExceptions();
+  const publicRoutes = publicOperations();
+  const launchesBefore = refusedLaunches().length;
 
-  const { operations, unclaimed } = await onFreshInstance(standIn, async (instance) => {
-    const ops: Operation[] = [
-      ...httpOperations(instance.app, instance.ids),
-      ...upgradeOperations(),
-    ];
-    const listening = await instance.listen();
+  const surface = await createInstance(instanceOptions(standIn));
+  let operations: Operation[];
+  let unclaimed: number[];
+  try {
+    operations = [...httpOperations(surface.app, surface.ids), ...knownUpgrades(standIn)];
+    const listening = await surface.listen();
     try {
-      const unclaimedHandlers = await unclaimedUpgradeHandlers(
+      unclaimed = await unclaimedUpgradeHandlers(
         listening.server,
         listening.port,
-        upgradeOperations().map((op) => op.path),
+        knownUpgrades(standIn).map((op) => op.path),
       );
-      return { operations: ops, unclaimed: unclaimedHandlers };
     } finally {
       await listening.close();
     }
-  });
+  } finally {
+    await surface.close();
+  }
   const inScope = operations.filter((op) => op.reach !== "machine" && op.reach !== "loopback-only");
 
-  // Per role, each role's outcomes come from one instance; per call, each
-  // outcome is fetched when the comparison needs it.
+  // Deletes go last, so a seeded record one removes is still there for the
+  // operations that read or change it, and the deepest path first, so a
+  // record goes before the record it sits under.
+  const isDelete = (op: Operation) => op.kind === "http" && op.method === "DELETE";
+  const depth = (op: Operation) => op.path.split("/").length;
+  const ordered = [
+    ...inScope.filter((op) => !isDelete(op)),
+    ...inScope.filter(isDelete).sort((a, b) => depth(b) - depth(a)),
+  ];
   const byRole = new Map<Role, Map<string, Outcome>>();
-  if (isolation === "per-role") {
-    // Deletes go last, so a seeded record one removes is still there for the
-    // operations that read or change it, and the deepest path first, so a
-    // record goes before the record it sits under.
-    const isDelete = (op: Operation) => op.kind === "http" && op.method === "DELETE";
-    const depth = (op: Operation) => op.path.split("/").length;
-    const ordered = [
-      ...inScope.filter((op) => !isDelete(op)),
-      ...inScope.filter(isDelete).sort((a, b) => depth(b) - depth(a)),
-    ];
-    for (const role of ["guardian", "teammate", "anonymous", "outsider"] as const) {
-      byRole.set(role, await callAllAs(ordered, role, standIn));
-    }
+  for (const role of ["guardian", "teammate", "anonymous", "outsider"] as const) {
+    byRole.set(role, await callAllAs(ordered, role, standIn));
   }
-  const outcomeOf = async (op: Operation, role: Role): Promise<Outcome> => {
-    const recorded = byRole.get(role)?.get(op.route);
-    return recorded ?? callOnFreshInstance(op, role, standIn);
+  const outcomeOf = (op: Operation, role: Role): Outcome => {
+    const outcome = byRole.get(role)?.get(op.route);
+    if (!outcome) throw new Error(`no ${role} outcome for ${op.route}`);
+    return outcome;
   };
 
   const results: OperationResult[] = [];
@@ -240,45 +243,58 @@ export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result>
       results.push({ ...base, verdict: "out-of-scope", outcomes: {} });
       continue;
     }
-    const guardian = await outcomeOf(op, "guardian");
-    const teammate = await outcomeOf(op, "teammate");
-    const exception = exceptions.get(op.route);
-    const result: OperationResult = {
-      ...base,
-      verdict: exception ? "exception" : compare(guardian, teammate),
-      ...(exception ? { exception } : {}),
-      outcomes: { guardian, teammate },
+    const outcomes = {
+      guardian: outcomeOf(op, "guardian"),
+      teammate: outcomeOf(op, "teammate"),
+      anonymous: outcomeOf(op, "anonymous"),
+      outsider: outcomeOf(op, "outsider"),
     };
-    if (!guardian.refused) {
-      const anonymous = await outcomeOf(op, "anonymous");
-      result.outcomes.anonymous = anonymous;
-      if (anonymous.refused) {
-        const outsider = await outcomeOf(op, "outsider");
-        result.outcomes.outsider = outsider;
-        result.outsider = outsider.refused ? "refused" : "admitted";
-      }
-    }
-    results.push(result);
+    const exception = exceptions.get(op.route);
+    const isPublic = publicRoutes.includes(op.route);
+    const gate = (outcome: Outcome): Gate =>
+      isPublic ? "public" : outcome.refused ? "refused" : "admitted";
+    results.push({
+      ...base,
+      verdict: exception ? "exception" : compare(outcomes.guardian, outcomes.teammate),
+      ...(exception ? { exception } : {}),
+      outcomes,
+      anonymous: gate(outcomes.anonymous),
+      outsider: gate(outcomes.outsider),
+    });
   }
 
   const routesWith = (verdict: Verdict) =>
     results.filter((r) => r.verdict === verdict).map((r) => r.route);
-  const outsiderAdmitted = results.filter((r) => r.outsider === "admitted").map((r) => r.route);
+  const admitted = (role: "anonymous" | "outsider") =>
+    results.filter((r) => r[role] === "admitted").map((r) => r.route);
+  const stalePublic = publicRoutes.filter((route) => {
+    const result = results.find((r) => r.route === route);
+    return !result || result.outcomes.anonymous?.refused !== false;
+  });
   const drift = mountDrift();
   const teammateRefused = routesWith("teammate-refused");
   const statusDiffers = routesWith("status-differs");
+  const anonymousAdmitted = admitted("anonymous");
+  const outsiderAdmitted = admitted("outsider");
+  const launches = refusedLaunches().slice(launchesBefore);
   return {
     pass:
       teammateRefused.length === 0 &&
       statusDiffers.length === 0 &&
+      anonymousAdmitted.length === 0 &&
       outsiderAdmitted.length === 0 &&
+      stalePublic.length === 0 &&
+      launches.length === 0 &&
       unclaimed.length === 0 &&
       drift.length === 0,
     operations: results,
     teammateRefused,
     statusDiffers,
     unverified: routesWith("unverified"),
+    anonymousAdmitted,
     outsiderAdmitted,
+    stalePublic,
+    refusedLaunches: [...launches],
     unclaimedUpgradeHandlers: unclaimed,
     mountDrift: drift,
     outOfScope: results
