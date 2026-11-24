@@ -31,7 +31,6 @@ const verifierDirty = git("status", "--porcelain", "--", folder, webFile) !== ""
 const core = readPart("core");
 const web = readPart("web");
 const proofs = readPart("proofs");
-const webProof = readPart("web-proof");
 
 const rule1 = {
   pass: Boolean(web?.pass && core?.rule1b?.pass),
@@ -65,7 +64,7 @@ const report = {
   ranAt: new Date().toISOString(),
   elapsedMs: core?.elapsedMs ?? null,
   rules: { rule1, rule2 },
-  proofs: proofs || webProof ? { rule2: proofs, settingsDriver: webProof } : null,
+  proofs: proofs ? { rule2: proofs } : null,
 };
 writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 
