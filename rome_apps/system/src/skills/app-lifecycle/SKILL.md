@@ -5,7 +5,7 @@ description: Install, reinstall, uninstall, enable, or disable Rome apps, share 
 
 # App lifecycle
 
-Read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
+Call `system:app_management` through `execute_action`, reading it with `read_action` when its signature does not say enough about an argument. For new app scaffolding, also read `coding:app_creation`.
 
 ## Three different endpoints
 

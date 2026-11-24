@@ -15,6 +15,10 @@ const NAMES = [
   "system:read_ai_tools",
   "system:sign_out_ai_tool",
   "system:change_ai_tool",
+  "system:read_devices",
+  "system:run_on_device",
+  "system:rename_device",
+  "system:remove_device",
 ];
 
 describe("core's agent tools", () => {
