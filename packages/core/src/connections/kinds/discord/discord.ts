@@ -658,11 +658,12 @@ export class DiscordAdapter {
         guilds: client.guilds.cache.map((g) => g.name),
       });
 
-      // Register slash commands globally.
-      if (this.commands && !this.slashCommandsRegistered) {
+      // Register slash commands globally. A bot given no commands registers
+      // none, which takes down any it offered before.
+      if (!this.slashCommandsRegistered) {
         this.slashCommandsRegistered = true;
         try {
-          const commands = discordSlashCommands(this.commands.list);
+          const commands = discordSlashCommands(this.commands?.list ?? []);
           await this.rest.put(discordJs().Routes.applicationCommands(client.user.id), {
             body: commands,
           });
