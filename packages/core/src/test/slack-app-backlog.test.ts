@@ -118,7 +118,6 @@ describe("a Slack app backlog, end to end", () => {
         cloud: {} as never,
         depositUrl: async () => null,
         deliveryAttempts: 4,
-        listens: () => true,
       }),
     );
     let recording: InboundRecording | undefined;

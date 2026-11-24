@@ -94,7 +94,6 @@ function descriptor(overrides: Partial<SlackAppDescriptorDeps> = {}) {
     cloud: cloud({}, [[WORKSPACE]]),
     depositUrl: async () => DEPOSIT_URL,
     deliveryAttempts: 4,
-    listens: () => true,
     approval: fast,
     ...overrides,
   });

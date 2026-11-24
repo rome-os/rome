@@ -12,7 +12,6 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
-import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
 import { KeyedMutex } from "../../../lib/keyed-mutex.js";
@@ -311,31 +310,17 @@ export class FeishuAdapter {
           );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
-    // A stop said to the bot still reaches a group switched off below.
-    const directedStop = (threadType === "private" || m.mentionedBot) && isStopCommand(text);
     // Only a delivered message waits on the name; a dropped one starts the lookup.
     const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
-    // A link code said in a group must void the code, so it skips the group
-    // filters. Admission voids it and keeps it from every agent.
-    if (threadType === "group" && !isLinkCodeMessage(text)) {
-      const configRequest = isSettingsRequest(text);
-      if (configRequest && m.mentionedBot) {
+    if (threadType === "group") {
+      if (isSettingsRequest(text) && m.mentionedBot) {
         await this.sendGroupConfigCard(m.chatId, m.messageId, m.senderId);
         return;
       }
-
-      const cfg = await this.getChannelConfig(m.chatId);
-      if (cfg.mode === "ignore" && !directedStop) {
-        log.debug("ignoring Feishu group message because group policy is disabled", {
-          from: m.senderId,
-          threadId: m.chatId,
-        });
-        return;
-      }
-      // A group message that does not mention the bot is recorded too.
-      // Whether it wakes the agent under the reply rule is the wake gate's
-      // call.
+      // Whether Rome keeps the message, in a group switched off too, is
+      // Rome's call, and whether it wakes the agent the wake gate's.
+      this.observeChat(m.chatId);
     }
 
     const name = await chatName;
@@ -603,14 +588,10 @@ export class FeishuAdapter {
     };
   }
 
-  /** The group's settings. `withAgents` adds `storedAgent` and
-   *  `answeringAgent`, which read the link and the loaded agents. */
-  private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
-    if (!this.chatSettings || !this.connectionId) {
-      return withAgents
-        ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
-        : {};
-    }
+  /** Tells the chat settings which group `chatId` is, by the name Rome has
+   *  seen for it, and answers that description. */
+  private observeChat(chatId: string): ChatDescriptor | undefined {
+    if (!this.connectionId) return undefined;
     const observed = this.observedConversations.get(chatId);
     const descriptor: ChatDescriptor = {
       ref: { connectionId: this.connectionId, chatId: chatId as ChatId },
@@ -619,7 +600,19 @@ export class FeishuAdapter {
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,
     };
-    this.chatSettings.observe?.(descriptor);
+    this.chatSettings?.observe?.(descriptor);
+    return descriptor;
+  }
+
+  /** The group's settings. `withAgents` adds `storedAgent` and
+   *  `answeringAgent`, which read the link and the loaded agents. */
+  private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
+    const descriptor = this.observeChat(chatId);
+    if (!this.chatSettings || !descriptor) {
+      return withAgents
+        ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
+        : {};
+    }
     const snapshot = await this.chatSettings.get(descriptor.ref);
     return {
       chatName: descriptor.displayName,

@@ -723,17 +723,20 @@ export class DiscordAdapter {
     };
   }
 
-  private async settingsForMessage(message: Message): Promise<ChatSettingsSnapshot | null> {
-    if (!this.chatSettings) return null;
+  /** Tells the chat settings which chat `message` was said in, with its name
+   *  and the channel a thread was opened under, so its settings read as that
+   *  chat's. */
+  private observeChat(message: Message): void {
+    if (!this.chatSettings) return;
     const parentId =
       message.channel && "isThread" in message.channel && message.channel.isThread()
         ? message.channel.parentId
         : null;
     const displayName = "name" in message.channel ? (message.channel.name ?? undefined) : undefined;
     const containerName = message.guild?.name;
-    const descriptor = this.descriptor(message.channelId, displayName, parentId, containerName);
-    this.chatSettings.observe?.(descriptor);
-    return this.chatSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(
+      this.descriptor(message.channelId, displayName, parentId, containerName),
+    );
   }
 
   private legacyConfig(snapshot: ChatSettingsSnapshot | null): DiscordChannelConfig {
@@ -846,11 +849,11 @@ export class DiscordAdapter {
     log.info("bot logged in", { username: this.client.user?.tag });
   }
 
-  /** Hears one message from the gateway: filters it, then hands it over. */
+  /** Hears one message from the gateway and hands it over. Whether Rome
+   *  keeps it, in a chat switched off too, is Rome's call. */
   private async hear(message: Message): Promise<void> {
     if (!this.handler) return;
 
-    // ── Layer 1: Hard filter ──────────────────────────────────────────────
     if (!message.author) return;
     if (message.system) return;
     // Self-messages: check after we know the client is ready
@@ -859,50 +862,10 @@ export class DiscordAdapter {
     const isDm =
       message.channel.type === discordJs().ChannelType.DM ||
       message.channel.type === discordJs().ChannelType.GroupDM;
-
     const isThread = isThreadType(message.channel.type);
 
-    // A link code said in a guild channel must void the code, so it skips
-    // the filters below. Admission voids it and keeps it from every agent.
-    if (!isDm && isLinkCodeMessage(withoutMentions(message.content))) {
-      await this.dispatchMessage(message, isDm, isThread);
-      return;
-    }
-
-    const cfg = this.legacyConfig(await this.settingsForMessage(message));
-
-    if (isDm) {
-      await this.dispatchMessage(message, isDm, isThread);
-      return;
-    }
-
-    // A chat switched off is not heard, as an account with no agent is not:
-    // nothing of it is recorded. A stop said to Rome still reaches it.
-    // Whom a message addresses is otherwise Participation's to work out.
-    if (cfg.mode === "ignore") {
-      const stop = isStopCommand(withoutMentions(message.content));
-      if (!stop || !(await this.saidToBot(message))) {
-        log.debug("ignoring message in channel with mode=ignore", {
-          channelId: message.channelId,
-        });
-        return;
-      }
-    }
-
-    // Every other message is handed over. Whether it wakes the agent (the
-    // reply rule, bots, mentions of others) is the wake gate's call.
+    this.observeChat(message);
     await this.dispatchMessage(message, isDm, isThread);
-  }
-
-  /** Whether a guild message is said to Rome's bot: it mentions the bot,
-   *  replies to the bot's message, or sits in a thread the bot started. Only
-   *  a stop in a chat switched off asks, since that chat is not heard. */
-  private async saidToBot(message: Message): Promise<boolean> {
-    const botId = this.client.user?.id;
-    if (!botId) return false;
-    if (message.mentions.users.has(botId)) return true;
-    if ((await this.repliedToAuthor(message)) === botId) return true;
-    return this.threadStarter(message) === botId;
   }
 
   /** Who said the message `message` replies to, when Discord can fetch it.

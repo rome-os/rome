@@ -415,7 +415,11 @@ import {
   isDiscordFrame,
   romeCloudDiscordApp,
 } from "./connections/kinds/discord-app/index.js";
-import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
+import {
+  ChatSettingsRepository,
+  ChatSettingsService,
+  heardUnlessSwitchedOff,
+} from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
   APP_CONNECTION_WRITE_ACTION,
@@ -770,9 +774,15 @@ async function main() {
     registry: connectionRegistry,
     accountOf: (connectionId) => accounts.accountOf(connectionId),
   });
+  // Read at each message, once the chat settings below exist.
+  const heardInChat = heardUnlessSwitchedOff({
+    settings: { get: (ref) => chatSettings.get(ref) },
+    rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
+  });
   // Every sender is admitted: Rome never asks a sender to pair
   // (docs/domains/people.md#stranger). Only the guardian's link code is taken
-  // out of the chat.
+  // out of the chat, and every message said in a chat switched off but a stop
+  // said to Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
@@ -781,7 +791,9 @@ async function main() {
     const platform =
       accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
     await readBotsOfPeople(platform, message);
-    return linkCodeAdmission(connectionId, connectionKind, message);
+    // A link code said in a chat switched off still voids the code.
+    if (!(await linkCodeAdmission(connectionId, connectionKind, message))) return false;
+    return heardInChat(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the connection kind
@@ -2372,7 +2384,6 @@ async function main() {
       // A setup's hold ends with the setup; frames held behind it then reach
       // its connection or are dropped.
       holdSlackFrames: () => slackSetupHolds.hold(),
-      listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
     chatSettings,

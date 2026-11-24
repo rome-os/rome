@@ -19,8 +19,23 @@ export interface SlackWireMessage {
   text?: string;
   thread_ts?: string;
   subtype?: string;
+  /** Workspaces Slack names on it. In a channel shared with another
+   *  workspace (Slack Connect) an author can be from either: `user_team` is
+   *  the author's, while `team` and `source_team` are the event's and can
+   *  differ from the author's. */
+  user_team?: string;
+  team?: string;
+  source_team?: string;
   /** Its last edit, when it was edited. */
   edited?: { ts?: string };
+}
+
+/** A member as Slack's directory names them. */
+export interface SlackMember extends SlackUserName {
+  /** The member's home workspace. */
+  teamId?: string;
+  /** Every workspace of an Enterprise Grid org the member belongs to. */
+  teams?: readonly string[];
 }
 
 /** The text of a message that was only the app's mention. */
@@ -49,12 +64,14 @@ export function inTimeline(wire: SlackWireMessage): boolean {
 
 /**
  * `wire` as Rome reads it, or null when nobody said it (a join, an edit) or it
- * holds no text. A message the app's bot said reads as outbound.
+ * holds no text. A message the app's bot said reads as outbound. Throws
+ * {@link SlackWorkspaceUnknown} while its author's workspace is not known, so
+ * a history read fails and is read again rather than name the author wrongly.
  */
 export function slackMessage(
   context: { channel: string; teamId: string; botUserId: string; chatId: string },
   wire: SlackWireMessage,
-  name: SlackUserName = {},
+  name: SlackMember = {},
 ): ChannelMessage | null {
   if (!isSaid(wire.subtype)) return null;
   const author = authorOf(wire);
@@ -70,7 +87,9 @@ export function slackMessage(
     direction: author === context.botUserId ? "outbound" : "inbound",
     chatId: context.chatId as ChatId,
     messageId: slackMessageId(wire.ts, wire.thread_ts),
-    senderId: slackSenderId(context.teamId, author),
+    // Slack user ids are per workspace, so an author from another workspace
+    // is named under their own.
+    senderId: slackSenderId(authorWorkspace(wire, name, context), author),
     ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
     ...(name.username ? { senderUsername: name.username } : {}),
     text,
@@ -81,4 +100,46 @@ export function slackMessage(
       : {}),
     thread: { kind: isDm ? "dm" : "group" },
   };
+}
+
+/** A message whose author Slack placed only in an Enterprise Grid org, while
+ *  Slack's directory has not named their workspace. The author has no
+ *  account id yet, so the message is not handed over until it does. */
+export class SlackWorkspaceUnknown extends Error {
+  constructor(readonly author: string) {
+    super(
+      `Slack has not said which workspace author ${author} belongs to yet. Read again shortly.`,
+    );
+  }
+}
+
+/** The workspace `wire`'s author belongs to. The app's own posts are in its
+ *  workspace. Otherwise, in order:
+ *  - `user_team`, when it names a workspace (`T…`) and not an Enterprise Grid
+ *    org (`E…`);
+ *  - the app's workspace, when Slack's directory says the member belongs to
+ *    it, whatever their home workspace is;
+ *  - the member's home workspace, from the directory;
+ *  - the app's workspace, when the directory has not answered and the message
+ *    names no other workspace. A history page names none, and a slow
+ *    directory never holds up a read, so an author from another workspace
+ *    that the app has not heard since it started reads as the app's until
+ *    the directory answers.
+ *  Anything else is not known yet. A bot, which the directory does not list,
+ *  keeps what the message names. */
+function authorWorkspace(
+  wire: SlackWireMessage,
+  member: SlackMember,
+  app: { teamId: string; botUserId: string },
+): string {
+  const own = app.teamId;
+  if (wire.user === app.botUserId) return own;
+  if (!wire.user) return wire.user_team ?? wire.team ?? own;
+  if (wire.user_team?.startsWith("T")) return wire.user_team;
+  if (member.teamId?.startsWith("T")) {
+    return member.teamId === own || member.teams?.includes(own) ? own : member.teamId;
+  }
+  const named = [wire.user_team, wire.team, wire.source_team].filter((team) => team !== undefined);
+  if (named.every((team) => team === own)) return own;
+  throw new SlackWorkspaceUnknown(wire.user);
 }

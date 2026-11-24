@@ -88,6 +88,7 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 What a platform delivered through a connection: where it was said, who said it, what it says, whom it mentions and what it replies to, all in the platform's own ids. It is not the [message](chats.md#message) Chats records. Chats records its own from this one, at the one point where the two meet.
 
 - A connection translates the platform's message and never decides anything from it. Whom it addresses, who the sender is to Rome and whether it wakes anyone are decided above the connection, in [Participation](participation.md#addressed) and People.
+- It reports every message the platform delivered. Which ones Rome keeps, such as none from a [chat switched off](participation.md#wake-gate), is decided above the connection (zhangfan, 2026-11-23).
 - It names the account it was delivered to, which is the connection's own account.
 - Its mentions list only individual accounts. A mention of everyone, of a channel or of a role names no one.
 - Some facts only the platform has, such as whether a bot said it or who said the message it replies to. The connection reports them when the platform tells, and leaves them out when it does not.
