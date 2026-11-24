@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { type AgentToolDeps, agentToolNames, registerAgentTools } from "./agent-tools.js";
+import {
+  type AgentToolDeps,
+  agentToolNames,
+  agentTools,
+  registerAgentTools,
+} from "./agent-tools.js";
 
 // Agents, agent prompts and saved routines call these names.
 const NAMES = [
@@ -29,6 +34,16 @@ describe("core's agent tools", () => {
     for (const name of NAMES) {
       expect(registry.get(name)?.inputSchema).toBeDefined();
       expect(registry.getMetadata(name)?.ownerType).toBe("core");
+    }
+  });
+
+  it("names each tool's older names as its aliases, which the agent's catalog leaves unlisted", () => {
+    const registry = new ActionRegistryImpl();
+
+    registerAgentTools(registry, async () => "guardian", {} as AgentToolDeps);
+
+    for (const tool of agentTools) {
+      expect(registry.getMetadata(tool.name)?.aliases).toEqual([...tool.olderNames]);
     }
   });
 });

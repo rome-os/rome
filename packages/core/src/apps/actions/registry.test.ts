@@ -94,6 +94,24 @@ describe("ActionRegistryImpl", () => {
     expect(registry.suggest("review")).toBeUndefined();
   });
 
+  it("keeps the full name of an action core registers with its own metadata", () => {
+    const registry = new ActionRegistryImpl({
+      legacyBindings: createEmptyLegacyArtifactBindings(),
+    });
+    const metadata: ArtifactMetadata = {
+      kind: "action",
+      ownerType: "core",
+      ownerId: "core",
+      publicName: "system:stop_run",
+      aliases: ["system:stop_old"],
+      sourcePath: "",
+    };
+    registry.register(callableAction("system:stop_run"), metadata);
+
+    expect(registry.list()).toEqual(["system:stop_run"]);
+    expect(registry.getMetadata("system:stop_run")).toEqual(metadata);
+  });
+
   it("maps a name without its app to the full ID only when one action has it", () => {
     expect(
       fullIdsByUniqueLocalName([

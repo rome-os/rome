@@ -112,9 +112,26 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
       return action !== undefined && permitted(turn, action) !== undefined;
     });
 
+  // An older name a core agent tool took over stays callable by that exact
+  // name, but while the agent may call the tool only the tool is listed and
+  // searched, so it finds one way to do each thing. The tool names its older
+  // names among its aliases.
+  const listed = (permitted: Action[]): Action[] => {
+    const names = new Set(permitted.map((action) => action.config.name));
+    const older = new Set(
+      (actionRegistry.listMetadata?.() ?? [])
+        .filter((metadata) => metadata.ownerType === "core" && names.has(metadata.publicName))
+        .flatMap((metadata) => metadata.aliases),
+    );
+    return permitted.filter((action) => !older.has(action.config.name));
+  };
+
   const actions: AgentActions = {
-    list: (turn) => permittedActions(turn).map(toAgentAction),
-    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
+    list: (turn) => listed(permittedActions(turn)).map(toAgentAction),
+    find: (turn, name) => {
+      const action = permittedActions(turn).find((entry) => entry.config.name === name);
+      return action ? toAgentAction(action) : undefined;
+    },
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;

@@ -27,7 +27,7 @@ export function decidesApprovalPerCall(action: Action): boolean {
 }
 
 export interface ActionRegistry {
-  register(action: Action): void;
+  register(action: Action, metadata?: ArtifactMetadata): void;
   get(name: string): Action | undefined;
   has(name: string): boolean;
   /** The full ID of the one action whose name without its app is `name`, for
@@ -35,6 +35,8 @@ export interface ActionRegistry {
   suggest?(name: string): string | undefined;
   /** Who registered action `name`. */
   getMetadata?(name: string): ArtifactMetadata | undefined;
+  /** Who registered each action. */
+  listMetadata?(): ArtifactMetadata[];
   list(): string[];
   /** Return named agent-callable actions plus public actions when "*" is present. */
   getForAgent(names: string[]): Action[];
