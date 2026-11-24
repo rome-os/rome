@@ -22,6 +22,7 @@ import { attachAppWebSocket } from "./routes/app-websocket-server.js";
 import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
 import { attachVoiceConversationServer } from "../voice-conversation/conversation-server.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
+import { voiceConversationRoutes } from "./routes/voice-conversation.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
@@ -199,6 +200,7 @@ export function buildApp(
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", voiceInputRoutes(deps));
+  api.route("/", voiceConversationRoutes(deps));
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));

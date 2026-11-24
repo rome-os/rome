@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceConversationServerMessage } from "@rome/api-types/voice-conversation";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
@@ -14,6 +14,16 @@ import {
   serve,
   type VoiceConversationDeps,
 } from "./conversation-server.js";
+
+// Who the upgrade proves the caller to be. Null refuses it as unauthenticated.
+const gate = rs.hoisted(() => ({ caller: null as null | { kind: "guardian" | "visitor" } }));
+rs.mock("../access/ws-guardian-gate.js", () => ({
+  gateUpgrade: async (_req: unknown, socket: import("node:stream").Duplex) => {
+    if (gate.caller) return gate.caller;
+    socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+    return null;
+  },
+}));
 
 const servers: Array<{ close(): void }> = [];
 afterEach(() => {
@@ -63,12 +73,12 @@ function standInTranscriber() {
 }
 
 /** A speaker that speaks each sentence as 100 ms of silence at once. */
-function standInSpeaker(outcome: "ok" | "disabled" = "ok") {
+function standInSpeaker(outcome: "ok" | "not-configured" = "ok") {
   const said: string[] = [];
   let closed = false;
   const source: SpeakerSource = {
     async open(listener: SpeakerListener) {
-      if (outcome === "disabled") return { ok: false, reason: "disabled" };
+      if (outcome === "not-configured") return { ok: false, reason: "not-configured" };
       return {
         ok: true,
         provider: "soniox",
@@ -185,7 +195,7 @@ describe("voice conversation socket", () => {
     ]);
   });
 
-  it("ends at once, listening to nothing, while voice mode is off", async () => {
+  it("ends at once, listening to nothing, when speaking is not set up", async () => {
     let listened = 0;
     const { client, messages, closed } = await connect({
       listening: {
@@ -194,7 +204,7 @@ describe("voice conversation socket", () => {
           return { ok: false, reason: "service-unavailable" };
         },
       },
-      speaker: standInSpeaker("disabled").source,
+      speaker: standInSpeaker("not-configured").source,
       canTalkIn: async () => true,
       send: async () => replyOf(""),
     });
@@ -218,7 +228,7 @@ describe("voice conversation socket", () => {
       speaker: {
         open: async () => {
           spoke++;
-          return { ok: false, reason: "disabled" };
+          return { ok: false, reason: "not-configured" };
         },
       },
       canTalkIn: async (chatId) => {
@@ -260,28 +270,55 @@ describe("voice conversation socket", () => {
     expect(first.messages).toEqual([{ type: "error", reason: "bad-request" }]);
   });
 
-  it("is not there while voice mode is off", async () => {
-    const http: Server = createServer();
-    const voice = attachVoiceConversationServer(
-      http,
-      {} as DrizzleDb,
-      {
-        listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
+  describe("who may open it", () => {
+    afterEach(() => {
+      gate.caller = null;
+    });
+
+    // The status the upgrade answers, and how often Rome Cloud's list was asked.
+    const upgrade = async (signedIn: boolean, onList: boolean) => {
+      let asked = 0;
+      const http: Server = createServer();
+      const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
+        listening: {
+          available: () => signedIn,
+          info: async () => {
+            asked++;
+            return { available: onList, place: null };
+          },
+          open: async () => ({ ok: false, reason: "service-refused" }),
+        },
         speaker: standInSpeaker().source,
         canTalkIn: async () => true,
         send: async () => replyOf(""),
-      },
-      async () => false,
-    );
-    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-    servers.push({ close: () => (voice.close(), http.close()) });
-    const client = new WebSocket(
-      `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
-    );
-    const status = await new Promise<number>((resolve) => {
-      client.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
-      client.on("open", () => resolve(101));
+      });
+      await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+      servers.push({ close: () => (voice.close(), http.close()) });
+      const client = new WebSocket(
+        `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
+      );
+      const status = await new Promise<number>((resolve) => {
+        client.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        client.on("open", () => resolve(101));
+        client.on("error", () => resolve(0));
+      });
+      return { status, asked };
+    };
+
+    it("is not there without a Rome Cloud sign-in, asking it nothing", async () => {
+      gate.caller = { kind: "guardian" };
+      expect(await upgrade(false, true)).toEqual({ status: 404, asked: 0 });
     });
-    expect(status).toBe(404);
+
+    it("never asks Rome Cloud for a caller that is not the guardian", async () => {
+      expect(await upgrade(true, true)).toEqual({ status: 401, asked: 0 });
+      gate.caller = { kind: "visitor" };
+      expect(await upgrade(true, true)).toEqual({ status: 403, asked: 0 });
+    });
+
+    it("is not there for the guardian of an account off the voice input list", async () => {
+      gate.caller = { kind: "guardian" };
+      expect(await upgrade(true, false)).toEqual({ status: 404, asked: 1 });
+    });
   });
 });

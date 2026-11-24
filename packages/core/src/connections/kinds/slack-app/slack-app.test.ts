@@ -240,8 +240,11 @@ describe("Slack app direct messages (R4)", () => {
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
     const base = dmEvent(1);
-    await mailbox.deposit(frame({ ...base, event: { ...base.event, user_team: "T_OTHER" } }));
-    expect(delivered.map((m) => m.senderId)).toEqual([`T_OTHER/${base.event.user}`]);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "T_OTHER" } }),
+      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, team: "T_THIRD" } }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_THIRD/U_GUARDIAN"]);
   });
 
   it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {

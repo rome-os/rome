@@ -303,6 +303,9 @@ export class AgentRunner {
     // An action's turn waits behind the running one. Its id is allocated by
     // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
+    // `submit` always takes ownership of the session hold (even if it throws),
+    // so mark submitted beforehand to avoid releasing a second time in `finally`.
+    held.submitted = true;
     const receipt = session.submit(
       {
         prompt: params.prompt,
@@ -322,7 +325,6 @@ export class AgentRunner {
         ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
       },
     );
-    held.submitted = true;
     const handle = await receipt.turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {

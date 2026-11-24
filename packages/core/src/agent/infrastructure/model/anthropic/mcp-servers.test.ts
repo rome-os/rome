@@ -6,6 +6,7 @@ import type { ModelToolCallContext } from "../../../../core/agent-runner.js";
 import type { AgentAction } from "../../../domain/agent-action.js";
 import type { Skill } from "../../../domain/skill.js";
 import { subagentToolName, type Subagent } from "../../../domain/subagent.js";
+import type { RomeTools } from "../../../domain/rome-tools.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
   createSdkMcpServerMock: rs.fn((config: unknown) => config),
@@ -167,6 +168,31 @@ function getSubagentServerTools() {
 describe("buildAnthropicMcpServers", () => {
   beforeEach(() => {
     rs.clearAllMocks();
+  });
+
+  it("mounts admitted computer tools and passes text and image content to the SDK", async () => {
+    const content = [
+      { type: "text", text: "window metadata" },
+      { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+    ];
+    const tools: RomeTools = {
+      listTools: (group) =>
+        group === "computer"
+          ? [
+              {
+                name: "computer_observe",
+                description: "Observe",
+                inputSchema: { type: "object", properties: {} },
+              },
+            ]
+          : [],
+      callTool: async () => ({ content: content as never }),
+    };
+    buildAnthropicMcpServers({ tools });
+    const config = createSdkMcpServerMock.mock.calls.find(
+      ([value]) => (value as { name: string }).name === "computer",
+    )?.[0] as { tools: { handler(args: unknown): Promise<unknown> }[] };
+    expect(await config.tools[0].handler({})).toEqual({ content });
   });
 
   it("registers only the fixed four tools on the actions MCP server", () => {

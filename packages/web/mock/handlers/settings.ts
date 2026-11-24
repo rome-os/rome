@@ -7,6 +7,7 @@ import {
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import type { VoiceInputInfo } from "@rome/api-types/voice-input";
+import type { VoiceConversationInfo } from "@rome/api-types/voice-conversation";
 import {
   DEFAULT_RECAP_SETTINGS,
   type RecapSettings,
@@ -392,6 +393,10 @@ export const settingsHandlers = [
     statusDevices.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
   }),
+  // Mock mode has no voice conversation socket either.
+  http.get("/api/voice-conversation", () =>
+    HttpResponse.json({ available: false } satisfies VoiceConversationInfo),
+  ),
   // Mock mode has no dictation socket, so it reports no transcription provider.
   http.get("/api/voice-input", () =>
     HttpResponse.json({ available: false, place: null } satisfies VoiceInputInfo),

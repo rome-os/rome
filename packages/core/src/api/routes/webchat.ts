@@ -5760,10 +5760,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
   // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
-  const spokenRefusal = async (chatId: string): Promise<string | null> =>
-    (await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+  // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
+  const spokenRefusal = async (chatId: string): Promise<string | null> => {
+    if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))) {
+      return "Session not found";
+    }
+    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
       ? null
-      : "Session not found";
+      : "A voice conversation is only for a Concierge chat";
+  };
 
   const runtime: WebchatRuntime = {
     activeStreams,

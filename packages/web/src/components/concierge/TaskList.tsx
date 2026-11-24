@@ -912,7 +912,7 @@ export function TaskList({
                     type="button"
                     aria-expanded={open}
                     onClick={() => setEndedOpen((value) => !value)}
-                    className="mb-2 flex items-center gap-1 px-3 text-aux font-medium text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+                    className="mb-2 flex items-center gap-1 px-3 text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
                   >
                     <ChevronDown
                       className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
@@ -921,9 +921,7 @@ export function TaskList({
                     {heading} <span className="tabular-nums text-subtle-foreground">{total}</span>
                   </button>
                 ) : (
-                  <h3 className="mb-2 px-3 text-aux font-medium text-muted-foreground">
-                    {heading}
-                  </h3>
+                  <h3 className="mb-2 px-3 text-aux text-muted-foreground">{heading}</h3>
                 )}
                 {open ? (
                   <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">

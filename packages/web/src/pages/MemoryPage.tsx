@@ -64,8 +64,8 @@ export function MemoryFolderPanel() {
         {/* Dream rewrites memory, apps and skills while the guardian is away.
             Its page is off the launcher, so this is where they find what it
             changed. */}
-        <section className="space-y-2">
-          <h3 className="px-1 text-section text-foreground">{t("memory.home.dreamHeading")}</h3>
+        <section className="flex flex-col gap-2">
+          <h3 className="px-4 text-aux text-muted-foreground">{t("memory.home.dreamHeading")}</h3>
           <Link
             to="/apps/dream"
             className="flex flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3 text-ui transition-colors hover:bg-accent sm:flex-row sm:items-center sm:justify-between sm:gap-3"
@@ -80,13 +80,13 @@ export function MemoryFolderPanel() {
           </Link>
         </section>
 
-        <section className="space-y-2">
-          <div className="flex items-baseline justify-between px-1">
-            <h3 className="text-section text-foreground">{t("memory.home.backupHeading")}</h3>
-            <span className="text-aux text-muted-foreground">{t("memory.home.backupHint")}</span>
-          </div>
+        <section className="flex flex-col gap-2">
+          <h3 className="px-4 text-aux text-muted-foreground">{t("memory.home.backupHeading")}</h3>
           <SyncStatusPanel path={MEMORY_SYNC_KEY} />
-          <p className="px-1 text-aux text-subtle-foreground">{t("memory.home.deviceNote")}</p>
+          <div className="flex flex-col gap-1 px-4 text-aux [text-wrap-style:pretty] text-muted-foreground">
+            <p>{t("memory.home.backupHint")}</p>
+            <p>{t("memory.home.deviceNote")}</p>
+          </div>
         </section>
       </div>
     </div>

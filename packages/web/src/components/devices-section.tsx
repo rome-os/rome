@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
-import { Measure, Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
+import { Measure } from "@rome-os/ui/page";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { DeviceConnectionCards, LinkDeviceMenu } from "@/components/device-connection-cards";
+import { SettingsGroup } from "@/components/settings-group";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDeviceManage } from "@/hooks/use-device-manage";
@@ -105,12 +106,7 @@ export function DevicesSection() {
           locale={i18n.language}
         />
       )}
-      <Section aria-labelledby="device-connection-title">
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle id="device-connection-title">{t("devices.connectionLabel")}</SectionTitle>
-          </SectionHeading>
-        </SectionHeader>
+      <SettingsGroup title={t("devices.connectionLabel")} titleId="device-connection-title">
         <Card>
           <CardContent>
             <StatusIndicator
@@ -145,7 +141,7 @@ export function DevicesSection() {
             )}
           </CardContent>
         </Card>
-      </Section>
+      </SettingsGroup>
       <DeviceConnectionCards />
     </Measure>
   );

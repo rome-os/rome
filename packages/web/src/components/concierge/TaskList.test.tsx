@@ -802,4 +802,17 @@ describe("TaskList", () => {
     });
     await waitFor(() => expect(reads()).toBe(before + 1));
   });
+
+  it("uses muted aux type on group headings and the collapsible Ended toggle without extra weight", async () => {
+    renderList();
+    const active = await screen.findByRole("heading", { level: 3, name: "Active" });
+    const ended = screen.getByRole("button", { name: /^Ended\b/ });
+    for (const header of [active, ended]) {
+      expect(header.className).toContain("px-3");
+      expect(header.className).toContain("text-aux");
+      expect(header.className).toContain("text-muted-foreground");
+      expect(header.className).not.toContain("font-medium");
+      expect(header.className).not.toContain("font-semibold");
+    }
+  });
 });

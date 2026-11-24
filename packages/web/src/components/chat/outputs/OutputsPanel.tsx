@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Download,
+  ExternalLink,
   File as FileIcon,
   FileAudio,
   FileCode,
@@ -72,6 +73,25 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
   if (type === "text/markdown" || /\.(md|markdown)$/i.test(output.name)) return "markdown";
   if (TEXT_TYPES.test(type) && type !== "text/html") return "text";
   return "file";
+}
+
+/**
+ * Where an HTML output opens in a tab of its own: its page on the Projects or
+ * Memory page, which shows it sandboxed. A shown copy opens the file it
+ * copied, as that file is now. Null for any other output, and for a copy of a
+ * file outside both folders, which only downloads. The route is read from
+ * `links` too, since `link` names only a written file's project route and a
+ * copy's asset URL. It is the file's path as it is, so each segment is
+ * encoded for the URL.
+ */
+export function pageHrefOf(
+  output: Pick<ChatOutput, "name" | "mimeType" | "link" | "links">,
+): string | null {
+  if (outputTypeOf(output) !== "page" && output.mimeType !== "text/html") return null;
+  const route = [output.link, ...(output.links ?? [])].find(
+    (link): link is string => link !== null && /^\/(projects|memory)\//.test(link),
+  );
+  return route ? route.split("/").map(encodeURIComponent).join("/") : null;
 }
 
 /**
@@ -324,7 +344,7 @@ export function OutputsPanel({
   const indexing = outputs.data?.indexing === true;
   // Earlier outputs still being read back, said quietly where the list is.
   const indexingNote = indexing ? (
-    <p role="status" className="px-1 text-aux text-muted-foreground">
+    <p role="status" className="px-3 text-aux text-muted-foreground">
       {t("outputs.indexing")}
     </p>
   ) : null;
@@ -360,7 +380,13 @@ export function OutputsPanel({
   }
   if (current) return preview(current);
   if (list.length === 0) {
-    if (indexing) return <div className="p-4">{indexingNote}</div>;
+    if (indexing) {
+      return (
+        <p role="status" className="p-4 text-aux text-muted-foreground">
+          {t("outputs.indexing")}
+        </p>
+      );
+    }
     return (
       <EmptyState className="h-full" role="region">
         <EmptyStateIcon>
@@ -382,7 +408,7 @@ export function OutputsPanel({
   const group = (key: "today" | "earlier", items: ChatOutput[]) =>
     items.length === 0 ? null : (
       <section key={key} className="flex flex-col gap-2">
-        <h3 className="px-1 text-aux text-muted-foreground">{t(`outputs.${key}`)}</h3>
+        <h3 className="px-3 text-aux text-muted-foreground">{t(`outputs.${key}`)}</h3>
         <ul
           aria-label={t(`outputs.${key}`)}
           className="divide-y divide-border-subtle overflow-hidden rounded-12 border border-border bg-surface"
@@ -869,10 +895,21 @@ function OutputPreview({
     );
   }
   if (kind === "file") {
+    const page = pageHrefOf(output);
     return (
       <div className={frame}>
         {header}
-        <p className="px-4 text-ui text-muted-foreground">{t("outputs.noPreview")}</p>
+        <p className="px-4 text-ui text-muted-foreground">
+          {page ? t("outputs.pageNoPreview") : t("outputs.noPreview")}
+        </p>
+        {page && (
+          <Button asChild variant="outline" size="sm" className="mx-4 self-start">
+            <a href={page} target="_blank" rel="noopener noreferrer">
+              <ExternalLink data-icon="inline-start" />
+              {t("outputs.openInNewTab")}
+            </a>
+          </Button>
+        )}
       </div>
     );
   }

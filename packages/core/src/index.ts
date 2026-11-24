@@ -317,6 +317,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
+import { botsOfPeople } from "./people/bots-of-people.js";
 import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -761,6 +762,7 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
+  const readBotsOfPeople = botsOfPeople(peopleRepo);
   const guardianLinkCodes = new GuardianLinkCodes();
   const linkCodeAdmission = createGuardianLinkAdmission({
     codes: guardianLinkCodes,
@@ -781,6 +783,10 @@ async function main() {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
     if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
+    // A grant that recorded no account still names its platform by its channel.
+    const platform =
+      accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
+    await readBotsOfPeople(platform, message);
     // A link code said in a chat switched off still voids the code.
     if (!(await linkCodeAdmission(connectionId, connectionKind, message))) return false;
     return heardInChat(connectionId, connectionKind, message);
@@ -1348,8 +1354,8 @@ async function main() {
     },
   });
   // Speech credentials for voice conversation mode. Only the speaker source
-  // asks for one, and only while `voice_mode` is on. At boot this reports the
-  // usage of speech sessions an earlier run left, if any.
+  // asks for one, when a conversation starts. At boot this reports the usage
+  // of speech sessions an earlier run left, if any.
   const speechCredentials = createRomeCloudSpeechCredentials({
     romeCloud: romeCloudAccess,
     settings: settingsRepo,
