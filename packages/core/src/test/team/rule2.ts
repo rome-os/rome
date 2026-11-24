@@ -5,9 +5,6 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Hono } from "hono";
-import type { Feature } from "../../api/deps.js";
-import { currentSessionActor } from "../../access/session-actor.js";
 import {
   createInstance,
   mountDrift,
@@ -24,6 +21,7 @@ import {
   type Role,
 } from "./callers.js";
 import { httpOperations, pathFor, upgradeOperations, type Operation } from "./surface.js";
+import { guardianOnlyFeature } from "./stand-in-routes.js";
 
 /**
  * A product the verifier is proven against instead of the one in the tree.
@@ -31,7 +29,7 @@ import { httpOperations, pathFor, upgradeOperations, type Operation } from "./su
  * check admits them as it admits the guardian. "admit-every-visitor": the
  * outsider's email is on the dashboard list too, so the product admits a
  * visitor nobody invited. "guardian-only-route": the product in the tree plus
- * `STAND_IN_GUARDIAN_ONLY_ROUTE`, which refuses everyone but the guardian.
+ * the routes in `stand-in-routes.ts`, which refuse everyone but the guardian.
  */
 export type StandIn = "open-checks" | "admit-every-visitor" | "guardian-only-route";
 
@@ -48,8 +46,6 @@ export interface Rule2Options {
   /** Default "per-call". */
   isolation?: Isolation;
 }
-
-export const STAND_IN_GUARDIAN_ONLY_ROUTE = "GET /api/team-verifier/guardian-only";
 
 export type Verdict =
   | "match"
@@ -76,9 +72,9 @@ export interface Rule2Result {
   operations: OperationResult[];
   teammateRefused: string[];
   statusDiffers: string[];
-  /** Routes where guardian and teammate got the same 404, 5xx or timeout, so
-   *  the call never reached what it would compare. Reported, never passed or
-   *  failed. */
+  /** Routes where guardian and teammate got the same 400, 404, 422, 5xx or
+   *  timeout, so the call may never have reached the guard it would compare.
+   *  Neither a match nor a failure. */
   unverified: string[];
   outsiderAdmitted: string[];
   unclaimedUpgradeHandlers: number[];
@@ -107,19 +103,6 @@ function instanceOptions(standIn: StandIn | undefined): InstanceOptions {
       standIn === "admit-every-visitor" ? [TEAMMATE.email, OUTSIDER.email] : [TEAMMATE.email],
     ...(standIn === "guardian-only-route" ? { extraFeatures: [guardianOnlyFeature()] } : {}),
   };
-}
-
-function guardianOnlyFeature(): Feature {
-  const routes = new Hono();
-  const path = STAND_IN_GUARDIAN_ONLY_ROUTE.slice("GET /api".length);
-  // Its own guard, so the stand-in keeps refusing a teammate whatever the
-  // product does with its guardian-only guards.
-  routes.get(path, async (c) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
-      return c.json({ error: "guardian only" }, 403);
-    return c.json({ ok: true });
-  });
-  return { routes, actions: [] };
 }
 
 /** The role whose session a call carries. The open-checks stand-in hands the
@@ -168,9 +151,9 @@ async function callOnFreshInstance(
 }
 
 /** Every operation in order on one instance for `role`. A write that changes
- *  the dashboard list (a teammate may save it, and every call sends `{}`)
- *  would sign the teammate out of the calls after it, so the list goes back
- *  to the booted one after each call. */
+ *  the dashboard list (a teammate may save it) would sign the teammate out of
+ *  the calls after it, so the list goes back to the booted one after each
+ *  call. */
 async function callAllAs(
   ops: Operation[],
   role: Role,
@@ -194,8 +177,9 @@ async function callAllAs(
   });
 }
 
+// A 400 or 422 may come from body validation that runs before the guard.
 const unusable = (status: Outcome["status"]) =>
-  status === "timeout" || status === 404 || status >= 500;
+  status === "timeout" || status === 400 || status === 404 || status === 422 || status >= 500;
 
 function compare(guardian: Outcome, teammate: Outcome): Verdict {
   if (!guardian.refused && teammate.refused) return "teammate-refused";

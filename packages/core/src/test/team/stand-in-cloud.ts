@@ -6,6 +6,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { allowVerifierServer } from "./network.js";
 
 export interface CloudAccount {
   accountId: string;
@@ -84,6 +85,7 @@ export async function startStandInCloud(): Promise<StandInCloud> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("stand-in cloud has no port");
+  const disallow = allowVerifierServer(address.port);
   return {
     origin: `http://127.0.0.1:${address.port}`,
     signInAs(next) {
@@ -91,6 +93,7 @@ export async function startStandInCloud(): Promise<StandInCloud> {
     },
     close: () =>
       new Promise<void>((resolve) => {
+        disallow();
         server.closeAllConnections();
         server.close(() => resolve());
       }),

@@ -1,13 +1,14 @@
 // Merges the parts a run wrote under out/ into out/report.json and
-// out/summary.md. Called by run.sh with the repo root, the verifier folder and
-// the web verifier file. Exits 0 when every rule passes, else 1.
+// out/summary.md. Called by run.sh with the repo root, the verifier folder,
+// the web verifier file and, on a run with proofs, the proof command's exit
+// status. Exits 0 when every rule and every proof passes, else 1.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const [repo, folder, webFile] = process.argv.slice(2);
+const [repo, folder, webFile, proofsExit] = process.argv.slice(2);
 const out = join(repo, folder, "out");
 
 const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
@@ -64,7 +65,7 @@ const report = {
   ranAt: new Date().toISOString(),
   elapsedMs: core?.elapsedMs ?? null,
   rules: { rule1, rule2 },
-  proofs: proofs ? { rule2: proofs } : null,
+  proofs: proofsExit === undefined ? null : { pass: proofsExit === "0", rule2: proofs ?? null },
 };
 writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 
@@ -110,7 +111,7 @@ else {
         `- ${o.route}: guardian ${outcome(o.outcomes.guardian)}, teammate ${outcome(o.outcomes.teammate)}`,
     ),
     "",
-    `Not verified: guardian and teammate got the same 404, 5xx or timeout, so the call never reached what it compares (${rule2.unverified.length}):`,
+    `Not verified: guardian and teammate got the same 400, 404, 422, 5xx or timeout, so the call may never have reached the guard it compares (${rule2.unverified.length}):`,
     ...rule2.unverified.map((o) => `- ${o.route}: ${outcome(o.outcomes.guardian)}`),
     "",
     `A visitor not on the list admitted where a signed-out caller is refused (${rule2.outsiderAdmitted.length}):`,
@@ -127,10 +128,19 @@ else {
   );
 }
 if (report.proofs) {
-  lines.push("", "## Proofs", "", "```json", JSON.stringify(report.proofs, null, 2), "```");
+  lines.push(
+    "",
+    `## Proofs: ${verdict(report.proofs.pass)}`,
+    "",
+    ...(report.proofs.pass ? [] : ["A proof failed: see out/proofs.log.", ""]),
+    "```json",
+    JSON.stringify(report.proofs.rule2, null, 2),
+    "```",
+  );
 }
 writeFileSync(join(out, "summary.md"), `${lines.join("\n")}\n`);
+const proofsLine = report.proofs ? `Proofs: ${verdict(report.proofs.pass)}\n` : "";
 process.stdout.write(
-  `${lines.slice(0, 4).join("\n")}\nRule 1: ${verdict(rule1.pass)}\nRule 2: ${verdict(rule2.pass)}\nReport: ${join(out, "report.json")}\n`,
+  `${lines.slice(0, 4).join("\n")}\nRule 1: ${verdict(rule1.pass)}\nRule 2: ${verdict(rule2.pass)}\n${proofsLine}Report: ${join(out, "report.json")}\n`,
 );
-process.exit(rule1.pass && rule2.pass ? 0 : 1);
+process.exit(rule1.pass && rule2.pass && (report.proofs?.pass ?? true) ? 0 : 1);
