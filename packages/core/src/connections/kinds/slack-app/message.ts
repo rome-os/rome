@@ -32,8 +32,10 @@ export interface SlackWireMessage {
 
 /** A member as Slack's directory names them. */
 export interface SlackMember extends SlackUserName {
-  /** The member's own workspace. */
+  /** The member's home workspace. */
   teamId?: string;
+  /** Every workspace of an Enterprise Grid org the member belongs to. */
+  teams?: readonly string[];
 }
 
 /** The text of a message that was only the app's mention. */
@@ -111,14 +113,19 @@ export class SlackWorkspaceUnknown extends Error {
   }
 }
 
-/** The workspace `wire`'s author belongs to: the one `user_team` names,
- *  unless it names an Enterprise Grid org (`E…`). A message that names no
- *  workspace but the app's own is from the app's workspace. Otherwise Slack's
- *  directory names the member's workspace, and until it does the workspace is
- *  not known. The message's own words come first, so an author keeps one id
- *  whether or not the directory answered. The app's own posts are in its
- *  workspace. A bot, which the directory does not list, keeps what the
- *  message names. */
+/** The workspace `wire`'s author belongs to. The app's own posts are in its
+ *  workspace. Otherwise, in order:
+ *  - `user_team`, when it names a workspace (`T…`) and not an Enterprise Grid
+ *    org (`E…`);
+ *  - the app's workspace, when Slack's directory says the member belongs to
+ *    it, whatever their home workspace is;
+ *  - the member's home workspace, from the directory;
+ *  - the app's workspace, when the directory has not answered and the message
+ *    names no other workspace. A history page names none, and a slow
+ *    directory never holds up a read, so an author from another workspace
+ *    reads as the app's until the directory answers.
+ *  Anything else is not known yet. A bot, which the directory does not list,
+ *  keeps what the message names. */
 function authorWorkspace(
   wire: SlackWireMessage,
   member: SlackMember,
@@ -128,8 +135,10 @@ function authorWorkspace(
   if (wire.user === app.botUserId) return own;
   if (!wire.user) return wire.user_team ?? wire.team ?? own;
   if (wire.user_team?.startsWith("T")) return wire.user_team;
+  if (member.teamId?.startsWith("T")) {
+    return member.teamId === own || member.teams?.includes(own) ? own : member.teamId;
+  }
   const named = [wire.user_team, wire.team, wire.source_team].filter((team) => team !== undefined);
   if (named.every((team) => team === own)) return own;
-  if (member.teamId?.startsWith("T")) return member.teamId;
   throw new SlackWorkspaceUnknown(wire.user);
 }
