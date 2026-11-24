@@ -337,10 +337,15 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             });
         },
         getMetadataSnapshot: () => ({ reasoningEffort }),
-        stopVoiceInput: voice.stop,
+        // A hidden composer hides the conversation's controls too, so it ends.
+        stopVoiceInput: () => {
+          voice.stop();
+          conversation.end();
+        },
       }),
       [
         voice.stop,
+        conversation.end,
         addPendingFiles,
         removeSentUploads,
         pendingUploads,

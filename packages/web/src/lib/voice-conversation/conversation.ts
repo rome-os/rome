@@ -61,6 +61,9 @@ export interface ConversationDeps {
 // Silence from Rome this long means the connection is gone: Rome says it is
 // there every second while the socket is open.
 const QUIET_LIMIT_MS = VOICE_CONVERSATION_ALIVE_INTERVAL_MS * 3;
+// Opening the socket may take longer on a slow mobile network, so it gets
+// this long before the quiet limit applies.
+const OPEN_LIMIT_MS = 10_000;
 
 // The socket states `WebSocket.CONNECTING` and `WebSocket.OPEN`, without needing the global.
 const CONNECTING = 0;
@@ -118,9 +121,9 @@ export function startVoiceConversation(
   function lost() {
     finish("connection-lost");
   }
-  const heardFromRome = () => {
+  const heardFromRome = (limit = QUIET_LIMIT_MS) => {
     if (quietTimer) clearTimeout(quietTimer);
-    quietTimer = setTimeout(lost, QUIET_LIMIT_MS);
+    quietTimer = setTimeout(lost, limit);
   };
   window.addEventListener("offline", lost);
   const send = (message: VoiceConversationClientMessage) => socket?.send(JSON.stringify(message));
@@ -146,7 +149,7 @@ export function startVoiceConversation(
       }
       microphone = opened;
       socket = deps.openSocket();
-      heardFromRome();
+      heardFromRome(OPEN_LIMIT_MS);
       socket.onopen = () => {
         heardFromRome();
         send({ type: "start", chatId, sampleRate: opened.sampleRate });

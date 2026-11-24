@@ -138,6 +138,30 @@ describe("a voice conversation in the browser", () => {
     expect(c.closedPlayer()).toBe(true);
   });
 
+  it("gives the socket 10 s to open, then 3 s of quiet from Rome", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      rs.advanceTimersByTime(9_000);
+      expect(c.ended).toEqual([]);
+      c.socket.open();
+      rs.advanceTimersByTime(2_500);
+      c.socket.say({ type: "alive" });
+      rs.advanceTimersByTime(2_500);
+      expect(c.ended).toEqual([]);
+      rs.advanceTimersByTime(600);
+      expect(c.ended).toEqual(["connection-lost"]);
+
+      const slow = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      rs.advanceTimersByTime(10_000);
+      expect(slow.ended).toEqual(["connection-lost"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("ends with Rome's reason, or the microphone's", async () => {
     const c = setup();
     await settle();

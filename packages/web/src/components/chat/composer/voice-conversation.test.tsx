@@ -1,10 +1,12 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
+import type { ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
 
 // The conversation itself: the test plays Rome.
@@ -45,7 +47,7 @@ afterEach(() => {
   conversation.ended = 0;
 });
 
-function renderComposer(available: boolean) {
+function renderComposer(available: boolean, ref = createRef<ChatComposerHandle>()) {
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://rome.test").pathname;
     if (path === "/api/voice-conversation") return Response.json({ available });
@@ -58,7 +60,7 @@ function renderComposer(available: boolean) {
     <MemoryRouter>
       <QueryClientProvider client={client}>
         <ReplyDraftHarness>
-          <ConciergeComposer chatId="concierge" onSend={() => {}} />
+          <ConciergeComposer ref={ref} chatId="concierge" onSend={() => {}} />
         </ReplyDraftHarness>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -106,6 +108,18 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(conversation.ended).toBe(1);
     expect(document.querySelector("[data-voice-conversation-capsule]")).toBeNull();
     expect(screen.getByRole("button", { name: "Voice conversation" })).toBeTruthy();
+  });
+
+  it("ends the conversation when the host hides the composer without unmounting it", async () => {
+    const ref = createRef<ChatComposerHandle>();
+    renderComposer(true, ref);
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    expect(document.querySelector("[data-voice-conversation-capsule]")).toBeTruthy();
+
+    // What the chat calls when sharing or a pane covers the composer.
+    act(() => ref.current?.stopVoiceInput());
+    expect(conversation.ended).toBe(1);
+    expect(document.querySelector("[data-voice-conversation-capsule]")).toBeNull();
   });
 
   it("says why a conversation ended on its own", async () => {
