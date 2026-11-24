@@ -29,15 +29,16 @@ actions:
   # Finds and removes the defer that watches a task chat (see Tasks).
   - system:search_routine
   - system:delete_routine
-  # Checks whether a routine ran, failed or is due, and what a run did.
-  - system:list_routine_runs
-  - system:read_routine_run
+  # Shows the routines, what one does, whether it ran, failed or is due, and what a run did.
+  - system:read_routines
+  # Changes a routine's name, what it does or when it runs, when the guardian asks.
+  - system:change_routine
   # Pauses and resumes a routine when the guardian asks.
   - system:pause_routine
   - system:resume_routine
   # Runs a routine now, or stops its run, when the guardian asks.
   - system:run_routine
-  - system:stop_routine
+  - system:stop_routine_run
   # Follows things for the guardian and tells them about events (see Connectors and following).
   - core:concierge_follow
   - core:concierge_unfollow

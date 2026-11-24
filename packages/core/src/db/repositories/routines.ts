@@ -94,12 +94,18 @@ export function routineChatOf(
   args: Record<string, unknown>,
   madeIn?: string,
 ): string | null {
-  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
-  const value = arg ? args[arg] : undefined;
-  if (typeof value === "string" && value) return value;
+  const named = chatNamedByArgs(actionName, args);
+  if (named) return named;
   if (madeIn) return madeIn;
   const context = actionExecutionContext.getStore()?.channelContext;
   return context?.channel === "webchat" && context.threadId ? context.threadId : null;
+}
+
+/** The chat a routine's args send into, or null when they name none. */
+export function chatNamedByArgs(actionName: string, args: Record<string, unknown>): string | null {
+  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
+  const value = arg ? args[arg] : undefined;
+  return typeof value === "string" && value ? value : null;
 }
 
 /** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
