@@ -111,17 +111,18 @@ export class SlackWorkspaceUnknown extends Error {
   }
 }
 
-/** The workspace `wire`'s author belongs to. Slack's directory names a
- *  member's own workspace, so it is asked first. Without it, `user_team`
- *  names the author's workspace, unless it names an Enterprise Grid org
- *  (`E…`). A message that names no workspace but the app's own is from the
- *  app's workspace. Anything else is not known yet. A bot, which the
- *  directory does not list, keeps what the message names. */
+/** The workspace `wire`'s author belongs to: the one `user_team` names,
+ *  unless it names an Enterprise Grid org (`E…`). A message that names no
+ *  workspace but the app's own is from the app's workspace. Otherwise Slack's
+ *  directory names the member's workspace, and until it does the workspace is
+ *  not known. The message's own words come first, so an author keeps one id
+ *  whether or not the directory answered. A bot, which the directory does
+ *  not list, keeps what the message names. */
 function authorWorkspace(wire: SlackWireMessage, member: SlackMember, own: string): string {
   if (!wire.user) return wire.user_team ?? wire.team ?? own;
-  if (member.teamId?.startsWith("T")) return member.teamId;
   if (wire.user_team?.startsWith("T")) return wire.user_team;
   const named = [wire.user_team, wire.team, wire.source_team].filter((team) => team !== undefined);
   if (named.every((team) => team === own)) return own;
+  if (member.teamId?.startsWith("T")) return member.teamId;
   throw new SlackWorkspaceUnknown(wire.user);
 }
