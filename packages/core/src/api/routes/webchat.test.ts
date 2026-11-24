@@ -603,6 +603,62 @@ describe("Webchat API", () => {
     expect(await list(visitor, "all")).toEqual(all);
   });
 
+  it("runs the Chat page's agent tools through the routes' own operations, for the guardian", async () => {
+    const { routes: app, runtime } = createWebchatRuntime(deps);
+    const page = runtime.chatPage;
+    const started = await page.startChat({ name: "From the agent" });
+    expect(started.status).toBe(200);
+    const id = String(started.body.id);
+    expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
+
+    expect((await page.renameChat(id, "  Taxes  ")).body).toMatchObject({ name: "Taxes" });
+    expect((await page.renameChat(id, "")).body).toEqual({ error: "name must not be empty" });
+    expect((await page.pinChat(id, true)).body).toMatchObject({ pinnedAt: expect.any(String) });
+    expect((await page.archiveChat(id, true)).body).toMatchObject({
+      archivedAt: expect.any(String),
+    });
+    const shown = (await (await app.request(`/chat/sessions/${id}`)).json()) as {
+      name: string;
+      archivedAt: string | null;
+    };
+    expect(shown).toMatchObject({ name: "Taxes", archivedAt: expect.any(String) });
+    expect(await page.chatName(id)).toBe("Taxes");
+    // The tools find a chat by its name in the sidebar's list, archived chats included.
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const sidebar = await runWithSessionActor(guardian, async () =>
+      (await app.request("/chat/sessions?status=all")).json(),
+    );
+    expect(await page.listChats()).toEqual(sidebar);
+    expect(await page.listChats()).toContainEqual(
+      expect.objectContaining({ id, name: "Taxes", activityAt: expect.any(String) }),
+    );
+
+    expect(await page.deleteChat(id)).toEqual({ status: 200, body: { ok: true } });
+    expect(await deps.webchatRepo.getSession(id)).toBeNull();
+    expect((await page.pinChat("gone", true)).status).toBe(404);
+
+    // A visitor's Concierge chat does not exist to the guardian, as on the dashboard.
+    await deps.webchatRepo.createSession(
+      "visitor-main",
+      "Concierge",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    expect(await page.renameChat("visitor-main", "Mine")).toEqual({
+      status: 404,
+      body: { error: "Session not found" },
+    });
+    expect(await page.chatName("visitor-main")).toBeNull();
+    expect((await page.listChats()).map((chat) => chat.id)).not.toContain("visitor-main");
+    expect((await deps.webchatRepo.getSession("visitor-main"))?.name).toBe("Concierge");
+  });
+
   it("keeps each person's Concierge and task chats from everyone else", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };

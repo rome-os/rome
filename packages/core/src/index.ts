@@ -1941,6 +1941,8 @@ async function main() {
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
     },
+    // The Chat page's routes, once the API layer that serves them is up.
+    chat: { page: () => internalApi?.chatPage ?? null },
     // The projection `GET /connections` serves, and the Connections page's disconnect.
     connections: {
       connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),

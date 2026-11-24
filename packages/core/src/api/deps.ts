@@ -92,6 +92,7 @@ import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../desktops/computer-use.js";
 import type { KindMount } from "../connections/kind-mount.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
+import type { ChatPage } from "../webchat/agent-tools.js";
 
 export interface ApiConfig {
   port: number;
@@ -321,6 +322,8 @@ export interface ApiDeps {
 
 export interface ApiHandle {
   port: number;
+  /** The Chat page's operations, for its agent tools (webchat/agent-tools.ts). */
+  chatPage: ChatPage;
   close(): Promise<void>;
 }
 
