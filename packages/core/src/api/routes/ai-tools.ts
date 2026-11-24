@@ -1,12 +1,10 @@
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import type { ProviderSwitch } from "../../webchat/provider-failures.js";
 import { isDefaultProvider } from "../../agent/index.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import {
   accountAllowsModel,
-  loggingOut,
-  logOutOfProvider,
   providerAuthorized,
   CODEX_LUNA_MODEL,
   CODEX_SOL_MODEL,
@@ -337,23 +335,32 @@ export function aiToolsRoutes(
   // default. A client that sends none moved them, as before.
   // The choice holds until the accounts read the provider as logged out,
   // however late that read lands. A logout that failed drops it.
-  const moveExistingOf = async (c: { req: { json(): Promise<unknown> } }) => {
+  const loggingOut = async (
+    c: { req: { json(): Promise<unknown> } },
+    provider: "anthropic" | "openai",
+    logout: () => Promise<Response>,
+  ): Promise<Response> => {
     const body = (await c.req.json().catch(() => null)) as { moveExisting?: unknown } | null;
-    return { moveExisting: body?.moveExisting !== false };
-  };
-  const logoutDeps = {
-    defaults: deps.defaultProviders,
-    accounts: deps.modelAccounts,
-    logins: { anthropic: deps.claudeAccount, openai: deps.codexAccountService },
+    const failed = deps.defaultProviders?.expectLogout(provider, {
+      moveExisting: body?.moveExisting !== false,
+    });
+    try {
+      const res = await logout();
+      if (!res.ok) await failed?.();
+      return res;
+    } catch (error) {
+      await failed?.();
+      throw error;
+    }
   };
 
-  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {
-    await loggingOut(deps.defaultProviders, "anthropic", await moveExistingOf(c), async () => {
+  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) =>
+    loggingOut(c, "anthropic", async () => {
       await deps.claudeAccount.removeCredential();
       await deps.modelAccounts.refresh("anthropic");
-    });
-    return c.json({ ok: true });
-  });
+      return c.json({ ok: true });
+    }),
+  );
 
   // Start ChatGPT OAuth on the shared app-server and open the returned URL in
   // the noVNC-visible server browser. Completion arrives as the process-global
@@ -396,20 +403,36 @@ export function aiToolsRoutes(
     return c.json({ ok: true });
   });
 
-  // The account is read again on success, so the agent gate reflects it at once.
-  const logOut = async (c: Context, provider: "anthropic" | "openai") => {
-    try {
-      await logOutOfProvider(logoutDeps, provider, await moveExistingOf(c));
+  // Re-read the account on success so the agent gate reflects it immediately.
+  app.post("/ai-tools/claude/logout", async (c) =>
+    loggingOut(c, "anthropic", async () => {
+      try {
+        await deps.claudeAccount.revoke();
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("claude logout failed", { error });
+        return c.json({ error }, 500);
+      }
+      await deps.modelAccounts.refresh("anthropic");
       return c.json({ ok: true });
-    } catch (err) {
-      const error = getErrorMessage(err);
-      log.warn(`${provider === "anthropic" ? "claude" : "codex"} logout failed`, { error });
-      return c.json({ error }, 500);
-    }
-  };
-  app.post("/ai-tools/claude/logout", async (c) => logOut(c, "anthropic"));
-  // Codex logs out over the app-server `account/logout` RPC (no PTY terminal).
-  app.post("/ai-tools/codex/logout", async (c) => logOut(c, "openai"));
+    }),
+  );
+
+  // Log out of Codex via the app-server `account/logout` RPC (no PTY terminal).
+  // Re-probe login state on success so the agent gate reflects it immediately.
+  app.post("/ai-tools/codex/logout", async (c) =>
+    loggingOut(c, "openai", async () => {
+      try {
+        await deps.codexAccountService.revoke();
+        await deps.modelAccounts.refresh("openai");
+        return c.json({ ok: true });
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("codex logout failed", { error });
+        return c.json({ error }, 500);
+      }
+    }),
+  );
 
   return app;
 }

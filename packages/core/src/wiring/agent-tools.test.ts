@@ -13,8 +13,6 @@ const NAMES = [
   "system:run_routine",
   "system:stop_routine",
   "system:read_ai_tools",
-  "system:sign_out_ai_tool",
-  "system:change_ai_tool",
   "system:read_devices",
   "system:run_on_device",
   "system:rename_device",

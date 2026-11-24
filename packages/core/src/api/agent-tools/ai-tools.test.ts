@@ -1,66 +1,39 @@
 import { describe, expect, it } from "@rstest/core";
 import type { DefaultProvider, ModelAccountReports } from "../../agent/index.js";
-import { approvalOf, callTool, whoMayAskSuite } from "../../apps/actions/agent-tool-contract.js";
+import { callTool, whoMayAskSuite } from "../../apps/actions/agent-tool-contract.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
-import { type AiToolDeps, changeAiTool, readAiTools, signOutAiTool } from "./ai-tools.js";
+import { type AiToolDeps, readAiTools } from "./ai-tools.js";
 
 whoMayAskSuite(readAiTools, {});
-whoMayAskSuite(signOutAiTool, { aiTool: "claude" });
-whoMayAskSuite(changeAiTool, { aiTool: "chatgpt" });
 
-/** A Rome with these accounts and default. Records what the tools changed. */
+/** A Rome with these accounts and default. */
 function rome(options: {
   reports: ModelAccountReports;
   current?: DefaultProvider | null;
   claudeKeyService?: string | null;
-  revokeFails?: boolean;
-}) {
-  const calls: string[] = [];
-  let current = options.current ?? null;
-  let reports = options.reports;
-  const signedIn = () => ({
-    anthropic: reports.anthropic !== undefined && reports.anthropic.state !== "unauthorized",
-    openai: reports.openai !== undefined && reports.openai.state !== "unauthorized",
-    rome_credits: false,
-  });
-  const revoke = (provider: "anthropic" | "openai") => async () => {
-    if (options.revokeFails) throw new Error("the provider refused");
-    calls.push(`revoke ${provider}`);
-  };
+  romeCredits?: { enabled: boolean; spendable: boolean };
+}): { deps: AiToolDeps } {
+  const { reports } = options;
   const deps: AiToolDeps = {
-    accounts: {
-      read: () => reports,
-      refresh: async (provider) => {
-        calls.push(`refresh ${provider}`);
-        if (provider) reports = { ...reports, [provider]: reportOf("unauthorized") };
-        // A logout of the default moves it to the other signed-in account.
-        if (provider && current === provider) {
-          current = provider === "anthropic" ? "openai" : "anthropic";
-        }
-        return true;
-      },
-    },
+    accounts: { read: () => reports },
     defaults: {
       ready: async () => {},
-      current: () => current,
-      signedIn,
-      choose: async (provider, { moveExisting } = {}) => {
-        if (!signedIn()[provider]) throw new Error(`${provider} is not signed in`);
-        calls.push(`choose ${provider} moveExisting=${moveExisting}`);
-        current = provider;
-      },
-      expectLogout: (provider, { moveExisting }) => {
-        calls.push(`expect logout ${provider} moveExisting=${moveExisting}`);
-        return async () => {
-          calls.push(`logout of ${provider} failed`);
-        };
-      },
+      current: () => options.current ?? null,
+      signedIn: () => ({
+        anthropic: reports.anthropic !== undefined && reports.anthropic.state !== "unauthorized",
+        openai: reports.openai !== undefined && reports.openai.state !== "unauthorized",
+        // As DefaultProviders reads it: credits enabled and no AI tool signed in.
+        rome_credits:
+          options.romeCredits?.enabled === true &&
+          reports.anthropic?.state !== "available" &&
+          reports.openai?.state !== "available",
+      }),
     },
-    logins: { anthropic: { revoke: revoke("anthropic") }, openai: { revoke: revoke("openai") } },
     chatsFollowingDefault: async () => 3,
+    romeCreditsUsable: () => options.romeCredits?.spendable === true,
     claudeKeyService: async () => options.claudeKeyService ?? null,
   };
-  return { deps, calls };
+  return { deps };
 }
 
 describe("reading the AI tools", () => {
@@ -118,121 +91,23 @@ describe("reading the AI tools", () => {
       default: null,
     });
   });
-});
 
-describe("signing out of an AI tool", () => {
-  it("is approved by the guardian on a card that says the default moves", async () => {
-    const { deps } = rome({
-      reports: { anthropic: reportOf("available"), openai: reportOf("available") },
-      current: "anthropic",
+  it("says Rome credits can run chats only while credits are left", async () => {
+    const signedOut = {
+      anthropic: reportOf("unauthorized"),
+      openai: reportOf("unauthorized"),
+    };
+    const usedUp = rome({ reports: signedOut, romeCredits: { enabled: true, spendable: false } });
+    const left = rome({ reports: signedOut, romeCredits: { enabled: true, spendable: true } });
+
+    const usedUpResult = await callTool(readAiTools, usedUp.deps, {});
+    const leftResult = await callTool(readAiTools, left.deps, {});
+
+    expect(usedUpResult.status === "ok" && usedUpResult.data).toMatchObject({
+      romeCredits: { canRunChats: false },
     });
-
-    const preview = await approvalOf(signOutAiTool, deps, { aiTool: "claude" });
-
-    expect(preview).toEqual({
-      kind: "generic",
-      title: "Sign out of Claude",
-      summary:
-        "Rome stops using your Claude account. To use it again, you sign in again in Settings › AI Tools. It is your default, so Rome makes another AI tool you can use the default, when there is one, and chats move to it, each on its next reply.",
-    });
-  });
-
-  it("logs out as the page does, telling the default first whether chats move", async () => {
-    const { deps, calls } = rome({
-      reports: { anthropic: reportOf("available"), openai: reportOf("available") },
-      current: "anthropic",
-    });
-
-    const result = await callTool(signOutAiTool, deps, {
-      aiTool: "claude",
-      moveExistingChats: false,
-    });
-
-    expect(result).toEqual({
-      status: "ok",
-      data: { aiTool: "claude", signedOut: true, default: "chatgpt" },
-    });
-    expect(calls).toEqual([
-      "expect logout anthropic moveExisting=false",
-      "revoke anthropic",
-      "refresh anthropic",
-    ]);
-  });
-
-  it("drops the default's expectation and says so when the logout fails", async () => {
-    const { deps, calls } = rome({
-      reports: { openai: reportOf("available") },
-      revokeFails: true,
-    });
-
-    const result = await callTool(signOutAiTool, deps, { aiTool: "chatgpt" });
-
-    expect(result).toEqual({
-      status: "error",
-      error:
-        "Signing out of ChatGPT failed: the provider refused. Tell the guardian they can sign out in Settings › AI Tools.",
-    });
-    expect(calls).toEqual(["expect logout openai moveExisting=true", "logout of openai failed"]);
-  });
-
-  it("turns down an AI tool that is not signed in", async () => {
-    const { deps, calls } = rome({ reports: { openai: reportOf("unauthorized") } });
-
-    const result = await callTool(signOutAiTool, deps, { aiTool: "chatgpt" });
-
-    expect(result).toEqual({
-      status: "error",
-      error: "ChatGPT is not signed in, so there is nothing to sign out of.",
-    });
-    expect(calls).toEqual([]);
-  });
-});
-
-describe("changing the AI tool Rome uses", () => {
-  it("makes a signed-in AI tool the default, moving existing chats unless told not to", async () => {
-    const { deps, calls } = rome({
-      reports: { anthropic: reportOf("available"), openai: reportOf("available") },
-      current: "anthropic",
-    });
-
-    const moved = await callTool(changeAiTool, deps, { aiTool: "chatgpt" });
-    const kept = await callTool(changeAiTool, deps, {
-      aiTool: "claude",
-      moveExistingChats: false,
-    });
-
-    expect(moved).toEqual({ status: "ok", data: { default: "chatgpt", changed: true } });
-    expect(kept).toEqual({ status: "ok", data: { default: "claude", changed: true } });
-    expect(calls).toEqual([
-      "choose openai moveExisting=true",
-      "choose anthropic moveExisting=false",
-    ]);
-  });
-
-  it("changes nothing when the AI tool already is the default", async () => {
-    const { deps, calls } = rome({
-      reports: { anthropic: reportOf("available") },
-      current: "anthropic",
-    });
-
-    const result = await callTool(changeAiTool, deps, { aiTool: "claude" });
-
-    expect(result).toEqual({
-      status: "ok",
-      data: { default: "claude", changed: false, message: "Claude is already the default." },
-    });
-    expect(calls).toEqual([]);
-  });
-
-  it("turns down an AI tool that is not signed in, pointing to the sign-in", async () => {
-    const { deps } = rome({ reports: { anthropic: reportOf("available") }, current: "anthropic" });
-
-    const result = await callTool(changeAiTool, deps, { aiTool: "chatgpt" });
-
-    expect(result).toEqual({
-      status: "error",
-      error:
-        "ChatGPT is not signed in, so it cannot be the default. Ask the guardian to sign in in Settings › AI Tools.",
+    expect(leftResult.status === "ok" && leftResult.data).toMatchObject({
+      romeCredits: { canRunChats: true },
     });
   });
 });

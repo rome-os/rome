@@ -1942,12 +1942,12 @@ async function main() {
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
     },
-    // The accounts and default `GET /ai-tools/status` reads, and the AI Tools page's logout.
+    // The accounts and default `GET /ai-tools/status` reads.
     aiTools: {
       accounts: modelAccounts,
       defaults: defaultProviders,
-      logins: { anthropic: claudeAccount, openai: codexAccountService },
       chatsFollowingDefault: () => chatProviders.followingCount(),
+      romeCreditsUsable: () => codexLoginChoice.creditsUsable(),
       claudeKeyService: async () => {
         const stored = await claudeAccount.storedCredential();
         return (
