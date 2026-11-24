@@ -28,6 +28,12 @@ export interface SlackWireMessage {
   edited?: { ts?: string };
 }
 
+/** A member as Slack's directory names them. */
+export interface SlackMember extends SlackUserName {
+  /** The member's own workspace. */
+  teamId?: string;
+}
+
 /** The text of a message that was only the app's mention. */
 const BARE_MENTION = "@Rome";
 
@@ -59,7 +65,7 @@ export function inTimeline(wire: SlackWireMessage): boolean {
 export function slackMessage(
   context: { channel: string; teamId: string; botUserId: string; chatId: string },
   wire: SlackWireMessage,
-  name: SlackUserName = {},
+  name: SlackMember = {},
 ): ChannelMessage | null {
   if (!isSaid(wire.subtype)) return null;
   const author = authorOf(wire);
@@ -77,7 +83,7 @@ export function slackMessage(
     messageId: slackMessageId(wire.ts, wire.thread_ts),
     // Slack user ids are per workspace, so an author from another workspace
     // is named under their own.
-    senderId: slackSenderId(wire.user_team ?? wire.team ?? context.teamId, author),
+    senderId: slackSenderId(authorWorkspace(wire, name, context.teamId), author),
     ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
     ...(name.username ? { senderUsername: name.username } : {}),
     text,
@@ -88,4 +94,12 @@ export function slackMessage(
       : {}),
     thread: { kind: isDm ? "dm" : "group" },
   };
+}
+
+/** The workspace `wire`'s author belongs to. Slack can name an Enterprise
+ *  Grid org (`E…`) in `user_team` instead of a workspace (`T…`); the
+ *  directory then names the author's workspace, where it was asked. */
+function authorWorkspace(wire: SlackWireMessage, member: SlackMember, own: string): string {
+  const named = wire.user_team ?? wire.team ?? own;
+  return named.startsWith("E") && member.teamId ? member.teamId : named;
 }

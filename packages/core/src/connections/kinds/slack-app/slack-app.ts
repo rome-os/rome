@@ -24,12 +24,18 @@ import {
   type SlackEventCallback,
   slackMessageId,
   slackSenderId,
-  type SlackUserName,
   slackUserIdOf,
   splitSlackText,
 } from "../slack/slack.js";
 import { isDepositedFor } from "./deposit.js";
-import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
+import {
+  authorOf,
+  inTimeline,
+  isSaid,
+  type SlackMember,
+  slackMessage,
+  type SlackWireMessage,
+} from "./message.js";
 import { SlackReadGate } from "./read-gate.js";
 import { type FetchHistoryPage, readTimeline } from "./timeline.js";
 import { SlackMemberChannels } from "./channels.js";
@@ -178,7 +184,7 @@ export class SlackAppAdapter {
    *  otherwise; the whole map goes when the adapter starts. */
   private readonly refusedWhileStopped = new Map<string, number>();
   private readonly dedup = new InboundDedup(5_000);
-  private readonly userNames = new Map<string, SlackUserName>();
+  private readonly userNames = new Map<string, SlackMember>();
   private abort = new AbortController();
   private depositKey: string;
   private readonly readGate: SlackReadGate;
@@ -278,10 +284,10 @@ export class SlackAppAdapter {
     if (!isSaid(event.subtype)) return { status: 200 };
     const author = event.user ?? (mention ? authorOf(event) : undefined);
     if (!author || typeof event.text !== "string") return { status: 200 };
-    const said = slackMessage(this.context(event.channel), wire);
+    const name = event.user ? await this.lookUpName(event.user) : {};
+    const said = slackMessage(this.context(event.channel), wire, name);
     if (!said) return { status: 200 };
 
-    const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {
       ...said,
       ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
@@ -585,7 +591,7 @@ export class SlackAppAdapter {
   /** The names of `authors`, each looked up once and all together. A page is
    *  answered without the names Slack has not given within
    *  {@link NAME_WAIT_MS}, so a slow lookup never holds up a read. */
-  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackUserName>> {
+  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackMember>> {
     const unique = [...new Set(authors)];
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<null>((resolve) => {
@@ -604,7 +610,7 @@ export class SlackAppAdapter {
   }
 
   /** A member's name, best effort: a failed lookup leaves the message unnamed. */
-  private async lookUpName(userId: string): Promise<SlackUserName> {
+  private async lookUpName(userId: string): Promise<SlackMember> {
     const cached = this.userNames.get(userId);
     if (cached) return cached;
     try {
