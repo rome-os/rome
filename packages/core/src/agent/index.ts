@@ -33,6 +33,7 @@ export type {
   CodexLoginChoice,
   CodexLogins,
   ModelLoginKind,
+  ModelProviderLogins,
 } from "./domain/model-login.js";
 export { codexLoginKind } from "./domain/model-login.js";
 export { providerAvailability } from "./domain/provider-availability.js";
@@ -177,6 +178,11 @@ export {
   type DefaultProviderChange,
   type DefaultProviders,
 } from "./application/default-providers.js";
+export {
+  loggingOut,
+  logOutOfProvider,
+  type ModelLogoutDeps,
+} from "./application/model-logout.js";
 export { createDefaultProviderSetting } from "./infrastructure/settings/default-provider-setting.js";
 export {
   codexStrongSelection,

@@ -12,6 +12,9 @@ const NAMES = [
   "system:resume_routine",
   "system:run_routine",
   "system:stop_routine",
+  "system:read_ai_tools",
+  "system:sign_out_ai_tool",
+  "system:change_ai_tool",
 ];
 
 describe("core's agent tools", () => {

@@ -228,6 +228,7 @@ import {
   followingSelection,
   isModelSelectionId,
   runsOnRomeCredits,
+  summarizeAnthropicCompatibleCredentials,
   MODEL_SELECTIONS,
   type DefaultProvider,
   type ModelResolutionErrorPayload,
@@ -1940,6 +1941,19 @@ async function main() {
       engine: routineEngine,
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
+    },
+    // The accounts and default `GET /ai-tools/status` reads, and the AI Tools page's logout.
+    aiTools: {
+      accounts: modelAccounts,
+      defaults: defaultProviders,
+      logins: { anthropic: claudeAccount, openai: codexAccountService },
+      chatsFollowingDefault: () => chatProviders.followingCount(),
+      claudeKeyService: async () => {
+        const stored = await claudeAccount.storedCredential();
+        return (
+          summarizeAnthropicCompatibleCredentials(stored?.credential ?? null)?.providerName ?? null
+        );
+      },
     },
     // The projection `GET /connections` serves, and the Connections page's disconnect.
     connections: {
