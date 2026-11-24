@@ -10,13 +10,12 @@ import {
   type ChatPageAnswer,
   type ChatToolDeps,
   changeChat,
-  deleteChat,
   startChat,
 } from "./agent-tools.js";
 
 whoMayAskSuite(startChat, {});
 whoMayAskSuite(changeChat, { name: "Taxes" });
-whoMayAskSuite(deleteChat, {});
+whoMayAskSuite(changeChat, { delete: true });
 
 // A chat as the page's routes answer it, with the fields the agent does not get.
 const chat = (fields: Record<string, unknown> = {}): ChatPageAnswer => ({
@@ -238,7 +237,7 @@ describe("changing a chat", () => {
 
     expect(await callTool(changeChat, deps, { chatId: "chat-1" })).toEqual({
       status: "error",
-      error: "Nothing to change: pass name, pinned, archived, model or project.",
+      error: "Nothing to change: pass name, pinned, archived, model, project or delete.",
     });
   });
 
@@ -268,17 +267,29 @@ describe("deleting a chat", () => {
   it("is approved by the guardian on a card that names the chat", async () => {
     const { deps } = chatPage();
 
-    expect(await approvalOf(deleteChat, deps, { chatId: "chat-1" })).toEqual({
+    expect(await approvalOf(changeChat, deps, { chatId: "chat-1", delete: true })).toEqual({
       kind: "generic",
       title: 'Delete the chat "Trip plan"',
       summary: "Deletes the chat and all its messages. This cannot be undone.",
     });
   });
 
+  it("asks no approval for any other change", async () => {
+    const { deps } = chatPage();
+
+    for (const input of [
+      { chatId: "chat-1", name: "Taxes" },
+      { chatId: "chat-1", pinned: true, archived: true, model: "auto" },
+      { chatId: "chat-1", delete: false, project: "website" },
+    ]) {
+      expect(await approvalOf(changeChat, deps, input)).toBeUndefined();
+    }
+  });
+
   it("deletes it through the page's delete", async () => {
     const { page, deps } = chatPage();
 
-    const result = await callTool(deleteChat, deps, { chatId: "chat-1" });
+    const result = await callTool(changeChat, deps, { chatId: "chat-1", delete: true });
 
     expect(page.deleteChat).toHaveBeenCalledWith("chat-1");
     expect(result).toEqual({
@@ -292,10 +303,23 @@ describe("deleting a chat", () => {
       deleteChat: rs.fn(async () => refused(409, "The main Concierge chat cannot be deleted")),
     });
 
-    expect(await callTool(deleteChat, deps, {})).toEqual({
+    expect(await callTool(changeChat, deps, { delete: true })).toEqual({
       status: "error",
       error:
         "The main Concierge chat cannot be deleted. Nothing was deleted; tell the guardian why.",
     });
+  });
+
+  it("takes no other change with a delete, and does nothing", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, { chatId: "chat-1", delete: true, name: "X" });
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("takes no other change"),
+    });
+    expect(page.deleteChat).not.toHaveBeenCalled();
+    expect(page.renameChat).not.toHaveBeenCalled();
   });
 });

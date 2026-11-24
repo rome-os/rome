@@ -419,7 +419,7 @@ describe("managing an app", () => {
     expect(result.status === "error" && result.error).toContain("system:read_apps");
   });
 
-  it("words the approval card with the app and what happens to its data", async () => {
+  it("asks approval to remove an app, on a card that names the app and what happens to its data", async () => {
     const { ops } = operations();
 
     expect(
@@ -429,9 +429,22 @@ describe("managing an app", () => {
       title: "Remove Notes and delete its data",
       summary: "Rome uninstalls Notes. Its data is deleted permanently and cannot be recovered.",
     });
-    expect(
-      await ops.approval(manageApp, { change: "install", listingId: "@ray/calendar" }),
-    ).toMatchObject({ title: "Install @ray/calendar from the App Store" });
+    expect(await ops.approval(manageApp, { change: "remove", appId: "notes" })).toMatchObject({
+      title: "Remove Notes",
+    });
+  });
+
+  it("asks no approval to install, update, or turn an app on or off", async () => {
+    const { ops } = operations();
+
+    for (const input of [
+      { change: "install", listingId: "@ray/calendar" },
+      { change: "update", appId: "notes" },
+      { change: "turn_on", appId: "notes" },
+      { change: "turn_off", appId: "notes" },
+    ]) {
+      expect(await ops.approval(manageApp, input)).toBeUndefined();
+    }
   });
 });
 

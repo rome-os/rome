@@ -65,6 +65,7 @@ export const readApps = agentTool({
 
 export const searchAppStore = agentTool({
   name: "system:search_app_store",
+  olderNames: ["system:app_store_search"],
   description:
     "Find apps in the Rome App Store (also called the store or app store), or read one listing with the versions it offers. Use it when the guardian asks what the store has, whether there is an app for something, or about one store app, and to find a listing's id before installing it with system:manage_app. It is Rome's own store, not Apple's or Google's",
   sideEffects: "read-only",
@@ -138,23 +139,16 @@ const manageInput = z.object({
 export const manageApp = agentTool({
   name: "system:manage_app",
   description:
-    "Install an app from the Rome App Store, update an installed app, turn one on or off, or remove one. Use it when the guardian asks to install, add, get, update, upgrade, enable, disable, turn on, turn off, uninstall or remove an app. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find a store app's listing id with system:search_app_store and an installed app's id with system:read_apps",
+    "Install an app from the Rome App Store, update an installed app, turn one on or off, or remove one. Use it when the guardian asks to install, add, get, update, upgrade, enable, disable, turn on, turn off, uninstall or remove an app. The guardian approves a removal on a card first; the other changes run at once. Only in the guardian's private chat, in a turn their own message started. Find a store app's listing id with system:search_app_store and an installed app's id with system:read_apps",
   sideEffects: "write",
   input: manageInput,
-  // Shown to the guardian alone, so it names the app whoever asked.
+  // Only a removal is approved. The card is shown to the guardian alone, so it
+  // names the app whoever asked.
   approval: async (input, { deps }) => {
-    if (input.change === "install") {
-      const listing = input.listingId?.trim() || "an app";
-      const version = input.version?.trim();
-      return {
-        title: `Install ${listing} from the App Store`,
-        summary: `Rome installs ${listing}${version ? ` version ${version}` : ""} and turns it on.`,
-      };
-    }
+    if (input.change !== "remove") return undefined;
     const id = input.appId?.trim() ?? "";
     const app = (await deps.apps()).find((a) => a.id === id);
-    const name = app?.displayName ?? (id || "an app");
-    return approvalWords(input.change, name, input.deleteData === true);
+    return removalWords(app?.displayName ?? (id || "an app"), input.deleteData === true);
   },
   run: async (input, { deps }) => {
     if (input.change === "install") return install(deps, input.listingId, input.version);
@@ -379,28 +373,16 @@ async function installing(
   }
 }
 
-function approvalWords(change: Exclude<Change, "install">, name: string, deleteData: boolean) {
-  switch (change) {
-    case "update":
-      return { title: `Update ${name}`, summary: `Rome installs the newer version of ${name}.` };
-    case "turn_on":
-      return { title: `Turn on ${name}`, summary: `${name} runs again in Rome.` };
-    case "turn_off":
-      return {
-        title: `Turn off ${name}`,
-        summary: `${name} stays installed but stops running until it is turned on again.`,
+function removalWords(name: string, deleteData: boolean) {
+  return deleteData
+    ? {
+        title: `Remove ${name} and delete its data`,
+        summary: `Rome uninstalls ${name}. Its data is deleted permanently and cannot be recovered.`,
+      }
+    : {
+        title: `Remove ${name}`,
+        summary: `Rome uninstalls ${name}. Its data is kept for a later reinstall. The routines it manages are deleted.`,
       };
-    case "remove":
-      return deleteData
-        ? {
-            title: `Remove ${name} and delete its data`,
-            summary: `Rome uninstalls ${name}. Its data is deleted permanently and cannot be recovered.`,
-          }
-        : {
-            title: `Remove ${name}`,
-            summary: `Rome uninstalls ${name}. Its data is kept for a later reinstall. The routines it manages are deleted.`,
-          };
-  }
 }
 
 function storeRefusal(

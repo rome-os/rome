@@ -36,7 +36,6 @@ const NAMES = [
   "system:stop_routine",
   "system:start_chat",
   "system:change_chat",
-  "system:delete_chat",
 ];
 
 describe("core's agent tools", () => {
@@ -61,8 +60,20 @@ describe("core's agent tools", () => {
 
     registerAgentTools(registry, async () => "guardian", {} as AgentToolDeps);
 
-    for (const tool of agentTools) {
-      expect(registry.getMetadata(tool.name)?.aliases).toEqual([...tool.olderNames]);
-    }
+    const aliases = Object.fromEntries(
+      agentTools
+        .map((tool) => [tool.name, registry.getMetadata(tool.name)?.aliases ?? []] as const)
+        .filter(([, names]) => names.length > 0),
+    );
+    expect(aliases).toEqual(OLDER_NAMES);
   });
 });
+
+// The older actions each tool took over, which agents and saved routines still call.
+const OLDER_NAMES = {
+  "system:search_app_store": ["system:app_store_search"],
+  "system:read_devices": ["core:device_describe"],
+  "system:run_on_device": ["core:device_run"],
+  "system:read_routines": ["system:list_routine_runs", "system:read_routine_run"],
+  "system:stop_routine_run": ["system:stop_routine"],
+};

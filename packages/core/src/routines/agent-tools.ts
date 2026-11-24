@@ -46,6 +46,7 @@ const runsLimit = z
 
 export const readRoutines = agentTool({
   name: "system:read_routines",
+  olderNames: ["system:list_routine_runs", "system:read_routine_run"],
   description:
     "See the guardian's routines, one routine, or one of its runs, as the Routines page shows them. Use it when the guardian asks what routines they have, what a routine does and when it runs, whether it ran, failed or is due, or why a run failed. With no id it lists every routine with what it runs, when, whether it is on and how its latest run went. With a routineId it returns that routine in full with its recent runs, newest first. With a routineId and a runId it returns that run with every action it ran",
   sideEffects: "read-only",
@@ -194,6 +195,7 @@ export const runRoutine = agentTool({
 
 export const stopRoutineRun = agentTool({
   name: "system:stop_routine_run",
+  olderNames: ["system:stop_routine"],
   description:
     "Stop a routine's run that is in progress, as the Routines page's Stop does — each running run ends as cancelled. Use it when the guardian asks to stop or cancel what a routine is doing right now. A run waiting for the guardian's approval is not stopped. The routine itself stays on; pause it with system:pause_routine to stop future runs. Only in the guardian's private chat, in a turn their own message started, so a routine cannot use it as its action. Find the routine's id with system:read_routines",
   sideEffects: "write",

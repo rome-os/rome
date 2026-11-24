@@ -1,4 +1,4 @@
-// What agents do on the Chat page: start a chat, change one, and delete one.
+// What agents do on the Chat page: start a chat, and change or delete one.
 // Each tool runs the page's own operation, which its route runs too
 // (api/routes/webchat.ts). How a tool is declared:
 // docs/concepts/actions.md#core-agent-tools.
@@ -128,7 +128,7 @@ export const startChat = agentTool({
 export const changeChat = agentTool({
   name: "system:change_chat",
   description:
-    'Change a chat on the dashboard, as its menu does: rename it, pin or unpin it, archive or unarchive it, pick the model it runs on, or move a chat with no message yet to another project. Use it when the guardian asks, such as "rename this chat to Taxes", "pin this chat" or "archive the chat you started". Pass only what changes. A chat\'s agent stays the one it started with. To delete a chat, use system:delete_chat. Only in the guardian\'s private chat, in a turn their own message started',
+    'Change a chat on the dashboard, as its menu does: rename it, pin or unpin it, archive or unarchive it, pick the model it runs on, move a chat with no message yet to another project, or delete it. Use it when the guardian asks, such as "rename this chat to Taxes", "pin this chat", "archive the chat you started" or "delete this chat". Pass only what changes. A chat\'s agent stays the one it started with. Deleting removes the chat and all its messages for good and takes no other change; the guardian approves it on a card first. To keep a chat out of the list instead, archive it. Only in the guardian\'s private chat, in a turn their own message started',
   sideEffects: "write",
   input: z.object({
     chatId,
@@ -146,13 +146,38 @@ export const changeChat = agentTool({
       .string()
       .optional()
       .describe('The project a chat with no message yet works in, such as "website".'),
+    delete: z
+      .boolean()
+      .optional()
+      .describe(
+        "true to delete the chat and all its messages for good, only when the guardian asks to delete it. Pass no other change with it.",
+      ),
   }),
+  // Only a delete is approved.
+  approval: async (input, { deps, turn }) => {
+    if (input.delete !== true) return undefined;
+    const id = chatOf(input.chatId, turn);
+    const name = id ? await deps.page()?.chatName(id) : null;
+    return {
+      title: name ? `Delete the chat "${name}"` : "Delete a chat",
+      summary: "Deletes the chat and all its messages. This cannot be undone.",
+    };
+  },
   run: async (input, { deps, turn }) => {
     const page = deps.page();
     if (!page) return toolError(NOT_UP);
     const id = chatOf(input.chatId, turn);
     if (!id) return toolError(NO_CHAT);
     const { name, pinned, archived, model, project } = input;
+    if (input.delete === true) {
+      const others = [name, pinned, archived, model, project].some((v) => v !== undefined);
+      if (others) {
+        return toolError(
+          "Deleting a chat takes no other change, so nothing was done. Delete it alone, or change it without delete.",
+        );
+      }
+      return deleteChat(page, id);
+    }
     const changes: Array<() => Promise<ChatPageAnswer>> = [];
     // Unarchived first and archived last, as an archived chat is not renamed.
     if (archived === false) changes.push(() => page.archiveChat(id, false));
@@ -162,7 +187,7 @@ export const changeChat = agentTool({
     if (project !== undefined) changes.push(() => page.setChatProject(id, project));
     if (archived === true) changes.push(() => page.archiveChat(id, true));
     if (changes.length === 0) {
-      return toolError("Nothing to change: pass name, pinned, archived, model or project.");
+      return toolError("Nothing to change: pass name, pinned, archived, model, project or delete.");
     }
     let last: ChatPageAnswer | null = null;
     for (const change of changes) {
@@ -178,36 +203,17 @@ export const changeChat = agentTool({
   },
 });
 
-export const deleteChat = agentTool({
-  name: "system:delete_chat",
-  description:
-    'Delete a chat on the dashboard and all its messages, for good. Use it only when the guardian asks to delete a chat, such as "delete this chat"; to keep it out of the list instead, archive it with system:change_chat. The guardian approves the delete on a card first. Only in the guardian\'s private chat, in a turn their own message started',
-  sideEffects: "write",
-  input: z.object({ chatId }),
-  approval: async (input, { deps, turn }) => {
-    const id = chatOf(input.chatId, turn);
-    const name = id ? await deps.page()?.chatName(id) : null;
-    return {
-      title: name ? `Delete the chat "${name}"` : "Delete a chat",
-      summary: "Deletes the chat and all its messages. This cannot be undone.",
-    };
-  },
-  run: async (input, { deps, turn }) => {
-    const page = deps.page();
-    if (!page) return toolError(NOT_UP);
-    const id = chatOf(input.chatId, turn);
-    if (!id) return toolError(NO_CHAT);
-    const name = await page.chatName(id);
-    const deleted = await page.deleteChat(id);
-    if (deleted.status === 404) return toolError(notFound(id));
-    if (deleted.status >= 400)
-      return toolError(`${errorOf(deleted)}. Nothing was deleted; tell the guardian why.`);
-    return { chatId: id, name, deleted: true };
-  },
-});
+async function deleteChat(page: ChatPage, id: string) {
+  const name = await page.chatName(id);
+  const deleted = await page.deleteChat(id);
+  if (deleted.status === 404) return toolError(notFound(id));
+  if (deleted.status >= 400)
+    return toolError(`${errorOf(deleted)}. Nothing was deleted; tell the guardian why.`);
+  return { chatId: id, name, deleted: true };
+}
 
 /** The Chat page's agent tools. */
-export const chatTools = [startChat, changeChat, deleteChat];
+export const chatTools = [startChat, changeChat];
 
 const NO_CHAT = "Pass the chat's id as chatId: this turn is not in a dashboard chat to default to.";
 
