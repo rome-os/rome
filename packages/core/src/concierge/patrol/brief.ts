@@ -107,7 +107,7 @@ const MAX_RECHECK_MS = 24 * 60 * 60_000;
 /** The run's prompt: the rules' facts first, everything else as JSON data. */
 export function buildPatrolPrompt(input: PatrolInput): string {
   return [
-    `Now: ${input.now}. Your next run that may speak: ${input.nextRun ?? "not within a day"}. Messages you may still send today: ${input.messagesLeftToday}.`,
+    `Now: ${input.now}. This run may speak. Your next run that may speak after this one: ${input.nextRun ?? "not within a day"}. Messages you may still send today: ${input.messagesLeftToday}.`,
     "Your observations so far, each with `held` set when code will not let it be told now:",
     JSON.stringify({ observations: input.observations }, null, 1),
     "What the guardian was told lately by alerts, digests and you. It is for understanding only: never raise it again.",

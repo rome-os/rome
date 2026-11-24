@@ -410,7 +410,15 @@ describe("a patrol run", () => {
     expect(recheck).toMatchObject({
       args: { recheck: true },
       trigger: { type: "schedule", date: "2026-11-23", localTime: "14:45", tzMode: "fixed" },
+      enabled: true,
     });
+    // It fires once: running it turns it off, so a restart never fires it again.
+    s.setClock(NOON + 2 * HOUR);
+    await s.patrol.run({ recheck: true });
+    const fired = [...s.routines.values()].find(
+      (r) => r.key === "concierge-patrol:guardian:recheck",
+    );
+    expect(fired?.enabled).toBe(false);
   });
 });
 

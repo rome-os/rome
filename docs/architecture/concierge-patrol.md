@@ -54,7 +54,7 @@ Solid lines are one run. Dashed lines are what a run reads or sets for a later o
 ### Reading
 
 - **The patrol agent holds no tools, no actions, no subagents and no servers.** Code gathers what it reads into its prompt, so read-only is the tool set's to keep, never the prompt's. A run whose agent definition holds anything is refused before it starts.
-- **Each run is a fresh agent session on the Concierge's medium tier,** recorded in the one "Concierge patrol" session, as triage's runs are. It is in no chat and in no task list.
+- **Each run is a fresh agent session on the Concierge's medium tier,** recorded in the one "Concierge patrol" session, as triage's runs are. It is in no chat and in no task list. The session serves the guardian's main chat, so it takes that chat's owner and privacy: its records hold their personal data.
 - **The patrol reads in three tiers.** Follow events, through the ledger, are for understanding only, and a task that a topic chat started is named only by its title. Memory notes, the main chat, tasks and schedules are speakable. The calendar is speakable only with its source named, and the brief marks it so. Health and location are not read.
 - **Code reads the calendar for the guardian outside any turn,** and the patrol speaks only in the guardian's main chat, which is private ([audience](../domains/participation.md#audience)).
 - **Everything the patrol agent reads is data.** Its prompt says so, and text inside the data never changes what it may do, since it can do nothing.

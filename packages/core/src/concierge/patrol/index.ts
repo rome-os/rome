@@ -261,6 +261,14 @@ export function startConciergePatrol(
     await reactivate(id);
   };
 
+  /** A wake-up the patrol set fires once: it is turned off as it runs, so a restart never fires it again. */
+  const consumeRecheck = async () => {
+    const routine = await deps.routines.findByKey(RECHECK_ROUTINE_KEY);
+    if (!routine?.enabled) return;
+    await deps.routines.update(routine.id, { enabled: false });
+    await deps.routineEngine.deactivate(routine.id);
+  };
+
   /** The guardian paused the patrol: its own wake-ups hold too. */
   const paused = async () => {
     const routine = await deps.routines.findByKey(PATROL_ROUTINE_KEY);
@@ -308,6 +316,7 @@ export function startConciergePatrol(
     const at = now();
     if (!(await service.isServed(GUARDIAN_OWNER)))
       return { status: "skipped", reason: "not_served" };
+    if (args.recheck) await consumeRecheck();
     if (await paused()) return { status: "skipped", reason: "paused" };
     const definition = deps.patrolAgent?.();
     if (definition && !holdsNothing(definition)) {
@@ -317,7 +326,9 @@ export function startConciergePatrol(
     }
     const mainChat = await service.findChatId(GUARDIAN_OWNER);
     if (!mainChat) return { status: "skipped", reason: "no_main_chat" };
-    const zone = await timezone();
+    // Following keeps the guardian's zone and rules. Before it runs, the patrol waits.
+    const zone = await timezone().catch(() => null);
+    if (zone === null) return { status: "skipped", reason: "following_not_running" };
     const { quietHours, digestTimes } = await rules();
     const state = await readState();
     const lastRunAt = state.lastRunAt ?? null;
@@ -453,6 +464,7 @@ export function startConciergePatrol(
     try {
       raw = await runPatrolAgent(deps.agentRunner, buildPatrolPrompt(input), {
         ...(deps.record ? { record: deps.record } : {}),
+        mainChat,
       });
     } catch (error) {
       log.warn("patrol run failed; it stays silent", { error: messageOf(error) });

@@ -14,11 +14,15 @@ const PATROL_AGENT = "core:concierge-patrol";
 export const PATROL_SESSION_ID = "concierge-patrol";
 const PATROL_TIMEOUT_MS = 180_000;
 
-/** Runs the patrol agent once on `prompt`. Answers its structured answer, or throws. */
+/**
+ * Runs the patrol agent once on `prompt`. Answers its structured answer, or
+ * throws. The record serves `mainChat`, so it takes that chat's owner and
+ * privacy: the prompt holds the guardian's personal data.
+ */
 export async function runPatrolAgent(
   runner: AgentRunnerInterface,
   prompt: string,
-  options: { record?: TriageRecordStore; timeoutMs?: number } = {},
+  options: { record?: TriageRecordStore; mainChat?: string; timeoutMs?: number } = {},
 ): Promise<unknown> {
   const record = options.record;
   const collect = async () => {
@@ -28,6 +32,7 @@ export async function runPatrolAgent(
         type: "action",
         name: "Concierge patrol",
         agentName: PATROL_AGENT,
+        ...(options.mainChat ? { servesSessionId: options.mainChat } : {}),
       });
     }
     let content = "";
