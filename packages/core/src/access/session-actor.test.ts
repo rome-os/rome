@@ -108,6 +108,29 @@ describe("resolveSessionActorFromMaterial", () => {
     expect(actor).toEqual({ kind: "anonymous" });
   });
 
+  it("requires a signed session with local computer use configured", async () => {
+    await seedSeat();
+    const key = "ROME_COMPUTER_USE_LOCAL_DEVICE_ID";
+    const original = process.env[key];
+    process.env[key] = "ee969ec6-1944-4e85-9fd3-31ec802f8e02";
+    try {
+      const peerAddress = "127.0.0.1";
+      expect(await resolveSessionActorFromMaterial(material({ peerAddress }), testDb.db)).toEqual({
+        kind: "anonymous",
+      });
+      const sessionToken = createSession(SEAT_USER_ID);
+      expect(
+        await resolveSessionActorFromMaterial(material({ peerAddress, sessionToken }), testDb.db),
+      ).toMatchObject({
+        kind: "guardian",
+        via: "cookie",
+      });
+    } finally {
+      if (original === undefined) delete process.env[key];
+      else process.env[key] = original;
+    }
+  });
+
   it("resolves a visitor cookie session", async () => {
     const actor = await resolveSessionActorFromMaterial(
       material({ visitorToken: createVisitorSession("acct-7", "friend@example.com") }),

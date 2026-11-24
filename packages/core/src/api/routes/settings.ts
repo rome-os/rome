@@ -16,6 +16,7 @@ import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
+import { isComputerUseApprovalSetting } from "../../core/computer-use-approvals.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
@@ -37,6 +38,9 @@ const VOICE_PRIVATE_KEYS = [SPEECH_SESSIONS_SETTING_KEY];
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
   for (const key of [...CONCIERGE_PRIVATE_KEYS, ...VOICE_PRIVATE_KEYS]) delete redacted[key];
+  for (const key of Object.keys(redacted)) {
+    if (isComputerUseApprovalSetting(key)) delete redacted[key];
+  }
   if (ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING in redacted) {
     redacted[ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING] =
       redactAnthropicCompatibleCredentialsSetting(
@@ -87,6 +91,12 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       if (key in body) {
         return c.json({ error: `${key} is managed by voice mode, not /api/settings.` }, 400);
       }
+    }
+    if (Object.keys(body).some(isComputerUseApprovalSetting)) {
+      return c.json(
+        { error: "Computer-use approvals are managed by the device approval route." },
+        400,
+      );
     }
 
     // guardianTimezone is scheduler input: route it through the shared

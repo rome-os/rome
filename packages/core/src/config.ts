@@ -65,6 +65,10 @@ const configSchema = z.object({
     .default(24 * 60),
 
   hostExecutionSocket: z.string().startsWith("/").optional(),
+  computerUseLocalDeviceId: z
+    .uuid()
+    .transform((id) => id.toLowerCase())
+    .optional(),
   hostExecutionEnabled: z
     .enum(["true", "false"])
     .default("false")
@@ -174,6 +178,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.ROME_HOST_EXECUTION_SOCKET) {
     raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;
   }
+  if (env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID !== undefined) {
+    raw.computerUseLocalDeviceId = env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID;
+  }
   if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
     raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
   }
@@ -269,6 +276,13 @@ export function loadConfig(): Config {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
   }
+  if (
+    result.data.computerUseLocalDeviceId !== undefined &&
+    (process.env.ROME_JWT_SECRET?.length ?? 0) < 32
+  )
+    throw new Error(
+      "Protected device use requires an explicit ROME_JWT_SECRET of at least 32 characters.",
+    );
 
   return result.data;
 }

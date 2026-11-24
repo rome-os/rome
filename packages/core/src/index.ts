@@ -176,6 +176,9 @@ import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./desktops/computer-use.js";
+import { createNativeComputerUseService } from "./core/native-computer-use.js";
+import { createComputerUseHost } from "@rome-os/node-core/computer-use";
+import { registerComputerUseAction } from "./core/computer-use-action.js";
 import { AppKeysRepository } from "./apps/repositories/app-keys.js";
 import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -1526,6 +1529,13 @@ async function main() {
     connectionKindOfChannel,
     placeAudience: chatAudience,
   });
+  const computerUseLocal = config.computerUseLocalDeviceId
+    ? { deviceId: config.computerUseLocalDeviceId, name: "This computer" }
+    : undefined;
+  const nativeComputerUse = createNativeComputerUseService({
+    placeAudience: (turn) => chatAudience(turn.threadContext()),
+    ...(computerUseLocal ? { local: { ...computerUseLocal, host: createComputerUseHost() } } : {}),
+  });
   const agentSessionManager = createSessions(
     {
       agentLoader,
@@ -1539,6 +1549,7 @@ async function main() {
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
       skillCatalog,
+      computerUse: nativeComputerUse,
       turnLifecycle: inOneHookChain(turnListeners),
       readAnswerShape,
       // Catch-up reads what was said where the session stands from Chats,
@@ -1893,6 +1904,7 @@ async function main() {
       approvalsRepo.claimApprovedEffect(id, OUTLOOK_SEND_ACTION, argsHash),
   });
   registerShowFileAction(actionRegistry);
+  registerComputerUseAction(actionRegistry, nativeComputerUse, chatAudience);
   registerPersonalDataActions(actionRegistry, {
     personalData: personalDataRepo,
     guardianTimeZone: () => resolveGuardianTimezone(settingsRepo),
@@ -2846,6 +2858,7 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       agentNameEvents,
+      ...(computerUseLocal ? { computerUseLocal } : {}),
       personalData: personalDataRepo,
       deviceConnections: deviceConnectionsRepo,
       placeAudience: chatAudience,
@@ -3225,6 +3238,7 @@ async function main() {
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
     nodeDevices.close();
+    await nativeComputerUse.close();
 
     if (internalApi) {
       try {
