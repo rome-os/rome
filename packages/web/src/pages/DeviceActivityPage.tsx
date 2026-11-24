@@ -4,8 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { deviceHref, nodeConsoleUrl, useDevicesQuery } from "@/components/devices-section";
+import { deviceHref, nodeConsoleUrl } from "@/components/devices-section";
 import { useDeviceManage } from "@/hooks/use-device-manage";
+import { useDevicesQuery } from "@/hooks/use-devices-query";
 import { useSettingsBack } from "@/hooks/use-settings-back";
 import { useThisDevice } from "@/hooks/use-this-device";
 

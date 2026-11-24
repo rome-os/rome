@@ -13,10 +13,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const setupMethods = ["desktop", "cli", "container"] as const;
-type SetupMethod = (typeof setupMethods)[number];
+// The ways to add a device and their instructions, which the Devices page and
+// the chat's add-device card (chat/entries/AddDeviceCard.tsx) both show.
 
-function DeviceConnectionContent({ method }: { method: SetupMethod }) {
+/** The ways to add a device, in the order the page offers them. */
+export const setupMethods = ["desktop", "cli", "container"] as const;
+export type SetupMethod = (typeof setupMethods)[number];
+
+/** The mark beside a way that is not ready yet, or nothing. */
+export function SetupMethodBadge({ method }: { method: SetupMethod }) {
+  const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
+  return method === "container" ? <Badge variant="muted">{t("comingSoon")}</Badge> : null;
+}
+
+/** One way's instructions. */
+export function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   if (method === "desktop") {
     return (
@@ -65,7 +76,7 @@ export function DeviceConnectionCards() {
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle>{t(`methods.${method}`)}</CardTitle>
-                {method === "container" && <Badge variant="muted">{t("comingSoon")}</Badge>}
+                <SetupMethodBadge method={method} />
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -129,9 +140,7 @@ export function LinkDeviceMenu() {
         <DialogHeader onClose={close} closeLabel={t("common.close")}>
           <div className="flex flex-wrap items-center gap-2">
             <DialogTitle>{method && t(`devices.setup.methods.${method}`)}</DialogTitle>
-            {method === "container" && (
-              <Badge variant="muted">{t("devices.setup.comingSoon")}</Badge>
-            )}
+            {method && <SetupMethodBadge method={method} />}
           </div>
         </DialogHeader>
         <DialogBody className="min-h-0 space-y-4">
