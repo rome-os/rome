@@ -1,9 +1,11 @@
 // Every agent tool core offers, by the dashboard page it stands for. Each page
 // declares its tools in one file of its context (connections/agent-tools.ts,
-// routines/agent-tools.ts); the wiring hands each page its deps once and
+// routines/agent-tools.ts), or beside its routes in api/agent-tools/ when its
+// context may not import apps/ (AI Tools, of the agent context); the wiring hands each page its deps once and
 // registers the tools in the main process. How to add a tool:
 // docs/concepts/actions.md#core-agent-tools.
 
+import { aiToolTools } from "../api/agent-tools/ai-tools.js";
 import type { AgentTool } from "../apps/actions/agent-tool.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import { type OwnerOfChat, whoMayAsk } from "../apps/actions/who-may-ask.js";
@@ -11,6 +13,7 @@ import { connectionTools } from "../connections/agent-tools.js";
 import { routineTools } from "../routines/agent-tools.js";
 
 const PAGES = {
+  aiTools: aiToolTools,
   connections: connectionTools,
   routines: routineTools,
 };

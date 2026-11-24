@@ -224,6 +224,7 @@ import {
   followingSelection,
   isModelSelectionId,
   runsOnRomeCredits,
+  summarizeAnthropicCompatibleCredentials,
   MODEL_SELECTIONS,
   type DefaultProvider,
   type ModelResolutionErrorPayload,
@@ -1925,6 +1926,19 @@ async function main() {
       guardianLanguage: async () => {
         const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
         return typeof stored === "string" ? stored : null;
+      },
+    },
+    // The accounts and default `GET /ai-tools/status` reads, and the AI Tools page's logout.
+    aiTools: {
+      accounts: modelAccounts,
+      defaults: defaultProviders,
+      logins: { anthropic: claudeAccount, openai: codexAccountService },
+      chatsFollowingDefault: () => chatProviders.followingCount(),
+      claudeKeyService: async () => {
+        const stored = await claudeAccount.storedCredential();
+        return (
+          summarizeAnthropicCompatibleCredentials(stored?.credential ?? null)?.providerName ?? null
+        );
       },
     },
   });
