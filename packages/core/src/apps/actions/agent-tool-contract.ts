@@ -3,9 +3,12 @@
 // own tests make, so a tool's tests cover only its operation.
 
 import { describe, expect, it } from "@rstest/core";
-import type { Action, ActionResult } from "@rome-os/app-runtime";
+import type { Action, ActionResult, PreviewPayload } from "@rome-os/app-runtime";
+import { createActionEngineRepos } from "../../test/db.js";
 import type { AgentTool, ToolTurn } from "./agent-tool.js";
 import { actionExecutionContext } from "./context.js";
+import { ActionEngine } from "./engine.js";
+import { ActionRegistryImpl } from "./registry.js";
 import { type OwnerOfChat, whoMayAsk } from "./who-may-ask.js";
 
 /** The guardian's own message in their private chat, which may call any tool. */
@@ -36,6 +39,19 @@ export function callTool<D>(
 ): Promise<ActionResult> {
   const action = actionOf(tool, deps);
   return asTurn(turn, () => action.execute(input));
+}
+
+/** The approval card `tool` shows for `input` in `turn`, or undefined for a
+ * call that runs without the guardian's approval. */
+export async function approvalOf<D>(
+  tool: AgentTool<D>,
+  deps: D,
+  input: Record<string, unknown>,
+  turn: ToolTurn = GUARDIAN_TURN,
+): Promise<PreviewPayload | undefined> {
+  const action = actionOf(tool, deps);
+  if (!action.config.requiresApproval) return undefined;
+  return asTurn(turn, async () => action.preview?.(input));
 }
 
 const visitor = { kind: "visitor", accountId: "visitor", email: "v@example.test" } as const;
@@ -109,41 +125,88 @@ const CASES: ReadonlyArray<{
 /**
  * The tests of who may ask for `tool`, by its sideEffects. A refused turn gets
  * the refusal and `run` never reaches `deps`; any other turn passes the check.
+ * For a tool with `approval`, the same holds for a call through the engine: a
+ * refused turn's call never reaches `approval` and leaves no approval behind.
  * `input` is any input that fits the tool.
  */
 export function whoMayAskSuite(tool: AgentTool<never>, input: Record<string, unknown>): void {
+  const asksApproval = tool.action(untouchableDeps([]), async () => null).config.requiresApproval;
   describe(`who may ask for ${tool.name}`, () => {
     for (const c of CASES) {
       const code = c[tool.sideEffects];
       it(`${code ? `refuses (${code})` : "lets through"} ${c.name}`, async () => {
-        const touched: string[] = [];
-        const deps = new Proxy(
-          {},
-          {
-            get: (_target, key) => {
-              touched.push(String(key));
-              throw new Error("run reached its deps");
-            },
-          },
-        ) as never;
-        const check = whoMayAsk(ownerOfChat);
-        let verdict: string | null | undefined;
-        const action = tool.action(deps, async (asked, turn) => {
-          verdict = await check(asked, turn);
-          return verdict;
-        });
+        const watched = watchedAction(tool);
         // A turn let through runs into the deps, which throw.
-        const result = await asTurn(c.turn, () => action.execute(input)).catch(() => null);
+        const result = await asTurn(c.turn, () => watched.action.execute(input)).catch(() => null);
+        expectVerdict(watched, code, tool.name, result);
+      });
+      if (!asksApproval) continue;
+      it(`${code ? `refuses (${code})` : "lets through"} ${c.name}, before any approval`, async () => {
+        const watched = watchedAction(tool);
+        const registry = new ActionRegistryImpl();
+        registry.register(watched.action);
+        const repos = createActionEngineRepos();
+        const cards: unknown[] = [];
+        const engine = new ActionEngine(registry, repos, {
+          processRole: "main",
+          isFirstPartyAction: () => true,
+          mainActions: new Set([tool.name]),
+          onApprovalCreated: async (approval) => void cards.push(approval),
+        });
+
+        // A turn let through reaches `approval`, which throws on the deps.
+        const result = await engine.run(tool.name, input, { initiator: "test", ...c.turn });
+
         if (code) {
-          expect(result).toEqual({ status: "error", error: verdict });
-          expect(verdict).toMatch(new RegExp(`^${code}: .*${tool.name}`));
-          expect(touched).toEqual([]);
+          expectVerdict(watched, code, tool.name, result);
+          expect(await repos.approvals.findPending()).toEqual([]);
+          expect(cards).toEqual([]);
         } else {
-          expect(verdict).toBeNull();
+          expect(watched.verdict()).toBeNull();
         }
       });
     }
   });
+}
+
+/** `tool`'s action over deps that throw when touched, with the check's verdict. */
+function watchedAction(tool: AgentTool<never>) {
+  const touched: string[] = [];
+  const check = whoMayAsk(ownerOfChat);
+  let verdict: string | null | undefined;
+  const action = tool.action(untouchableDeps(touched), async (asked, turn) => {
+    verdict = await check(asked, turn);
+    return verdict;
+  });
+  return { action, touched, verdict: () => verdict };
+}
+
+function expectVerdict(
+  watched: ReturnType<typeof watchedAction>,
+  code: string | null,
+  name: string,
+  result: ActionResult | null,
+): void {
+  const verdict = watched.verdict();
+  if (!code) {
+    expect(verdict).toBeNull();
+    return;
+  }
+  expect(result).toEqual({ status: "error", error: verdict });
+  expect(verdict).toMatch(new RegExp(`^${code}: .*${name}`));
+  expect(watched.touched).toEqual([]);
+}
+
+function untouchableDeps(touched: string[]): never {
+  return new Proxy(
+    {},
+    {
+      get: (_target, key) => {
+        touched.push(String(key));
+        throw new Error("the tool reached its deps");
+      },
+    },
+  ) as never;
 }
 
 function asTurn<T>(turn: ToolTurn, fn: () => Promise<T>): Promise<T> {

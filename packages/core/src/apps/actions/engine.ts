@@ -9,12 +9,14 @@ import type {
   ActionExecutionContext,
   ActionEvent,
 } from "@rome-os/app-runtime";
-import type {
-  Action,
-  ActionRegistry,
-  ActionResult,
-  PendingApproval,
-  PreviewPayload,
+import {
+  CallRefusal,
+  decidesApprovalPerCall,
+  type Action,
+  type ActionRegistry,
+  type ActionResult,
+  type PendingApproval,
+  type PreviewPayload,
 } from "./types.js";
 import type {
   ActionExecutionStatus,
@@ -787,7 +789,16 @@ export class ActionEngine {
 
     // Root action itself is sensitive: short-circuit before executing it
     // unless we're replaying after the guardian has already approved it.
-    if (action.config.requiresApproval && replayStore.mode === "record" && !approvedRootResume) {
+    let approval: CallApproval = { asks: false };
+    if (replayStore.mode === "record" && !approvedRootResume) {
+      try {
+        approval = await this.approvalOf(action, args, replayStore, context);
+      } catch (err) {
+        return { status: "error", error: approvalFailure(action.config.name, err) };
+      }
+    }
+    if (approval.asks) {
+      const card = approval;
       const pending = await this.withTrace(
         action.config.name,
         buildRomeSpanAttrs(context),
@@ -797,6 +808,7 @@ export class ActionEngine {
             args,
             replayStore,
             context,
+            card,
           );
           if (span) {
             span.setAttribute("rome.action.approval_required", true);
@@ -971,8 +983,20 @@ export class ActionEngine {
       }
     }
 
-    if (action.config.requiresApproval) {
-      const pending = await this.recordPendingApproval(action.config.name, args, store, context);
+    let approval: CallApproval;
+    try {
+      approval = await this.approvalOf(action, args, store, context);
+    } catch (err) {
+      return { status: "error", error: approvalFailure(action.config.name, err) };
+    }
+    if (approval.asks) {
+      const pending = await this.recordPendingApproval(
+        action.config.name,
+        args,
+        store,
+        context,
+        approval,
+      );
       return { status: "pending_approval", approval: pending };
     }
 
@@ -2164,11 +2188,29 @@ export class ActionEngine {
     }
   }
 
+  /** Whether this call of `action` waits for the guardian, and the card it
+   *  waits on. An action that decides per call (`decidesApprovalPerCall`)
+   *  waits only when its preview words a card, and a preview of one that
+   *  throws, refusal of the turn included, throws here, so the call does not
+   *  run. */
+  private async approvalOf(
+    action: Action,
+    args: Record<string, unknown>,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+  ): Promise<CallApproval> {
+    if (!action.config.requiresApproval) return { asks: false };
+    if (!decidesApprovalPerCall(action)) return { asks: true };
+    const preview = await this.renderPreview(action.config.name, args, store, context);
+    return preview ? { asks: true, preview } : { asks: false };
+  }
+
   private async recordPendingApproval(
     actionName: string,
     args: Record<string, unknown>,
     store: ReplayStore,
     context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
   ): Promise<PendingApproval> {
     const seq = store.nextSequence++;
     store.journal.push({
@@ -2187,6 +2229,7 @@ export class ActionEngine {
       description,
       store,
       context,
+      approval,
     );
     const ref: PendingApproval = { approvalId, actionName, description };
     // First pending approval in this run becomes the root-level signal. Later
@@ -2205,6 +2248,7 @@ export class ActionEngine {
     description: string,
     store: ReplayStore,
     context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
   ): Promise<string> {
     // The preview and the replay both run as the turn that asked: without
     // them a chatless turn reads as outside any turn (app-host chat-calls). A
@@ -2212,39 +2256,16 @@ export class ActionEngine {
     const caller = actionExecutionContext.getStore();
     const turnId = context?.turnId ?? caller?.turnId;
     const audience = context?.audience ?? caller?.audience;
-    // The preview is the action's own code, so it runs with what its execute
-    // would get (executeNestedInvocation): the audience only for a
-    // first-party action in main, and the caller's accountable human. The
-    // replay goes back through run(), which gates the audience itself.
-    const previewAudience =
-      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
-    let preview: PreviewPayload | undefined;
-    try {
-      const action = this.registry.get(actionName);
-      const previewStore: ActionExecutionStore = {
-        actionName,
-        executionId: context?.executionId ?? store.rootExecutionId,
-        rootExecutionId: store.rootExecutionId,
-        parentExecutionId: context?.parentExecutionId,
-        parentActionName: context?.parentActionName,
-        initiator: context?.initiator ?? "unknown",
-        actor: caller?.actor ?? context?.actor,
-        callerAppId: context?.callerAppId,
-        engine: this,
-        channelContext: context?.channelContext,
-        sharedContext: context?.sharedContext,
-        sessionId: context?.sessionId,
-        turnId,
-        audience: previewAudience,
-        agentName: context?.agentName,
-        channelThreadKey: context?.channelThreadKey,
-      };
-      preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
-    } catch (previewErr) {
-      log.warn("action preview renderer threw", {
-        actionName,
-        error: previewErr instanceof Error ? previewErr.message : String(previewErr),
-      });
+    let preview = approval.preview;
+    if (!preview) {
+      try {
+        preview = await this.renderPreview(actionName, args, store, context);
+      } catch (previewErr) {
+        log.warn("action preview renderer threw", {
+          actionName,
+          error: previewErr instanceof Error ? previewErr.message : String(previewErr),
+        });
+      }
     }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
@@ -2287,4 +2308,53 @@ export class ActionEngine {
 
     return approvalId;
   }
+
+  /** The action's own preview of a call, run as the turn that asked. */
+  private async renderPreview(
+    actionName: string,
+    args: Record<string, unknown>,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+  ): Promise<PreviewPayload | undefined> {
+    const caller = actionExecutionContext.getStore();
+    // The preview is the action's own code, so it runs with what its execute
+    // would get (executeNestedInvocation): the audience only for a
+    // first-party action in main, and the caller's accountable human. The
+    // replay goes back through run(), which gates the audience itself.
+    const audience = context?.audience ?? caller?.audience;
+    const previewAudience =
+      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
+    const action = this.registry.get(actionName);
+    const previewStore: ActionExecutionStore = {
+      actionName,
+      executionId: context?.executionId ?? store.rootExecutionId,
+      rootExecutionId: store.rootExecutionId,
+      parentExecutionId: context?.parentExecutionId,
+      parentActionName: context?.parentActionName,
+      initiator: context?.initiator ?? "unknown",
+      actor: caller?.actor ?? context?.actor,
+      callerAppId: context?.callerAppId,
+      engine: this,
+      channelContext: context?.channelContext,
+      sharedContext: context?.sharedContext,
+      sessionId: context?.sessionId,
+      turnId: context?.turnId ?? caller?.turnId,
+      audience: previewAudience,
+      agentName: context?.agentName,
+      channelThreadKey: context?.channelThreadKey,
+    };
+    return actionExecutionContext.run(previewStore, () => action?.preview?.(args));
+  }
+}
+
+/** Whether a call waits for the guardian, and with which card when its
+ *  action worded one in deciding. */
+type CallApproval = { asks: false } | { asks: true; preview?: PreviewPayload };
+
+/** The error of a call whose approval could not be decided. A refusal of the
+ *  turn (`CallRefusal`) is the call's error as worded. */
+function approvalFailure(actionName: string, err: unknown): string {
+  if (err instanceof CallRefusal) return err.message;
+  const reason = err instanceof Error ? err.message : String(err);
+  return `${actionName} did not run: whether it needs the guardian's approval could not be decided (${reason}).`;
 }
