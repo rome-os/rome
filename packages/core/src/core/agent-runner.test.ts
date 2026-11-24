@@ -7070,6 +7070,74 @@ describe("AgentRunner", () => {
       expect(inDirect).not.toContain("the launch moved to Friday");
     });
 
+    it("shows a mention in a thread of a workspace account the thread's and the chat's messages", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const chat = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C1",
+        agentName: "main",
+      });
+      const said = (chatId: string, messageId: string, text: string) => ({
+        channel: "slack_app",
+        chatId,
+        messageId,
+        direction: "inbound",
+        senderId: "T_A/U_SAM",
+        senderDisplayName: "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, 1)),
+      });
+      const latest = rs.fn(
+        async (place: ThreadContext) =>
+          (place.threadId === "C1"
+            ? [said("C1", "1.0", "the launch moved to Friday")]
+            : [said("C1", "1.5", "which launch?")]) as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+        servesWorkspace: (connectionId) => connectionId === "slack",
+      });
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "@rome when is it?",
+          channelThreadKey: "slack_app:*",
+          romeSessionId: chat.id,
+          inThread: "C1:1.5" as never,
+          threadContext: {
+            channel: "slack_app",
+            threadId: "C1",
+            connectionId: "slack",
+            threadType: "group",
+          },
+        }),
+      );
+
+      const [prompt] = providerPrompts;
+      expect(prompt).toContain("<place>\nchat: C1\nthread: C1:1.5");
+      expect(prompt).toContain("which launch?");
+      expect(prompt).toContain("the launch moved to Friday");
+    });
+
     it("does not read a platform thread again when its session closed idle and reopened on the same model thread", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({

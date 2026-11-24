@@ -4468,40 +4468,34 @@ class AgentSessionImpl implements AgentSession {
         // (docs/domains/participation.md#projection).
         const first = earliestOf(unseen, byId(sink.currentId));
         // Where the prompt facts read a chat on every turn, as on an account
-        // that serves its workspace, a turn on a message in the open chat (not
-        // one Rome runs, such as a task's report) is shown what
-        // was said there since the last message the model was shown, and
-        // needs no opening read.
+        // that serves its workspace, a turn on a message in a chat (not one
+        // Rome runs, such as a task's report) is shown what was said there
+        // since the last message the model was shown, and needs no opening
+        // read. A message in a thread is shown the chat's as well as the
+        // thread's, read side by side.
         const chatKey =
-          !this.isSubagent && !sink.inThread && sink.initiatedBy !== "system" && promptFacts.chat
+          !this.isSubagent && sink.initiatedBy !== "system" && promptFacts.chat
             ? (sink.threadContext as ThreadContext).threadId
             : undefined;
-        const chatRead = chatKey
-          ? await promptFacts
-              .chat?.(
+        const chatReading = chatKey
+          ? (
+              promptFacts.chat?.(
                 sink.threadContext as ThreadContext,
                 byId(sink.currentId)?.at ?? new Date(),
                 byId(sink.currentId)?.id,
                 this.threadsRead.get(chatKey),
-              )
-              // A read that fails leaves the turn to answer without it.
-              .catch(() => null)
-          : null;
-        if (chatKey && chatRead) chatShown = { thread: chatKey, last: byId(sink.currentId)?.id };
-        const opening =
-          // Not when the unseen messages fill the catch-up already, so a
-          // platform that rations reads, such as Slack, keeps its read.
-          !chatRead &&
-          !this.isSubagent &&
-          this.threadFresh &&
-          !this.threadContextInjected &&
-          unseen.length < CATCH_UP_LIMIT &&
-          promptFacts.earlier
-            ? await promptFacts
-                .earlier(sink.threadContext as ThreadContext, first?.at ?? new Date(), first?.id)
-                // A read that fails opens the session as if there were none.
-                .catch(() => null)
-            : null;
+              ) ?? Promise.resolve(null)
+            ).catch((error: unknown) => {
+              // A read that fails leaves the turn to answer without it, and
+              // the next turn reads again.
+              this.deps.log.warn("chat catch-up read failed", {
+                sessionId: this.sessionId,
+                chat: chatKey,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return null;
+            })
+          : Promise.resolve(null);
         // A message in a platform thread inside the session's conversation,
         // such as a Slack mention in a thread, comes with the thread's
         // earlier messages. A later one comes with what was said there since
@@ -4517,9 +4511,9 @@ class AgentSessionImpl implements AgentSession {
             this.threadsRead.get(sink.inThread) !== undefined)
             ? sink.inThread
             : undefined;
-        const threadRead =
+        const [threadRead, chatRead] = await Promise.all([
           thread && promptFacts.thread
-            ? await promptFacts
+            ? promptFacts
                 .thread(
                   sink.threadContext as ThreadContext,
                   thread,
@@ -4527,6 +4521,23 @@ class AgentSessionImpl implements AgentSession {
                   current?.id,
                   this.threadsRead.get(thread),
                 )
+                .catch(() => null)
+            : null,
+          chatReading,
+        ]);
+        if (chatKey && chatRead) chatShown = { thread: chatKey, last: current?.id };
+        const opening =
+          // Not when the unseen messages fill the catch-up already, so a
+          // platform that rations reads, such as Slack, keeps its read.
+          !chatRead &&
+          !this.isSubagent &&
+          this.threadFresh &&
+          !this.threadContextInjected &&
+          unseen.length < CATCH_UP_LIMIT &&
+          promptFacts.earlier
+            ? await promptFacts
+                .earlier(sink.threadContext as ThreadContext, first?.at ?? new Date(), first?.id)
+                // A read that fails opens the session as if there were none.
                 .catch(() => null)
             : null;
         // A read that failed, or a turn stopped before the model took its

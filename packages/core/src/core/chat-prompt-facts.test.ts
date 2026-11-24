@@ -255,7 +255,7 @@ describe("chatPromptFacts on an account that serves its workspace", () => {
     account: { platform: "slack", id: "T_A/U_ROME" },
   });
   const workspaceFacts = (
-    latest: () => Promise<unknown[]>,
+    latest: (place: never, bounds: never) => Promise<unknown[]>,
     keys: Record<number, string> = {},
     serves = true,
   ) => {
@@ -310,6 +310,31 @@ describe("chatPromptFacts on an account that serves its workspace", () => {
       until: new Date(before.getTime() + 999),
       newerThan: "m9",
     });
+  });
+
+  it("shows the latest messages when the read since the last one shown is refused", async () => {
+    // More was said since than one page holds: the platform refuses to read
+    // forward, and the turn is shown the latest messages, as a new session.
+    const { promptFacts, read } = workspaceFacts(
+      async (_place: unknown, bounds: { newerThan?: string }) => {
+        if (bounds?.newerThan) throw new Error("More than 15 messages follow m9 in Slack chat C1");
+        return [message(20), message(19, "the launch moved to Friday")];
+      },
+      { 41: "m9", 42: "m20" },
+    );
+    const said = await promptFacts.chat?.(group, before, 42, 41);
+    expect(said?.map((m) => m.text)).toEqual(["the launch moved to Friday"]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenLastCalledWith(group, {
+      limit: 16,
+      until: new Date(before.getTime() + 999),
+    });
+  });
+
+  it("reads no fallback when the read since the last one shown is only late", async () => {
+    const { promptFacts, read } = workspaceFacts(() => new Promise(() => {}), { 41: "m9" });
+    expect(await promptFacts.chat?.(group, before, undefined, 41)).toBeNull();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("answers none when the platform refuses the read or takes too long", async () => {

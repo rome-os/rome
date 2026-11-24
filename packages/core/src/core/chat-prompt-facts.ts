@@ -3,7 +3,10 @@ import type { PromptFacts, ThreadRead, UnseenMessage } from "../agent/index.js";
 import type { SenderLabels } from "../chats/sender-labels.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { contextOf, type ContextLine, type TurnLinks } from "../sessions/turn-links.js";
+import { createLogger } from "../logger.js";
 import { type ChannelSurfaces, surfaceOf } from "./session-opening.js";
+
+const log = createLogger("chat-prompt-facts");
 
 /** How many of a chat's latest messages a new session reads from the
  *  platform: one page of Slack's, which answers one read a minute for a
@@ -23,11 +26,12 @@ const EARLIER_WAIT_MS = 5_000;
  *  for its turn; a session's turns run one at a time, so no read waits much
  *  longer. A turn that did not wait would answer a reply it cannot place. */
 const THREAD_WAIT_MS = 90_000;
-/** How long a turn in the open chat of an account that serves its workspace
- *  waits for what was said there since it was last shown. A reply there
- *  needs none of it to be placed, so a burst of mentions answers without
- *  rather than wait a minute for each read. */
-const CHAT_WAIT_MS = 20_000;
+/** How long a turn in a chat of an account that serves its workspace waits
+ *  for what was said there since it was last shown, as long as a thread's
+ *  turn waits: Slack answers one read a minute for a workspace, and an answer
+ *  a minute late beats one given blind. A larger burst still answers, without
+ *  them. */
+const CHAT_WAIT_MS = 90_000;
 
 export interface ChatPromptFactsDeps {
   /** What was said in each chat that a session has not seen. */
@@ -92,7 +96,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     waitMs = thread
       ? (deps.threadWaitMs ?? THREAD_WAIT_MS)
       : (deps.latestWaitMs ?? EARLIER_WAIT_MS),
-  ): Promise<ThreadRead | null> => {
+  ): Promise<(ThreadRead & { failed?: true }) | null> => {
     if (!deps.latest || handsEveryMessage(place.channel)) return null;
     // Rome's record keeps whole seconds, so what was said just before the
     // session's first message may share its second. Knowing that message's
@@ -119,11 +123,28 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
           ? {}
           : { olderThan: key }),
     });
-    read.catch(() => {});
+    let failed = false;
+    read.catch((error: unknown) => {
+      failed = true;
+      log.warn("could not read a chat's messages", {
+        channel: place.channel,
+        chat: place.threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     const page = await within(read, waitMs);
     // A thread that cannot be read is said to be unread, so the turn does
-    // not take it for one that held nothing.
-    if (!page) return thread ? { messages: [], cut: false, unread: true } : null;
+    // not take it for one that held nothing. One the platform refused, rather
+    // than answered late, says so.
+    if (!page) {
+      if (!thread) return null;
+      return {
+        messages: [],
+        cut: false,
+        unread: true,
+        ...(failed ? { failed: true as const } : {}),
+      };
+    }
     // Messages the model was shown already, at or before `since`, are cut by
     // the platform's own order too.
     const [below, bound] = olderThan(page, before, key);
@@ -174,14 +195,21 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     // latest messages the first time. Rome keeps none of them.
     async chat(place, before, first, since) {
       if (!servesWorkspace(place)) return null;
-      const read = await readBefore(
-        place,
-        before,
-        first,
-        { since },
-        deps.chatWaitMs ?? CHAT_WAIT_MS,
-      );
-      return read && !read.unread ? read.messages : null;
+      const waitMs = deps.chatWaitMs ?? CHAT_WAIT_MS;
+      const started = Date.now();
+      if (since !== undefined) {
+        const read = await readBefore(place, before, first, { since }, waitMs);
+        if (read && !read.unread) return read.messages;
+        if (!read?.failed) return null;
+      }
+      // A read since the last message shown that the platform refuses, such
+      // as one with more messages after it than one page holds, shows the
+      // latest messages instead, as a new session reads them, in what is
+      // left of the wait.
+      const left = waitMs - (Date.now() - started);
+      if (left <= 0) return null;
+      const latest = await readBefore(place, before, first, {}, left);
+      return latest && !latest.unread ? latest.messages : null;
     },
     place: (place, thread) => (servesWorkspace(place) ? placeLine(place, thread) : null),
   };
