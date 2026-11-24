@@ -3,13 +3,18 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetTitle } from "@/components/ui/sheet";
-import { type OutputsTabOptions, useToolOutputs } from "@/pages/free/tool-outputs";
+import {
+  type OutputsTabFile,
+  type OutputsTabOptions,
+  useToolOutputs,
+} from "@/pages/free/tool-outputs";
 import { type LeaveGuard, leaveEditor } from "./OutputEditor";
 import { OutputsPanel } from "./OutputsPanel";
 
 /**
- * Opens a chat's outputs: in the side pane's Outputs tab, or in a full-height
- * sheet where the pane would take the whole width. Render `sheet` once,
+ * Opens a chat's outputs, or one of them: in the side pane's Outputs tab or the
+ * file's own tab, or in a full-height sheet where the pane would take the
+ * whole width. Render `sheet` once,
  * outside any menu, so it outlives what opened it.
  */
 export function useOutputsPane(chatId: string | null, options: OutputsTabOptions = {}) {
@@ -21,11 +26,11 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
   const hide = pane?.hide;
   useEffect(() => () => hide?.(), [hide]);
 
-  const open = (outputId?: string) => {
+  const open = (file?: OutputsTabFile) => {
     if (!chatId) return;
     if (!pane || pane.compact) {
-      setSheet((prev) => ({ outputId: outputId ?? null, seq: (prev?.seq ?? 0) + 1 }));
-    } else pane.show(chatId, outputId, options);
+      setSheet((prev) => ({ outputId: file?.id ?? null, seq: (prev?.seq ?? 0) + 1 }));
+    } else pane.show(chatId, file, options);
   };
   // Closing the sheet first settles a file being edited in it.
   const leaveGuard: LeaveGuard = useRef(null);
@@ -55,7 +60,6 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
           selectionSeq={sheet?.seq}
           onNavigate={closeNow}
           leaveGuard={leaveGuard}
-          heading={false}
           taskChats={options.taskChats}
         />
       </div>

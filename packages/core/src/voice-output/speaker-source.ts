@@ -12,6 +12,9 @@ import { resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
 const log = createLogger("voice-output");
 
+// After a fresh credential could not be had, how long until a refusal may ask again.
+const RENEW_AGAIN_AFTER_MS = 30_000;
+
 type SpeakerOpenOutcome =
   | {
       ok: true;
@@ -42,6 +45,8 @@ export interface SpeakerSourceDeps {
   credentials: SpeechCredentialSource;
   /** Whether voice mode is on. Read on every `open`. Defaults to the `voice_mode` gate. */
   enabled?: () => Promise<boolean>;
+  /** Epoch milliseconds. */
+  now?: () => number;
 }
 
 export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
@@ -50,7 +55,12 @@ export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
   return {
     async open(listener) {
       if (!(await enabled())) return { ok: false, reason: "disabled" };
-      return renewing(listener, (inner) => openOnCredential(deps.credentials, inner), retire);
+      return renewing(
+        listener,
+        (inner) => openOnCredential(deps.credentials, inner),
+        retire,
+        deps.now ?? Date.now,
+      );
     },
   };
 }
@@ -123,6 +133,8 @@ interface Leg {
  * whose audio came. Sentences already speaking on the old credential finish
  * there. It renews at most once until audio comes again, and says a sentence
  * again at most once, so a credential refused from the start fails as before.
+ * When no fresh credential can be had, the next refusal 30 s later asks again,
+ * so a passing failure does not silence the rest of the session.
  *
  * Across a renewal, sentences may start out of the order they were said: one
  * whose refusal comes late, or after the new credential is in use, starts
@@ -133,6 +145,7 @@ async function renewing(
   listener: SpeakerListener,
   openOn: (listener: SpeakerListener) => Promise<SpeakerOpenOutcome>,
   retire: ((sessionId: string) => void) | undefined,
+  now: () => number,
 ): Promise<SpeakerOpenOutcome> {
   // The text and place in order of each sentence said and not over yet.
   const said = new Map<string, { text: string; order: number }>();
@@ -145,6 +158,9 @@ async function renewing(
   let current: Leg = { session: null, live: new Set() };
   let renewal: Promise<void> | null = null;
   let mayRenew = true;
+  // When no fresh credential could be had: a refusal from then on asks again.
+  let renewAgainAt: number | null = null;
+  const canRenew = () => mayRenew || (renewAgainAt !== null && now() >= renewAgainAt);
   let closed = false;
 
   const forget = (id: string) => {
@@ -183,6 +199,7 @@ async function renewing(
 
   const renew = (from: Leg, error: SpeakerError) => {
     mayRenew = false;
+    renewAgainAt = null;
     if (from.credentialSessionId) retire?.(from.credentialSessionId);
     const next: Leg = { session: null, live: new Set() };
     const opening = openOn(legListener(next)).catch(
@@ -199,6 +216,7 @@ async function renewing(
         .sort((a, b) => (said.get(a)?.order ?? 0) - (said.get(b)?.order ?? 0));
       if (!outcome.ok) {
         log.warn("speech credential not renewed", { reason: outcome.reason });
+        renewAgainAt = now() + RENEW_AGAIN_AFTER_MS;
         for (const id of ids) {
           forget(id);
           listener.onSentenceError(id, error);
@@ -241,7 +259,7 @@ async function renewing(
           said.has(id) &&
           !heard.has(id) &&
           !retried.has(id) &&
-          (renewal !== null || leg !== current || mayRenew);
+          (renewal !== null || leg !== current || canRenew());
         if (again) {
           retried.add(id);
           if (renewal || leg === current) {
@@ -257,7 +275,7 @@ async function renewing(
       onClosed(error) {
         legs.delete(leg);
         if (leg !== current || closed || renewal) return;
-        if (error.kind === "unauthorized" && mayRenew) return renew(leg, error);
+        if (error.kind === "unauthorized" && canRenew()) return renew(leg, error);
         end(error);
       },
     };

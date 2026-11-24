@@ -362,4 +362,39 @@ describe("a speaking session whose credential is refused", () => {
     expect(credentials.retired).toEqual(["speech-1"]);
     expect(fake.connections()).toBe(1);
   });
+
+  it("asks again 30 s after no fresh credential could be had", async () => {
+    const spoken = speakUnless(new Set(["Bearer temp-1"]));
+    let tries = 0;
+    const credentials = rotating(() =>
+      ++tries === 1 ? { kind: "unavailable", detail: "Rome Cloud did not answer" } : null,
+    );
+    let at = 0;
+    const events: string[] = [];
+    const source = createSpeakerSource({ credentials, enabled: async () => true, now: () => at });
+    const outcome = await source.open({
+      onAudio: () => {},
+      onSentenceEnd: (id) => events.push(`end ${id}`),
+      onSentenceError: (id, error) => events.push(`error ${id} ${error.kind}`),
+      onClosed: (error) => events.push(`closed ${error.kind}`),
+    });
+    if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
+    opened.push(outcome.session);
+
+    outcome.session.say("a", "第一句。");
+    await until(() => events.length === 1);
+    // Within 30 s a refusal does not ask Rome Cloud again.
+    at += 29_000;
+    outcome.session.say("b", "第二句。");
+    await until(() => events.length === 2);
+    expect(events).toEqual(["error a unauthorized", "error b unauthorized"]);
+    expect(credentials.asked).toBe(2);
+
+    at += 1_000;
+    outcome.session.say("c", "第三句。");
+    await until(() => events.length === 3, "the sentence on a fresh key");
+    expect(events.at(-1)).toBe("end c");
+    expect(credentials.asked).toBe(3);
+    expect(spoken).toEqual([{ key: fake.authorization().at(-1), text: "第三句。" }]);
+  });
 });

@@ -4,7 +4,15 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const app = resolve(root, "dist/native/Rome Computer Use.app");
+const args = process.argv.slice(2);
+function option(name: string): string | undefined {
+  const index = args.indexOf(name);
+  return index < 0 ? undefined : args[index + 1];
+}
+const app = resolve(
+  option("--app") ??
+    resolve(root, "../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"),
+);
 const nativeEntries = readdirSync(dirname(app)).sort();
 if (nativeEntries.length !== 1 || nativeEntries[0] !== basename(app)) {
   throw new Error(
@@ -38,9 +46,11 @@ if (
 if (implementation.buildOptions?.selfTest !== false)
   throw new Error("A native test fixture cannot be packaged as the runtime helper.");
 
-if (process.argv.includes("--release")) {
+if (args.includes("--release")) {
   if (process.platform !== "darwin" || process.arch !== "arm64")
-    throw new Error("Publish node-core from an arm64 Mac with its signed native helper.");
+    throw new Error(
+      "Publish @rome-os/node-core-darwin-arm64 from an arm64 Mac with its signed native helper.",
+    );
   if (
     /<key>RomeComputerUseUnsigned<\/key>\s*<true\/>/.test(info) ||
     implementation.buildOptions?.unsigned !== false

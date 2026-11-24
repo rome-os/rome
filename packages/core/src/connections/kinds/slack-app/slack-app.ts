@@ -84,8 +84,8 @@ export interface SlackAppAdapterConfig {
   /** Whether the Worker still holds the workspace for this instance. Asked
    *  when Slack reports the app removed. */
   bound: () => Promise<boolean>;
-  /** How many times the mailbox's drain delivers one frame before it holds
-   *  it until resumed. */
+  /** The most times the mailbox's drain delivers one frame before it drops
+   *  it. */
   deliveryAttempts: number;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
@@ -302,11 +302,10 @@ export class SlackAppAdapter {
     // record (docs/domains/connections.md#message). A delivery that is
     // refused or not recorded in time answers 500, and the mailbox delivers it
     // again; Chats records a message it already holds only once. The drain
-    // gives up on a frame after a few retries and waits to be resumed, so the
-    // refusal also reports the connection down: the runtime starts it again
-    // after a backoff, and the connection starting resumes the frame. Recording
-    // stopping is no fault while the drain's own retries remain: an app
-    // swapping its hook stops it for a moment. A stop that outlasts them is.
+    // drops a frame after its retries, so the refusal also reports the
+    // connection down and the runtime starts it again after a backoff.
+    // Recording stopping is no fault while the drain's own retries remain: an
+    // app swapping its hook stops it for a moment. A stop that outlasts them is.
     if (!this.handler) return { status: 500 };
     try {
       await this.handler(

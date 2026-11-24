@@ -111,7 +111,7 @@ describe("a Slack setup's hold on the shared mailbox", () => {
       cloud: neverApproved,
       depositUrl: async () => "https://relay.example/h/a.b",
       approval: { pollMs: 5, limitMs: 300 },
-      holdSlackFrames: () => holds.hold(() => drainer?.resumeBlocked()),
+      holdSlackFrames: () => holds.hold(),
     })(interact, ctx).catch(() => {
       setupEnded = true;
     });

@@ -14,8 +14,7 @@ for (const chat of [
     });
     const blur = page.locator("[data-slot=progressive-blur]").first();
     await expect(blur).toBeVisible();
-    const clearTop = await page.locator("[data-chat-floor]").evaluate((floor) => {
-      const scroller = floor.parentElement!;
+    const clearTop = await page.locator("[data-chat-scroller]").evaluate((scroller) => {
       return (
         scroller.getBoundingClientRect().top +
         Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop)
@@ -39,9 +38,8 @@ for (const chat of [
     });
     const header = page.locator("[data-slot=progressive-blur]").first().locator("xpath=..");
     const headerBounds = (await header.boundingBox())!;
-    const hit = await page.locator("[data-chat-floor]").evaluate(
-      (floor, y) => {
-        const scroller = floor.parentElement!;
+    const hit = await page.locator("[data-chat-scroller]").evaluate(
+      (scroller, y) => {
         const bounds = scroller.getBoundingClientRect();
         return {
           gutter: scroller.offsetWidth - scroller.clientWidth,

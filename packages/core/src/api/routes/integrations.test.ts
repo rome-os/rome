@@ -61,34 +61,6 @@ describe("GET /integrations/relay", () => {
   });
 });
 
-describe("POST /integrations/relay/resume", () => {
-  it("re-arms a blocked delivery behind the same-origin guard", async () => {
-    let calls = 0;
-    const deps = relayDeps();
-    (deps.relayDrainer as unknown as { resumeBlocked: () => boolean }).resumeBlocked = () => {
-      calls++;
-      return true;
-    };
-    const app = new Hono().route("/", integrationsRoutes(deps));
-
-    const res = await app.request("/integrations/relay/resume", {
-      method: "POST",
-      headers: { "sec-fetch-site": "same-origin" },
-    });
-
-    expect(res.status).toBe(200);
-    expect(calls).toBe(1);
-    expect((await res.json()).resumed).toBe(true);
-  });
-
-  it("rejects cross-site resume attempts", async () => {
-    const app = new Hono().route("/", integrationsRoutes(relayDeps()));
-    const res = await app.request("/integrations/relay/resume", { method: "POST" });
-
-    expect(res.status).toBe(403);
-  });
-});
-
 // The legacy `POST /integrations/:provider/reconnect` was removed in #1611 —
 // reconnect now re-runs the setup (force-start), so there is
 // no bespoke reconnect route to test here anymore.

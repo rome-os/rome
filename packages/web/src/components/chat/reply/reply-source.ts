@@ -123,6 +123,18 @@ export function lastTextMessage(messages: ChatMessage[]): ChatMessage | undefine
   );
 }
 
+/** What replying to `message` quotes: the whole of its text. */
+export function targetOf(message: ChatMessage): ReplyTarget {
+  const text = parseMessageEntries(message)
+    .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
+    .join("\n\n");
+  return {
+    messageId: message.id,
+    author: message.role === "user" ? "guardian" : "agent",
+    preview: replyPreview(text),
+  };
+}
+
 /**
  * The reply a Reply on `source` picks. A selection inside the message's own
  * element (`source.scope`, else its `data-timeline-anchor`) becomes the

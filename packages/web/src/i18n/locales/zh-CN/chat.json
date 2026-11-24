@@ -218,7 +218,11 @@
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
-    "jump": "跳到原消息"
+    "jump": "跳到原消息",
+    "closeChain": "关闭回复串",
+    "loadingChain": "正在加载回复串",
+    "loadFailed": "无法加载回复串",
+    "retry": "重试"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -451,6 +455,7 @@
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
     "lockedByCard": "请先回答上方的卡片，再继续。",
+    "placeholderInThread": "在回复串中发送消息",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
     "hints": {
       "skill": "输入 / 使用技能",
@@ -908,5 +913,19 @@
     "untitled": "任务",
     "mainChat": "主对话",
     "backTo": "返回{{name}}"
+  },
+  "pinnedHint": {
+    "kept": "在 {{provider}} 上",
+    "owner": "你选了 {{model}}",
+    "backToDefault": "改回默认",
+    "romeCredits": "Rome 额度",
+    "failed": "没能改回，请重试。",
+    "confirm": {
+      "title": "改回默认？",
+      "bodyKept": "这个聊天从下一次回复起，从 {{from}} 改用你的默认 {{to}}。",
+      "bodyOwner": "这个聊天从下一次回复起不再用 {{model}}，改用你的默认 {{to}}。",
+      "bodyNoDefault": "这个聊天从下一次回复起改用你的默认。",
+      "cancel": "取消"
+    }
   }
 }

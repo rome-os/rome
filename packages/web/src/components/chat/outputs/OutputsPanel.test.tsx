@@ -17,6 +17,7 @@ import {
   type FilterRowSize,
   kindsThatFit,
   kindsThatStillFit,
+  OutputFile,
   OutputsPanel,
   outputTitle,
   outputTypeOf,
@@ -172,6 +173,7 @@ function renderPanel(
     taskChats?: boolean;
     onOpenTaskChat?: (id: string) => void;
     onNavigate?: () => void;
+    onOpenOutput?: (output: ChatOutputDto) => void;
   } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -205,8 +207,9 @@ describe("OutputsPanel", () => {
       }),
     ];
     renderPanel();
-    expect((await screen.findByRole("heading", { name: /Outputs/ })).textContent).toContain("3");
-    const today = screen.getByRole("list", { name: "Today" });
+    const today = await screen.findByRole("list", { name: "Today" });
+    // The tab or the sheet around the list names it: it has no heading of its own.
+    expect(screen.queryByRole("heading", { name: /Outputs/ })).toBeNull();
     const rows = within(today).getAllByRole("listitem");
     expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual([
       "Trip notes",
@@ -842,5 +845,100 @@ describe("readPrefix", () => {
     expect(prefix).toEqual({ text: "x".repeat(2500), cut: true });
     expect(pulled).toBeLessThan(10);
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("OutputsPanel in the side pane", () => {
+  it("hands a chosen output to the pane and keeps the list in place", async () => {
+    const user = userEvent.setup();
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    const onOpenOutput = rs.fn();
+    renderPanel({ onOpenOutput });
+    await user.click(await screen.findByRole("button", { name: "Notes" }));
+    expect(onOpenOutput).toHaveBeenCalledWith(expect.objectContaining({ id: "notes" }));
+    expect(screen.getByRole("list", { name: "Today" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
+  });
+});
+
+describe("OutputFile", () => {
+  function renderFile(opened: { id: string; link: string | null }, withActions = true) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const actions = document.createElement("div");
+    document.body.append(actions);
+    const guard = { current: null as (() => Promise<boolean>) | null };
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <OutputFile
+              chatId="chat-1"
+              opened={opened}
+              actions={withActions ? actions : null}
+              leaveGuard={guard}
+            />
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
+    return Object.assign(view, { actions, guard });
+  }
+
+  it("shows the file alone, with its buttons in the pane's tab row", async () => {
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    files[outputs[0].contentUrl!] = "# Plan";
+    const { actions } = renderFile({ id: "notes", link: outputs[0].link });
+    const markdown = await screen.findByTestId("output-markdown");
+    await waitFor(() =>
+      expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
+    );
+    // No header: no way back, and the name and kind are the tab's.
+    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
+    expect(screen.queryByText("notes.md")).toBeNull();
+    expect(within(actions).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+      outputs[0].contentUrl,
+    );
+    actions.remove();
+  });
+
+  it("draws no buttons while its tab is not the one showing", async () => {
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    files[outputs[0].contentUrl!] = "# Plan";
+    renderFile({ id: "notes", link: outputs[0].link }, false);
+    await screen.findByTestId("output-markdown");
+    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+  });
+
+  it("follows the file to its new record, and says when it is gone", async () => {
+    outputs = [output("notes-2", { name: "notes.txt" })];
+    files[outputs[0].contentUrl!] = "second take";
+    renderFile({ id: "notes-1", link: outputs[0].link });
+    expect(await screen.findByText("second take")).toBeTruthy();
+    cleanup();
+
+    outputs = [];
+    renderFile({ id: "notes-1", link: "/projects/demo/notes.txt" });
+    expect(await screen.findByText("Moved or deleted")).toBeTruthy();
+  });
+
+  it("edits a written text file in place, and Done in the tab row returns to the preview", async () => {
+    const user = userEvent.setup();
+    outputs = [output("one", { name: "notes.txt" })];
+    files[outputs[0].contentUrl!] = "hello";
+    resolved["projects/demo/notes.txt"] = {};
+    outputs[0] = {
+      ...outputs[0],
+      path: "/projects/demo/notes.txt",
+      link: "/projects/demo/notes.txt",
+    };
+    const { actions, guard } = renderFile({ id: "one", link: outputs[0].link });
+    await user.click(await within(actions).findByRole("button", { name: "Edit" }));
+    expect(await screen.findByTestId("project-browser")).toBeTruthy();
+    // The pane's close of the tab asks the editor first.
+    expect(guard.current).not.toBeNull();
+    await user.click(within(actions).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByTestId("project-browser")).toBeNull());
+    expect(await screen.findByText("hello")).toBeTruthy();
+    actions.remove();
   });
 });

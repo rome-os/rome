@@ -21,6 +21,7 @@ struct TopicChatScreen: View {
 
     @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
+    @State private var transcriptScroll = TranscriptScroll()
     @State private var starting: String?
     @State private var startFailed = false
     @State private var startFailure: SendFailure = .unknown
@@ -97,6 +98,13 @@ struct TopicChatScreen: View {
         .topicRestore($restoring, workspace: workspace)
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        // Read again each time it comes back into view, as after Settings
+        // changed the default with the topic still mounted beneath it.
+        .task(id: "\(store?.sessionId ?? "")|\(chatId.map { visibleChat == $0 } ?? inFront)") {
+            if chatId.map({ visibleChat == $0 }) ?? inFront { await store?.readChatSession() }
+        }
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
@@ -107,7 +115,7 @@ struct TopicChatScreen: View {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
                 if !archived, let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage) { store.dismissQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
@@ -120,7 +128,7 @@ struct TopicChatScreen: View {
                     ConciergeStarters { send(text: $0.text) }
                 }
                 if !archived {
-                    TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
+                    TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, inThread: store?.threadFocus != nil, sharing: store?.share.isSelecting ?? false) { send() }
                 }
             }
             .shareModeComposer(store?.share)
@@ -150,6 +158,7 @@ struct TopicChatScreen: View {
     /// Read only while it is the chat on screen: never under an instance
     /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
+        guard store.threadFocus == nil else { return }
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
         // Before the read: the open reads where the unread messages start.
         store.beginOpen()
@@ -160,13 +169,13 @@ struct TopicChatScreen: View {
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
-            TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
-                    .equatable()
-                    .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
+            TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, footer: archived ? nil : PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
+                SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
             }
-            .onTapGesture { composerFocused = false }
-            .overlay(alignment: .top) { UnreadPillButton(store: store) }
+                        .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
+            .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
+                .onTapGesture { composerFocused = false }
+            .overlay(alignment: .bottom) { TranscriptBackToBottom(scroll: transcriptScroll, hidden: store.threadFocus != nil) }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.
@@ -262,6 +271,7 @@ private struct TopicComposer: View {
     @Binding var draft: String
     @Binding var focused: Bool
     let attachments: ComposerAttachments
+    let inThread: Bool
     /// Share selection hides the field while it lasts.
     let sharing: Bool
     let onSend: () -> Void
@@ -275,8 +285,8 @@ private struct TopicComposer: View {
     var body: some View {
         let chat = chatId.flatMap(workspace.topics.chat)
         // Only "Message in <name>" is fitted.
-        let name = TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, onSend: onSend)
+        let name = inThread ? nil : TopicChatsStore.composerName(chat)
+        Composer(text: $draft, placeholder: inThread ? String(localized: "Message in thread") : TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, onSend: onSend)
     }
 }
 
@@ -318,6 +328,10 @@ private struct TopicChatHeader: View {
             onAgent: onAgent,
             zoomSource: AgentZoom.source(chatId ?? draftKey),
             tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
+            onCloseThread: chatId.flatMap { id -> (() -> Void)? in
+                let store = workspace.topicStore(id)
+                return store.threadFocus == nil ? nil : { store.closeThread() }
+            },
             // A blank chat has nothing to rename, pin, archive or delete yet.
             onRename: menu.has(.rename) ? { onRename(title) } : nil,
             pinned: menu.has(.pin) && (chatId.map(workspace.topics.isPinned) ?? false),

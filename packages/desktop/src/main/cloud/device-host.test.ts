@@ -73,7 +73,9 @@ describe("DeviceHost", () => {
   });
 
   it("stays connected, in a limited mode, while Computer use is off", async () => {
-    const { subject, gateway, limited, options } = host({ enabled: () => false });
+    const { subject, gateway, limited, options } = host({
+      enabled: () => false,
+    });
     subject.start();
     await settle();
     // Nothing that can run programs is connected, and the login shell's PATH is not needed.
@@ -177,6 +179,20 @@ describe("DeviceHost", () => {
       deviceId: credential.deviceSessionId,
       name: "RayBook",
     });
+  });
+
+  it("forwards the shared native computer-use host only when Computer use is enabled", async () => {
+    const computerUse = {} as Exclude<HostOptions["computerUse"], false | undefined>;
+    let enabled = false;
+    const { subject, gateway } = host({ computerUse, enabled: () => enabled });
+    await subject.start();
+    expect(gateway.calls).toHaveLength(0);
+    await subject.stop();
+
+    enabled = true;
+    await subject.start();
+    expect(gateway.calls[0]?.computerUse).toBe(computerUse);
+    await subject.stop();
   });
 
   it("records every remote request in the app's audit log", async () => {

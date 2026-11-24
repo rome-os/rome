@@ -20,6 +20,7 @@ import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
 import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
 import { attachAppWebSocket } from "./routes/app-websocket-server.js";
 import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
+import { attachVoiceConversationServer } from "../voice-conversation/conversation-server.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
@@ -360,6 +361,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             desktopProxy.close();
             appWebSocket.close();
             voiceInput.close();
+            voiceConversation?.close();
             await webchatRuntime.flushAll();
             // Force-close any active HTTP connections so shutdown is not
             // blocked by in-flight requests (e.g. long-lived SSE streams).
@@ -412,6 +414,15 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.transcriptionUsage ?? null,
         deps.dashboardAccessState,
       );
+      const voiceConversation = deps.speaker
+        ? attachVoiceConversationServer(server as Server, deps.db, {
+            listening: deps.voiceInput ?? NO_VOICE_INPUT,
+            speaker: deps.speaker,
+            canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
+            send: (chatId, text, signal) => webchatRuntime.sendSpoken(chatId, text, signal),
+            usage: deps.transcriptionUsage ?? null,
+          })
+        : null;
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });
         reject(err);

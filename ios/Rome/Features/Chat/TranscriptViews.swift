@@ -61,7 +61,7 @@ private struct BubbleMenuItems: View {
             }
             CopyButton(text: text)
             if let onSelect {
-                Button(action: onSelect) { Label("Select text", systemImage: "selection.pin.in.out") }
+                Button(action: onSelect) { Label("Select", systemImage: "selection.pin.in.out") }
             }
             if let onShare = menu.onShare {
                 Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
@@ -198,6 +198,7 @@ struct UserBubble: View {
                 .opacity(pending == .sending ? 0.55 : 1)
                 // Behind the photos and the bubble, not the row.
                 .tinted(tinted)
+                .threadFocusHitArea()
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -452,6 +453,7 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
+        .threadFocusHitArea()
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
         .bubbleWidth()
@@ -608,6 +610,7 @@ enum TranscriptSpacing {
         if case .separator = previous { return 14 }
         if case .typing = row { return 14 }
         if case .notice = row { return 14 }
+        if case .providerOutage = row { return 14 }
         // A faint line stands apart, like a time separator.
         switch (row, previous) {
         case (.sessionRenewal, _), (_, .sessionRenewal), (.unreadDivider, _), (_, .unreadDivider): return 14

@@ -70,7 +70,7 @@ export function UserMessageBubble({
           <CircleSlash className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : null}
         <div className="min-w-0">
-          {quote ? <QuotedReply part={quote} /> : null}
+          {quote ? <QuotedReply part={quote} from={msg.id} /> : null}
           {body ? (
             <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
               {body}

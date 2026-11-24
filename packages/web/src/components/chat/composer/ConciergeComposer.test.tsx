@@ -99,6 +99,27 @@ describe("ConciergeComposer", () => {
     expect(screen.getByPlaceholderText("Message")).toBeTruthy();
   });
 
+  it.each([
+    null,
+    "Trip to Lisbon",
+  ])("changes only the placeholder while focused, preserving the %s draft and input", async (chatName) => {
+    const { rerenderWith, onSend } = renderComposer({ chatName });
+    const box = screen.getByRole("textbox");
+    const original = box.getAttribute("placeholder");
+    fireEvent.input(box, { target: { value: "Unsent draft" } });
+    rerenderWith({ chatName, placeholder: "Message in thread" });
+    expect(screen.getByPlaceholderText("Message in thread")).toBe(box);
+    expect((box as HTMLTextAreaElement).value).toBe("Unsent draft");
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend.mock.calls[0][0].replyTo).toBeUndefined();
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+    rerenderWith({ chatName });
+    expect(screen.getByRole("textbox")).toBe(box);
+    expect(box.getAttribute("placeholder")).toBe(original);
+  });
+
   it("picks a scoped skill, sends a chip-only turn, and clears the chip", async () => {
     const { onSend } = renderComposer();
     const box = screen.getByRole("textbox") as HTMLTextAreaElement;

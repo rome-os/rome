@@ -122,8 +122,8 @@ export interface SlackAppSetupDeps {
   depositUrl: () => Promise<string | null>;
   /** How often and how long the setup waits for Slack's approval. */
   approval?: { pollMs: number; limitMs: number };
-  /** Has the mailbox hold Slack frames while the setup waits for approval;
-   *  the returned function lets go and has held frames delivered again. */
+  /** Has the mailbox hold Slack frames while the setup waits for approval,
+   *  within the drain's retry budget; the returned function lets go. */
   holdSlackFrames?: () => () => void;
 }
 
@@ -271,10 +271,9 @@ export interface SlackAppDescriptorDeps {
   /** The public address of this instance's relay mailbox, or null while Rome
    *  Cloud has not given one. */
   depositUrl: () => Promise<string | null>;
-  /** How many times the mailbox's drain delivers one frame before it holds it. */
+  /** The most times the mailbox's drain delivers one frame before it drops it. */
   deliveryAttempts: number;
-  /** Has the instance's mailbox drained while the connection runs, and
-   *  retries a frame it gave up on while the connection was down; the
+  /** Has the instance's mailbox drained while the connection runs; the
    *  returned function lets go. */
   claimMailbox?: () => () => void;
   /** Has the mailbox hold Slack frames while a setup waits for approval. */
@@ -435,7 +434,7 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
                   body: frame?.body ?? null,
                 });
               });
-              // Last, so a frame the mailbox retries at once finds the ingress.
+              // Last, so the first frame the mailbox delivers finds the ingress.
               releaseMailbox = deps.claimMailbox?.() ?? null;
               void refresh();
             },

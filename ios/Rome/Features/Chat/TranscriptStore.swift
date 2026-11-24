@@ -16,8 +16,14 @@ final class TranscriptStore {
 
     // The properties with a `didSet` are what `rows` is built from: each
     // change builds the rows again, once, so a read is a plain property read.
-    private(set) var messages: [ChatMessage] = [] { didSet { rebuildRows() } }
-    private(set) var pending: [PendingSend] = [] { didSet { rebuildRows() } }
+    private(set) var messages: [ChatMessage] = [] { didSet {
+        rebuildRows()
+        threadFocus?.updateHeld(messages, changedFrom: oldValue)
+    } }
+    private(set) var pending: [PendingSend] = [] { didSet {
+        rebuildRows()
+        threadFocus?.updatePending(pending)
+    } }
     private(set) var loaded = false
     /// A read of the chat worked at least once (or it was made just now), so
     /// an empty transcript is a chat with nothing in it, not one that failed
@@ -166,6 +172,13 @@ final class TranscriptStore {
 
     func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
 
+    /// A shared bubble keeps the quote it already displayed in the main list.
+    /// A backfilled row absent there takes its metadata from the focused page.
+    func sharedInfo(for row: TranscriptRow, fallback: TranscriptStore) -> RowInfo {
+        rowInfo[row.id] ?? fallback.info(for: row)
+    }
+
+
     /// A merge changes the messages and the sends together: one rebuild after both.
     @ObservationIgnored private var rowsHeld = false
 
@@ -289,6 +302,7 @@ final class TranscriptStore {
     }
 
     func stop() {
+        closeThread(animated: false)
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
         for poll in approvalPolls.values { poll.cancel() }
@@ -428,6 +442,7 @@ final class TranscriptStore {
     }
 
     func markRead() {
+        guard threadFocus == nil else { return }
         // A read before the open's read mark is known would erase it.
         let waiting = openRead
         Task {
@@ -548,7 +563,7 @@ final class TranscriptStore {
 
     /// New replies came in, or the list appeared: read, if the chat shows.
     func arrived() {
-        if onScreen { markRead() }
+        if onScreen && threadFocus == nil { markRead() }
     }
 
     // The server sends every message list in its final order, and the store never
@@ -572,6 +587,7 @@ final class TranscriptStore {
     /// A live message: replaces the held message with its id where it stands,
     /// else goes last.
     private func mergeLive(_ message: ChatMessage) {
+        threadFocus?.receive(message)
         var next = messages
         if let index = next.firstIndex(where: { $0.id == message.id }) {
             next[index] = message
@@ -597,6 +613,7 @@ final class TranscriptStore {
     /// from the page, and the paging follows its cursor. Every refresh of the
     /// newest page goes through here, so they all follow the one rule.
     private func mergeLatest(_ page: MessagePage, dropsUnlisted: Bool = false) {
+        threadFocus?.catchUp(page.messages)
         let ids = Set(page.messages.map(\.id))
         let heldIDs = Set(messages.map(\.id))
         guard let anchor = page.messages.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
@@ -619,6 +636,7 @@ final class TranscriptStore {
     // MARK: Live events
 
     private func handle(_ event: LiveEvent) {
+        threadFocus?.handle(event, sessionId: sessionId)
         switch event {
         case .messageInsert(var message) where message.sessionId == sessionId:
             let held = messages.first { $0.id == message.id }
@@ -689,6 +707,83 @@ final class TranscriptStore {
         }
     }
 
+    var threadFocus: ThreadFocus?
+    @ObservationIgnored let focusPosition = TranscriptFocusPosition()
+    @ObservationIgnored private var threadEpoch = 0
+
+    func openThread(from messageId: String, row: String, original: String) async {
+        guard threadFocus == nil else { return }
+        focusPosition.pause()
+        let root = message(messageId)?.chatThreadId ?? messageId
+        let y = focusPosition.frame(row)?.minY
+        let gap = rows.firstIndex(where: { $0.id == row }).map { index in
+            TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
+        } ?? 0
+        let focus = ThreadFocus(sessionId: sessionId, anchor: messageId, row: row,
+                                bubbleY: y.map { $0 + gap },
+                                page: ThreadPage(messages: ThreadFocus.memory(messages, root: root, anchor: messageId), hasOlder: true, hasNewer: true),
+                                backend: backend, pending: true, root: root, original: original)
+        focusPosition.begin(focus)
+        threadFocus = focus
+        focus.updatePending(pending)
+        await readThread(focus, original: original)
+    }
+
+    private func readThread(_ focus: ThreadFocus, original: String) async {
+        let epoch = threadEpoch
+        do {
+            let page = try await backend.threadPage(sessionId: sessionId, anchor: focus.anchor, before: nil, after: nil, limit: 10)
+            guard !Task.isCancelled, epoch == threadEpoch, threadFocus === focus else { return }
+            focus.hydrate(page)
+        } catch {
+            guard !Task.isCancelled, epoch == threadEpoch, threadFocus === focus else { return }
+            switch error as? APIError {
+            case .notFound, .unauthorized, .conciergeOff, .server(status: 403, message: _):
+                closeThread(animated: false)
+                if error as? APIError == .notFound { await reveal(quoted: original) }
+            default:
+                focus.failed()
+            }
+        }
+    }
+
+    func retryThread() {
+        guard let focus = threadFocus, focus.initial == .failed else { return }
+        focus.retry()
+        Task { await readThread(focus, original: focus.original) }
+    }
+
+    func closeThread(animated: Bool = true) {
+        threadEpoch += 1
+        guard let focus = threadFocus else { return }
+        focusPosition.close(animated: animated) { [weak self, weak focus] in
+            guard let self, let focus, self.threadFocus === focus else { return }
+            self.threadFocus = nil
+        }
+    }
+
+    func holdThreadMessages(_ next: [ChatMessage]) {
+        commit(next, persist: false)
+    }
+
+    /// The chat's sends a focused chain draws as its own: their Retry and
+    /// Delete still act on the chat, which holds them.
+    func holdThreadPending(_ next: [PendingSend]) {
+        let stored = Set(messages.map(\.id))
+        let next = next.filter { !stored.contains($0.id) }
+        if next != pending { pending = next }
+    }
+
+    /// A message's Share. Turns are picked on the chat itself, so a chain in
+    /// focus closes first, and gives the turn of a message only it holds.
+    func beginShare(fromRow rowId: String) {
+        guard let focus = threadFocus else { return share.begin(fromRow: rowId) }
+        let turn = ShareTurns(messages: focus.transcript.messages, rows: focus.transcript.rows).turnOfRow[rowId]
+            ?? share.turns?.turnOfRow[rowId]
+        closeThread()
+        share.begin(turn: turn)
+    }
+
     // MARK: Replies
 
     /// The message the guardian replies to, quoted in the reply bar above the
@@ -702,21 +797,21 @@ final class TranscriptStore {
     private(set) var jumpTarget: String?
     @ObservationIgnored private var untint: Task<Void, Never>?
 
-    /// What the composer's next send replies to, and what its draft keeps.
-    var composerReply: ReplyTarget? { quote }
+    /// An explicit reply wins over the focused chain's implicit send target.
+    var composerReply: ReplyTarget? { quote ?? threadFocus?.reply.map { ReplyTarget(messageId: $0.id) } }
 
     /// Whether the reply bar shows.
     var showsQuoteBar: Bool { quote != nil }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        quote.flatMap { message($0.messageId) }
+        quote.flatMap { threadFocus?.transcript.message($0.messageId) ?? message($0.messageId) }
     }
 
     /// Reply on a message, from the menu of its `row`: the reply bar
     /// quotes it.
     func reply(to messageId: String, row: String? = nil) {
-        guard kind == .concierge, message(messageId) != nil else { return }
+        guard kind == .concierge, message(messageId) != nil || threadFocus?.transcript.message(messageId) != nil else { return }
         quote = ReplyTarget(messageId: messageId)
         replyRow = row ?? rows.first(where: { $0.messageId == messageId })?.id
         replies += 1
@@ -733,6 +828,10 @@ final class TranscriptStore {
         quote = nil
     }
 
+    func dismissQuote() {
+        cancelQuote()
+    }
+
     /// A restored draft was written as a reply: the reply bar comes back.
     func restoreReply(_ target: ReplyTarget) {
         guard kind == .concierge else { return }
@@ -742,14 +841,20 @@ final class TranscriptStore {
     /// How many older pages a tap on a quote loads before it gives up.
     static let quotePages = 10
 
-    /// The quote in a reply was tapped: the transcript goes to the original
-    /// and tints it. One not held yet comes in by paging older messages until
-    /// it does, up to `quotePages` pages; then the tap does nothing, quietly.
-    func quoteAction(original: String) -> (() -> Void)? {
+    /// A quote with a containing row opens that message's chain. Without a
+    /// row, it reveals the original, as on an instance without the endpoint.
+    func quoteAction(original: String, from: String? = nil, row: String? = nil) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
         return { [weak self] in
             guard let self else { return }
-            Task { await self.reveal(quoted: original) }
+            if from != nil && row != nil { self.focusPosition.pause() }
+            Task {
+                if let from, let row {
+                    await self.openThread(from: from, row: row, original: original)
+                } else {
+                    await self.reveal(quoted: original)
+                }
+            }
         }
     }
 
@@ -829,6 +934,10 @@ final class TranscriptStore {
             repeat {
                 resyncAgain = false
                 await reload()
+                // A reconnect or a return may follow a change of the default
+                // made elsewhere: whether the chat is pinned is read again too,
+                // inside the loop, so a resync asked meanwhile is not lost.
+                await readChatSession()
             } while resyncAgain
             resyncWork = nil
         }
@@ -1069,6 +1178,9 @@ final class TranscriptStore {
                     pending[index].state = .sent
                 }
                 if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
+                if let focus = threadFocus, !focus.hasNewer {
+                    Task { await focus.load(.after, reconcile: true) }
+                }
                 // The server does not announce the guardian's own input, so fetch it,
                 // and once more if that fetch fails.
                 Task {
@@ -1246,6 +1358,123 @@ final class TranscriptStore {
         // ended before this chat saw it run.
         defer { resync() }
         return try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+    }
+
+    /// What a provider failure card asks the chat's screen to show.
+    enum FailurePrompt: Identifiable, Equatable {
+        /// A move to another provider, asked first.
+        case confirm(messageId: String, action: ProviderFailureAction)
+        /// The login of the card's account.
+        case logIn(AIAccount)
+
+        var id: String {
+            switch self {
+            case .confirm(let messageId, _): return "confirm-\(messageId)"
+            case .logIn(let account): return "login-\(account.rawValue)"
+            }
+        }
+    }
+
+    var failurePrompt: FailurePrompt?
+    /// Failure cards whose button the server is acting on, by message id. The
+    /// card waits for the server's settled part; nothing settles it here.
+    private(set) var failurePending: Set<String> = []
+    /// The button that failed on each card, until the next press.
+    private(set) var failureErrors: [String: ProviderFailureAction] = [:]
+    /// How long a pressed card waits for the server to settle it before its
+    /// buttons come back.
+    static var failurePendingLimit: Duration = .seconds(60)
+
+    /// A failure card's button: asks first where the web asks, opens the
+    /// login, or sends it.
+    func press(_ action: ProviderFailureAction, part: ProviderFailurePart, messageId: String) {
+        switch action {
+        case .logIn:
+            if let account = part.provider.account { failurePrompt = .logIn(account) }
+        case _ where action.confirms:
+            failurePrompt = .confirm(messageId: messageId, action: action)
+        default:
+            Task { await send(action, messageId: messageId) }
+        }
+    }
+
+    /// Runs a failure card's button on the server, then reads the chat: the
+    /// card settles once its turn runs again.
+    func send(_ action: ProviderFailureAction, messageId: String) async {
+        guard !failurePending.contains(messageId) else { return }
+        failurePending.insert(messageId)
+        failureErrors[messageId] = nil
+        do {
+            if let change = action.switchBody {
+                // An option that no longer worked wrote a fresh card in its
+                // place: the chat is read again and shows it, with no error.
+                if try await backend.switchProviderFailure(messageId: messageId, change: change) {
+                    failurePending.remove(messageId)
+                    resync()
+                    return
+                }
+            } else {
+                try await backend.continueProviderFailure(messageId: messageId)
+            }
+        } catch {
+            failurePending.remove(messageId)
+            failureErrors[messageId] = action
+            return
+        }
+        // A switch pins this chat, or lets it follow a new default: the
+        // resync reads that too.
+        resync()
+        let limit = Self.failurePendingLimit
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            self?.failurePending.remove(messageId)
+        }
+    }
+
+    /// The chat as the server shows it, for whether it follows the default.
+    private(set) var chatSession: ChatSession?
+    /// "Back to default" is on its way.
+    private(set) var followingDefault = false
+    /// The pinned hint's Back to default asks first; the chat's screen shows the confirm.
+    var confirmsFollowDefault = false
+
+    /// Reads whether the chat follows the default. A failed read keeps what shows.
+    func readChatSession() async {
+        if let read = try? await backend.chatSession(sessionId) { chatSession = read }
+    }
+
+    /// "Back to default": the chat follows the default from its next turn.
+    func followDefault() async {
+        guard !followingDefault else { return }
+        followingDefault = true
+        defer { followingDefault = false }
+        do {
+            chatSession = try await backend.followDefault(sessionId: sessionId)
+        } catch {
+            // The hint stays, and the error bar says why.
+            say(String(localized: "Could not go back to the default. Try again."))
+        }
+    }
+
+    /// Cards whose answer is on its way, by tool-use id: each is sent once.
+    private(set) var answeringCards: Set<String> = []
+    /// Cards whose answer did not go through, by tool-use id: they offer Retry.
+    private(set) var failedCards: Set<String> = []
+
+    /// Answers a card the turn waits on, such as Chat's connect-AI card once
+    /// an account is logged in; the chat is read again so the answer shows.
+    func answerCard(toolUseId: String, sessionId: String, output: JSONValue) async {
+        guard !answeringCards.contains(toolUseId) else { return }
+        answeringCards.insert(toolUseId)
+        failedCards.remove(toolUseId)
+        defer { resync() }
+        do {
+            try await backend.answerInteraction(sessionId: sessionId, toolUseId: toolUseId, output: output)
+        } catch {
+            // The card offers Retry: nothing else would send it again.
+            answeringCards.remove(toolUseId)
+            failedCards.insert(toolUseId)
+        }
     }
 
     /// A widget's read of its own app, with this chat's backend.

@@ -106,6 +106,7 @@ export function TraceDrawer({
   readOnly = false,
   hasApps = false,
   outlet,
+  actions = null,
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
@@ -131,6 +132,11 @@ export function TraceDrawer({
    * is that mode before the tab has mounted, and renders nothing.
    */
   outlet?: HTMLElement | null;
+  /**
+   * In the Trace tab, where its download goes: the pane's tab row, which is the
+   * tab's header. Null while the tab is not the one showing.
+   */
+  actions?: HTMLElement | null;
 }) {
   const { t } = useTranslation("activity");
   const [remoteTrace, setRemoteTrace] = useState<TraceSnapshot | null>(null);
@@ -356,20 +362,20 @@ export function TraceDrawer({
   ) : null;
 
   if (outlet !== undefined) {
-    // The Trace tab names the trace, shows Live and closes it, so only the
-    // summary and the dump link remain for the content header.
+    // The Trace tab names the trace, shows Live and closes it, and its row
+    // holds the dump link, so the summary is the trace's first line.
     if (!outlet || !target) return null;
-    return createPortal(
-      <TraceUsageOptionsContext.Provider value={usageOptions}>
-        {(summary || dumpLink) && (
-          <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-            <div className="min-w-0 flex-1">{summary}</div>
-            {dumpLink}
-          </div>
+    return (
+      <>
+        {createPortal(
+          <TraceUsageOptionsContext.Provider value={usageOptions}>
+            {summary && <div className="min-w-0 shrink-0 px-4 pt-3">{summary}</div>}
+            {body}
+          </TraceUsageOptionsContext.Provider>,
+          outlet,
         )}
-        {body}
-      </TraceUsageOptionsContext.Provider>,
-      outlet,
+        {actions && dumpLink ? createPortal(dumpLink, actions) : null}
+      </>
     );
   }
 

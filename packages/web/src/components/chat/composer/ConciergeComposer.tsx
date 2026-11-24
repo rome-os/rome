@@ -88,6 +88,8 @@ export interface ConciergeComposerProps {
   streamError?: string | ChatErrorNotice | null;
   /** An open topic chat's own name, which the placeholder says it is a message "in". Unset in the main chat. */
   chatName?: string | null;
+  /** Replaces the default or topic placeholder while a chain is in focus. */
+  placeholder?: string;
   /** The chat whose draft the field keeps. */
   chatId?: string | null;
   /** The chat's own model pick. Unset hides the model row. */
@@ -112,6 +114,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       onStop,
       streamError,
       chatName,
+      placeholder,
       chatId,
       modelSelection,
       onSend,
@@ -622,9 +625,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       addPendingFiles(files);
                     }}
                     placeholder={
-                      pendingUploads.length > 0
+                      placeholder ??
+                      (pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : (namedPlaceholder ?? t("concierge.placeholder"))
+                        : (namedPlaceholder ?? t("concierge.placeholder")))
                     }
                     rows={1}
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:truncate placeholder:text-subtle-foreground focus:outline-none"
