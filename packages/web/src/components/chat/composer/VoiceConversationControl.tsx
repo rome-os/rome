@@ -1,5 +1,5 @@
 import type { VoiceConversationState } from "@rome/api-types/voice-conversation";
-import { AudioLines, MicOff } from "lucide-react";
+import { AudioLines, Mic, MicOff } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { RomeLogo } from "@/components/logo";
@@ -26,7 +26,7 @@ export function VoiceConversationButton({ onStart }: { onStart: () => void }) {
   );
 }
 
-/** Mutes the microphone during a voice conversation. Pressed while muted. */
+/** Mutes the microphone during a voice conversation. Shows the microphone, struck through and pressed while muted. */
 export function VoiceConversationMute({
   muted,
   onToggle,
@@ -48,7 +48,7 @@ export function VoiceConversationMute({
       onClick={onToggle}
       className="touch-target"
     >
-      <MicOff aria-hidden />
+      {muted ? <MicOff aria-hidden /> : <Mic aria-hidden />}
     </Button>
   );
 }

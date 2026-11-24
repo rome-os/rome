@@ -90,11 +90,16 @@ describe("voice conversation in the Concierge's message field", () => {
     act(() => conversation.handlers?.onState("speaking"));
     expect(screen.getByRole("status").textContent).toBe("Speaking");
 
+    // The icon shows the microphone as it is: on, then struck through once muted.
+    const icon = (name: string) =>
+      screen.getByRole("button", { name }).querySelector("svg")?.getAttribute("class") ?? "";
+    expect(icon("Mute")).toMatch(/\blucide-mic\b(?!-)/);
     fireEvent.click(screen.getByRole("button", { name: "Mute" }));
     expect(conversation.muted).toEqual([true]);
     expect(screen.getByRole("button", { name: "Unmute" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
+    expect(icon("Unmute")).toContain("lucide-mic-off");
     expect(screen.getByRole("status").textContent).toBe("Muted");
 
     fireEvent.click(screen.getByRole("button", { name: "End" }));
