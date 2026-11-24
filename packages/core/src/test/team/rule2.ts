@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import type { Feature } from "../../api/deps.js";
-import { guardianOnly } from "../../access/guardian-only.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 import {
   createInstance,
   mountDrift,
@@ -112,7 +112,13 @@ function instanceOptions(standIn: StandIn | undefined): InstanceOptions {
 function guardianOnlyFeature(): Feature {
   const routes = new Hono();
   const path = STAND_IN_GUARDIAN_ONLY_ROUTE.slice("GET /api".length);
-  routes.get(path, guardianOnly, (c) => c.json({ ok: true }));
+  // Its own guard, so the stand-in keeps refusing a teammate whatever the
+  // product does with its guardian-only guards.
+  routes.get(path, async (c) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "guardian only" }, 403);
+    return c.json({ ok: true });
+  });
   return { routes, actions: [] };
 }
 
