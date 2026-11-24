@@ -10,7 +10,11 @@ import type { AppAccessMode, InstalledAppCard } from "@rome/api-types/apps";
 import { z } from "zod";
 import type { DrizzleDb } from "../db/index.js";
 import { agentToolsOf, type ToolOutcome, toolError } from "./actions/agent-tool.js";
-import { type AppPermissionsSetting, withAppAccess } from "./app-permissions.js";
+import {
+  type AppPermissionsSetting,
+  DEFAULT_APP_PERMISSIONS_SETTING,
+  withAppAccess,
+} from "./app-permissions.js";
 import type { AppCatalog } from "./catalog.js";
 import { type AppManager, AppManagerError } from "./manager.js";
 import type { PublishInstalledAppOutcome } from "./publish.js";
@@ -34,11 +38,12 @@ export interface AppToolDeps {
   db: DrizzleDb;
   /** Publishes an installed app, as `POST /api/apps/:appId/publish` does. */
   publish: (appId: string) => Promise<PublishInstalledAppOutcome>;
-  /** Who besides the guardian may open each app (`/api/public-access`). */
-  appAccess: {
-    load: () => Promise<AppPermissionsSetting>;
-    save: (setting: AppPermissionsSetting) => Promise<void>;
-  };
+  /** Replaces one app's access in who besides the guardian may open each app
+   *  (`/api/public-access`), keeping every other app's. */
+  changeAppAccess: (
+    appId: string,
+    access: { mode: AppAccessMode; emails: readonly string[] },
+  ) => AppPermissionsSetting;
   /** The instance's public origin, which a share link starts with; null when unknown. */
   publicOrigin: () => string | null;
 }
@@ -214,7 +219,7 @@ const ACCESS_MODE: Record<(typeof ACCESS)[number], AppAccessMode> = {
 export const shareApp = agentTool({
   name: "system:share_app",
   description:
-    "Share an app with people besides the guardian, or stop sharing it: anyone with its link, or only visitors whose Rome Cloud emails are listed, or the guardian alone. It answers with the link to send them. Use it when the guardian asks to share an app, let someone open or use it, make it public, or make it private again. Only an app with a page can be shared. Only in the guardian's private chat, in a turn their own message started. Find the app's id with system:read_apps",
+    "Share an app with people besides the guardian, or stop sharing it: anyone with its link, or only visitors whose Rome Cloud emails are listed, or the guardian alone. It answers with the link to send them, or says this Rome has no public address. Use it when the guardian asks to share an app, let someone open or use it, make it public, or make it private again. Only an app with a page can be shared. The guardian approves on a card any change that lets more people open the app; narrowing who may open it needs none. Only in the guardian's private chat, in a turn their own message started. Find the app's id with system:read_apps",
   sideEffects: "write",
   input: z.object({
     appId,
@@ -230,6 +235,25 @@ export const shareApp = agentTool({
         "For listed_emails: every Rome Cloud email that may open the app. It replaces the list the app had.",
       ),
   }),
+  // A card only for a change that lets someone open the app who could not
+  // before. Shown to the guardian alone, so it names the app and the emails.
+  approval: async (input, { deps }) => {
+    const id = input.appId.trim();
+    const app = (await deps.apps()).find((a) => a.id === id);
+    if (!app?.canManagePublicAccess) return undefined;
+    const mode = ACCESS_MODE[input.access];
+    const emails = validEmails(id, mode, input.emails);
+    if (!widens(app, mode, emails)) return undefined;
+    return mode === "public"
+      ? {
+          title: `Make ${app.displayName} public`,
+          summary: `Anyone with the link can open ${app.displayName} and use what it serves, without signing in.`,
+        }
+      : {
+          title: `Share ${app.displayName}`,
+          summary: `${emails.join(", ")} can open ${app.displayName} and use what it serves, after signing in with Rome Cloud.`,
+        };
+  },
   run: async (input, { deps }) => {
     const id = input.appId.trim();
     const app = (await deps.apps()).find((a) => a.id === id);
@@ -238,31 +262,50 @@ export const shareApp = agentTool({
       return toolError(`${app.displayName} has no page to open, so it cannot be shared.`);
     }
     const mode = ACCESS_MODE[input.access];
-    const setting = withAppAccess(await deps.appAccess.load(), app.id, {
-      mode,
-      emails: input.emails ?? [],
-    });
-    const emails = setting.cloudEmailAccess[app.id] ?? [];
+    const emails = validEmails(app.id, mode, input.emails);
     if (mode === "cloud-email" && emails.length === 0) {
       return toolError(
         "Pass at least one valid Rome Cloud email in emails, or choose anyone_with_link.",
       );
     }
-    await deps.appAccess.save(setting);
+    deps.changeAppAccess(app.id, { mode, emails });
     const origin = deps.publicOrigin();
+    // The page's share link is the standalone route, which opens without the
+    // dashboard around the app. Without a public address nobody else can
+    // open it, and the page offers no link either.
+    const shared = mode !== "private" && app.fullHref;
     return {
       appId: app.id,
       name: app.displayName,
       access: input.access,
       ...(mode === "cloud-email" ? { emails } : {}),
-      // The page's share link is the standalone route, which opens without the
-      // dashboard around the app.
-      ...(mode !== "private" && app.fullHref
-        ? { link: origin ? `${origin}${app.fullHref}` : app.fullHref }
+      ...(shared && origin ? { link: `${origin}${app.fullHref}` } : {}),
+      ...(shared && !origin
+        ? {
+            note: "This Rome has no public address, so there is no link to send and no one else can open the app yet. Tell the guardian.",
+          }
         : {}),
     };
   },
 });
+
+/** The emails a change to listed_emails keeps, normalized as they are stored. */
+function validEmails(appId: string, mode: AppAccessMode, emails: string[] | undefined): string[] {
+  if (mode !== "cloud-email") return [];
+  return (
+    withAppAccess(DEFAULT_APP_PERMISSIONS_SETTING, appId, { mode, emails: emails ?? [] })
+      .cloudEmailAccess[appId] ?? []
+  );
+}
+
+/** Whether the change lets someone open the app who could not before. */
+function widens(app: InstalledAppCard, mode: AppAccessMode, emails: string[]): boolean {
+  if (mode === "private" || app.accessMode === "public") return false;
+  if (mode === "public") return true;
+  if (app.accessMode !== "cloud-email") return emails.length > 0;
+  const before = new Set(app.cloudAllowedEmails);
+  return emails.some((email) => !before.has(email));
+}
 
 /** The Apps page's agent tools. */
 export const appTools = [readApps, searchAppStore, manageApp, publishApp, shareApp];

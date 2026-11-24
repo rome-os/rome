@@ -137,6 +137,39 @@ export async function saveAppPermissionsSetting(
   permissions.replace(appPermissions(setting));
 }
 
+/**
+ * Replaces one app's access in the stored setting and hands the result to
+ * Access. The read and the write run in one transaction with no await
+ * between them, so a change to another app made meanwhile is kept.
+ */
+export function changeAppAccess(
+  db: DrizzleDb,
+  permissions: Permissions,
+  appId: string,
+  access: { mode: AppAccessMode; emails?: readonly string[] },
+): AppPermissionsSetting {
+  const setting = db.transaction((tx) => {
+    const row = tx
+      .select()
+      .from(settings)
+      .where(eq(settings.key, APP_PERMISSIONS_SETTING_KEY))
+      .get();
+    const next = withAppAccess(
+      row?.value ? normalizeAppPermissionsSetting(row.value) : DEFAULT_APP_PERMISSIONS_SETTING,
+      appId,
+      access,
+    );
+    const now = new Date();
+    tx.insert(settings)
+      .values({ key: APP_PERMISSIONS_SETTING_KEY, value: next, updatedAt: now })
+      .onConflictDoUpdate({ target: settings.key, set: { value: next, updatedAt: now } })
+      .run();
+    return next;
+  });
+  permissions.replace(appPermissions(setting));
+  return setting;
+}
+
 /** Loads the stored setting into Access at startup. */
 export async function loadAppPermissions(db: DrizzleDb, permissions: Permissions): Promise<void> {
   permissions.replace(appPermissions(await loadAppPermissionsSetting(db)));

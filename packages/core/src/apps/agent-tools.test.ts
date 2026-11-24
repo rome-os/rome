@@ -10,7 +10,7 @@ import {
   searchAppStore,
   shareApp,
 } from "./agent-tools.js";
-import type { AppPermissionsSetting } from "./app-permissions.js";
+import { type AppPermissionsSetting, withAppAccess } from "./app-permissions.js";
 import type { AppCatalog } from "./catalog.js";
 import { AppManagerError, type InstallResult } from "./manager.js";
 import type { AppStoreListing } from "./store-service.js";
@@ -138,8 +138,9 @@ function operations(overrides: Partial<AppToolDeps> = {}) {
       },
     })),
   };
-  const save = rs.fn(async (next: AppPermissionsSetting) => {
-    setting = next;
+  const save = rs.fn((appId: string, access: Parameters<AppToolDeps["changeAppAccess"]>[1]) => {
+    setting = withAppAccess(setting, appId, access);
+    return setting;
   });
   const deps: AppToolDeps = {
     apps: async () => [notes, digest],
@@ -162,7 +163,7 @@ function operations(overrides: Partial<AppToolDeps> = {}) {
       httpStatus: 404 as const,
       error: "",
     })),
-    appAccess: { load: async () => setting, save },
+    changeAppAccess: save,
     publicOrigin: () => "https://ada.romeos.cc",
     ...overrides,
   };
@@ -546,11 +547,64 @@ describe("sharing an app", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("answers with the link's path where Rome has no public origin", async () => {
+  it("answers no link, and says why, where Rome has no public address", async () => {
     const { ops } = operations({ publicOrigin: () => null });
 
-    expect(await ops.share({ appId: "notes", access: "anyone_with_link" })).toMatchObject({
-      data: { link: "/full/apps/notes" },
+    const result = await ops.share({ appId: "notes", access: "anyone_with_link" });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      data: { note: expect.stringContaining("no public address") },
     });
+    expect((result as { data: object }).data).not.toHaveProperty("link");
+  });
+
+  it("asks the guardian to approve making an app public, naming it", async () => {
+    const { ops } = operations();
+
+    expect(await ops.approval(shareApp, { appId: "notes", access: "anyone_with_link" })).toEqual({
+      kind: "generic",
+      title: "Make Notes public",
+      summary: expect.stringContaining("Anyone with the link can open Notes"),
+    });
+  });
+
+  it("asks the guardian to approve each email that could not open the app before", async () => {
+    const { ops } = operations();
+
+    expect(
+      await ops.approval(shareApp, {
+        appId: "notes",
+        access: "listed_emails",
+        emails: ["ada@example.com", "Bob@Example.com"],
+      }),
+    ).toEqual({
+      kind: "generic",
+      title: "Share Notes",
+      summary: expect.stringContaining("ada@example.com, bob@example.com can open Notes"),
+    });
+  });
+
+  it("asks nothing for a change that lets no one new open the app", async () => {
+    const { ops } = operations();
+
+    for (const input of [
+      { appId: "notes", access: "private" },
+      { appId: "notes", access: "listed_emails", emails: ["ada@example.com"] },
+      { appId: "notes", access: "listed_emails", emails: ["x"] },
+      { appId: "digest", access: "anyone_with_link" },
+    ]) {
+      expect(await ops.approval(shareApp, input)).toBeUndefined();
+    }
+    const publicApp = operations({
+      apps: async () => [{ ...notes, accessMode: "public", cloudAllowedEmails: [] }],
+    }).ops;
+    expect(
+      await publicApp.approval(shareApp, {
+        appId: "notes",
+        access: "listed_emails",
+        emails: ["bob@example.com"],
+      }),
+    ).toBeUndefined();
   });
 });

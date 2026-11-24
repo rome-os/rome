@@ -334,11 +334,7 @@ import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
 import { Permissions } from "./access/permissions.js";
-import {
-  loadAppPermissions,
-  loadAppPermissionsSetting,
-  saveAppPermissionsSetting,
-} from "./apps/app-permissions.js";
+import { changeAppAccess, loadAppPermissions } from "./apps/app-permissions.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { DashboardAccessStore } from "./access/dashboard-access-store.js";
 import {
@@ -1954,10 +1950,7 @@ async function main() {
       catalog: appCatalog,
       db,
       publish: (appId) => publishInstalledApp(appCatalog, appId),
-      appAccess: {
-        load: () => loadAppPermissionsSetting(db),
-        save: (setting) => saveAppPermissionsSetting(db, permissions, setting),
-      },
+      changeAppAccess: (appId, access) => changeAppAccess(db, permissions, appId, access),
       publicOrigin: () => getConfiguredInstanceOrigin(),
     },
     // The Routines page's records, and the rules a changed routine meets as a new one does.
