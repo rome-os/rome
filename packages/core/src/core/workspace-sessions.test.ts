@@ -47,6 +47,25 @@ describe("workspaceSessions", () => {
     ]);
   });
 
+  it("opens the account's session on the model it is given, at its effort", async () => {
+    let asked: unknown;
+    const sessions = {
+      async open(_key, opening) {
+        asked = { selectionId: opening?.selectionId, reasoningEffort: opening?.reasoningEffort };
+        return {} as AgentSession;
+      },
+    } as Sessions;
+    const open = workspaceSessions(sessions, serves, () => ({
+      selectionId: "claude-opus-5-5",
+      reasoningEffort: "low",
+    }));
+    await open.open(
+      { agentName: "core:concierge", channelThreadKey: "slack_app:C1" },
+      mention("C1"),
+    );
+    expect(asked).toEqual({ selectionId: "claude-opus-5-5", reasoningEffort: "low" });
+  });
+
   it("opens a chat of any other account in its own session", async () => {
     const { sessions, opened } = recording();
     const open = workspaceSessions(sessions, serves);

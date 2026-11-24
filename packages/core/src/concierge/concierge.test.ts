@@ -325,6 +325,8 @@ function setup(
     webchatRepo: {
       setAskingDevice: rs.fn(async () => {}),
       getSession: async (id: string) => sessions.get(id) ?? null,
+      findChatIdByAddress: (channel: string, threadId: string) =>
+        storedChats.findChatIdByAddress(channel, threadId),
       listSessions: async () => [...sessions.values()],
       updateSessionLargeModelSelection: rs.fn(
         async (id: string, largeModelSelection: string, largeModelSelectionBy: string) => {

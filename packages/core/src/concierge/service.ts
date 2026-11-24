@@ -488,7 +488,7 @@ export class ConciergeService {
     const existing = await this.deps.webchatRepo.getSession(id);
     if (existing) {
       if (!existing.largeModelSelection) {
-        const picked = this.pickModel();
+        const picked = this.strongModel();
         if (picked) {
           await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked, "auto");
         }
@@ -510,7 +510,7 @@ export class ConciergeService {
       MAIN_CHAT_NAME,
       undefined,
       undefined,
-      this.pickModel(),
+      this.strongModel(),
       undefined,
       CONCIERGE_AGENT_ID,
       "webchat",
@@ -704,7 +704,7 @@ export class ConciergeService {
       trimmed,
       undefined,
       undefined,
-      main?.largeModelSelection ?? this.pickModel(),
+      main?.largeModelSelection ?? this.strongModel(),
       undefined,
       CONCIERGE_AGENT_ID,
       "webchat",
@@ -880,7 +880,10 @@ export class ConciergeService {
   // question (docs/concierge-eval.md#baseline). An Anthropic-compatible
   // provider serves its own models through the tier mappings, so it keeps the
   // tier's choice, as does a Rome with no default yet.
-  private pickModel(): ModelSelectionId | null {
+  /** The model a Concierge chat Rome picks for runs on: the default
+   *  provider's strong one, or null when no default is set or the login
+   *  takes no exact selection. */
+  strongModel(): ModelSelectionId | null {
     const provider = this.defaultModelProvider();
     if (!provider) return null;
     const { anthropic: claude, openai: codex } = this.deps.accounts.read();

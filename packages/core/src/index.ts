@@ -1701,9 +1701,13 @@ async function main() {
   };
   // Inbound conversations open their sessions here, so every chat of an
   // account that serves its workspace shares the account's one session.
+  // That session runs the Concierge on the model a Concierge chat Rome picks
+  // runs on, the default provider's strong one (Opus 5.5 on Anthropic), at
+  // low effort.
   const conversationSessions = workspaceSessions(
     agentSessionManager,
     servesWorkspaceIn(connectionRegistry),
+    () => ({ selectionId: concierge.strongModel(), reasoningEffort: "low" }),
   );
   const agentSessionBridge = new AgentSessionBridge(
     conversationSessions,
