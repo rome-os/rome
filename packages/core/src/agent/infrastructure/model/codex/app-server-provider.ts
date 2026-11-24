@@ -107,7 +107,11 @@ import {
 } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./tool-result-error.js";
 import type { RomeToolResult } from "../../../domain/rome-tools.js";
-import { computerToolTraceInput, isComputerTool } from "../../../domain/computer-use.js";
+import {
+  computerToolTraceInput,
+  computerToolTraceOutput,
+  isComputerTool,
+} from "../../../domain/computer-use.js";
 import { codexStop } from "./stop.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "./cli-auth.js";
@@ -870,12 +874,7 @@ export class CodexAppServerProvider implements ModelProvider {
         toolUseId: item.id,
         tool,
         output: isComputerTool(tool)
-          ? {
-              content: [
-                { type: "text", text: "Private computer-use result omitted from activity." },
-              ],
-              ...(dynamicOutput?.isError === undefined ? {} : { isError: dynamicOutput.isError }),
-            }
+          ? computerToolTraceOutput(dynamicOutput?.isError)
           : isDynamic
             ? (dynamicOutput ?? rec.contentItems ?? rec.error ?? item)
             : isMcp

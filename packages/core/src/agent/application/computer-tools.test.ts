@@ -33,6 +33,10 @@ describe("computer tools", () => {
     expect((await tools[0].handler({})).isError).toBe(true);
     expect(run).not.toHaveBeenCalled();
     expect(computerTools(port, { ...turn, actions: [] })).toEqual([]);
+    expect(computerTools(port, { ...turn, isSubagent: true })).toEqual([]);
+    expect(
+      computerTools(port, { ...turn, isSubagent: true, actions: ["core:computer_use"] }),
+    ).toEqual([]);
   });
 
   it("does not turn a phone device read permission into computer input permission", () => {

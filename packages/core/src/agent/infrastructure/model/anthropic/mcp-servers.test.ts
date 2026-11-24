@@ -186,7 +186,7 @@ describe("buildAnthropicMcpServers", () => {
               },
             ]
           : [],
-      callTool: async () => ({ content: content as never, redactFromTrace: true }),
+      callTool: async () => ({ content: content as never }),
     };
     buildAnthropicMcpServers({ tools });
     const config = createSdkMcpServerMock.mock.calls.find(

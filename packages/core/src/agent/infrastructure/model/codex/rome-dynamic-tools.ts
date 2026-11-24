@@ -6,6 +6,7 @@ import {
   type RomeToolResult,
   type RomeTools,
 } from "../../../domain/rome-tools.js";
+import { computerToolTraceOutput, isComputerTool } from "../../../domain/computer-use.js";
 import type { DynamicToolCallResponse, DynamicToolSpec } from "./app-server-protocol.js";
 
 export interface RomeDynamicToolCallResult {
@@ -109,7 +110,12 @@ export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
       if (!args) return errorResult(`Invalid arguments for dynamic tool: ${name}`);
       try {
         const result = await tools.callTool(group, name, args, context);
-        return { response: toDynamicResponse(result), traceOutput: romeToolTraceOutput(result) };
+        return {
+          response: toDynamicResponse(result),
+          traceOutput: isComputerTool(name)
+            ? computerToolTraceOutput(result.isError)
+            : romeToolTraceOutput(result),
+        };
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : String(err));
       }

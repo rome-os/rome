@@ -22,14 +22,13 @@ function fakeTools(definitions: Partial<Record<RomeToolGroup, readonly string[]>
 }
 
 describe("Rome dynamic tools", () => {
-  it("delivers image blocks to the model while removing private bytes from activity", async () => {
+  it("delivers image blocks to the model while redacting computer-use outputs from activity", async () => {
     const romeTools = fakeTools({ computer: ["computer_observe"] });
     romeTools.callTool = async () => ({
       content: [
         { type: "text", text: "private AX contents" },
         { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
       ],
-      redactFromTrace: true,
     });
     const result = await createRomeDynamicTools(romeTools).callTool("computer_observe", {});
     expect(result.response).toEqual({
@@ -41,6 +40,19 @@ describe("Rome dynamic tools", () => {
     });
     expect(JSON.stringify(result.traceOutput)).not.toContain("aW1hZ2U=");
     expect(JSON.stringify(result.traceOutput)).not.toContain("private AX contents");
+  });
+
+  it("omits raw image bytes from activity for non-computer tools while preserving text", async () => {
+    const romeTools = fakeTools({ actions: ["execute_action"] });
+    romeTools.callTool = async () => ({
+      content: [
+        { type: "text", text: "public summary" },
+        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+      ],
+    });
+    const result = await createRomeDynamicTools(romeTools).callTool("execute_action", {});
+    expect(JSON.stringify(result.traceOutput)).not.toContain("aW1hZ2U=");
+    expect(JSON.stringify(result.traceOutput)).toContain("public summary");
   });
   it("flattens every tool group and preserves schemas, errors, trace output, and call ids", async () => {
     const romeTools = fakeTools({

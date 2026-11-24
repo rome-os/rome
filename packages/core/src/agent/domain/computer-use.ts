@@ -52,3 +52,11 @@ export function isComputerTool(name: string): boolean {
 export function computerToolTraceInput(name: string, input: unknown): unknown {
   return isComputerTool(name) ? { privateComputerUse: true } : input;
 }
+
+/** Redacted activity-trace placeholder for computer-use tool results. */
+export function computerToolTraceOutput(isError?: boolean): RomeToolResult {
+  return {
+    content: [{ type: "text", text: "Private computer-use result omitted from activity." }],
+    ...(isError === undefined ? {} : { isError }),
+  };
+}

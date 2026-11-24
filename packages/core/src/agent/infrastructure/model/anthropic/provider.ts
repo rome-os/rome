@@ -26,7 +26,11 @@ import type {
 } from "../../../domain/model-port.js";
 import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
-import { computerToolTraceInput, isComputerTool } from "../../../domain/computer-use.js";
+import {
+  computerToolTraceInput,
+  computerToolTraceOutput,
+  isComputerTool,
+} from "../../../domain/computer-use.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
 import { anthropicStop, claudeStoppedTurnResult } from "./stop.js";
@@ -390,10 +394,7 @@ function extractToolResultMessages(
   const contentResults = content.filter(isToolResultParam).map((block): ModelTurnActivityEvent => {
     const tool = normalizeToolName(toolUseNames.get(block.tool_use_id) ?? "unknown");
     const output = isComputerTool(tool)
-      ? {
-          content: [{ type: "text", text: "Private computer-use result omitted from activity." }],
-          isError: block.is_error === true,
-        }
+      ? computerToolTraceOutput(block.is_error === true)
       : typeof block.is_error === "boolean"
         ? { content: block.content, isError: block.is_error }
         : block.content;
@@ -416,18 +417,13 @@ function extractToolResultMessages(
   if (parentToolUseId && "tool_use_result" in message) {
     // `tool_use_result` has no documented failure signal, so this result
     // leaves `isError` unset ("the producer cannot tell").
+    const tool = normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown");
     return [
       {
         type: "tool_result",
         toolUseId: parentToolUseId,
-        tool: normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown"),
-        output: isComputerTool(normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown"))
-          ? {
-              content: [
-                { type: "text", text: "Private computer-use result omitted from activity." },
-              ],
-            }
-          : message.tool_use_result,
+        tool,
+        output: isComputerTool(tool) ? computerToolTraceOutput() : message.tool_use_result,
         endedAt: new Date().toISOString(),
       },
     ];

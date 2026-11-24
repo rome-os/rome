@@ -52,20 +52,16 @@ export type RomeToolContent = RomeToolText | RomeToolImage;
 export interface RomeToolResult {
   content: RomeToolText[] | [RomeToolText, ...RomeToolContent[]];
   isError?: boolean;
-  /** The model receives the result, but Rome's activity trace omits its private contents. */
-  redactFromTrace?: boolean;
 }
 
 /** Image bytes belong to model input, never the persisted activity trace. */
 export function romeToolTraceOutput(result: RomeToolResult): RomeToolResult {
   return {
-    content: result.redactFromTrace
-      ? [{ type: "text", text: "Private computer-use result omitted from activity." }]
-      : result.content.map((item) =>
-          item.type === "text"
-            ? item
-            : { type: "text", text: `[${item.mimeType} image omitted from activity]` },
-        ),
+    content: result.content.map((item) =>
+      item.type === "text"
+        ? item
+        : { type: "text", text: `[${item.mimeType} image omitted from activity]` },
+    ),
     ...(result.isError === undefined ? {} : { isError: result.isError }),
   };
 }
