@@ -96,6 +96,7 @@ import {
 } from "../../core/model-selector.js";
 import {
   declaresComputerUse,
+  readByActorAlone,
   resolveAgentPolicy,
   type ModelSelection,
   type ModelSelectionId,
@@ -5520,10 +5521,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
+  // The devices the signed-in person may let the agent use from this chat: the
+  // guardian in a chat only they read, or a dashboard admin in a chat only
+  // they read while they are on the team.
   const computerUseTargets = async (c: Context) => {
     const actor = await currentSessionActor();
-    if (actor?.kind !== "guardian" || actor.via !== "cookie" || cameThroughWidgetEvent(c.env))
-      return [];
+    const signedIn =
+      (actor?.kind === "guardian" && actor.via === "cookie") || actor?.kind === "visitor";
+    if (!actor || !signedIn || cameThroughWidgetEvent(c.env)) return [];
     const sessionId = c.req.param("id");
     if (!sessionId) return [];
     const session = await deps.webchatRepo.getSession(sessionId);
@@ -5532,21 +5537,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.type !== "webchat" ||
       session.parentSessionId ||
       session.archivedAt ||
-      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian"))
+      !(await canOpenChat(
+        (id) => deps.webchatRepo.getSession(id),
+        sessionId,
+        sessionOwnerKey(actor),
+      ))
     )
       return [];
     const agent = deps.agentLoader.find(session.agentName ?? "main");
     if (!declaresComputerUse(agent?.definition.actions ?? [])) return [];
-    if (
-      (await deps.placeAudience({
-        channel: "webchat",
-        threadId: sessionId,
-        romeSessionId: sessionId,
-        channelUserId: actor.userId,
-        threadType: "private",
-      })) !== "private"
-    )
-      return [];
+    const audience = await deps.placeAudience({
+      channel: "webchat",
+      threadId: sessionId,
+      romeSessionId: sessionId,
+      threadType: "private",
+    });
+    if (!readByActorAlone(actor, audience)) return [];
     const targets: Array<{
       deviceId: string;
       name: string;
@@ -5565,7 +5571,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (targets.length === 0) return [];
     return targets.map(({ scope, ...target }) => ({
       ...target,
-      approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
+      // Each person on the team approves a device for themselves.
+      approvalKey: computerUseApprovalKey(
+        actor.kind === "guardian"
+          ? actor
+          : { userId: `visitor:${actor.accountId}`, accountId: actor.accountId },
+        target.deviceId,
+        scope,
+      ),
     }));
   };
 

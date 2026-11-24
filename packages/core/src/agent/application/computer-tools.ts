@@ -170,7 +170,7 @@ export function computerTools(computer: AgentComputerUse | undefined, turn: Turn
   return [
     tool(
       "status",
-      "List authorized computers or inspect a device's helper. If the message has approvedDeviceId, use that exact target. Otherwise, for this computer, resolve askingDeviceId from the authorized list. Call computer_discover on the selected device before deciding which capabilities to use. Ask when the target is ambiguous. Native input belongs to the current private guardian turn; end or cancel bindings when finished.",
+      "List authorized computers or inspect a device's helper. If the message has approvedDeviceId, use that exact target. Otherwise, for this computer, resolve askingDeviceId from the authorized list. Call computer_discover on the selected device before deciding which capabilities to use. Ask when the target is ambiguous. Native input belongs to the current turn, which only its person reads; end or cancel bindings when finished.",
       { deviceId: id },
     ),
     tool(

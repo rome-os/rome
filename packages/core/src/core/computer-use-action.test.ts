@@ -6,7 +6,7 @@ import { registerComputerUseAction } from "./computer-use-action.js";
 function setup() {
   let action: Action | undefined;
   const devices = { listDevices: rs.fn(async () => [{ id: "test-device" }]) };
-  const audience = rs.fn(async (): Promise<"private" | "shared"> => "private");
+  const audience = rs.fn(async (): Promise<"private" | "admin" | "shared"> => "private");
   registerComputerUseAction(
     {
       register: (value) => {
@@ -57,5 +57,23 @@ describe("core:computer_use action", () => {
       status: "error",
       error: "computer_use_private_guardian_only",
     });
+  });
+
+  it("lists authorized computers for a dashboard admin's turn in a chat only they read", async () => {
+    const f = setup();
+    f.audience.mockResolvedValue("admin");
+    const admin = { kind: "visitor" as const, accountId: "ada", email: "ada@example.test" };
+    expect(await f.run({ actor: admin, audience: "admin" })).toMatchObject({ status: "ok" });
+  });
+
+  it("refuses a dashboard admin outside a chat only they read, or once off the team", async () => {
+    const f = setup();
+    const admin = { kind: "visitor" as const, accountId: "ada", email: "ada@example.test" };
+    f.audience.mockResolvedValue("private");
+    expect(await f.run({ actor: admin, audience: "private" })).toMatchObject({ status: "error" });
+    // Off the team, the chat reads as shared.
+    f.audience.mockResolvedValue("shared");
+    expect(await f.run({ actor: admin, audience: "admin" })).toMatchObject({ status: "error" });
+    expect(f.devices.listDevices).not.toHaveBeenCalled();
   });
 });

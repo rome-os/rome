@@ -1,4 +1,5 @@
 import type { RomeToolResult } from "./rome-tools.js";
+import { readByActorAlone } from "./turn-audience.js";
 import type { TurnFacts } from "./turn-facts.js";
 
 export const COMPUTER_USE_ACTION = "core:computer_use";
@@ -44,8 +45,7 @@ export function permitsComputerUse(turn: TurnFacts): boolean {
   return (
     declaresComputerUse(turn.actions, turn.withheldActions) &&
     !turn.isSubagent &&
-    turn.actor()?.kind === "guardian" &&
-    turn.audience() === "private" &&
+    readByActorAlone(turn.actor(), turn.audience()) &&
     turn.live?.() === true
   );
 }

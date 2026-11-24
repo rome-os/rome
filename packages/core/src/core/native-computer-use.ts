@@ -683,7 +683,7 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
       if (!(await admittedHere()))
         return error(
           "computer_use_denied",
-          "Computer use requires an authorized live guardian turn in a private chat.",
+          "Computer use requires an authorized live turn in a chat only its person reads.",
         );
       const parsed = schemas[operation].safeParse(input);
       if (!parsed.success)

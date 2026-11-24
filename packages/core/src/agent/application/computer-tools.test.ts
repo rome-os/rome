@@ -49,6 +49,18 @@ describe("computer tools", () => {
     );
   });
 
+  it("permits a dashboard admin only in a turn only they read", () => {
+    const admin = { kind: "visitor", accountId: "ada" };
+    expect(permitsComputerUse({ ...turn, actor: () => admin, audience: () => "admin" })).toBe(true);
+    expect(permitsComputerUse({ ...turn, actor: () => admin, audience: () => "private" })).toBe(
+      false,
+    );
+    expect(permitsComputerUse({ ...turn, actor: () => admin, audience: () => "shared" })).toBe(
+      false,
+    );
+    expect(permitsComputerUse({ ...turn, audience: () => "admin" })).toBe(false);
+  });
+
   it("honors place-level withheldActions for wildcard and explicit computer-use grants", async () => {
     const run = rs.fn(async () => ({ content: [{ type: "text" as const, text: "ok" }] }));
     const port = { permits: permitsComputerUse, run };

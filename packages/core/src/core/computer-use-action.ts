@@ -1,4 +1,4 @@
-import { COMPUTER_USE_ACTION } from "../agent/index.js";
+import { COMPUTER_USE_ACTION, readByActorAlone } from "../agent/index.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { ThreadContext } from "./types.js";
@@ -15,9 +15,9 @@ export function registerComputerUseAction(
       type: "system",
       description:
         "List the guardian's authorized computers. Allowing this action also enables the " +
-        "computer_* tools to observe and control supported windows in a private guardian " +
-        "chat. Use those tools for window discovery, binding, observation, action, verification " +
-        "and cancellation. Execution never falls back to shell commands.",
+        "computer_* tools to observe and control supported windows in a chat only the " +
+        "person asking reads, the guardian or a dashboard admin. Use those tools for window " +
+        "discovery, binding, observation, action, verification and cancellation. Execution never falls back to shell commands.",
       complexity: "simple",
       speed: "fast",
       reliability: "medium",
@@ -26,10 +26,12 @@ export function registerComputerUseAction(
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     execute: async () => {
       const turn = actionExecutionContext.getStore();
+      // The chat is read again, so a dashboard admin taken off the team, or a
+      // chat opened to others, ends the turn's reach between the two checks.
       const admitted = async () =>
-        turn?.actor?.kind === "guardian" &&
-        turn.audience === "private" &&
-        (await audience(turn.channelContext)) === "private";
+        !!turn?.audience &&
+        readByActorAlone(turn.actor, turn.audience) &&
+        (await audience(turn.channelContext)) === turn.audience;
       if (!(await admitted())) {
         return { status: "error", error: "computer_use_private_guardian_only" };
       }

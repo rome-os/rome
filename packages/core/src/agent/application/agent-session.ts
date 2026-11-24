@@ -57,7 +57,7 @@ import {
   type TurnActor,
   sameActor,
 } from "../domain/turn-facts.js";
-import { type Audience, turnAudience } from "../domain/turn-audience.js";
+import { type Audience, readByActorAlone, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -4186,14 +4186,15 @@ class AgentSessionImpl implements AgentSession {
         options?.initiatedBy === "system" ||
         options?.lifecycleParent !== undefined ||
         options?.reportedTask !== undefined ||
-        options?.actor?.kind !== "guardian" ||
-        audience !== "private" ||
+        !readByActorAlone(options?.actor, audience) ||
         typeof grant.deviceId !== "string" ||
         !grant.deviceId ||
         !Number.isSafeInteger(grant.expiresAt) ||
         grant.expiresAt <= Date.now())
     )
-      throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
+      throw new Error(
+        "Computer use requires an unexpired grant for a turn only its person on the team reads.",
+      );
     if (grant && (!input.inputId || input.inputId.trim().length === 0)) {
       throw new Error("A computer-use grant requires an inputId.");
     }

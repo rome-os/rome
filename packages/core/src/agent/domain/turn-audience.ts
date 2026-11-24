@@ -80,3 +80,14 @@ export function narrowerAudience(a: Audience, b: Audience | undefined): Audience
   if (a === "shared" || b === "shared") return "shared";
   return a === "admin" || b === "admin" ? "admin" : "private";
 }
+
+/**
+ * Whether only `actor` reads a turn of `audience`: the guardian in a private
+ * one, or a dashboard admin, a visitor on the team, in an `admin` one.
+ */
+export function readByActorAlone(actor: { kind: string } | undefined, audience: Audience): boolean {
+  return (
+    (actor?.kind === "guardian" && audience === "private") ||
+    (actor?.kind === "visitor" && audience === "admin")
+  );
+}

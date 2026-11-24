@@ -248,7 +248,7 @@ it.each([
           { inputId: "no-system", prompt: "no system grants" },
           { actor: guardian, priority: "after", initiatedBy: "system", computerUseGrant: grant },
         ),
-      ).toThrow("requires an unexpired grant for a private guardian turn");
+      ).toThrow("requires an unexpired grant for a turn only its person on the team reads");
       expect(() =>
         session.submit(
           { prompt: "missing inputId" },
@@ -393,7 +393,7 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
         { inputId: "expired-grant", prompt: "expired grant" },
         { actor: guardian, priority: "after", computerUseGrant: expiredGrant },
       ),
-    ).toThrow("requires an unexpired grant for a private guardian turn");
+    ).toThrow("requires an unexpired grant for a turn only its person on the team reads");
     expect(inUse(expired)).toBe(false);
 
     const nonPrivate = await openSession();
@@ -408,7 +408,7 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
           computerUseGrant: validGrant,
         },
       ),
-    ).toThrow("requires an unexpired grant for a private guardian turn");
+    ).toThrow("requires an unexpired grant for a turn only its person on the team reads");
     expect(inUse(nonPrivate)).toBe(false);
 
     const missingInputId = await openSession();

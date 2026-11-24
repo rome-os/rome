@@ -268,6 +268,7 @@ export {
   type Audience,
   messagingAudience,
   narrowerAudience,
+  readByActorAlone,
   turnAudience,
 } from "./domain/turn-audience.js";
 export type { DeferTool } from "./application/ask-user-tools.js";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ThreadContext } from "@rome-os/app-runtime";
-import { narrowerAudience, turnAudience } from "./turn-audience.js";
+import { narrowerAudience, readByActorAlone, turnAudience } from "./turn-audience.js";
 
 const place = (overrides: Partial<ThreadContext>): ThreadContext => ({
   channel: "telegram",
@@ -129,5 +129,16 @@ describe("narrowerAudience", () => {
     expect(narrowerAudience("admin", "private")).toBe("admin");
     expect(narrowerAudience("private", "admin")).toBe("admin");
     expect(narrowerAudience("admin", "shared")).toBe("shared");
+  });
+});
+
+describe("readByActorAlone", () => {
+  it("is the guardian in a private turn, or a dashboard admin in an admin one", () => {
+    expect(readByActorAlone({ kind: "guardian" }, "private")).toBe(true);
+    expect(readByActorAlone({ kind: "visitor" }, "admin")).toBe(true);
+    expect(readByActorAlone({ kind: "guardian" }, "admin")).toBe(false);
+    expect(readByActorAlone({ kind: "visitor" }, "private")).toBe(false);
+    expect(readByActorAlone(undefined, "private")).toBe(false);
+    expect(readByActorAlone({ kind: "visitor" }, "shared")).toBe(false);
   });
 });

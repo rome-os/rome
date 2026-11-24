@@ -257,6 +257,48 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessageCount(triageId)).toBe(0);
   });
 
+  it("lets a dashboard admin approve a device for themselves from a chat only they read", async () => {
+    const agentLoader = new AgentLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
+    await agentLoader.loadAll(join(import.meta.dirname, "../../../agents"));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    // The admin's chat reads as theirs while they are on the team.
+    let audience: "admin" | "shared" = "admin";
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      agentLoader,
+      computerUseLocal: local,
+      placeAudience: async () => audience,
+    });
+    const admin = { kind: "visitor", accountId: "ada", email: "ada@example.test" } as const;
+    const guardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const as = (actor: typeof admin | typeof guardian, path: string, method = "GET") =>
+      runWithSessionActor(actor, () =>
+        app.request(`http://rome.test${path}`, {
+          method,
+          headers: { "content-type": "application/json", origin: "http://rome.test" },
+          ...(method === "POST" ? { body: JSON.stringify({ agentName: "core:concierge" }) } : {}),
+        }),
+      );
+    const { id } = (await (await as(admin, "/chat/sessions", "POST")).json()) as { id: string };
+    const route = `/chat/sessions/${id}/computer-use`;
+
+    const offered = await as(admin, route);
+    expect(offered.status).toBe(200);
+    expect(await offered.json()).toEqual({ ...local, persistentAccess: true });
+    expect((await as(admin, `${route}/${local.deviceId}`, "PUT")).status).toBe(204);
+    expect(await (await as(admin, route)).json()).toMatchObject({ authorized: true });
+    // The approval is the admin's own: the guardian's stays unset.
+    expect(
+      await deps.settingsRepo.get(computerUseApprovalKey(guardian, local.deviceId, "local")),
+    ).toBeNull();
+    expect((await as(admin, `${route}/${local.deviceId}`, "DELETE")).status).toBe(204);
+    expect(await (await as(admin, route)).json()).not.toHaveProperty("authorized");
+
+    audience = "shared";
+    expect((await as(admin, route)).status).toBe(404);
+    expect((await as(admin, `${route}/${local.deviceId}`, "PUT")).status).toBe(404);
+  });
+
   it("reuses one device approval across chats and derives short-lived authority only for eligible turns", async () => {
     rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
     const deviceId = "46569840-79c2-4fff-9f18-b1c86d3d1ec4";
@@ -390,7 +432,9 @@ describe("Webchat API", () => {
     const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
     const release = rs.fn();
     const submit = rs.fn(() => {
-      throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
+      throw new Error(
+        "Computer use requires an unexpired grant for a turn only its person on the team reads.",
+      );
     });
     rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
       sessionId: "computer-throw-session",
