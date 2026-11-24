@@ -1,2 +1,4 @@
 .state/
 .state-live/
+# Copies other than the default (tools/copy.sh).
+.state-*/

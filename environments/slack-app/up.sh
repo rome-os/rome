@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Starts the Slack app test environment and writes .state/env.json.
 #
-#   environments/slack-app/up.sh [--rome <ref>] [--rome-cloud <ref>] [--old-connections rome-a|rome-b]
+#   environments/slack-app/up.sh [--project <name>] [--port-base <port>] [--rome <ref>] [--rome-cloud <ref>]
+#                                [--cloud-only] [--old-connections rome-a|rome-b]
 #
+# --project     which copy: its compose project, state folder and image names
+#               (tools/copy.sh; default $SLACKENV_PROJECT, else slackenv)
+# --port-base   its host ports, base+0 to base+100 (default $SLACKENV_PORT_BASE,
+#               else 47100); a port another compose project publishes is refused
 # --rome        the rome commit the instances run (default origin/main)
 # --rome-cloud  the rome-cloud commit Rome Cloud and the relay run (default origin/main)
 # --cloud-only  start Rome Cloud, the relay and the fake Slack, without instances
@@ -19,7 +24,6 @@ set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROME_DIR="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
 ROME_CLOUD_DIR="${ROME_CLOUD_DIR:-$(dirname "$ROME_DIR")/rome-cloud}"
-STATE_DIR="$ENV_DIR/.state"
 ROME_REF=origin/main
 ROME_CLOUD_REF=origin/main
 CLOUD_ONLY=0
@@ -27,6 +31,14 @@ OLD_CONNECTIONS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --project)
+      SLACKENV_PROJECT="$2"
+      shift 2
+      ;;
+    --port-base)
+      SLACKENV_PORT_BASE="$2"
+      shift 2
+      ;;
     --rome)
       ROME_REF="$2"
       shift 2
@@ -49,7 +61,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,18p' "$0"
+      sed -n '2,24p' "$0"
       exit 0
       ;;
     *)
@@ -64,6 +76,12 @@ die() {
   printf '[slackenv] %s\n' "$*" >&2
   exit 1
 }
+
+# shellcheck source=tools/copy.sh
+. "$ENV_DIR/tools/copy.sh"
+PORT_BASE="${SLACKENV_PORT_BASE:-47100}"
+[[ "$PORT_BASE" =~ ^[0-9]+$ ]] && [ "$PORT_BASE" -ge 1024 ] && [ "$PORT_BASE" -le 65435 ] ||
+  die "the port base must be a number from 1024 to 65435: $PORT_BASE"
 
 # ----------------------------------------------------------------- commits
 # The environment runs only committed code: this folder must be clean, and
@@ -169,14 +187,19 @@ cat "$STATE_DIR/tls/tls.crt" ${SLACKENV_EXTRA_CA:+"$SLACKENV_EXTRA_CA"} >"$STATE
 chmod 644 "$STATE_DIR/tls/tls.key" # read by the fake Slack's container user; the key guards nothing outside this environment
 
 # ----------------------------------------------------------- configuration
-export SLACKENV_PROJECT="${SLACKENV_PROJECT:-slackenv}"
 export SLACKENV_NODE_IMAGE="${SLACKENV_NODE_IMAGE:-node:24-slim}"
 export SLACKENV_POSTGRES_IMAGE="${SLACKENV_POSTGRES_IMAGE:-postgres:16-alpine}"
 # The Playwright release rome pins (packages/web @playwright/test), and the
 # digest rome's CI pins for it.
 export SLACKENV_PLAYWRIGHT_VERSION="${SLACKENV_PLAYWRIGHT_VERSION:-1.62.1}"
 export SLACKENV_PLAYWRIGHT_IMAGE="${SLACKENV_PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e}"
-export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182 BROWSER_PORT=47190 MODEL_PROXY_HOST_PORT=47191 SLACK_GATEWAY_PORT=47192
+# Every host port is the base plus a fixed offset; the default base gives
+# 47100 (Rome Cloud), 47181/47182 (instances), 47190 (browser), 47191 (model
+# proxy control), 47192 (Worker), 47200 (fake Slack). Inside a forwarder's
+# namespace the same numbers name the same services, so each copy keeps the
+# one-address-everywhere rule with its own numbers.
+export PANTHEON_PORT=$PORT_BASE FAKE_SLACK_PORT=$((PORT_BASE + 100)) ROME_A_PORT=$((PORT_BASE + 81)) ROME_B_PORT=$((PORT_BASE + 82)) \
+  BROWSER_PORT=$((PORT_BASE + 90)) MODEL_PROXY_HOST_PORT=$((PORT_BASE + 91)) SLACK_GATEWAY_PORT=$((PORT_BASE + 92)) SLACKENV_PORT_BASE=$PORT_BASE
 export HOST_UID HOST_GID
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
@@ -190,7 +213,7 @@ RELAY_ORIGIN=http://relay:8787
 [ "$SLACK_GATEWAY" = on ] && RELAY_ORIGIN=https://relay.slackenv.test
 # Slack retries after about 0 s, 1 min and 5 min; shortened here (DIFFERENCES.md).
 export FAKE_SLACK_RETRY_DELAYS_MS="${FAKE_SLACK_RETRY_DELAYS_MS:-1000,10000,30000}"
-export ROME_IMAGE="${SLACKENV_ROME_IMAGE:-slackenv-rome:${ROME_SHA:0:12}}"
+export ROME_IMAGE="${SLACKENV_ROME_IMAGE:-$IMAGE_PREFIX-rome:${ROME_SHA:0:12}}"
 # Rome Cloud's one origin, on the host, in the browser and in every container.
 # With the Worker it is https, as in production: the Worker checks an
 # instance's token audience and its OAuth redirect against its https
@@ -208,7 +231,7 @@ CLOUD="$CLOUD_ORIGIN"
 
 # What compose interpolates, kept for ctl.sh and down.sh. The model credential
 # is left out: only `up` passes it, through this script's environment.
-for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE SLACKENV_PLAYWRIGHT_IMAGE \
+for v in SLACKENV_PROJECT SLACKENV_PORT_BASE IMAGE_PREFIX SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE SLACKENV_PLAYWRIGHT_IMAGE \
   SLACKENV_PLAYWRIGHT_VERSION HOST_UID HOST_GID ENV_DIR STATE_DIR \
   PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT MODEL_PROXY_HOST_PORT SLACK_GATEWAY_PORT SLACK_GATEWAY \
   CLOUD_ORIGIN CLOUD_TARGET CLOUD_SELF PANTHEON_PLAIN_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
@@ -266,10 +289,30 @@ fi
 
 compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/compose.yml" "$@"; }
 
+# A port another compose project holds is refused before anything starts, so
+# a copy never half-starts on another's ports: a published port, or the
+# --port of a container on the host's network (another copy's browser).
+taken="$(docker ps --no-trunc --format '{{.Label "com.docker.compose.project"}}	{{.Ports}}	{{.Command}}' |
+  OURS="$PANTHEON_PORT $PANTHEON_PLAIN_PORT $FAKE_SLACK_PORT $ROME_A_PORT $ROME_B_PORT $BROWSER_PORT $MODEL_PROXY_HOST_PORT $SLACK_GATEWAY_PORT" \
+    node -e '
+    const ours = new Set(process.env.OURS.split(" "));
+    const taken = [];
+    for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
+      const [project, ports = "", command = ""] = line.split("\t");
+      if (!line || project === process.env.SLACKENV_PROJECT) continue;
+      const held = [...ports.matchAll(/:(\d+)->/g), ...command.matchAll(/--port[ =]"?(\d+)/g)].map((m) => m[1]);
+      for (const p of held) if (ours.has(p)) taken.push(`${p} (${project || "no compose project"})`);
+    }
+    console.log([...new Set(taken)].join(", "));')"
+[ -z "$taken" ] || die "ports taken by another project: $taken; pick another --port-base"
+
 # --------------------------------------------------------------- images
+# Each copy builds under its own name (IMAGE_PREFIX), so down.sh --images of
+# one copy never removes another's; docker's layer cache makes a build of a
+# commit another copy built quick.
 if [ "$CLOUD_ONLY" = 0 ] && ! docker image inspect "$ROME_IMAGE" >/dev/null 2>&1; then
   log "building $ROME_IMAGE from rome $ROME_SHA (first time for this commit: several minutes)"
-  docker build -q -t "$ROME_IMAGE" --build-arg ROME_BUILD_SHA="$ROME_SHA" "$STATE_DIR/rome-src" >/dev/null
+  docker build -q -t "$ROME_IMAGE" --label "slackenv.project=$SLACKENV_PROJECT" --build-arg ROME_BUILD_SHA="$ROME_SHA" "$STATE_DIR/rome-src" >/dev/null
 fi
 
 # ------------------------------------------------------------ Rome Cloud

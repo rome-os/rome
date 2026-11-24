@@ -22,6 +22,8 @@ test("cloud-query sends the query to the server, never as a psql script", () => 
   mkdirSync(join(dir, ".state"));
   writeFileSync(join(dir, ".state/compose.env"), "");
   copyFileSync(join(here, "../ctl.sh"), join(dir, "ctl.sh"));
+  mkdirSync(join(dir, "tools"));
+  copyFileSync(join(here, "copy.sh"), join(dir, "tools/copy.sh"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const log = join(dir, "calls.jsonl");

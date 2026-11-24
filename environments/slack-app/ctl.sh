@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Controls a running environment.
 #
+#   environments/slack-app/ctl.sh [--project <name>] <command> ...
+#     (which copy, tools/copy.sh: default $SLACKENV_PROJECT, else slackenv)
+#
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
 #   environments/slack-app/ctl.sh port rome-a|rome-b send|read|thread|groups|call '<json>'
@@ -9,7 +12,7 @@
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
 #   environments/slack-app/ctl.sh old-connections rome-a|rome-b  (R10's slack_bot and slack)
-#   environments/slack-app/ctl.sh product-tests <repo-relative test file>...  (R9)
+#   environments/slack-app/ctl.sh product-tests [--add <host file>=<repo-relative path>]... [<repo-relative test file>]...
 #   environments/slack-app/ctl.sh old-rows rome-a|rome-b  (whether old-connections' rows are still stored)
 #   environments/slack-app/ctl.sh logs <service> [--since <RFC 3339 time>] [--tail <lines>]
 #   environments/slack-app/ctl.sh gateway-probe rome-a|rome-b  (the slack-gateway Worker, as that instance)
@@ -45,13 +48,20 @@
 # stores any of the strings: database columns, grant credentials, files under
 # the homes and /run, and its logs.
 # product-tests runs test files of the rome commit under test, unchanged, in
-# an image of that commit with its dependencies (test-runner/Dockerfile). Like
+# an image of that commit with its dependencies (test-runner/Dockerfile).
+# --add places a file that is not in the commit (a verifier's own test) at a
+# path the commit does not have, read-only, and runs it with the rest. Like
 # every command here it needs a bring-up first: it reads .state/rome-src.
 set -euo pipefail
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="$ENV_DIR/.state"
+if [ "${1:-}" = --project ]; then
+  SLACKENV_PROJECT="${2:-}"
+  shift 2 || true
+fi
+# shellcheck source=tools/copy.sh
+. "$ENV_DIR/tools/copy.sh"
 [ -f "$STATE_DIR/compose.env" ] || {
-  echo "the environment is not running (no .state/compose.env); run up.sh first" >&2
+  echo "copy $SLACKENV_PROJECT is not running (no $STATE_DIR/compose.env); run up.sh --project $SLACKENV_PROJECT first" >&2
   exit 1
 }
 compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/compose.yml" "$@"; }
@@ -75,7 +85,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,49p' "$0"
+    sed -n '2,54p' "$0"
     exit 2
     ;;
 esac
@@ -409,22 +419,46 @@ case "$action" in
     ;;
   product-tests)
     shift
-    [ $# -gt 0 ] || {
-      echo "usage: ctl.sh product-tests <repo-relative test file>..." >&2
-      exit 2
-    }
     src="$STATE_DIR/rome-src"
     sha="$(git -C "$src" rev-parse HEAD)"
     result() { # <exit code> <runs json>
       printf '{"ok":%s,"commit":"%s","runs":[%s]%s}\n' "$([ "$1" -eq 0 ] && echo true || echo false)" "$sha" "$2" "${3:-}"
       exit "$1"
     }
-    for f in "$@"; do
+    # Files of the commit, then files --add places beside them.
+    tests=() added=() mounts=()
+    while [ $# -gt 0 ]; do
+      if [ "$1" = --add ]; then
+        spec="${2:-}"
+        host="${spec%%=*}" dest="${spec#*=}"
+        [ -n "$spec" ] && [ "$host" != "$spec" ] && [ -n "$host" ] && [ -n "$dest" ] || {
+          echo "usage: --add <host file>=<repo-relative path>" >&2
+          exit 2
+        }
+        [ -f "$host" ] || result 2 "" ",\"error\":\"no such file: $host\""
+        [[ "$dest" == /* || "$dest" == *..* ]] && result 2 "" ",\"error\":\"not a repo-relative path: $dest\""
+        # Placed only where the commit has nothing, so no product file is replaced.
+        git -C "$src" cat-file -e "HEAD:$dest" 2>/dev/null &&
+          result 2 "" ",\"error\":\"already in the commit, so not added: $dest\""
+        added+=("$dest")
+        mounts+=(-v "$(cd "$(dirname "$host")" && pwd)/$(basename "$host"):/repo/$dest:ro")
+        shift 2
+        continue
+      fi
+      tests+=("$1")
+      shift
+    done
+    [ $((${#tests[@]} + ${#added[@]})) -gt 0 ] || {
+      echo "usage: ctl.sh product-tests [--add <host file>=<repo-relative path>]... [<repo-relative test file>]..." >&2
+      exit 2
+    }
+    for f in "${tests[@]}"; do
       if [[ "$f" == /* || "$f" == *..* ]] || ! git -C "$src" cat-file -e "HEAD:$f" 2>/dev/null; then
         result 2 "" ",\"error\":\"not in the commit: $f\""
       fi
     done
-    image="slackenv-rome-test:${sha:0:12}"
+    set -- "${tests[@]}" "${added[@]}"
+    image="$IMAGE_PREFIX-rome-test:${sha:0:12}"
     if ! docker image inspect "$image" >/dev/null 2>&1; then
       echo "building $image from rome $sha (first time for this commit: several minutes)" >&2
       ctx="$(mktemp -d)"
@@ -442,7 +476,7 @@ case "$action" in
     fi
     # An image without the files cannot check them: 126, as for a runner that
     # cannot start.
-    missing="$(docker run --rm --network none "$image" sh -c 'for f; do [ -f "/repo/$f" ] || echo "$f"; done' sh "$@")"
+    missing="$(docker run --rm --network none "${mounts[@]}" "$image" sh -c 'for f; do [ -f "/repo/$f" ] || echo "$f"; done' sh "$@")"
     if [ -n "$missing" ]; then
       result 126 "" ",\"error\":\"not in the test image $image: $(echo "$missing" | tr '\n' ' ' | sed 's/ $//')\""
     fi
@@ -453,7 +487,8 @@ case "$action" in
       d="$(dirname "$f")"
       pkg=""
       while [ "$d" != . ] && [ "$d" != / ]; do
-        if [ -n "$(find "$src/$d" -maxdepth 1 -name 'rstest.config.*' -print -quit)" ]; then
+        # An added file's folder may not be in the commit.
+        if [ -d "$src/$d" ] && [ -n "$(find "$src/$d" -maxdepth 1 -name 'rstest.config.*' -print -quit)" ]; then
           pkg="$d"
           break
         fi
@@ -468,7 +503,7 @@ case "$action" in
       read -ra files <<<"${groups[$pkg]}"
       set +e
       # rstest keeps the test files that start with an absolute filter.
-      docker run --rm --network none -w "/repo/$pkg" "$image" \
+      docker run --rm --network none "${mounts[@]}" -w "/repo/$pkg" "$image" \
         pnpm exec /repo/scripts/test-env.sh rstest run "${files[@]/#//repo/}"
       c=$?
       set -e

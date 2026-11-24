@@ -10,7 +10,12 @@ import { fileURLToPath } from "node:url";
 const [envSha, romeSha, romeRef, cloudSha, cloudRef, model, stateDir] = process.argv.slice(2);
 const envDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const e = process.env;
+// The copy this file describes (tools/copy.sh). The default copy's commands
+// stay as they were; another names itself to ctl.sh and down.sh.
+const project = e.SLACKENV_PROJECT || "slackenv";
+const named = project === "slackenv" ? [] : ["--project", project];
 const ctl = join(envDir, "ctl.sh");
+const ctlCmd = (...args) => [ctl, ...named, ...args];
 const workspaces = JSON.parse(
   readFileSync(join(envDir, "config/workspaces.json"), "utf8"),
 ).workspaces;
@@ -36,29 +41,32 @@ const instance = (name, port, guardian) => ({
   // The guardian's signed-in session on the instance, as a cookie map.
   guardian_cookies_file: join(stateDir, `${name}-cookies.json`),
   enroll: enroll(name),
-  stop: [ctl, "stop", name],
-  start: [ctl, "start", name],
-  status: [ctl, "status", name],
+  stop: ctlCmd("stop", name),
+  start: ctlCmd("start", name),
+  status: ctlCmd("status", name),
   control: {
-    stop: [ctl, "stop", name],
-    start: [ctl, "start", name],
-    status: [ctl, "status", name],
+    stop: ctlCmd("stop", name),
+    start: ctlCmd("start", name),
+    status: ctlCmd("status", name),
     // Append a Slack conversation id. Stops the instance, wipes Rome's copy of
     // that chat, starts it again; exit 0 when no copy is left.
-    wipe_chat: [ctl, "wipe-chat", name],
+    wipe_chat: ctlCmd("wipe-chat", name),
     // Whether /run/rome/slack-oauth-token exists in the instance, and the last
     // 6 characters of the bot and user tokens it holds.
-    token_file: [ctl, "token-file", name],
+    token_file: ctlCmd("token-file", name),
     // R10: writes the older slack_bot and slack connections into the stopped
     // instance and starts it again. Prints old_connections below, whose checks
     // report what the instance made of the rows without judging them; exit 0
     // once the rows are written and the instance is healthy.
     // up.sh --old-connections <name> runs it before this file.
-    old_connections: [ctl, "old-connections", name],
+    old_connections: ctlCmd("old-connections", name),
     // R10, read only: whether the rows old_connections wrote are still stored,
     // {slack_bot: {connection_id, stored}, slack: {connection_id, stored}};
     // stored when both the connections row and its connection_grants row are.
-    old_rows: [ctl, "old-rows", name],
+    old_rows: ctlCmd("old-rows", name),
+    // The instance's log; append --since <RFC 3339 time> for a time span, and
+    // --tail <lines>|all. Without either, the last 500 lines.
+    logs: ctlCmd("logs", name),
   },
   old_connections_file: join(stateDir, `${name}-old-connections.json`),
   // What old_connections printed last, or null before it ran: per kind its
@@ -75,6 +83,9 @@ console.log(
     {
       version: 1,
       created_at: new Date().toISOString(),
+      // Which copy this is: its compose project, host port base and state
+      // folder (this file is in it). ctl.sh and down.sh take it as --project.
+      copy: { project, port_base: Number(e.SLACKENV_PORT_BASE ?? 47100), state_dir: stateDir },
       commits: {
         environment: envSha,
         rome: romeSha,
@@ -105,8 +116,8 @@ console.log(
               rome_cloud_url: e.CLOUD_ORIGIN,
               relay_origin: "https://relay.slackenv.test",
               slack_origin: "https://slack.com",
-              logs: [ctl, "logs", "slack-gateway"],
-              probe: [ctl, "gateway-probe"],
+              logs: ctlCmd("logs", "slack-gateway"),
+              probe: ctlCmd("gateway-probe"),
             }
           : null,
       fake_slack: {
@@ -123,7 +134,7 @@ console.log(
         // The app's public distribution (R2): on, any workspace can approve
         // it; off, only its home workspace. ctl.sh distribution on|off sets it,
         // and control/approvals records each answer with its workspace.
-        distribution: { on: true, home_team: home, switch: [ctl, "distribution"] },
+        distribution: { on: true, home_team: home, switch: ctlCmd("distribution") },
         workspaces: workspaces.map((w, i) => ({
           id: w.id,
           name: w.name,
@@ -174,7 +185,7 @@ console.log(
         dev_sign_in: `${e.CLOUD_ORIGIN}/api/auth/dev/start?email=`,
         trust_pem: join(stateDir, "trust.pem"),
         // SQL on stdin, a JSON array of rows on stdout, read only.
-        query: [ctl, "cloud-query"],
+        query: ctlCmd("cloud-query"),
       },
       relay: { url_inside_network: "http://relay:8787" },
       // Test files of the rome commit under test, run unchanged in an image of
@@ -183,7 +194,12 @@ console.log(
       // line {ok, commit, runs: [{package, files, exit_code}], error?}; exits
       // 0 when all pass, 2 when a file is not in the commit, 126 when the test
       // image lacks a file.
-      product_tests: [ctl, "product-tests"],
+      // A test file that is not in the commit (the verifier's own) runs the
+      // same way with --add <host file>=<repo-relative path>, placed read-only
+      // where the commit has nothing, under a package whose rstest config
+      // takes it.
+      product_tests: ctlCmd("product-tests"),
+      product_tests_add_flag: "--add",
       // A Playwright browser in a container on the host's network, so the
       // instances' own origins work. Connect with the client below:
       // (await import(browser.import)).chromium.connect(browser.ws_endpoint).
@@ -226,7 +242,7 @@ console.log(
       // A stop of an instance stands in for the 1 hour outage in R6.
       shortened: { r6_stop_minutes: 2 },
       differences: join(envDir, "DIFFERENCES.md"),
-      down: [join(envDir, "down.sh")],
+      down: [join(envDir, "down.sh"), ...named],
     },
     null,
     2,
