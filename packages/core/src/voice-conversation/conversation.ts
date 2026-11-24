@@ -95,8 +95,8 @@ export interface ConversationDeps {
   audio(pcm: Uint8Array): void;
   /** Ends the conversation. */
   fail(reason: VoiceConversationStopReason): void;
-  /** The one task started at message `messageId`, its chat and name, or null for none or several. */
-  taskOf?: (messageId: string) => Promise<{ chatId: string; name: string } | null>;
+  /** The tasks started at message `messageId`: each one's chat and name. */
+  tasksOf?: (messageId: string) => Promise<{ chatId: string; name: string }[]>;
   /** Whether the chat runs a turn now, such as one still saying a report. */
   chatBusy?: () => boolean;
   /** Runs `fn` after `ms`, and returns the cancel. */
@@ -287,16 +287,22 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
   const take = (added: AddedMessage) => {
     if (added.turnId && ownTurns.has(added.turnId)) return;
-    const message = lateMessage(added.content, added.turnId, added.id, added.chatThreadId);
+    const message = lateMessage(added.content, added.turnId, added.id);
     if (!message) return;
-    if (!message.start || !deps.taskOf) return place(message);
+    if (!message.start || !deps.tasksOf) return place(message);
     // A text result replies to its task's start message, and its card names
     // the task chat: both are filed under the task chat, so one task is one offer.
-    deps.taskOf(message.start).then(
-      (task) => {
-        if (task) {
+    deps.tasksOf(message.start).then(
+      (tasks) => {
+        const [task] = tasks;
+        if (tasks.length === 1 && task) {
           message.key = `task:${task.chatId}`;
           message.name ??= task.name;
+          message.task = true;
+        } else if (tasks.length > 1) {
+          // Several tasks started there: which one reports is not known, so
+          // the report is asked about on its own.
+          message.key = `msg:${message.ids[0] ?? message.key}`;
           message.task = true;
         }
         place(message);

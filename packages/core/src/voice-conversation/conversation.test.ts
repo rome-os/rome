@@ -49,11 +49,11 @@ function scriptedTurn() {
 
 /** Task `task-1`, 「夏威夷酒店」, started at message `start-1`. */
 const oneTask = async (messageId: string) =>
-  messageId === "start-1" ? { chatId: "task-1", name: "夏威夷酒店" } : null;
+  messageId === "start-1" ? [{ chatId: "task-1", name: "夏威夷酒店" }] : [];
 
 function setup(
   options: {
-    taskOf?: (messageId: string) => Promise<{ chatId: string; name: string } | null>;
+    tasksOf?: (messageId: string) => Promise<{ chatId: string; name: string }[]>;
     chatBusy?: () => boolean;
     notReady?: boolean;
   } = {},
@@ -108,7 +108,7 @@ function setup(
       turns.push(turn);
       return { ...turn.turn, id: `spoken-${turns.length}` };
     },
-    ...(options.taskOf ? { taskOf: options.taskOf } : {}),
+    ...(options.tasksOf ? { tasksOf: options.tasksOf } : {}),
     ...(options.chatBusy ? { chatBusy: options.chatBusy } : {}),
     message: (m) => messages.push(m),
     audio: (pcm) => played.push(pcm.byteLength),
@@ -489,7 +489,7 @@ describe("late messages in a voice conversation", () => {
   };
 
   it("asks once both are quiet for 3 s, and sends the answer to the chat with what was asked", async () => {
-    const c = setup({ taskOf: oneTask });
+    const c = setup({ tasksOf: oneTask });
     c.conversation.arrived(late("system-1", "酒店查好了。一共三家。", "start-1", "msg-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS - 1);
@@ -547,7 +547,7 @@ describe("late messages in a voice conversation", () => {
   });
 
   it("asks about each task once a conversation", async () => {
-    const c = setup({ taskOf: oneTask });
+    const c = setup({ tasksOf: oneTask });
     c.conversation.arrived(late("system-1", "测试都过了。", "start-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS);
@@ -578,7 +578,7 @@ describe("late messages in a voice conversation", () => {
   });
 
   it("tells only the newest report on a task, the one before being out of date", async () => {
-    const c = setup({ taskOf: oneTask });
+    const c = setup({ tasksOf: oneTask });
     c.conversation.heard("说说别的", "");
     c.conversation.arrived(late("system-1", "还在跑，过了一半。", "start-1"));
     c.conversation.arrived(late("system-2", "跑完了，全部通过。", "start-1"));
@@ -617,14 +617,14 @@ describe("late messages in a voice conversation", () => {
   });
 
   it("files a task's text result and its card under the task, as one offer", async () => {
-    const c = setup({ taskOf: oneTask });
+    const c = setup({ tasksOf: oneTask });
     c.conversation.arrived(late("system-1", "订好了。", "start-1", "msg-1"));
+    // The card quotes nothing: it names its task chat.
     c.conversation.arrived({
       id: "msg-2",
       sessionId: "concierge",
       turnId: "system-1",
       role: "assistant",
-      chatThreadId: "start-1",
       content: JSON.stringify([
         { type: "widget", forwardedFrom: { chatId: "task-1", title: "夏威夷酒店" } },
       ]),
@@ -636,8 +636,30 @@ describe("late messages in a voice conversation", () => {
     expect(c.notes[0]).toContain("message msg-2, msg-1");
   });
 
+  it("asks once about a turn's plain messages, which name no task", async () => {
+    const c = setup({ tasksOf: oneTask });
+    c.conversation.arrived(late("system-1", "PR 合并了。", undefined, "msg-1"));
+    c.conversation.arrived(late("system-1", "检查全过了。", undefined, "msg-2"));
+    // A reply to a message that started no task is a plain message too.
+    c.conversation.arrived(late("system-1", "顺便说一句。", "typed-1", "msg-3"));
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    expect(texts(c)).toEqual(["有新消息了，要听吗？"]);
+    answer(c, "念吧");
+    expect(c.notes[0]).toContain("PR 合并了。\n检查全过了。\n顺便说一句。");
+    c.turns[0]?.end();
+    await settled();
+    c.clock.advance(60_000);
+    expect(c.said).toHaveLength(1);
+  });
+
   it("asks about each report apart when several tasks share the start message", async () => {
-    const c = setup({ taskOf: async () => null });
+    const c = setup({
+      tasksOf: async () => [
+        { chatId: "task-1", name: "A" },
+        { chatId: "task-2", name: "B" },
+      ],
+    });
     c.conversation.arrived(late("system-1", "第一个好了。", "start-1", "msg-1"));
     c.conversation.arrived(late("system-1", "第二个好了。", "start-1", "msg-2"));
     await settled();

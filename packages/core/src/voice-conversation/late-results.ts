@@ -15,7 +15,8 @@ export interface LateMessage {
   /**
    * What it reports on: `task:` and the task chat, once that is known, from
    * its card or from the start message it replies to. Otherwise `msg:` and
-   * itself, when the start message names no one task, or `turn:` and its turn.
+   * itself, when several tasks share that start message, or `turn:` and its
+   * turn.
    * A conversation asks once per key.
    */
   key: string;
@@ -39,7 +40,6 @@ export function lateMessage(
   content: string,
   turnId: string | null,
   id?: string,
-  thread?: string | null,
 ): LateMessage | null {
   let parts: unknown;
   try {
@@ -69,10 +69,12 @@ export function lateMessage(
   const text = events
     .map((e) => (e.type === "said" ? e.text : "[Something the chat shows, such as a card]"))
     .join("\n");
-  // A card replies with no quote: its thread is the message it replies to.
-  const start = taskChat ? null : (replyTo ?? thread ?? null);
-  const own = id ?? Math.random().toString(36).slice(2);
-  const key = taskChat ? `task:${taskChat}` : start ? `msg:${own}` : `turn:${turnId ?? own}`;
+  // A card names its task chat. A text result quotes its task's start
+  // message, where the task is looked up.
+  const start = taskChat ? null : replyTo;
+  const key = taskChat
+    ? `task:${taskChat}`
+    : `turn:${turnId ?? id ?? Math.random().toString(36).slice(2)}`;
   return {
     key,
     turnId,

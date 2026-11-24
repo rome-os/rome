@@ -52,8 +52,8 @@ export interface VoiceConversationDeps {
   send(chatId: string, text: string, signal: AbortSignal, note?: string): Promise<ReplyTurn>;
   /** Calls `listener` with each message added to any chat, and returns the unsubscribe. */
   watch?: (listener: (message: AddedMessage) => void) => () => void;
-  /** The one task started at message `messageId` of `chatId`: its chat and name, or null. */
-  taskOf?: (chatId: string, messageId: string) => Promise<{ chatId: string; name: string } | null>;
+  /** The tasks started at message `messageId` of `chatId`: each one's chat and name. */
+  tasksOf?: (chatId: string, messageId: string) => Promise<{ chatId: string; name: string }[]>;
   /** Whether `chatId` runs a turn now. */
   isRunning?: (chatId: string) => boolean;
   usage?: TranscriptionUsageSink | null;
@@ -147,8 +147,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
     },
     fail: (reason) => close({ type: "error", reason }),
-    taskOf: (messageId) =>
-      chatId && deps.taskOf ? deps.taskOf(chatId, messageId) : Promise.resolve(null),
+    tasksOf: (messageId) =>
+      chatId && deps.tasksOf ? deps.tasksOf(chatId, messageId) : Promise.resolve([]),
     chatBusy: () => Boolean(chatId && deps.isRunning?.(chatId)),
   });
 

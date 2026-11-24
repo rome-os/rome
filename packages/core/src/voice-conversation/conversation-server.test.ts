@@ -280,9 +280,9 @@ describe("voice conversation socket", () => {
           unwatched++;
         };
       },
-      taskOf: async (chatId, messageId) => {
+      tasksOf: async (chatId, messageId) => {
         named.push(`${chatId} ${messageId}`);
-        return { chatId: "task-1", name: "Fix CI" };
+        return [{ chatId: "task-1", name: "Fix CI" }];
       },
     });
     expect(watching.listener).toBeNull();

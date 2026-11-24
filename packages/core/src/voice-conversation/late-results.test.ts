@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { lateMessage, offerLine, offerNote } from "./late-results.js";
 
 describe("late messages", () => {
-  it("keys a report by the task chat its card shows, or keeps the message it replies to for the task to be found", () => {
+  it("keys a report by the task chat its card names, or by its turn, keeping the start message it quotes for the task to be found", () => {
     const text = (content: string) => ({ type: "text", content });
     expect(
       lateMessage(
@@ -13,7 +13,7 @@ describe("late messages", () => {
         "t1",
         "a1",
       ),
-    ).toMatchObject({ key: "msg:a1", start: "m1", task: false, text: "done" });
+    ).toMatchObject({ key: "turn:t1", start: "m1", task: false, text: "done" });
     expect(
       lateMessage(
         JSON.stringify([{ type: "task_chat", chatId: "c1", title: "Fix CI", show: "ask" }]),
@@ -24,11 +24,14 @@ describe("late messages", () => {
       key: "turn:t3",
       task: false,
     });
-    // A card replies with no quote: its thread is the start message.
-    expect(lateMessage(JSON.stringify([text("again")]), "t6", "a6", "m6")).toMatchObject({
-      key: "msg:a6",
-      start: "m6",
-    });
+    // A forwarded card names its task chat, and quotes nothing.
+    expect(
+      lateMessage(
+        JSON.stringify([{ type: "widget", forwardedFrom: { chatId: "c6", title: "Hotels" } }]),
+        "t6",
+        "a6",
+      ),
+    ).toMatchObject({ key: "task:c6", start: null, name: "Hotels", task: true });
     expect(lateMessage(JSON.stringify([]), "t4")).toBeNull();
     expect(lateMessage("not json", "t5")).toBeNull();
   });
