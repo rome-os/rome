@@ -17,7 +17,27 @@ const upstream = createServer(async (req, res) => {
     setTimeout(() => res.socket.destroy(), 20);
     return;
   }
-  res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+  if (seen.at(-1).body.stream) {
+    // A message stream: the input side first, the output in the last delta.
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const usage = {
+      input_tokens: 10,
+      cache_creation_input_tokens: 3000,
+      cache_creation: { ephemeral_5m_input_tokens: 1000, ephemeral_1h_input_tokens: 2000 },
+      cache_read_input_tokens: 50000,
+      output_tokens: 1,
+    };
+    res.write(
+      `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage } })}\n\n`,
+    );
+    res.write(
+      `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", usage: { output_tokens: 400 } })}\n\n`,
+    );
+    return res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
+  }
+  res
+    .writeHead(200, { "content-type": "application/json" })
+    .end('{"ok":true,"usage":{"input_tokens":1000000,"output_tokens":100000}}');
 }).listen(0);
 await new Promise((r) => upstream.once("listening", r));
 
@@ -45,22 +65,76 @@ after(() => {
   for (const c of children) c.kill();
 });
 
-async function send(port, headers) {
-  await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+async function send(port, headers, extra = {}) {
+  const res = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": "sk-ant-placeholder", ...headers },
-    body: JSON.stringify({ model: "claude-opus-5-5", messages: [] }),
+    body: JSON.stringify({ model: "claude-sonnet-5-5", messages: [], ...extra }),
   });
+  await res.text();
   return seen.at(-1);
 }
 
-test("pins the model and swaps in an API key", async () => {
+const getJson = async (url) => (await fetch(url)).json();
+
+test("pins the model to Opus 5.5, keeps the effort, and swaps in an API key", async () => {
   const p = await startProxy({ MODEL_PROXY_API_KEY: "real-key" });
   children.push(p.child);
-  const got = await send(p.port, { "anthropic-beta": "context-1m-2025-08-07,tools-x" });
-  assert.equal(got.body.model, "claude-haiku-5-5");
+  const got = await send(
+    p.port,
+    { "anthropic-beta": "context-1m-2025-08-07,tools-x" },
+    { output_config: { effort: "low" } },
+  );
+  assert.equal(got.body.model, "claude-opus-5-5");
+  assert.deepEqual(got.body.output_config, { effort: "low" });
   assert.equal(got.headers["x-api-key"], "real-key");
   assert.equal(got.headers["anthropic-beta"], "tools-x");
+  const stats = await getJson(`http://127.0.0.1:${p.port}/_stats`);
+  assert.equal(stats.pinned, "claude-opus-5-5");
+  assert.deepEqual(stats.asked, { "claude-sonnet-5-5": 1 });
+  assert.deepEqual(stats.sent, { "claude-opus-5-5 low": 1 });
+});
+
+test("another model can be pinned", async () => {
+  const p = await startProxy({ MODEL_PROXY_API_KEY: "k", MODEL_PROXY_MODEL: "claude-haiku-5-5" });
+  children.push(p.child);
+  assert.equal((await send(p.port, {})).body.model, "claude-haiku-5-5");
+});
+
+test("usage: the tokens and cost of the message turns in a span, streamed or not", async () => {
+  const p = await startProxy({ MODEL_PROXY_API_KEY: "k" });
+  children.push(p.child);
+  const start = Date.now();
+  await send(p.port, {}, { output_config: { effort: "low" } });
+  await send(p.port, {}, { output_config: { effort: "low" }, stream: true });
+  // Counting tokens is not a message turn.
+  await fetch(`http://127.0.0.1:${p.port}/v1/messages/count_tokens`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-5-5", messages: [] }),
+  });
+  const mid = Date.now();
+  await new Promise((r) => setTimeout(r, 20));
+  await send(p.port, {});
+  const all = await getJson(`http://127.0.0.1:${p.port}/_usage`);
+  assert.equal(all.turns, 3);
+  const opus = all.models["claude-opus-5-5"];
+  assert.deepEqual(opus.by_effort, { low: 2, unset: 1 });
+  assert.equal(opus.input_tokens, 2_000_010);
+  assert.equal(opus.output_tokens, 200_400);
+  assert.equal(opus.cache_creation_input_tokens, 1000);
+  assert.equal(opus.cache_creation_1h_input_tokens, 2000);
+  assert.equal(opus.cache_read_input_tokens, 50000);
+  // 2,000,010 x $4 + 1,000 x $5 + 2,000 x $8 + 50,000 x $0.20 + 200,400 x $20, per million.
+  assert.equal(opus.cost_usd, 12.03904);
+  assert.equal(all.cost_usd, 12.03904);
+  const span = await getJson(
+    `http://127.0.0.1:${p.port}/_usage?since=${new Date(start).toISOString()}&until=${mid}`,
+  );
+  assert.equal(span.turns, 2);
+  assert.equal(span.models["claude-opus-5-5"].output_tokens, 100_400);
+  const bad = await fetch(`http://127.0.0.1:${p.port}/_usage?since=yesterday`);
+  assert.equal(bad.status, 400);
 });
 
 test("a subscription token gets the OAuth beta", async () => {
@@ -91,7 +165,7 @@ test("a stream cut off upstream ends that response and leaves the proxy running"
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(exited, false);
   const next = await send(p.port, {});
-  assert.equal(next.body.model, "claude-haiku-5-5");
+  assert.equal(next.body.model, "claude-opus-5-5");
 });
 
 test("an upload cut off by the instance leaves the proxy running", async () => {
@@ -112,5 +186,5 @@ test("an upload cut off by the instance leaves the proxy running", async () => {
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(exited, false);
   const next = await send(p.port, {});
-  assert.equal(next.body.model, "claude-haiku-5-5");
+  assert.equal(next.body.model, "claude-opus-5-5");
 });

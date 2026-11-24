@@ -101,7 +101,7 @@ ROME_CLOUD_SHA="$(resolve "$ROME_CLOUD_DIR" "$ROME_CLOUD_REF")"
 log "environment $ENV_SHA, rome $ROME_SHA ($ROME_REF), rome-cloud $ROME_CLOUD_SHA ($ROME_CLOUD_REF)"
 
 # --------------------------------------------------------------- the model
-AGENT_MODEL="${SLACKENV_AGENT_MODEL:-claude-haiku-5-5}"
+AGENT_MODEL="${SLACKENV_AGENT_MODEL:-claude-opus-5-5}"
 read_secret() {
   [ -n "${!1:-}" ] && {
     printf '%s' "${!1}"

@@ -1,13 +1,16 @@
 // Stands between the instances and Anthropic's API. It pins every request to
-// one model (Haiku 5.5 by default) whatever model Rome picked, and it adds the
-// environment's credential, so the instances hold only a placeholder key and
-// the real one never enters an instance, env.json or the repo.
+// one model (Opus 5.5 by default) whatever model Rome picked, keeps the effort
+// Rome asked for, and adds the environment's credential, so the instances hold
+// only a placeholder key and the real one never enters an instance, env.json
+// or the repo.
 //
-// Env: MODEL_PROXY_PORT (8080), MODEL_PROXY_MODEL (claude-haiku-5-5),
+// Env: MODEL_PROXY_PORT (8080), MODEL_PROXY_MODEL (claude-opus-5-5),
 // MODEL_PROXY_UPSTREAM (https://api.anthropic.com), and one credential:
 // MODEL_PROXY_API_KEY (sent as x-api-key) or MODEL_PROXY_OAUTH_TOKEN (sent as
 // a bearer token). GET /_stats answers how many requests went through, by the
-// model Rome asked for.
+// model Rome asked for and by the model and effort sent. GET
+// /_usage?since=&until= answers the tokens the upstream reported for messages
+// in that span, and their cost at list prices (usage.mjs).
 //
 // With MODEL_PROXY_CONTROL_PORT set (the isolated environment only, never the
 // live stack), it also answers ctl.sh port's scripted turns itself
@@ -15,9 +18,10 @@
 // jobs: POST /_port, GET and DELETE /_port/<nonce>. It forwards nothing.
 
 import { createServer } from "node:http";
+import { createUsage } from "./usage.mjs";
 
 const port = Number(process.env.MODEL_PROXY_PORT ?? 8080);
-const pinned = process.env.MODEL_PROXY_MODEL ?? "claude-haiku-5-5";
+const pinned = process.env.MODEL_PROXY_MODEL || "claude-opus-5-5";
 const upstream = (process.env.MODEL_PROXY_UPSTREAM ?? "https://api.anthropic.com").replace(
   /\/$/,
   "",
@@ -25,7 +29,8 @@ const upstream = (process.env.MODEL_PROXY_UPSTREAM ?? "https://api.anthropic.com
 const apiKey = process.env.MODEL_PROXY_API_KEY ?? "";
 const oauthToken = process.env.MODEL_PROXY_OAUTH_TOKEN ?? "";
 const OAUTH_BETA = "oauth-2025-04-20";
-const stats = { requests: 0, asked: {}, statuses: {}, scripted: 0 };
+const stats = { requests: 0, asked: {}, sent: {}, statuses: {}, scripted: 0 };
+const usage = createUsage();
 const controlPort = process.env.MODEL_PROXY_CONTROL_PORT;
 const script = controlPort
   ? (await import("./port-script.mjs")).createPortScript({ model: pinned })
@@ -42,6 +47,7 @@ const HOP = new Set([
 ]);
 
 createServer(async (req, res) => {
+  if (req.url.startsWith("/_usage")) return answerUsage(req, res);
   if (req.url === "/_stats") {
     res.writeHead(200, { "content-type": "application/json" });
     return res.end(
@@ -60,6 +66,8 @@ createServer(async (req, res) => {
     return res.destroy();
   }
   let body = Buffer.concat(chunks);
+  // What one message turn cost, filled from the upstream's answer.
+  let turn = null;
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k)) headers[k] = v;
 
@@ -78,6 +86,12 @@ createServer(async (req, res) => {
       }
       if (typeof json.model === "string") {
         stats.asked[json.model] = (stats.asked[json.model] ?? 0) + 1;
+        const effort = json.output_config?.effort ?? "unset";
+        const sent = `${pinned} ${effort}`;
+        stats.sent[sent] = (stats.sent[sent] ?? 0) + 1;
+        if (req.url.split("?")[0] === "/v1/messages") {
+          turn = { asked: json.model, model: pinned, effort };
+        }
         json.model = pinned;
         body = Buffer.from(JSON.stringify(json));
       }
@@ -124,8 +138,15 @@ createServer(async (req, res) => {
       if (!HOP.has(k) && k !== "content-encoding") out[k] = v;
     });
     res.writeHead(response.status, out);
-    if (response.body) for await (const chunk of response.body) res.write(chunk);
+    const reading = turn ? usage.reader(response.headers.get("content-type")) : null;
+    if (response.body) {
+      for await (const chunk of response.body) {
+        reading?.push(chunk);
+        res.write(chunk);
+      }
+    }
     res.end();
+    if (reading) usage.record({ ...turn, status: response.status, ...reading.tokens() });
   } catch (error) {
     stats.statuses.error = (stats.statuses.error ?? 0) + 1;
     console.error(JSON.stringify({ msg: "upstream request failed", error: String(error) }));
@@ -144,6 +165,13 @@ createServer(async (req, res) => {
   console.log(JSON.stringify({ msg: "model proxy listening", port, pinned, upstream })),
 );
 
+function answerUsage(req, res) {
+  const q = new URL(req.url, "http://proxy").searchParams;
+  const out = usage.report(q.get("since"), q.get("until"));
+  res.writeHead(out.error ? 400 : 200, { "content-type": "application/json" });
+  res.end(JSON.stringify(out));
+}
+
 if (script) {
   createServer(async (req, res) => {
     const send = (status, body) => {
@@ -154,6 +182,7 @@ if (script) {
     for await (const c of req) chunks.push(c);
     const nonce = req.url.match(/^\/_port\/([a-z0-9]+)$/)?.[1];
     if (req.method === "GET" && req.url === "/_stats") return send(200, stats);
+    if (req.method === "GET" && req.url.startsWith("/_usage")) return answerUsage(req, res);
     if (req.method === "POST" && req.url === "/_port") {
       let body;
       try {

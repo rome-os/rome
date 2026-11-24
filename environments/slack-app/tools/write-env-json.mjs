@@ -105,7 +105,23 @@ console.log(
         rome_cloud_base_ref: e.ROME_CLOUD_BASE_REF ?? "origin/main",
         rome_dependencies: e.ROME_DEPENDENCIES ?? "not_installed",
       },
-      agent: { model, pinned_by: "model-proxy", concierge: "on" },
+      // The model proxy sends every request to `model` and keeps the effort
+      // Rome asks for: the Concierge's agent file asks low. stats counts
+      // requests by the model Rome asked for and by model and effort sent;
+      // usage (or ctl.sh usage --since --until) the tokens and cost of the
+      // message turns in a span.
+      agent: {
+        model,
+        effort: "low",
+        effort_set_by: "rome",
+        pinned_by: "model-proxy",
+        concierge: "on",
+        model_proxy: {
+          stats: `http://127.0.0.1:${e.MODEL_PROXY_HOST_PORT}/_stats`,
+          usage: `http://127.0.0.1:${e.MODEL_PROXY_HOST_PORT}/_usage`,
+          usage_command: ctlCmd("usage"),
+        },
+      },
       // Rome Cloud's slack-gateway Worker, when the rome-cloud commit has it
       // (wrangler.slack.jsonc); null otherwise. Inside the network it is
       // https://slack.romeos.io, and the fake Slack sends its events there.
@@ -128,6 +144,10 @@ console.log(
         url: fakeSlack,
         control: `${fakeSlack}/_control`,
         approve_screen: `${fakeSlack}/oauth/v2/authorize`,
+        // Several mentions, direct messages and group messages at one moment
+        // (POST {items}), and what the app posted (GET ?team&channel&thread_ts&since).
+        batch: `${fakeSlack}/_control/batch`,
+        posts: `${fakeSlack}/_control/posts`,
         app_id: e.SLACK_APP_ID,
         client_id: e.SLACK_CLIENT_ID,
         events_url: e.FAKE_SLACK_EVENTS_URL,
@@ -164,6 +184,14 @@ console.log(
             ]),
           ),
           groups: (w.channels ?? []).map((c) => c.id),
+          // The shared groups the bot is in, each with its members.
+          groups_with_bot: (w.channels ?? [])
+            .filter((c) => c.bot_member !== false)
+            .map((c) => ({
+              id: c.id,
+              name: c.name,
+              members: c.members ?? w.members.map((m) => m.id),
+            })),
           // Groups the bot is not in, and what was said in each group before
           // the app arrived.
           groups_without_bot: (w.channels ?? [])

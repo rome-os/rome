@@ -990,6 +990,7 @@ export class FakeSlack {
           members: w.members.map((m) => ({ ...m, im_channel: this.imChannel(w.id, m.id) })),
           groups: (w.channels ?? []).map((c) => ({
             ...c,
+            bot_member: c.bot_member !== false,
             members: c.members ?? w.members.map((m) => m.id),
           })),
         };
@@ -1729,6 +1730,22 @@ async function control(slack, method, url, body) {
       slack.rememberEvent(body.team, event);
       return { ok: true, event_sent: false, ts: event.ts, event };
     }
+    case "POST /batch": {
+      // Several members write at the same moment. Every message gets its ts
+      // first, in the order given, and then every event goes out at once, so
+      // no delivery waits on another.
+      if (!Array.isArray(body.items) || body.items.length === 0)
+        throw httpError(400, "items must be a non-empty list");
+      const planned = body.items.map((item) => batchItem(slack, item));
+      const results = await Promise.all(
+        planned.map(async ({ team, event, send: sent }) => {
+          if (sent) return { kind: event.type, ...(await sendAndRemember(slack, team, event)) };
+          slack.rememberEvent(team, event);
+          return { kind: event.type, event_sent: false, ts: event.ts, event };
+        }),
+      );
+      return { ok: true, results };
+    }
     case "GET /history": {
       const team = q.get("team");
       const channel = slack.resolveConversation(team, q.get("channel"));
@@ -2025,6 +2042,35 @@ function readWsFrame(buffer) {
 /** Sends a member's message event. The message enters Slack's history once
  *  Slack accepts it (the app is installed and holds the scope), before the app
  *  hears of it. */
+/**
+ * One item of a batch as the single calls would make it: the event, and
+ * whether Slack sends it. A mention outside the bot's groups and a group
+ * message without `send_event` stay in history, as in /mention and
+ * /group-message.
+ */
+function batchItem(slack, item) {
+  const { kind, team, user, channel, text, thread_ts: threadTs } = item ?? {};
+  if (kind === "dm") {
+    return {
+      team,
+      event: slack.directMessage(team, user, text, threadTs),
+      send: item.send_event !== false,
+    };
+  }
+  if (kind === "mention") {
+    const event = slack.mention(team, user, channel, text, threadTs);
+    return { team, event, send: slack.botInConversation(team, event.channel) };
+  }
+  if (kind === "group-message") {
+    return {
+      team,
+      event: slack.groupMessage(team, user, channel, text, threadTs),
+      send: item.send_event === true,
+    };
+  }
+  throw httpError(400, `unknown batch item kind ${kind}; use mention, dm or group-message`);
+}
+
 async function sendAndRemember(slack, team, event) {
   const sent = await slack.sendEvent(team, event, {
     onAccepted: () => slack.rememberEvent(team, event),

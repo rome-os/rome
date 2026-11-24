@@ -11,6 +11,7 @@
 #   environments/slack-app/ctl.sh record rome-a|rome-b '{"chat":"<conversation id>[:<thread ts>]"}'
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
+#   environments/slack-app/ctl.sh usage [--since <time>] [--until <time>]   (model tokens and cost)
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
 #   environments/slack-app/ctl.sh old-connections rome-a|rome-b  (R10's slack_bot and slack)
 #   environments/slack-app/ctl.sh product-tests [--add <host file>=<repo-relative path>]... [<repo-relative test file>]...
@@ -79,7 +80,7 @@ case "$action" in
     exit 2
     ;;
   esac ;;
-  cloud-query | product-tests) ;;
+  cloud-query | product-tests | usage) ;;
   distribution) case "$svc" in on | off) ;; *)
     echo "usage: ctl.sh distribution on|off" >&2
     exit 2
@@ -90,7 +91,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,59p' "$0"
+    sed -n '2,60p' "$0"
     exit 2
     ;;
 esac
@@ -437,6 +438,26 @@ case "$action" in
     node -e '
       fetch(`http://127.0.0.1:${process.argv[1]}/_control/config`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ distributed: process.argv[2] === "on" }) })
         .then((r) => r.json()).then((c) => console.log(JSON.stringify({ distributed: c.distributed, home_team: c.home_team })), (e) => { console.error(String(e)); process.exit(1); });' "$port" "$svc"
+    ;;
+  usage)
+    # The model proxy's count of message turns that ended in [since, until):
+    # tokens and cost per model sent, as JSON. Times are RFC 3339 or epoch ms.
+    shift
+    query=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --since | --until) query="$query&${1#--}=$(node -p 'encodeURIComponent(process.argv[1])' "${2:-}")" && shift 2 ;;
+        *)
+          echo "usage: ctl.sh usage [--since <time>] [--until <time>]" >&2
+          exit 2
+          ;;
+      esac
+    done
+    port="$(sed -n 's/^MODEL_PROXY_HOST_PORT=//p' "$STATE_DIR/compose.env")"
+    # shellcheck disable=SC2016 # the backticks are JavaScript
+    node -e '
+      fetch(`http://127.0.0.1:${process.argv[1]}/_usage?${process.argv[2]}`)
+        .then(async (r) => { console.log(await r.text()); if (!r.ok) process.exit(1); }, (e) => { console.error(String(e)); process.exit(1); });' "$port" "${query#&}"
     ;;
   product-tests)
     shift

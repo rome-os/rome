@@ -777,12 +777,15 @@ test("the channels option: users.conversations, and channel history and replies,
       token,
     );
     assert.equal(listed.ok, true);
-    // The bot is in general and news, not in quiet.
+    // The bot is in every group of A but quiet.
     assert.deepEqual(
       listed.channels.map((c) => [c.id, c.name, c.is_private]),
       [
         ["CA0000GENRL", "general", false],
         ["CA0000NEWS1", "news", false],
+        ["CA0000DSGN1", "design", false],
+        ["CA0000OPS01", "ops", false],
+        ["CA0000SALES", "sales", false],
       ],
     );
     assert.equal(listed.response_metadata.next_cursor, "");

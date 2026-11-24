@@ -26,6 +26,18 @@
           "email": "cara@acme.test"
         },
         {
+          "id": "UA0000DAVE1",
+          "name": "dave",
+          "real_name": "Dave Member",
+          "email": "dave@acme.test"
+        },
+        {
+          "id": "UA0000EMMA1",
+          "name": "emma",
+          "real_name": "Emma Member",
+          "email": "emma@acme.test"
+        },
+        {
           "id": "UA0000GST01",
           "name": "gil",
           "real_name": "Gil Guest",
@@ -37,12 +49,12 @@
         {
           "id": "CA0000GENRL",
           "name": "general",
-          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"]
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1", "UA0000DAVE1", "UA0000EMMA1"]
         },
         {
           "id": "CA0000NEWS1",
           "name": "news",
-          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"],
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1", "UA0000DAVE1", "UA0000EMMA1"],
           "seed_messages": [
             {
               "ts": "1700000000.000100",
@@ -72,6 +84,21 @@
               "text": "Then I'll bring the candles."
             }
           ]
+        },
+        {
+          "id": "CA0000DSGN1",
+          "name": "design",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1", "UA0000DAVE1", "UA0000EMMA1"]
+        },
+        {
+          "id": "CA0000OPS01",
+          "name": "ops",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1", "UA0000DAVE1", "UA0000EMMA1"]
+        },
+        {
+          "id": "CA0000SALES",
+          "name": "sales",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1", "UA0000DAVE1", "UA0000EMMA1"]
         },
         {
           "id": "CA0000QUIET",
