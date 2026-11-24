@@ -222,6 +222,31 @@ describe("OutputsPanel", () => {
     expect(earlier.textContent).toContain("Page·Written");
   });
 
+  it("aligns Today, Earlier, and indexing status to the 12px row inset in muted aux type", async () => {
+    indexing = true;
+    outputs = [
+      output("notes", { name: "trip-notes.md", mimeType: "text/markdown" }),
+      output("old", {
+        name: "old-page.html",
+        mimeType: "text/html",
+        at: new Date(Date.now() - 3 * 24 * HOUR).toISOString(),
+      }),
+    ];
+    renderPanel();
+    await screen.findByRole("list", { name: "Today" });
+    for (const label of ["Today", "Earlier"]) {
+      const heading = screen.getByRole("heading", { level: 3, name: label });
+      expect(heading.className).toContain("px-3");
+      expect(heading.className).toContain("text-aux");
+      expect(heading.className).toContain("text-muted-foreground");
+      expect(heading.className).not.toContain("px-1");
+      expect(heading.className).not.toContain("font-medium");
+    }
+    const status = screen.getByRole("status");
+    expect(status.className).toContain("px-3");
+    expect(status.className).not.toContain("px-1");
+  });
+
   it("opens the task chat an output came from beside the chat where the host can", async () => {
     outputs = [
       output("budget", {
