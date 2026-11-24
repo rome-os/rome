@@ -43,3 +43,12 @@ export type { BuildActionOverrides, RecordingAction } from "./builders.js";
 
 export { createFetchRecorder, FetchRecorderUnmatchedError } from "./fetch-recorder.js";
 export type { FetchRecorder, FetchRule, RecordedFetchCall } from "./fetch-recorder.js";
+
+export { bootWorkspaceAccount } from "./workspace-account.js";
+export type {
+  WorkspaceAccount,
+  WorkspaceAccountOptions,
+  WorkspaceKindPorts,
+  WorkspaceMessage,
+  WorkspaceSent,
+} from "./workspace-account.js";

@@ -52,6 +52,10 @@ Channels: `rome.channels` is the production channel list over fake Connections, 
 
 Adapter units (testing the adapter itself, below the harness): inject through the adapter's factory seam — `new TelegramAdapter({ botToken }, fake.createBot)` with `const fake = new FakeTelegramApi()`. The fake is a *server*, not an SDK replica: `createBot` returns a real grammy `Bot` whose API transformer answers outbound calls with canned wire JSON, so middleware filters, init, and the long-poll lifecycle run grammy's production code instead of a hand-rolled imitation that drifts. Await `fake.untilPolling()` after `adapter.start()`, drive incoming traffic with `fake.emitUpdate(update)` (a Telegram `Update`, through real `bot.handleUpdate`), and assert the outbound contract on `fake.sent` (`{ method, payload }` pairs captured pre-serialization — an `InputFile` is still an instance, since multipart encoding happens in grammy's HTTP caller below the seam; methods the fake doesn't model throw instead of fake-succeeding); no `createTestRome()` and no DB needed. See `src/connections/kinds/telegram/telegram.test.ts` for the reference conversion.
 
+## Workspace account
+
+`bootWorkspaceAccount({ kind, ports, model })` (`workspace-account.ts`) boots an account of a kind that declares `servesWorkspace: true`, wired as `index.ts` wires Rome's Slack app: the wake gate, the account's one session, catch-up through the kind's `TalkHistory`, and the Concierge with `say` and `send`. `deliver(message)` hands it a message as any sender, and `sent` lists what Rome sent where. It stands in for the inbox app's hook. See `src/test/workspace-account.test.ts`.
+
 ## Notes
 
 - `engine:` mirrors the daemon's ActionEngine wiring variations: `tracer` for real `action:*` spans, `onApprovalCreated` for the approval-card callback, `processRole: "main"` for tests that exercise the fork orchestration itself (stub `executeInSubprocess` — the fork is the edge), and `clock` to inject a time source.
