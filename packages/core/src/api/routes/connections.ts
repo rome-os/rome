@@ -21,6 +21,7 @@ import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
 import { reachedAccount } from "../../connections/connection.js";
 import { actStatusOf } from "../../connections/acts-with-grant.js";
+import { accessKept, disconnectConnection } from "../../connections/disconnect.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -460,28 +461,10 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (!isSameOriginMutationRequest(c.req.raw)) {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
     }
-    const registry = requireConnectionRegistry(deps);
-    const conn = findConnection(registry, c.req.param("id"));
-    if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    // A kind that takes back its access at the platform ends as a disconnect
-    // does, so this route never leaves that access behind unannounced.
-    if (registry.getDescriptor(conn.connectionKind)?.onDisconnect) {
-      const ended = await registry.disconnect(conn.id);
-      return c.json({ ok: true, ...accessKept(ended) });
-    }
-    await registry.remove(conn.id);
-    return c.json({ ok: true });
+    const outcome = await disconnectConnection(requireConnectionRegistry(deps), c.req.param("id"));
+    if (outcome.status === "not-found") return c.json({ error: "Unknown connection." }, 404);
+    return c.json({ ok: true, ...(outcome.warning ? { warning: outcome.warning } : {}) });
   });
 
   return app;
-}
-
-/** The warning a disconnect answers with when the platform may still hold
- *  Rome's access. */
-function accessKept(ended: { notTakenBack?: string }): { warning?: string } {
-  return ended.notTakenBack
-    ? {
-        warning: `Disconnected in Rome, but the service may still hold Rome's access: ${ended.notTakenBack}. Remove Rome there too.`,
-      }
-    : {};
 }
