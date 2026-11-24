@@ -1,3 +1,4 @@
+import { COMPUTER_USE_ACTION } from "../agent/index.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { ThreadContext } from "./types.js";
@@ -10,7 +11,7 @@ export function registerComputerUseAction(
 ): void {
   registry.register({
     config: {
-      name: "core:computer_use",
+      name: COMPUTER_USE_ACTION,
       type: "system",
       description:
         "List the guardian's authorized computers. Allowing this action also enables the " +
