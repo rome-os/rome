@@ -23,6 +23,8 @@ export type SseEventHandlers<Schemas extends Record<string, z.ZodType>> = {
 interface ConnectionState {
   source: EventSource;
   listeners: Map<string, EventListener>;
+  /** Set at teardown; a listener a wrapper refuses to remove stays silent. */
+  closed: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -104,10 +106,34 @@ function addEventListener<
   eventName: EventName,
 ): void {
   const listener = ((event: MessageEvent<string>) => {
+    if (state.closed) return;
     invokeHandler(handlersRef, url, eventName, event);
   }) as EventListener;
   state.listeners.set(eventName, listener);
   state.source.addEventListener(eventName, listener);
+}
+
+/**
+ * Removes one listener without letting a wrapper's failure stop teardown.
+ * An extension can expose `removeEventListener` through a proxy that throws
+ * `Illegal invocation` on the native receiver, and that must not skip
+ * `close()` or the listeners after it.
+ */
+function removeListener(
+  source: EventSource,
+  eventName: string,
+  listener: EventListener,
+  url: string,
+): void {
+  try {
+    source.removeEventListener(eventName, listener);
+  } catch (error) {
+    console.error("SSE listener removal failed", {
+      url,
+      eventName,
+      error: errorMessage(error),
+    });
+  }
 }
 
 export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
@@ -126,7 +152,7 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
     if (!enabled || typeof EventSource !== "function") return;
 
     const source = new EventSource(url, { withCredentials: true });
-    const state: ConnectionState = { source, listeners: new Map() };
+    const state: ConnectionState = { source, listeners: new Map(), closed: false };
     const activeHandlers = handlersRef.current;
     for (const eventName in activeHandlers) {
       addEventListener(state, handlersRef, url, eventName);
@@ -134,6 +160,7 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
 
     let hasOpened = false;
     const handleOpen = () => {
+      if (state.closed) return;
       if (!hasOpened) {
         hasOpened = true;
         return;
@@ -146,6 +173,7 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
     };
     source.addEventListener("open", handleOpen);
     const handleError = () => {
+      if (state.closed) return;
       const context: SseErrorContext = { readyState: source.readyState };
       invokeObservedCallback(
         () => optionsRef.current?.onError?.(context),
@@ -156,13 +184,18 @@ export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(
     source.addEventListener("error", handleError);
 
     return () => {
-      source.removeEventListener("open", handleOpen);
-      source.removeEventListener("error", handleError);
+      state.closed = true;
+      removeListener(source, "open", handleOpen, url);
+      removeListener(source, "error", handleError, url);
       for (const [eventName, listener] of state.listeners) {
-        source.removeEventListener(eventName, listener);
+        removeListener(source, eventName, listener, url);
       }
       state.listeners.clear();
-      source.close();
+      try {
+        source.close();
+      } catch (error) {
+        console.error("SSE connection close failed", { url, error: errorMessage(error) });
+      }
     };
   }, [enabled, url]);
 }
