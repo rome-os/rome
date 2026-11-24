@@ -4,8 +4,8 @@
 
 import { connectStep } from "../connections/device/connect-step.js";
 import {
-  DEVICE_DESCRIBE_ACTION,
-  DEVICE_RUN_ACTION,
+  READ_DEVICES_TOOL,
+  RUN_ON_DEVICE_TOOL,
   type LivePointer,
   type LiveRoutes,
   type LiveTurn,
@@ -66,8 +66,8 @@ export function withNextStep(
   return {
     ...pointer,
     next:
-      `Read the rest from ${on} live now with ${DEVICE_RUN_ACTION} and device ` +
-      `"${pointer.device.id}", the operation and arguments from ${DEVICE_DESCRIBE_ACTION}. Do not ` +
+      `Read the rest from ${on} live now with ${RUN_ON_DEVICE_TOOL} and deviceId ` +
+      `"${pointer.device.id}", the operation and arguments from ${READ_DEVICES_TOOL}. Do not ` +
       "schedule a later check for this. If the " +
       "device does not answer, answer from the stored data and say how fresh it is.",
   };

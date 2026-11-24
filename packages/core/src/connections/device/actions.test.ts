@@ -335,7 +335,7 @@ describe("device actions", () => {
     );
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^not_connected: .*core:device_describe/),
+      error: expect.stringMatching(/^not_connected: .*system:read_devices/),
     });
     expect(calls).toEqual([]);
   });

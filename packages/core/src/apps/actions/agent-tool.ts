@@ -37,9 +37,10 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
   /** What the agent reads to choose the tool. */
   description: string;
   /** Names of older actions or tools this tool takes over. While the agent
-   *  may call this tool, the catalog lists and searches only this tool, and a
-   *  call by an older name still runs: as the older action where one is still
-   *  registered, else as this tool. */
+   *  may call this tool, the catalog lists and searches only this tool, and an
+   *  agent's call by an older name still runs: as the older action where one
+   *  is still registered, else as this tool. Routines, webhooks and apps run
+   *  an action by its exact name and get no fallback. */
   olderNames?: readonly string[];
   /** Picks who may ask: a read needs a turn that works for the guardian, a
    *  write the guardian's own message in their private chat (who-may-ask.ts). */

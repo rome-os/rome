@@ -3,6 +3,7 @@ import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import {
   type AgentToolDeps,
   agentToolNames,
+  agentTools,
   agentToolOlderNames,
   registerAgentTools,
 } from "./agent-tools.js";
@@ -12,12 +13,19 @@ const NAMES = [
   "system:read_connections",
   "system:connect_service",
   "system:disconnect_service",
+  "system:read_routines",
+  "system:change_routine",
   "system:list_routine_runs",
   "system:read_routine_run",
   "system:pause_routine",
   "system:resume_routine",
   "system:run_routine",
+  "system:stop_routine_run",
   "system:stop_routine",
+  "system:read_devices",
+  "system:run_on_device",
+  "system:rename_device",
+  "system:remove_device",
 ];
 
 describe("core's agent tools", () => {
@@ -30,6 +38,8 @@ describe("core's agent tools", () => {
   });
 
   it("maps each older name to one tool, never to another tool's own name", () => {
+    const declared = agentTools.flatMap((tool) => tool.olderNames);
+    expect(agentToolOlderNames.size).toBe(declared.length);
     for (const [older, tool] of agentToolOlderNames) {
       expect(agentToolNames.has(tool)).toBe(true);
       expect(agentToolNames.has(older)).toBe(false);
