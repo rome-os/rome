@@ -4070,15 +4070,25 @@ class AgentSessionImpl implements AgentSession {
   }
 
   submit(input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt {
-    if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
+    if (this.status === "closed") {
+      this.release();
+      throw new Error(`AgentSession ${this.sessionId} is closed`);
+    }
     const { priority = "next", onInputStatus, ...turnOptions } = options;
-    if (turnOptions.computerUseGrant !== undefined && priority !== "after")
+    if (turnOptions.computerUseGrant !== undefined && priority !== "after") {
+      this.release();
       throw new Error("A computer-use grant requires a separate turn.");
+    }
     if (!isQueueInput(priority)) {
       const landed = afterLanding(this.turnMutex.isLocked());
-      const handle = this.startTurn(input, turnOptions, onInputStatus);
-      // The turn now holds the session, so the caller's hold ends.
-      this.release();
+      let handle: AgentTurnHandle;
+      try {
+        handle = this.startTurn(input, turnOptions, onInputStatus);
+      } finally {
+        // Either the turn now holds the session or admission threw before
+        // starting one; in both cases the caller's hold ends here.
+        this.release();
+      }
       return {
         ...(input.inputId ? { inputId: input.inputId } : {}),
         turnId: handle.id,
@@ -4097,12 +4107,17 @@ class AgentSessionImpl implements AgentSession {
     ) {
       this.currentSink.taskInputContinues = true;
     }
-    const receipt = this.inputs.submit(
-      { ...input, inputId: input.inputId ?? uuidv7() },
-      { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
-    );
-    // The queued input now holds the session, so the caller's hold ends.
-    this.release();
+    let receipt: AgentInputReceipt;
+    try {
+      receipt = this.inputs.submit(
+        { ...input, inputId: input.inputId ?? uuidv7() },
+        { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
+      );
+    } finally {
+      // Either the queued input now holds the session or submission threw;
+      // in both cases the caller's hold ends here.
+      this.release();
+    }
     // The queue ends its own turn. A system turn (a backend continuation) runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;

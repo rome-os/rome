@@ -45,8 +45,10 @@ async function withRunningSession(
     facts: TurnFacts;
     acknowledge(): void;
     finishFirst(): void;
+    firstEnded(): Promise<void>;
     finishSecond(): void;
     nextStarted(): Promise<void>;
+    openSession(): Promise<AgentSession>;
   }) => Promise<void>,
   initialActor: TurnActor = { kind: "visitor", accountId: "synthetic-visitor" },
   initialOptions: SubmitOptions = {},
@@ -162,28 +164,32 @@ async function withRunningSession(
     { keepAliveAcrossTurns: true },
   );
   try {
-    const session = await manager.open(
-      { agentName: agent.name, channelThreadKey: "webchat:source" },
-      {
-        workingDir: directory,
-        audience: "private",
-        threadContext: { channel: "webchat", threadId: "source", threadType: "private" },
-      },
-    );
+    const openSession = () =>
+      manager.open(
+        { agentName: agent.name, channelThreadKey: "webchat:source" },
+        {
+          workingDir: directory,
+          audience: "private",
+          threadContext: { channel: "webchat", threadId: "source", threadType: "private" },
+        },
+      );
+    const session = await openSession();
     const visitor = initialActor;
     const receipt = session.submit(
       { prompt: "go" },
       { actor: visitor, priority: "next", ...initialOptions },
     );
-    await receipt.turn;
+    const firstTurn = await receipt.turn;
     await rs.waitFor(() => expect(running).toBe(true));
     await run({
       session,
       facts: facts!,
       acknowledge,
       finishFirst: () => turnEnds[0].resolve(),
+      firstEnded: () => firstTurn.ended().then(() => {}),
       finishSecond: () => turnEnds[1].resolve(),
       nextStarted: () => rs.waitFor(() => expect(runs).toBeGreaterThan(1)),
+      openSession,
     });
   } finally {
     acknowledge();
@@ -316,6 +322,55 @@ it("does not restore a grant after observing that it expired", async () => {
     guardian,
     { priority: "after", computerUseGrant: grant },
   );
+});
+
+it("releases the caller lease when a computer-use grant is rejected on submit", async () => {
+  const inUse = (session: AgentSession) =>
+    (session as AgentSession & { hasTurnInProgress: boolean }).hasTurnInProgress;
+
+  await withRunningSession(async ({ session, finishFirst, firstEnded, openSession }) => {
+    finishFirst();
+    await firstEnded();
+    await rs.waitFor(() => expect(inUse(session)).toBe(false));
+
+    const validGrant = { deviceId: "synthetic-device", expiresAt: Date.now() + 30_000 };
+    const expiredGrant = { deviceId: "synthetic-device", expiresAt: Date.now() - 1 };
+
+    const wrongPriority = await openSession();
+    expect(inUse(wrongPriority)).toBe(true);
+    expect(() =>
+      wrongPriority.submit(
+        { prompt: "wrong priority" },
+        { actor: guardian, priority: "next", computerUseGrant: validGrant },
+      ),
+    ).toThrow("requires a separate turn");
+    expect(inUse(wrongPriority)).toBe(false);
+
+    const expired = await openSession();
+    expect(inUse(expired)).toBe(true);
+    expect(() =>
+      expired.submit(
+        { prompt: "expired grant" },
+        { actor: guardian, priority: "after", computerUseGrant: expiredGrant },
+      ),
+    ).toThrow("requires an unexpired grant for a private guardian turn");
+    expect(inUse(expired)).toBe(false);
+
+    const nonPrivate = await openSession();
+    expect(inUse(nonPrivate)).toBe(true);
+    expect(() =>
+      nonPrivate.submit(
+        { prompt: "shared audience" },
+        {
+          actor: guardian,
+          priority: "after",
+          parentAudience: "shared",
+          computerUseGrant: validGrant,
+        },
+      ),
+    ).toThrow("requires an unexpired grant for a private guardian turn");
+    expect(inUse(nonPrivate)).toBe(false);
+  }, guardian);
 });
 
 for (const reason of ["user-stop", "superseded"] as const) {
