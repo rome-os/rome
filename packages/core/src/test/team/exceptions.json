@@ -11,7 +11,7 @@
     },
     {
       "name": "removing the guardian",
-      "routes": []
+      "routes": ["POST /api/vault/reset"]
     },
     {
       "name": "the guardian's own",
