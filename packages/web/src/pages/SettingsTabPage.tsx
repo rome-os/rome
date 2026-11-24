@@ -131,6 +131,7 @@ type TierModelMappings = Partial<
 
 export const TABS = [
   "Appearance",
+  "Team",
   "Connections",
   "Devices",
   "AI Tools",
@@ -140,7 +141,7 @@ export const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-// Only these tabs read what `loadAll` fetches (/api/settings). Connections,
+// Only these tabs read what `loadAll` fetches (/api/settings). Team, Connections,
 // Devices and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
 // nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
@@ -305,6 +306,11 @@ export default function SettingsPage() {
       ) : (
         <>
           {activeTab === "Appearance" && <AppearanceSection />}
+          {activeTab === "Team" && (
+            <Measure>
+              <TeamSection />
+            </Measure>
+          )}
           {activeTab === "Connections" && (
             <ConnectionsSection
               connections={connections}
@@ -1424,7 +1430,6 @@ function AdvancedEasterEggOverlay({ onClose }: { onClose: () => void }) {
 }
 
 // ── Section: Access Control ───────────────────────────
-// Who can sign in from the public host (allowed Rome Cloud emails).
 
 function AccessControlSection({
   settings,
@@ -1449,20 +1454,21 @@ function AccessControlSection({
           onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
           disabled={saving}
         />
-        <AllowedCloudEmailsRows />
       </FormRows>
     </SettingsGroup>
   );
 }
 
+// ── Section: Team ──────────────────────────────────────
+// Who may use this Rome as the guardian does: the dashboard allow-list.
+
 interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-/** Admins as rows of the Access and privacy group: a heading row with
- * the count, the add field, then one row per address. Last in the group, so a
- * long list grows at the bottom rather than pushing the other settings down. */
-function AllowedCloudEmailsRows() {
+/** The team as one surface: a heading row with the count, the add field, then
+ * one row per address. */
+function TeamSection() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -1483,14 +1489,14 @@ function AllowedCloudEmailsRows() {
   async function saveErrorMessage(response: Response): Promise<string> {
     const data = (await response.json().catch(() => null)) as { error?: unknown } | null;
     if (data?.error === "too_many_emails") {
-      return t("publicAccess.dashboardEmails.tooMany", { limit: DASHBOARD_ACCESS_MAX_EMAILS });
+      return t("team.members.tooMany", { limit: DASHBOARD_ACCESS_MAX_EMAILS });
     }
     if (data?.error === "email_too_long") {
-      return t("publicAccess.dashboardEmails.emailTooLong", {
+      return t("team.members.emailTooLong", {
         limit: DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
       });
     }
-    return apiErrorMessageFrom(data, t("publicAccess.dashboardEmails.saveFailedFallback"));
+    return apiErrorMessageFrom(data, t("team.members.saveFailedFallback"));
   }
 
   // Saves `next` right away; on failure rolls the list back to `previous` so
@@ -1506,14 +1512,10 @@ function AllowedCloudEmailsRows() {
         body: JSON.stringify(updated),
       });
       if (!response.ok) throw new Error(await saveErrorMessage(response));
-      toast.success(t("publicAccess.dashboardEmails.savedFlash"));
+      toast.success(t("team.members.savedFlash"));
     } catch (error) {
       setEmails(previous);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t("publicAccess.dashboardEmails.saveFailedFallback"),
-      );
+      toast.error(error instanceof Error ? error.message : t("team.members.saveFailedFallback"));
     } finally {
       setSaving(false);
     }
@@ -1534,7 +1536,7 @@ function AllowedCloudEmailsRows() {
     if (parsed.invalid.length > 0) {
       setDraft(parsed.invalid.join(" "));
       setDraftError(
-        t("publicAccess.dashboardEmails.invalidEmails", {
+        t("team.members.invalidEmails", {
           emails: parsed.invalid.join(", "),
         }),
       );
@@ -1560,23 +1562,21 @@ function AllowedCloudEmailsRows() {
   if (!loaded) return null;
 
   return (
-    <>
+    <FormRows>
       <FormRow>
         <FormRowHeading>
-          <FormRowLabel>{t("publicAccess.dashboardEmails.title")}</FormRowLabel>
-          <FormRowDescription>{t("publicAccess.dashboardEmails.description")}</FormRowDescription>
+          <FormRowLabel>{t("team.members.title")}</FormRowLabel>
+          <FormRowDescription>{t("team.members.description")}</FormRowDescription>
         </FormRowHeading>
         <FormRowControl>
-          <Badge variant="muted">
-            {t("publicAccess.dashboardEmails.accountCount", { count: emails.length })}
-          </Badge>
+          <Badge variant="muted">{t("team.members.peopleCount", { count: emails.length })}</Badge>
         </FormRowControl>
       </FormRow>
       <div className="px-4 py-3">
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
-              id="dashboard-cloud-emails"
+              id="team-emails"
               size="md"
               icon={<Mail />}
               type="email"
@@ -1592,11 +1592,11 @@ function AllowedCloudEmailsRows() {
               }}
               onPaste={handlePaste}
               disabled={saving}
-              placeholder={t("publicAccess.dashboardEmails.placeholder")}
+              placeholder={t("team.members.placeholder")}
               autoComplete="off"
               spellCheck={false}
               aria-invalid={draftError ? true : undefined}
-              aria-label={t("publicAccess.dashboardEmails.inputLabel")}
+              aria-label={t("team.members.inputLabel")}
             />
           </div>
           <Button
@@ -1606,13 +1606,13 @@ function AllowedCloudEmailsRows() {
             disabled={saving || !draft.trim()}
             onClick={() => commitDraft(draft)}
           >
-            {t("publicAccess.dashboardEmails.add")}
+            {t("team.members.add")}
           </Button>
         </div>
         {draftError && <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>}
       </div>
       {emails.length > 0 ? (
-        <ul aria-label={t("publicAccess.dashboardEmails.title")} className="divide-y divide-border">
+        <ul aria-label={t("team.members.title")} className="divide-y divide-border">
           {emails.map((email) => (
             <li key={email} className="flex items-center gap-3 px-4 py-3">
               <Avatar size="sm">
@@ -1623,7 +1623,7 @@ function AllowedCloudEmailsRows() {
               <span className="min-w-0 flex-1 truncate text-ui text-foreground">{email}</span>
               <IconButton
                 size="sm"
-                label={t("publicAccess.dashboardEmails.remove", { email })}
+                label={t("team.members.remove", { email })}
                 icon={<X />}
                 className="text-muted-foreground hover:text-foreground"
                 disabled={saving}
@@ -1633,10 +1633,8 @@ function AllowedCloudEmailsRows() {
           ))}
         </ul>
       ) : (
-        <p className="px-4 py-3 text-ui text-muted-foreground">
-          {t("publicAccess.dashboardEmails.empty")}
-        </p>
+        <p className="px-4 py-3 text-ui text-muted-foreground">{t("team.members.empty")}</p>
       )}
-    </>
+    </FormRows>
   );
 }
