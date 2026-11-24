@@ -237,14 +237,36 @@ describe("Slack app direct messages (R4)", () => {
 
   it("hands over an author from another workspace under that workspace", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, delivered } = adapter(mailbox);
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
     await a.start();
     const base = dmEvent(1);
     await mailbox.deposit(
       frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "T_OTHER" } }),
-      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, team: "T_THIRD" } }),
     );
-    expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_THIRD/U_GUARDIAN"]);
+    userName.mockResolvedValue({ displayName: "Ann", username: "ann", teamId: "T_EXTERNAL" });
+    const second = dmEvent(2, {});
+    await mailbox.deposit(
+      frame({
+        ...second,
+        event: { ...second.event, user: "U_ANN", team: TEAM, source_team: "T_EXTERNAL" },
+      }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_EXTERNAL/U_ANN"]);
+  });
+
+  it("holds a message that names another workspace but not its author's", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, team: TEAM, source_team: "T_EXTERNAL" } }),
+    );
+    expect(delivered).toHaveLength(0);
+    expect(mailbox.statuses).toEqual([500]);
   });
 
   it("names an author Slack places only in an Enterprise Grid org under their own workspace", async () => {
