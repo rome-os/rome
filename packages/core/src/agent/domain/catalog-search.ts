@@ -7,6 +7,10 @@ export const SEARCH_LIMIT_DESCRIPTION =
   `Optional. Recommended: omit this parameter to use the default of ${DEFAULT_SEARCH_LIMIT}. ` +
   `If provided, use an integer from 1 to ${MAX_SEARCH_LIMIT}.`;
 
+export const SEARCH_QUERY_FORM =
+  "The query is a JavaScript regular expression such as disconnect|unlink; matching already " +
+  "ignores case, and inline markers such as (?i) are not accepted.";
+
 export function normalizeSearchLimit(limit: number | undefined): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) {
     return DEFAULT_SEARCH_LIMIT;
@@ -34,7 +38,7 @@ function parseRegexQuery(queryText: string): RegExp | null {
     return new RegExp(trimmed.slice(1, lastSlash), flags);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
+    throw new Error(`Invalid regex query: ${message}. ${SEARCH_QUERY_FORM}`);
   }
 }
 
@@ -53,7 +57,7 @@ function compileSearchRegex(queryText: string): RegExp {
     return new RegExp(queryText, "i");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
+    throw new Error(`Invalid regex query: ${message}. ${SEARCH_QUERY_FORM}`);
   }
 }
 
