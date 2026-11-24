@@ -33,6 +33,8 @@ describe("dream agents", () => {
       "dream:read_memory_file",
       "dream:write_memory_file",
       "dream:edit_memory_file",
+      // Read-only, and it never carries personal data.
+      "core:concierge_patrol_observations",
     ]);
   });
 
