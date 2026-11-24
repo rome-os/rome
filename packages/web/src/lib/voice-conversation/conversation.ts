@@ -84,9 +84,13 @@ const browserDeps: ConversationDeps = {
   createPlayer: createPcmPlayer,
 };
 
-/** Starts a voice conversation in `chatId`. Call it from the guardian's click, so the reply may play. */
+/**
+ * Starts a voice conversation in `chat`: a chat's id, or, for a draft, what
+ * creates the chat and answers its id. Call it from the guardian's click, so
+ * the reply may play.
+ */
 export function startVoiceConversation(
-  chatId: string,
+  chat: string | (() => Promise<string>),
   handlers: ConversationHandlers,
   deps: ConversationDeps = browserDeps,
 ): VoiceConversation {
@@ -141,13 +145,22 @@ export function startVoiceConversation(
         handlers.onAsking?.(true);
       },
     )
-    .then((opened) => {
+    .then(async (opened) => {
       if (asking) handlers.onAsking?.(false);
       if (done) {
         opened.close();
         return;
       }
       microphone = opened;
+      // A draft's chat is created once the microphone is on, so a refused microphone leaves no empty chat.
+      let chatId: string;
+      try {
+        chatId = typeof chat === "string" ? chat : await chat();
+      } catch {
+        finish("chat-refused");
+        return;
+      }
+      if (done) return;
       socket = deps.openSocket();
       heardFromRome(OPEN_LIMIT_MS);
       socket.onopen = () => {

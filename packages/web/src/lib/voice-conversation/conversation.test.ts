@@ -36,7 +36,7 @@ function fakeSocket() {
   return socket;
 }
 
-function setup(refuse?: string) {
+function setup(refuse?: string, chat: string | (() => Promise<string>) = "concierge") {
   const socket = fakeSocket();
   let onAudio: (chunk: ArrayBuffer) => void = () => {};
   const played: Array<[number, number]> = [];
@@ -72,7 +72,7 @@ function setup(refuse?: string) {
   const states: string[] = [];
   const ended: Array<ConversationStopReason | null> = [];
   const conversation = startVoiceConversation(
-    "concierge",
+    chat,
     { onState: (s) => states.push(s), onEnded: (r) => ended.push(r) },
     deps,
   );
@@ -111,6 +111,35 @@ describe("a voice conversation in the browser", () => {
 
     c.socket.say({ type: "clear" });
     expect(c.cleared()).toBe(1);
+  });
+
+  it("creates a draft's chat once the microphone is on, then starts in it", async () => {
+    const order: string[] = [];
+    const c = setup(undefined, async () => {
+      order.push("chat");
+      return "topic-1";
+    });
+    await settle();
+    c.socket.open();
+    expect(order).toEqual(["chat"]);
+    expect(c.socket.text()).toEqual([{ type: "start", chatId: "topic-1", sampleRate: 16000 }]);
+
+    const refusedMic = setup("NotAllowedError", async () => {
+      order.push("refused");
+      return "topic-2";
+    });
+    await settle();
+    expect(refusedMic.ended).toEqual(["microphone-blocked"]);
+    expect(order).toEqual(["chat"]);
+  });
+
+  it("ends as refused when a draft's chat cannot be created", async () => {
+    const c = setup(undefined, async () => {
+      throw new Error("no");
+    });
+    await settle();
+    expect(c.ended).toEqual(["chat-refused"]);
+    expect(c.micClosed()).toBe(true);
   });
 
   it("sends no audio while muted", async () => {

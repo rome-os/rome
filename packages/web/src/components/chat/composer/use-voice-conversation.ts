@@ -11,8 +11,15 @@ import {
 /**
  * A voice conversation in `chatId`, run from the composer. The composer offers
  * it only where `available` holds; Rome checks the chat again when it starts.
+ * A draft with `startChat` offers it too: starting creates the chat.
  */
-export function useVoiceConversation({ chatId }: { chatId: string | null | undefined }) {
+export function useVoiceConversation({
+  chatId,
+  startChat,
+}: {
+  chatId: string | null | undefined;
+  startChat?: () => Promise<string>;
+}) {
   const info = useVoiceConversationInfo();
   const conversationRef = useRef<VoiceConversation | null>(null);
   const [active, setActive] = useState(false);
@@ -23,13 +30,14 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
   const [stopped, setStopped] = useState<ConversationStopReason | null>(null);
 
   const start = useCallback(() => {
-    if (!chatId || conversationRef.current) return;
+    const chat = chatId || startChat;
+    if (!chat || conversationRef.current) return;
     setStopped(null);
     setState("listening");
     setMuted(false);
     mutedRef.current = false;
     setActive(true);
-    conversationRef.current = startVoiceConversation(chatId, {
+    conversationRef.current = startVoiceConversation(chat, {
       onState: setState,
       onAsking: setAsking,
       onEnded: (reason) => {
@@ -41,7 +49,7 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
         setStopped(reason);
       },
     });
-  }, [chatId]);
+  }, [chatId, startChat]);
 
   const end = useCallback(() => conversationRef.current?.end(), []);
 
@@ -52,8 +60,14 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
     setMuted(next);
   }, []);
 
-  // Leaving the chat, or the page, ends its conversation.
-  useEffect(() => () => conversationRef.current?.end(), [chatId]);
+  // Leaving the chat, or the page, ends its conversation. A draft turning
+  // into the chat its conversation created stays in it.
+  const chatIdRef = useRef(chatId);
+  useEffect(() => {
+    if (chatIdRef.current && chatIdRef.current !== chatId) conversationRef.current?.end();
+    chatIdRef.current = chatId;
+  }, [chatId]);
+  useEffect(() => () => conversationRef.current?.end(), []);
 
   // The bars follow whoever is talking: Rome while it speaks, the guardian otherwise.
   const level = useCallback(() => {
@@ -63,8 +77,9 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
   }, [state]);
 
   return {
-    /** False hides the voice conversation button: the account is off the voice input list, or this is no chat yet. */
-    available: Boolean(info.data?.available) && Boolean(chatId) && shellAllowsMicrophone(),
+    /** False hides the voice conversation button: the account is off the voice input list, or this is no chat yet and cannot start one. */
+    available:
+      Boolean(info.data?.available) && Boolean(chatId || startChat) && shellAllowsMicrophone(),
     active,
     state,
     muted,

@@ -2211,6 +2211,18 @@ export function Chat({
     ],
   );
 
+  // A voice conversation started in a draft creates its session, as the
+  // draft's first send would, and talks in it.
+  const startConversationChat = useCallback(async () => {
+    if (!startSession) throw new Error("This draft cannot start a chat");
+    const id = await startSession();
+    mainSessionIdRef.current = id;
+    setCreatedSessionId(id);
+    onSessionCreated?.(id);
+    notifySessionsChanged();
+    return id;
+  }, [startSession, onSessionCreated, notifySessionsChanged]);
+
   // Send a turn into the active session. The composer owns the input state
   // (text/uploads/options); this handler builds the POST and delegates the
   // turn lifecycle to runTurnLifecycle.
@@ -3354,6 +3366,7 @@ export function Chat({
                       <ConciergeComposer
                         ref={composerRef}
                         chatId={mainSessionId}
+                        startChat={startSession ? startConversationChat : undefined}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}
