@@ -12,6 +12,8 @@ const STORED_WITHIN_MS = 5_000;
 
 /** A message added to a chat, as far as the reply reads it. */
 export interface AddedMessage {
+  /** Its id in the chat. */
+  id?: string;
   /** The chat it was added to. */
   sessionId: string;
   turnId: string | null;
@@ -53,6 +55,7 @@ export function gatherDelivered(
   return {
     stop,
     of: (turn, stored) => ({
+      id: turn.id,
       events: () =>
         readDelivered(chatId, turn, stored, early, stop, (listener) => {
           take = listener;
@@ -130,7 +133,7 @@ async function storedOrLate(stored: () => Promise<unknown>): Promise<void> {
 
 // What a message says: its text parts. A quote of the message it answers is
 // not said, and any other part, such as a card, is shown.
-function partsOf(content: string): ReplyEvent[] {
+export function partsOf(content: string): ReplyEvent[] {
   let parts: unknown;
   try {
     parts = JSON.parse(content);

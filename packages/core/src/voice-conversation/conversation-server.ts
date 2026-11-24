@@ -30,6 +30,7 @@ import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-inp
 import { readVoiceTerms } from "../voice-input/voice-terms.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import { createConversation, type ReplyTurn } from "./conversation.js";
+import type { AddedMessage } from "./delivered-reply.js";
 
 const log = createLogger("voice-conversation");
 
@@ -47,8 +48,14 @@ export interface VoiceConversationDeps {
   speaker: SpeakerSource;
   /** Whether `chatId` can take spoken turns, asked before any session opens. */
   canTalkIn(chatId: string): Promise<boolean>;
-  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
-  send(chatId: string, text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. `note` opens the turn's prompt, for that turn only. */
+  send(chatId: string, text: string, signal: AbortSignal, note?: string): Promise<ReplyTurn>;
+  /** Calls `listener` with each message added to any chat, and returns the unsubscribe. */
+  watch?: (listener: (message: AddedMessage) => void) => () => void;
+  /** The tasks started at message `messageId` of `chatId`: each one's chat and name. */
+  tasksOf?: (chatId: string, messageId: string) => Promise<{ chatId: string; name: string }[]>;
+  /** Whether `chatId` runs a turn now. */
+  isRunning?: (chatId: string) => boolean;
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
   maxConversationMs?: number;
@@ -119,18 +126,19 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   let alive: ReturnType<typeof setInterval> | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
   let chatId: string | null = null;
+  let stopWatching: (() => void) | null = null;
 
   const reply = (message: VoiceConversationServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
   };
 
   const conversation = createConversation({
-    send: (text, signal) => {
+    send: (text, signal, note) => {
       const to = chatId;
       if (!to) return Promise.reject(new Error("no chat"));
       return actor
-        ? runWithSessionActor(actor, () => deps.send(to, text, signal))
-        : deps.send(to, text, signal);
+        ? runWithSessionActor(actor, () => deps.send(to, text, signal, note))
+        : deps.send(to, text, signal, note);
     },
     message: (message) => {
       if (!closed) reply(message);
@@ -139,6 +147,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
     },
     fail: (reason) => close({ type: "error", reason }),
+    tasksOf: (messageId) =>
+      chatId && deps.tasksOf ? deps.tasksOf(chatId, messageId) : Promise.resolve([]),
+    chatBusy: () => Boolean(chatId && deps.isRunning?.(chatId)),
   });
 
   // Every listening session is a Rome Cloud session, so each one reports.
@@ -157,6 +168,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const settle = (outcome: string) => {
+    stopWatching?.();
+    stopWatching = null;
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
     conversation.close();
@@ -192,6 +205,12 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     // A chat that cannot take spoken turns is refused before any paid session opens.
     if (!chatId || !(await deps.canTalkIn(chatId))) return fail("chat-refused");
     if (closed) return;
+    // From now on, before any spoken turn, so none of its messages is missed.
+    const watched = chatId;
+    stopWatching =
+      deps.watch?.((message) => {
+        if (message.sessionId === watched) conversation.arrived(message);
+      }) ?? null;
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
       if (spoken.ok) spoken.session.close();
@@ -235,6 +254,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       termCount: terms.length,
     });
     reply({ type: "ready", sampleRate: spoken.session.format.sampleRate });
+    conversation.ready();
     reply({ type: "state", state: "listening" });
   }
 
