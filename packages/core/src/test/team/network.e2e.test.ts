@@ -1,10 +1,17 @@
 // The team verifier's instance reaches no server on the developer's machine
-// that the verifier did not start. `POST /api/desktop/navigate-chatgpt` calls
-// Chrome's debugging port to close tabs and open new ones; a fake Chrome on a
-// loopback port stands in for it. The desktop routes read the port once at
-// load, so this file sets it before it loads the instance.
+// that the verifier did not start, and runs no program but the sandbox's
+// stubs. `POST /api/desktop/navigate-chatgpt` calls Chrome's debugging port to
+// close tabs and open new ones; a fake Chrome on a loopback port stands in for
+// it. The desktop routes read the port once at load, so this file sets it
+// before it loads the instance.
 
+// First, so HOME is the sandbox's before any product module loads.
+import { refusedLaunches, SANDBOX } from "./sandbox.js";
+import { execFile, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 
 let chrome: Server;
@@ -60,5 +67,49 @@ describe("the team verifier's instance", () => {
     chromeRequests.length = 0;
     expect(await navigateChatGpt(true)).toBe(200);
     expect(chromeRequests).toContain("GET /json/list");
+  }, 60_000);
+});
+
+describe("a program a route launches", () => {
+  // A program outside the sandbox that would leave a file behind if it ran.
+  const outside = mkdtempSync(join(SANDBOX.home, "outside-"));
+  const ranMarker = join(outside, "ran");
+  const decoy = join(outside, "composio");
+  writeFileSync(decoy, `#!/bin/sh\ntouch '${ranMarker}'\n`);
+  chmodSync(decoy, 0o755);
+
+  async function withInstance<T>(run: () => Promise<T>): Promise<T> {
+    const { createInstance } = await import("./instance.js");
+    const instance = await createInstance({ dashboardEmails: [] });
+    try {
+      return await run();
+    } finally {
+      await instance.close();
+    }
+  }
+
+  it("is refused when it lies outside the sandbox's stubs", async () => {
+    const before = refusedLaunches().length;
+    const sync = await withInstance(async () => spawnSync(decoy, ["login"]));
+    expect(sync.status).toBe(127);
+    const viaExecFile = await withInstance(() =>
+      promisify(execFile)(decoy, ["login"]).then(
+        () => 0,
+        (error: { code?: number }) => error.code,
+      ),
+    );
+    expect(viaExecFile).toBe(127);
+    expect(existsSync(ranMarker)).toBe(false);
+    expect(refusedLaunches().slice(before)).toEqual([`${decoy} login`, `${decoy} login`]);
+  }, 60_000);
+
+  it("runs the sandbox's stub for a CLI it has one for, whatever PATH comes first", async () => {
+    // The Composio CLI's own directories go ahead of PATH, as
+    // `getComposioEnv` puts them.
+    const result = await withInstance(async () =>
+      spawnSync("composio", ["login"], { env: { PATH: `${outside}:${process.env.PATH}` } }),
+    );
+    expect(result.status).toBe(1);
+    expect(existsSync(ranMarker)).toBe(false);
   }, 60_000);
 });
