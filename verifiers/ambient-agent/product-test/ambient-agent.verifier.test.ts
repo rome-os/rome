@@ -163,8 +163,14 @@ function standInPlatform() {
       },
     },
   };
-  const descriptor: ConnectionDescriptor = {
+  // The fields a kind declares to serve a whole workspace from one session,
+  // with the Concierge on an account made for it. `servesWorkspace` is the
+  // feature's own opt-in; a Rome without it ignores the field.
+  const descriptor = {
     connectionKind: KIND,
+    link: "own_account",
+    startsWithConcierge: true,
+    servesWorkspace: true,
     grant: "bot",
     auth: {
       obtain: async () => ({ material: {}, expiresAt: "never" }),
@@ -172,7 +178,7 @@ function standInPlatform() {
     },
     accountIdOf: () => BOT,
     capabilities: { talker: { reads: true, build: () => talker } },
-  };
+  } as ConnectionDescriptor;
   return {
     descriptor,
     sent,

@@ -84,6 +84,9 @@ async function round(ctx, fact, i, { thread = false, hooks = {}, asker: askedBy 
   return ev;
 }
 
+/** Whether so many rounds missed that the bar can no longer be met, so the rest are not asked. */
+const beyondBar = (rounds) => rounds.filter((r) => !r.held).length > ROUNDS - PASS_AT;
+
 function score(rounds, notCounted = {}) {
   const held = rounds.filter((r) => r.held).length;
   const answered = rounds.filter((r) => r.answered).length;
@@ -106,7 +109,7 @@ function score(rounds, notCounted = {}) {
       reason: `${held} of ${rounds.length} facts held${guardianNote}`,
       evidence,
     };
-  const parts = [`${held} of ${rounds.length} facts held (bar ${PASS_AT})`];
+  const parts = [`${held} of ${rounds.length} facts held (bar ${PASS_AT} of ${ROUNDS})`];
   if (answered === 0)
     parts.push(`the agent did not answer a member's mention: none of ${rounds.length} got a reply`);
   else {
@@ -114,6 +117,10 @@ function score(rounds, notCounted = {}) {
       parts.push(`${rounds.length - answered} member's mention(s) got no reply`);
     if (answered - held) parts.push(`${answered - held} answered without the fact`);
   }
+  if (rounds.length < ROUNDS)
+    parts.push(
+      `stopped after ${rounds.length} of ${ROUNDS} rounds, as the bar could no longer be met`,
+    );
   return { result: "fail", reason: parts.join("; ") + guardianNote, evidence };
 }
 
@@ -126,7 +133,7 @@ export async function recall(ctx) {
   const facts = drawFacts(ROUNDS + ctx.threadRounds + 1, { exclude: ctx.usedTopics });
   ctx.usedTopics.push(...facts.map((f) => f.topic));
   const rounds = [];
-  for (let i = 0; i < ROUNDS; i++) rounds.push(await round(ctx, facts[i], i));
+  for (let i = 0; i < ROUNDS && !beyondBar(rounds); i++) rounds.push(await round(ctx, facts[i], i));
   const thread = [];
   for (let i = 0; i < ctx.threadRounds; i++)
     thread.push(await round(ctx, facts[ROUNDS + i], ROUNDS + i, { thread: true }));
@@ -178,18 +185,21 @@ export async function stopped(ctx) {
     },
   };
   const rounds = [];
-  for (let i = 0; i < ROUNDS; i++) {
-    const ev = await round(ctx, facts[i], i, { hooks });
-    rounds.push(ev);
-    if (ev.controlFault) {
-      // Leave the instance running for whatever comes next.
-      await run(ctx.env.instance.start, [], { timeoutMs: ctx.restartMs });
-      return {
-        result: "not checked",
-        reason: `environment fault in round ${i + 1}: ${ev.controlFault}`,
-        evidence: { rounds },
-      };
+  try {
+    for (let i = 0; i < ROUNDS && !beyondBar(rounds); i++) {
+      const ev = await round(ctx, facts[i], i, { hooks });
+      rounds.push(ev);
+      if (ev.controlFault)
+        return {
+          result: "not checked",
+          reason: `environment fault in round ${i + 1}: ${ev.controlFault}`,
+          evidence: { rounds },
+        };
     }
+  } finally {
+    // Leave the instance running for whatever comes next, also when a round threw.
+    const state = await status(ctx);
+    if (state !== "running") await run(ctx.env.instance.start, [], { timeoutMs: ctx.restartMs });
   }
   return score(rounds);
 }

@@ -104,7 +104,10 @@ const CASES = [
     want: failing(1, 3, 6),
     exit: 1,
     what: "never reads the history",
-    reason: [1, /10 answered without the fact.*guardian asked.*answered without the fact/],
+    reason: [
+      1,
+      /answered without the fact.*stopped after 2 of 10 rounds.*guardian asked.*answered without the fact/,
+    ],
   },
   {
     name: "guardian-only",
@@ -112,7 +115,10 @@ const CASES = [
     want: failing(1, 3, 5, 6, 7, 8),
     exit: 1,
     what: "answers only the guardian, as main",
-    reason: [1, /did not answer a member's mention.*guardian asked.*held the fact/],
+    reason: [
+      1,
+      /did not answer a member's mention.*stopped after 2 of 10 rounds.*guardian asked.*held the fact/,
+    ],
   },
   {
     name: "silent",
