@@ -4098,13 +4098,14 @@ class AgentSessionImpl implements AgentSession {
       this.release();
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
-    const { priority = "next", onInputStatus, ...turnOptions } = options;
+    const { priority = "next", onInputStatus, supersedeRunning, ...turnOptions } = options;
     if (turnOptions.computerUseGrant !== undefined && priority !== "after") {
       this.release();
       throw new Error("A computer-use grant requires a separate turn.");
     }
     if (!isQueueInput(priority)) {
       const landed = afterLanding(this.turnMutex.isLocked());
+      const sink = this.currentSink;
       let handle: AgentTurnHandle;
       try {
         handle = this.startTurn(input, turnOptions, onInputStatus);
@@ -4112,6 +4113,14 @@ class AgentSessionImpl implements AgentSession {
         // Either the turn now holds the session or admission threw before
         // starting one; in both cases the caller's hold ends here.
         this.release();
+      }
+      if (supersedeRunning && sink && !sink.done && sink.turnId !== handle.id) {
+        void this.stopRunning(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+          this.log.warn("superseding the running turn failed", {
+            sessionId: this.sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
       return {
         ...(input.inputId ? { inputId: input.inputId } : {}),
@@ -4131,6 +4140,7 @@ class AgentSessionImpl implements AgentSession {
     ) {
       this.currentSink.taskInputContinues = true;
     }
+    const mutexBusy = this.turnMutex.isLocked();
     let receipt: AgentInputReceipt;
     try {
       receipt = this.inputs.submit(
@@ -4142,7 +4152,7 @@ class AgentSessionImpl implements AgentSession {
       // in both cases the caller's hold ends here.
       this.release();
     }
-    // The queue ends its own turn. A system turn (a backend continuation) runs
+    // The queue ends its own turn. A system or isolated `after` turn runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;
     if (
@@ -4159,7 +4169,7 @@ class AgentSessionImpl implements AgentSession {
         }),
       );
     }
-    return receipt;
+    return mutexBusy && receipt.landed === "started" ? { ...receipt, landed: "queued" } : receipt;
   }
 
   /** Starts a turn behind the running one: an `after` input's, or the input queue's. */

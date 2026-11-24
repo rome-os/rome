@@ -1792,6 +1792,14 @@ describe("native computer-use agent admission", () => {
       body,
     });
     const result = await f.call("observe", { sessionId, screenshot: true });
+    expect(content(result)).toMatchObject({
+      ok: true,
+      result: {
+        sessionId,
+        stateVersion: 1,
+        screenshot: image,
+      },
+    });
     expect(result.content[1]).toEqual({
       type: "image",
       mimeType: "image/png",
@@ -2033,5 +2041,95 @@ describe("native computer-use agent admission", () => {
       expect((await f.call("act", act(sessionId))).isError).toBe(true);
       expect(f.client.run.mock.calls).toHaveLength(calls);
     }
+  });
+
+  it("proactively cancels active bindings and clears windows when cancelDevice is called", async () => {
+    const f = fixture();
+    const sessionId = await f.bind();
+    f.client.run.mockResolvedValueOnce(
+      ok({ sessionId: "native-session", terminalCause: "cancelled", stopConfirmed: true }),
+    );
+    await f.service.cancelDevice("device");
+    expect(f.client.run).toHaveBeenLastCalledWith("device", "computer.cancel", {
+      sessionId: "native-session",
+    });
+    const afterRevoke = await f.call("observe", { sessionId });
+    expect(afterRevoke.isError).toBe(true);
+    expect(content(afterRevoke)).toMatchObject({ error: { code: "invalid_session" } });
+  });
+
+  it("returns session_stopped (not unknown_outcome) when mid-call revocation cancel transport throws", async () => {
+    let current = true;
+    const expiresAt = Date.now() + 30_000;
+    const revocableCaller = turn({
+      computerUseGrant: () => ({
+        deviceId: "device",
+        expiresAt,
+        isCurrent: async () => current,
+      }),
+    });
+    const f = fixture(true);
+    const listed = await f.call("windows", { deviceId: "device" }, revocableCaller);
+    const windowRef = JSON.parse(listed.content[0].text).result.windows[0].windowRef;
+    const bound = await f.call("bind", { deviceId: "device", windowRef }, revocableCaller);
+    const sessionId = JSON.parse(bound.content[0].text).result.sessionId as string;
+    f.client.run
+      .mockImplementationOnce(async () => {
+        current = false;
+        return ok(observed());
+      })
+      .mockRejectedValueOnce(new Error("transport closed during cancel"));
+    const result = await f.call("observe", { sessionId }, revocableCaller);
+    expect(result.isError).toBe(true);
+    expect(content(result)).toMatchObject({ error: { code: "session_stopped" } });
+  });
+
+  it("matches localized macOS apps by bundleName, appName, and bundleId", async () => {
+    const f = fixture();
+    const windows = [
+      {
+        windowRef: "native-textedit",
+        appName: "文本编辑",
+        bundleName: "TextEdit",
+        bundleId: "com.apple.TextEdit",
+        title: "notes.txt",
+      },
+      {
+        windowRef: "native-browser",
+        appName: "Google Chrome",
+        bundleName: "Google Chrome",
+        bundleId: "com.google.Chrome",
+        title: "TextEdit documentation",
+      },
+    ];
+    f.client.run.mockImplementation(async (_device, action) => {
+      if (action === "computer.windows") return ok({ windows });
+      if (action === "computer.bind")
+        return ok({ sessionId: "native-session", scope: "background" });
+      return ok({});
+    });
+
+    for (const application of ["TextEdit", "文本编辑", "com.apple.TextEdit"]) {
+      const listed = await f.call("windows", { deviceId: "device", application });
+      expect(listed.isError).toBeUndefined();
+      const matched = content(listed).result.windows as Array<{ title: string; appName: string }>;
+      expect(matched).toHaveLength(1);
+      expect(matched[0]).toMatchObject({ appName: "文本编辑", title: "notes.txt" });
+    }
+
+    let listedForBind = await f.call("windows", { deviceId: "device" });
+    const textEditRef = (
+      content(listedForBind).result.windows as Array<{ windowRef: string; appName: string }>
+    ).find((w) => w.appName === "文本编辑")?.windowRef;
+    expect(textEditRef).toBeDefined();
+    const bound = await f.call("bind", {
+      deviceId: "device",
+      windowRef: textEditRef,
+      application: "TextEdit",
+    });
+    expect(bound.isError).toBeUndefined();
+    expect(f.client.run).toHaveBeenLastCalledWith("device", "computer.bind", {
+      windowRef: "native-textedit",
+    });
   });
 });

@@ -104,12 +104,12 @@ export type SessionScope = "mine" | "all";
 const computerUseTargetSchema = z
   .object({
     deviceId: z.string().uuid(),
-    name: z.string().trim().max(200),
+    name: z.string().trim(),
     authorized: z.literal(true).optional(),
   })
   .transform(({ name, ...target }) => ({
     ...target,
-    name: name || target.deviceId,
+    name: name.slice(0, 200) || target.deviceId,
   }));
 
 export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;

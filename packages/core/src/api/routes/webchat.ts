@@ -5419,6 +5419,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
       priority: said.computerUseGrant ? ("after" as const) : priority.data,
+      ...(said.computerUseGrant && priority.data === "now" ? { supersedeRunning: true } : {}),
       ...(said.computerUseGrant ? { computerUseGrant: said.computerUseGrant } : {}),
       threadContext,
       romeSessionId: sessionId,
@@ -5520,12 +5521,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  const computerUseTargets = async (c: Context) => {
+  const COMPUTER_USE_LIST_DEVICES_TIMEOUT_MS = 3_000;
+  const COMPUTER_USE_DEVICE_ID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const listRemoteMacDevices = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        deps.nodeDevices.listDevices(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), COMPUTER_USE_LIST_DEVICES_TIMEOUT_MS);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  const computerUseSessionContext = async (c: Context) => {
     const actor = await currentSessionActor();
     if (actor?.kind !== "guardian" || actor.via !== "cookie" || cameThroughWidgetEvent(c.env))
-      return [];
+      return null;
     const sessionId = c.req.param("id");
-    if (!sessionId) return [];
+    if (!sessionId) return null;
     const session = await deps.webchatRepo.getSession(sessionId);
     if (
       !session ||
@@ -5534,9 +5555,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.archivedAt ||
       !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian"))
     )
-      return [];
+      return null;
     const agent = deps.agentLoader.find(session.agentName ?? "main");
-    if (!declaresComputerUse(agent?.definition.actions ?? [])) return [];
+    if (!declaresComputerUse(agent?.definition.actions ?? [])) return null;
     if (
       (await deps.placeAudience({
         channel: "webchat",
@@ -5546,7 +5567,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         threadType: "private",
       })) !== "private"
     )
-      return [];
+      return null;
+    return { actor, sessionId };
+  };
+
+  const computerUseTargets = async (c: Context, requestedDeviceId?: string) => {
+    if (deps.computerUseSigningSecretReady === false) return [];
+    const context = await computerUseSessionContext(c);
+    if (!context) return [];
+    const { actor } = context;
     const targets: Array<{
       deviceId: string;
       name: string;
@@ -5554,8 +5583,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }> = [
       ...(deps.computerUseLocal ? [{ ...deps.computerUseLocal, scope: "local" as const }] : []),
     ];
+    // Short-circuit for the instance-local target so local approval and turns never wait on
+    // remote device discovery.
+    if (
+      requestedDeviceId !== undefined &&
+      deps.computerUseLocal &&
+      deps.computerUseLocal.deviceId === requestedDeviceId
+    ) {
+      return targets.map(({ scope, ...target }) => ({
+        ...target,
+        approvalKey: computerUseApprovalKey(actor, target.deviceId, scope),
+      }));
+    }
     const seen = new Set<string>(targets.map(({ deviceId }) => deviceId));
-    const listed = await deps.nodeDevices.listDevices();
+    const listed = await listRemoteMacDevices();
     for (const device of listed?.devices ?? []) {
       if ((device.platform === "macos" || device.platform === "darwin") && !seen.has(device.id)) {
         seen.add(device.id);
@@ -5591,13 +5632,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.on(["PUT", "DELETE"], "/chat/sessions/:id/computer-use/:deviceId", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw))
       return c.json({ error: "Computer-use approval requires the same origin." }, 403);
-    const target = (await computerUseTargets(c)).find(
-      ({ deviceId }) => deviceId === c.req.param("deviceId"),
-    );
-    if (!target) return c.json({ error: "Computer use is unavailable" }, 404);
-    if (c.req.method === "PUT")
+    const deviceId = c.req.param("deviceId");
+    if (c.req.method === "PUT") {
+      const target = (await computerUseTargets(c, deviceId)).find(
+        (candidate) => candidate.deviceId === deviceId,
+      );
+      if (!target) return c.json({ error: "Computer use is unavailable" }, 404);
       await grantComputerUseApproval(deps.settingsRepo, target.approvalKey);
-    else await deps.settingsRepo.delete(target.approvalKey);
+      return c.body(null, 204);
+    }
+    // DELETE must succeed even when a previously approved Mac is currently offline or unlisted,
+    // and must proactively cancel any in-flight native bindings for that device.
+    const context = await computerUseSessionContext(c);
+    if (!context || !deviceId || !COMPUTER_USE_DEVICE_ID_RE.test(deviceId))
+      return c.json({ error: "Computer use is unavailable" }, 404);
+    const isLocal = deps.computerUseLocal?.deviceId === deviceId;
+    const scope: ComputerUseApprovalScope = isLocal ? "local" : "mac";
+    const approvalKey = computerUseApprovalKey(context.actor, deviceId, scope);
+    const stored = await deps.settingsRepo.get(approvalKey);
+    if (stored === null && !isLocal) {
+      const listed = (await computerUseTargets(c, deviceId)).some(
+        (candidate) => candidate.deviceId === deviceId,
+      );
+      if (!listed) return c.json({ error: "Computer use is unavailable" }, 404);
+    }
+    await deps.settingsRepo.delete(approvalKey);
+    await deps.nativeComputerUse?.cancelDevice(deviceId).catch(() => {});
     return c.body(null, 204);
   });
 
@@ -5617,9 +5677,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
     }
     if (body.computerUseDeviceId !== undefined) {
-      const target = (await computerUseTargets(c)).find(
-        ({ deviceId }) => deviceId === body.computerUseDeviceId,
-      );
+      const requestedDeviceId =
+        typeof body.computerUseDeviceId === "string" ? body.computerUseDeviceId : undefined;
+      const target =
+        requestedDeviceId !== undefined
+          ? (await computerUseTargets(c, requestedDeviceId)).find(
+              ({ deviceId }) => deviceId === requestedDeviceId,
+            )
+          : undefined;
       if (
         !target ||
         !isSameOriginMutationRequest(c.req.raw) ||

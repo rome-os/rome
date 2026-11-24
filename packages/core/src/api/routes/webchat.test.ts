@@ -562,6 +562,153 @@ describe("Webchat API", () => {
     expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("computerUseGrant");
   });
 
+  it("blocks remote Mac computer use when signing secret is not protected, allows offline revocation with cancelDevice, short-circuits local target, and preserves Concierge supersedeRunning", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "11111111-2222-4333-8444-555555555555", name: "This computer" };
+    const remoteId = "46569840-79c2-4fff-9f18-b1c86d3d1ec4";
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    let onlineDevices = [{ id: remoteId, name: "Studio Mac", platform: "macos" }];
+    const listDevices = rs
+      .spyOn(deps.nodeDevices, "listDevices")
+      .mockImplementation(async () => ({ devices: onlineDevices }));
+    const cancelDevice = rs.fn(async () => {});
+    const submit = rs.fn((input: AgentTurnInput, _options?: SendTurnOptions) =>
+      testReceipt(
+        testTurnHandle({
+          turnId: "hardened-turn-1",
+          events: (async function* () {
+            yield { type: "result" as const, content: "Done" };
+          })(),
+        }),
+        input.inputId,
+      ),
+    );
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "hardened-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:hardened" },
+      selectModel: () => {},
+      release: () => {},
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+
+    // 1. Weak/dev signing secret disables remote Mac computer use completely.
+    const unsafeApp = createWebchatRuntime({
+      ...deps,
+      computerUseSigningSecretReady: false,
+      placeAudience: async () => "private",
+    }).routes;
+    const unsafeChat = (await (
+      await runWithSessionActor(guardian, () =>
+        unsafeApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Unsafe secret chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          unsafeApp.request(`http://rome.test/chat/sessions/${unsafeChat.id}/computer-use`),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          unsafeApp.request(
+            `http://rome.test/chat/sessions/${unsafeChat.id}/computer-use/${remoteId}`,
+            { method: "PUT", headers: { origin: "http://rome.test" } },
+          ),
+        )
+      ).status,
+    ).toBe(404);
+
+    // 2. Protected runtime: local short-circuit, Concierge supersedeRunning, and offline revocation.
+    const app = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      computerUseSigningSecretReady: true,
+      nativeComputerUse: { cancelDevice },
+      placeAudience: async () => "private",
+    }).routes;
+    const { id } = (await (
+      await runWithSessionActor(guardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Hardened chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    // Local PUT + POST /turns must NOT call nodeDevices.listDevices().
+    listDevices.mockClear();
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    expect(listDevices).not.toHaveBeenCalled();
+
+    const conciergeTurn = await runWithSessionActor(guardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://rome.test" },
+        body: JSON.stringify({
+          text: "Check my local window",
+          priority: "now",
+          computerUseDeviceId: local.deviceId,
+        }),
+      }),
+    );
+    expect(conciergeTurn.status).toBe(200);
+    expect(listDevices).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        priority: "after",
+        supersedeRunning: true,
+        computerUseGrant: expect.objectContaining({ deviceId: local.deviceId }),
+      }),
+    );
+
+    // Approve remote Mac, then take it offline/unlisted, and verify DELETE still revokes & cancels.
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${remoteId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    onlineDevices = [];
+    const revokedOffline = await runWithSessionActor(guardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/computer-use/${remoteId}`, {
+        method: "DELETE",
+        headers: { origin: "http://rome.test" },
+      }),
+    );
+    expect(revokedOffline.status).toBe(204);
+    expect(cancelDevice).toHaveBeenCalledWith(remoteId);
+    const approvalKey = computerUseApprovalKey(guardian, remoteId, "mac");
+    expect(await deps.settingsRepo.get(approvalKey)).toBeNull();
+  });
+
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };

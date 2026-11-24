@@ -249,7 +249,13 @@ describe("device list for the folder picker", () => {
       listDevices: async () => ({
         items: [
           { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
-          { id: "pc", platform: 3 },
+          { id: "pc", device_name: "   ", platform: 3 },
+          {
+            id: "revoked-mac",
+            device_name: "Old Mac",
+            platform: "macos",
+            revoked_at: "2026-10-01T00:00:00Z",
+          },
         ],
       }),
     }));

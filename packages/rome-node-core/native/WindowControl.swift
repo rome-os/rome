@@ -644,6 +644,28 @@ final class NativeWindow: @unchecked Sendable {
         }
     }
 
+    private enum OnScreenAXResolution {
+        case exact(Set<CGWindowID>)
+        case transientFailure
+        case unavailable
+    }
+
+    private func resolveOnScreenAXWindows(pid: pid_t) -> OnScreenAXResolution {
+        do {
+            let roots = try readWindowRoots(pid: pid, allowOffscreen: false)
+            let mapped = roots.compactMap { try? AXSnapshotReader.verifyExactWindow($0, pid: pid) }
+            let unique = Set(Dictionary(grouping: mapped, by: { $0 }).compactMap { $0.value.count == 1 ? $0.key : nil })
+            return .exact(unique)
+        } catch let failure as NativeFailure {
+            if failure.details["axError"] as? Int32 == AXError.cannotComplete.rawValue {
+                return .transientFailure
+            }
+            return .unavailable
+        } catch {
+            return .unavailable
+        }
+    }
+
     func windows(epoch: UInt64) throws -> [String: Any] {
         guard AXIsProcessTrusted() else { throw NativeFailure("accessibility_permission_required") }
         _ = try NativeFocus.consoleState()
@@ -660,10 +682,18 @@ final class NativeWindow: @unchecked Sendable {
             // The host publishes negotiated bind options. An older host can pass these rows through.
             var windowCapabilities = Self.capabilities(semanticOnly: allowOffscreen)
             windowCapabilities.removeValue(forKey: "foregroundNavigationFallback")
-            result.append(["windowRef": ref, "title": row[kCGWindowName as String] as? String ?? "",
-                           "appName": NSRunningApplication(processIdentifier: binding.pid)?.localizedName ?? "",
-                           "bundleId": binding.bundleId, "frame": frame, "capabilities": windowCapabilities])
+            let app = NSRunningApplication(processIdentifier: binding.pid)
+            let bundleName = app?.bundleURL?.deletingPathExtension().lastPathComponent ?? ""
+            var item: [String: Any] = [
+                "windowRef": ref, "title": row[kCGWindowName as String] as? String ?? "",
+                "appName": app?.localizedName ?? "",
+                "bundleId": binding.bundleId, "frame": frame, "capabilities": windowCapabilities,
+            ]
+            if !bundleName.isEmpty { item["bundleName"] = bundleName }
+            result.append(item)
         }
+        var axWindowsByPID: [pid_t: OnScreenAXResolution] = [:]
+        let onScreenDeadline = ProcessInfo.processInfo.systemUptime + 0.5
         for row in rows {
             guard result.count < 128,
                   (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
@@ -671,6 +701,20 @@ final class NativeWindow: @unchecked Sendable {
                   let number = (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                   let frame = try? AXSnapshotReader.onScreenBounds(row),
                   let binding = try? ProcessBinding.read(pid) else { continue }
+            let resolution: OnScreenAXResolution
+            if let cached = axWindowsByPID[pid] {
+                resolution = cached
+            } else if ProcessInfo.processInfo.systemUptime < onScreenDeadline {
+                resolution = resolveOnScreenAXWindows(pid: pid)
+                axWindowsByPID[pid] = resolution
+            } else {
+                resolution = .transientFailure
+            }
+            switch resolution {
+            case .exact(let ids): guard ids.contains(number) else { continue }
+            case .unavailable: continue
+            case .transientFailure: break
+            }
             add(row, binding: binding, window: number, frame: frame, allowOffscreen: false)
         }
         if result.count < 128 {

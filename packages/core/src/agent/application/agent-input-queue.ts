@@ -41,6 +41,8 @@ export interface SubmitOptions extends SendTurnOptions {
   onInputStatus?(status: InputStatusEvent): Promise<void> | void;
   /** Defaults to `next`. */
   priority?: SubmitPriority;
+  /** For `priority: "after"` (e.g. isolated Concierge computer-use turns), stop any running turn so this turn starts immediately without folding or steering. */
+  supersedeRunning?: boolean;
 }
 
 /** Where a submitted input landed, and the turn it lands in. */

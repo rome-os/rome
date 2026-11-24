@@ -103,11 +103,16 @@ export function createNodeDevicesService(
         client ??= createClient();
         const list = await client.listDevices();
         return {
-          devices: list.items.map((item) => ({
-            id: item.id,
-            name: typeof item.device_name === "string" ? item.device_name : item.id,
-            platform: typeof item.platform === "string" ? item.platform : null,
-          })),
+          devices: list.items
+            .filter((item) => !item.revoked_at)
+            .map((item) => ({
+              id: item.id,
+              name:
+                typeof item.device_name === "string" && item.device_name.trim()
+                  ? item.device_name
+                  : item.id,
+              platform: typeof item.platform === "string" ? item.platform : null,
+            })),
         };
       } catch (error) {
         if (error instanceof DaemonVersionError) {

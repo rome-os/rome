@@ -423,6 +423,31 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
   }, guardian);
 });
 
+it("supersedes a running turn when supersedeRunning is set on an isolated computer-use turn and reports queued for follow-up next turns", async () => {
+  await withRunningSession(async ({ session, finishFirst, firstEnded, nextStarted }) => {
+    const grant = { deviceId: "synthetic-device", expiresAt: Date.now() + 30_000 };
+    const cuReceipt = session.submit(
+      { inputId: "cu-now", prompt: "take over now" },
+      {
+        actor: guardian,
+        priority: "after",
+        supersedeRunning: true,
+        computerUseGrant: grant,
+      },
+    );
+    expect(cuReceipt.landed).toBe("queued");
+    finishFirst();
+    await firstEnded();
+    await nextStarted();
+
+    const followUp = session.submit(
+      { inputId: "follow-up-next", prompt: "after computer use" },
+      { actor: guardian, priority: "next" },
+    );
+    expect(followUp.landed).toBe("queued");
+  }, guardian);
+});
+
 it("drains a provider-retained steer B into its own ungranted turn before queued granted turn G opens", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rome-abg-retained-steer-"));
   const rows = new Map<string, Session>();

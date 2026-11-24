@@ -706,10 +706,17 @@ export function Chat({
     staleTime: 0,
     retry: false,
   });
+  const computerUseDeniedOrGone =
+    computerUseEligibility.isError &&
+    computerUseEligibility.error instanceof ChatApiError &&
+    (computerUseEligibility.error.status === 401 ||
+      computerUseEligibility.error.status === 403 ||
+      computerUseEligibility.error.status === 404);
   const computerUseTarget =
     computerUseSession &&
-    computerUseEligibility.isSuccess &&
-    computerUseEligibility.isFetchedAfterMount
+    computerUseEligibility.isFetchedAfterMount &&
+    !computerUseDeniedOrGone &&
+    computerUseEligibility.data
       ? computerUseEligibility.data
       : null;
   const computerUseTargets =

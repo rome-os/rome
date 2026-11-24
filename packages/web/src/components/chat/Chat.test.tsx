@@ -875,6 +875,41 @@ describe("computer use", () => {
     expect(posted?.[1].has("computerUsePreemption")).toBe(false);
   });
 
+  it("keeps computer-use controls and selection across transient refetch errors", async () => {
+    const target = {
+      deviceId,
+      name: "Test Mac",
+      authorized: true as const,
+      persistentAccess: true as const,
+    };
+    rs.mocked(getChatComputerUseTarget)
+      .mockResolvedValueOnce(target)
+      .mockRejectedValueOnce(new Error("Temporary network hiccup"));
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({
+      ok: true,
+      data: { turnId: "kept-turn" },
+    });
+    const client = queries();
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseAccess" }));
+    fireEvent.click(await screen.findByRole("button", { name: "composer.computerUseSelectLabel" }));
+    await screen.findByRole("button", { name: "composer.computerUseActive" });
+
+    // Trigger a background refetch that fails transiently.
+    await client.invalidateQueries({ queryKey: ["chat-computer-use", "session-1"] });
+    await waitFor(() => expect(getChatComputerUseTarget).toHaveBeenCalledTimes(2));
+
+    // Control and active selection remain intact and attach computerUseDeviceId on send.
+    expect(screen.getByRole("button", { name: "composer.computerUseActive" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+    expect(rs.mocked(postSessionTurn).mock.calls[0]?.[1].get("computerUseDeviceId")).toBe(deviceId);
+  });
+
   it("clears stale selection and refreshes targets when a turn returns computer_use_denied", async () => {
     rs.mocked(getChatComputerUseTarget)
       .mockResolvedValueOnce({
