@@ -22,6 +22,8 @@ import { guardianAuth, settings } from "../../db/schema.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { isGuardianSession } from "../../access/session-actor.js";
+import { actorOfOwner } from "../../access/owner-actor.js";
+import { isOnTeam } from "../../access/team.js";
 import { linkCode } from "../../people/link-code/index.js";
 import { phoneBook } from "../../people/phone-book/index.js";
 import { personHistory } from "../../people/person-history/index.js";
@@ -231,6 +233,8 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     placeAudience: placeAudience({
       dashboardChat: (chatId) => testDeps.webchatRepo.getSession(chatId),
       visitorsAllowed: () => testDeps.dashboardAccessState.hasCloudEmailAccess(),
+      ownerOnTeam: async (owner) =>
+        isOnTeam(await actorOfOwner(db, owner), testDeps.dashboardAccessState),
     }),
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
