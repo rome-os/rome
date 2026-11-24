@@ -46,7 +46,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     openDirectMessage: rs.fn(async () => "D_NEW"),
     addReaction: rs.fn(async () => {}),
     removeReaction: rs.fn(async () => {}),
-    userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
+    userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: TEAM })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),
     memberChannels: rs.fn(async () => ({ channels: [] })),
@@ -274,10 +274,15 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
   });
 
-  it("names an author of the app's workspace there, whatever workspace the directory gives", async () => {
+  it("names a Grid member of the app's workspace there, whatever their home workspace", async () => {
     const mailbox = fakeMailbox();
     const api = fakeApi({
-      userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: "T_HOME" })),
+      userName: rs.fn(async () => ({
+        displayName: "Ouou",
+        username: "ouou",
+        teamId: "T_HOME",
+        teams: ["T_HOME", TEAM],
+      })),
     });
     const { adapter: a, delivered } = adapter(mailbox, api);
     await a.start();
@@ -291,7 +296,8 @@ describe("Slack app direct messages (R4)", () => {
 
   it("holds a message that names another workspace but not its author's", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, delivered } = adapter(mailbox);
+    const userName = rs.fn(async () => ({ displayName: "Ouou", username: "ouou" }));
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
     await a.start();
     const base = dmEvent(1);
     await mailbox.deposit(
@@ -801,9 +807,12 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: { gate?: SlackReadGate } = {},
+  options: { gate?: SlackReadGate; userName?: SlackAppWebApi["userName"] } = {},
 ) {
-  const api = fakeApi({ conversationHistory: slack.conversationHistory });
+  const api = fakeApi({
+    conversationHistory: slack.conversationHistory,
+    ...(options.userName ? { userName: options.userName } : {}),
+  });
   return adapter(mailbox, api, {
     readGate: options.gate ?? openGate(),
   });
@@ -812,6 +821,29 @@ function historyAdapter(
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
+  it("names an author from another workspace the same when read as when heard", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1), { user: "U_EXTERNAL" });
+    const userName = rs.fn(async () => ({
+      displayName: "Ann",
+      username: "ann",
+      teamId: "T_OTHER",
+    }));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, user: "U_EXTERNAL", user_team: "T_OTHER" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_OTHER/U_EXTERNAL",
+      "T_OTHER/U_EXTERNAL",
+    ]);
+  });
+
   it("reads Rome's own post in the app's workspace when Slack names only an org on it", async () => {
     const slack = fakeSlackHistory();
     Object.assign(slack.say(1, "bot"), { user_team: "E_ORG" });

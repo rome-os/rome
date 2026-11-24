@@ -260,6 +260,7 @@ export function createSlackAppWebApi(
             name?: unknown;
             real_name?: unknown;
             team_id?: unknown;
+            enterprise_user?: { teams?: unknown };
             profile?: { display_name?: unknown };
           }
         | undefined;
@@ -267,6 +268,13 @@ export function createSlackAppWebApi(
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
         teamId: stringField(user?.team_id),
+        ...(Array.isArray(user?.enterprise_user?.teams)
+          ? {
+              teams: user.enterprise_user.teams.filter(
+                (team): team is string => typeof team === "string",
+              ),
+            }
+          : {}),
       };
     },
     async conversationHistory(teamId, input, signal) {
