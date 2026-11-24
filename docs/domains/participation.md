@@ -35,6 +35,7 @@ The check that decides whether a message wakes the agent. It looks at where the 
 One of Rome's accounts that serves the whole workspace it is in, such as Rome's Slack app. Its kind of connection declares it (`servesWorkspace`), and nothing reads the kind's name.
 
 - A direct message or a mention from anyone the account hears wakes its agent, whatever their bond level. A policy that blocks the sender or the chat still wins. A message addressed to nobody stays quiet, and so does another bot's unless the chat takes bots' messages. It decides who wakes the agent, not what they may ask of it.
+- Its agent's messages into any chat of the account go out with no check and no approval card ([Send gate](#send-gate)). A chat outside it keeps the rule of [Reply](#reply).
 
 ## Addressed
 
@@ -76,6 +77,7 @@ What the agent says back after a wake, through the account it was woken on.
 The check that decides whether a message an agent wrote may go out. It looks at where the message goes, who sent the message it answers and which agent wrote it, never at the text, and answers *send*, *check*, *ask the guardian* or *refuse*. On *check*, a checking agent reads the message and sends it, refuses it, or holds it for the guardian in Approvals.
 
 - A reply to the guardian goes out unchecked, even in a group where others read it, and a reply to anyone else is checked first.
+- A message into any chat of a [workspace account](#workspace-account) goes out unchecked, to whoever it answers.
 - The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
 - The sentinel's own reply to a message it triaged does not pass the send gate.
 - An agent whose own app runs its turns has no send gate: its app decides what goes out.

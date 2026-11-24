@@ -345,7 +345,7 @@ import { ApprovalHandler, executionRequester } from "./apps/actions/approval-han
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
-import { guardedSend } from "./participation/send-gate/index.js";
+import { guardedSend, workspaceSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { servesWorkspaceIn } from "./connections/serves-workspace.js";
@@ -1423,7 +1423,7 @@ async function main() {
     sayInChat: (chat, message) =>
       sayOnConnection(
         {
-          gate: guardedSend,
+          gate: workspaceSend(servesWorkspaceIn(connectionRegistry), guardedSend),
           connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
           envoy: async (input) => {
             let verdict: unknown;
@@ -2080,7 +2080,7 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: guardedSend,
+    sendGate: workspaceSend(servesWorkspaceIn(connectionRegistry), guardedSend),
     wakeGateFor,
     routinesRepo,
     routineEngine,
