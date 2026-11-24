@@ -240,3 +240,102 @@ describe("chatPromptFacts earlier messages", () => {
     expect(latest).toHaveBeenCalledWith(place, { limit: 16, until: before });
   });
 });
+
+describe("chatPromptFacts on an account that serves its workspace", () => {
+  const message = (minute: number, text = `message ${minute}`) => ({
+    channel: "slack_app",
+    chatId: "C1",
+    messageId: `m${minute}`,
+    direction: "inbound",
+    senderId: "T_A/U_SAM",
+    senderDisplayName: "Sam",
+    text,
+    attachments: [],
+    timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+    account: { platform: "slack", id: "T_A/U_ROME" },
+  });
+  const workspaceFacts = (
+    latest: () => Promise<unknown[]>,
+    keys: Record<number, string> = {},
+    serves = true,
+  ) => {
+    const read = rs.fn(latest);
+    const promptFacts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => undefined },
+      messages: {
+        byIds: (ids) => ids.flatMap((id) => (keys[id] ? [{ key: keys[id] } as never] : [])),
+      },
+      labels: {
+        read: (async (lines: readonly { senderName: string | null }[]) =>
+          lines.map((line) => ({ ...line, sender: line.senderName, who: null }))) as never,
+        readUnseen: async () => [],
+      },
+      channelOfChat: () => null,
+      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+      latest: read as never,
+      servesWorkspace: (connectionId) => serves && connectionId === "slack",
+      connectionOfChannel: (channel) => (channel === "slack_app" ? "slack" : null),
+      chatWaitMs: 50,
+    });
+    return { promptFacts, read };
+  };
+  const group = {
+    channel: "slack_app",
+    threadId: "C1",
+    threadType: "group" as const,
+    connectionId: "slack",
+    threadName: "general",
+  };
+  const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+
+  it("shows a new session the chat's latest messages before the mention", async () => {
+    // Newest first: the mention (m20) and two messages that did not mention Rome.
+    const { promptFacts } = workspaceFacts(
+      async () => [message(20), message(12, "the code is 7"), message(10)],
+      { 42: "m20" },
+    );
+    const said = await promptFacts.chat?.(group, before, 42);
+    expect(said?.map((m) => m.text)).toEqual(["message 10", "the code is 7"]);
+  });
+
+  it("reads only what was said since the last message the model was shown", async () => {
+    const { promptFacts, read } = workspaceFacts(async () => [message(20), message(15)], {
+      41: "m9",
+      42: "m20",
+    });
+    const said = await promptFacts.chat?.(group, before, 42, 41);
+    expect(said?.map((m) => m.text)).toEqual(["message 15"]);
+    expect(read).toHaveBeenCalledWith(group, {
+      limit: 16,
+      until: new Date(before.getTime() + 999),
+      newerThan: "m9",
+    });
+  });
+
+  it("answers none when the platform refuses the read or takes too long", async () => {
+    const refused = workspaceFacts(async () => {
+      throw new Error("Slack lets Rome read this workspace's history about once a minute");
+    });
+    expect(await refused.promptFacts.chat?.(group, before)).toBeNull();
+    const slow = workspaceFacts(() => new Promise(() => {}));
+    expect(await slow.promptFacts.chat?.(group, before)).toBeNull();
+  });
+
+  it("reads no chat of any other account on each turn", async () => {
+    const { promptFacts, read } = workspaceFacts(async () => [message(1)], {}, false);
+    expect(await promptFacts.chat?.(group, before)).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("names the chat and thread a turn's message was said in", () => {
+    const { promptFacts } = workspaceFacts(async () => []);
+    expect(promptFacts.place?.(group, "C1:1700.1")).toBe(
+      "<place>\nchat: C1\nthread: C1:1700.1\nkind: group\nname: general\n</place>",
+    );
+    // A task's report names its chat by channel alone.
+    expect(promptFacts.place?.({ channel: "slack_app", threadId: "D2" }, undefined)).toBe(
+      "<place>\nchat: D2\nthread: none\nkind: group\n</place>",
+    );
+    expect(promptFacts.place?.({ ...group, connectionId: "telegram" }, undefined)).toBeNull();
+  });
+});

@@ -1580,6 +1580,8 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
+        servesWorkspace: servesWorkspaceIn(connectionRegistry),
+        connectionOfChannel: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
         // A new session reads the chat's latest messages from where the chat
         // lives, and only from a platform that answers them live, bounded at
         // `until`. A store a personal account syncs, such as WhatsApp's, also

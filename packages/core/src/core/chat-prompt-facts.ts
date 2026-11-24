@@ -23,6 +23,11 @@ const EARLIER_WAIT_MS = 5_000;
  *  for its turn; a session's turns run one at a time, so no read waits much
  *  longer. A turn that did not wait would answer a reply it cannot place. */
 const THREAD_WAIT_MS = 90_000;
+/** How long a turn in the open chat of an account that serves its workspace
+ *  waits for what was said there since it was last shown. A reply there
+ *  needs none of it to be placed, so a burst of mentions answers without
+ *  rather than wait a minute for each read. */
+const CHAT_WAIT_MS = 20_000;
 
 export interface ChatPromptFactsDeps {
   /** What was said in each chat that a session has not seen. */
@@ -50,15 +55,30 @@ export interface ChatPromptFactsDeps {
   latestWaitMs?: number;
   /** How long a read of a platform thread may take. Defaults to 90s. */
   threadWaitMs?: number;
+  /** Whether the account behind a connection serves its whole workspace, so
+   *  its open chats are read on every turn and each turn names its place.
+   *  Absent, none does. */
+  servesWorkspace?: (connectionId: string) => boolean;
+  /** The connection behind a channel, for a place that names none, as a
+   *  task's report does. Absent, such a place names no connection. */
+  connectionOfChannel?: (channel: string) => string | null;
+  /** How long a read of an open chat on such an account may take. Defaults
+   *  to 20s. */
+  chatWaitMs?: number;
 }
 
 /**
  * The prompt facts, answering that a session catches up on nothing in a chat
  * whose channel already hands the agent every message, as web chat does, and
  * that a new session in a direct message reads that chat's latest messages
- * from the platform.
+ * from the platform. On an account that serves its workspace, every turn in
+ * an open chat reads it too, and names the chat and thread it was said in.
  */
 export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
+  const servesWorkspace = (place: ThreadContext) => {
+    const connectionId = place.connectionId ?? deps.connectionOfChannel?.(place.channel);
+    return !!connectionId && deps.servesWorkspace?.(connectionId) === true;
+  };
   const handsEveryMessage = (channel: string) =>
     !surfaceOf(deps.channelSurface, channel).promptContext;
   /** The latest messages of the chat `place` names said before `before`, and
@@ -69,6 +89,9 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     before: Date,
     first: number | undefined,
     thread: { since?: number } | null,
+    waitMs = thread
+      ? (deps.threadWaitMs ?? THREAD_WAIT_MS)
+      : (deps.latestWaitMs ?? EARLIER_WAIT_MS),
   ): Promise<ThreadRead | null> => {
     if (!deps.latest || handsEveryMessage(place.channel)) return null;
     // Rome's record keeps whole seconds, so what was said just before the
@@ -97,10 +120,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
           : { olderThan: key }),
     });
     read.catch(() => {});
-    const page = await within(
-      read,
-      thread ? (deps.threadWaitMs ?? THREAD_WAIT_MS) : (deps.latestWaitMs ?? EARLIER_WAIT_MS),
-    );
+    const page = await within(read, waitMs);
     // A thread that cannot be read is said to be unread, so the turn does
     // not take it for one that held nothing.
     if (!page) return thread ? { messages: [], cut: false, unread: true } : null;
@@ -148,7 +168,39 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       place.threadId && thread.startsWith(`${place.threadId}:`)
         ? readBefore({ ...place, threadId: thread }, before, first, { since })
         : Promise.resolve(null),
+    // On an account that serves its workspace, one session holds every chat
+    // and hears only what mentions it, so each turn in an open chat reads
+    // what was said there since the last message the model was shown, or the
+    // latest messages the first time. Rome keeps none of them.
+    async chat(place, before, first, since) {
+      if (!servesWorkspace(place)) return null;
+      const read = await readBefore(
+        place,
+        before,
+        first,
+        { since },
+        deps.chatWaitMs ?? CHAT_WAIT_MS,
+      );
+      return read && !read.unread ? read.messages : null;
+    },
+    place: (place, thread) => (servesWorkspace(place) ? placeLine(place, thread) : null),
   };
+}
+
+/** The line naming where a turn's message was said on an account that
+ *  serves its workspace: the chat and thread ids a send takes, and what the
+ *  chat is. */
+function placeLine(place: ThreadContext, thread: string | undefined): string {
+  const kind = place.threadType === "private" ? "direct message" : "group";
+  const name = place.threadName?.trim().replace(/[<>&\n]/g, " ");
+  return [
+    "<place>",
+    `chat: ${place.threadId}`,
+    `thread: ${thread ?? "none"}`,
+    `kind: ${kind}`,
+    ...(name ? [`name: ${name}`] : []),
+    "</place>",
+  ].join("\n");
 }
 
 /** The messages of `page`, newest first, said before the session's first

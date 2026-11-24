@@ -79,4 +79,25 @@ export interface PromptFacts {
     first?: number,
     since?: number,
   ): Promise<ThreadRead | null>;
+  /**
+   * The messages said in `place`'s open chat since the one with id `since`
+   * the model was last shown there, or its latest ones when `since` is not
+   * given, read as {@link earlier} reads a chat, on every turn in the chat.
+   * Null where a chat is not read on each turn, which is every chat but one
+   * of an account that serves its workspace, and where none could be read.
+   * Absent, no chat is read on each turn.
+   */
+  chat?(
+    place: ThreadContext,
+    before: Date,
+    first?: number,
+    since?: number,
+  ): Promise<UnseenMessage[] | null>;
+  /**
+   * A line that names where the turn's message was said, chat and thread,
+   * in the form a send names them, put ahead of every turn's prompt. Null
+   * where a session serves one chat, which its thread context names once.
+   * Absent, no turn names its place.
+   */
+  place?(place: ThreadContext, thread: string | undefined): string | null;
 }

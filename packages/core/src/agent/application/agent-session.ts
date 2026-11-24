@@ -4441,6 +4441,8 @@ class AgentSessionImpl implements AgentSession {
       // The thread this turn shows the model, with the last message shown,
       // noted as read once the model has taken the input.
       let threadShown: { thread: string; last: number | undefined } | undefined;
+      // Likewise the open chat this turn shows, read on every turn.
+      let chatShown: { thread: string; last: number | undefined } | undefined;
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       // The prompt facts answer null where it catches up on nothing.
@@ -4458,9 +4460,31 @@ class AgentSessionImpl implements AgentSession {
         // chat's latest messages from where the chat lives
         // (docs/domains/participation.md#projection).
         const first = earliestOf(unseen, byId(sink.currentId));
+        // Where the prompt facts read a chat on every turn, as on an account
+        // that serves its workspace, a turn on a message in the open chat (not
+        // one Rome runs, such as a task's report) is shown what
+        // was said there since the last message the model was shown, and
+        // needs no opening read.
+        const chatKey =
+          !this.isSubagent && !sink.inThread && sink.initiatedBy !== "system" && promptFacts.chat
+            ? (sink.threadContext as ThreadContext).threadId
+            : undefined;
+        const chatRead = chatKey
+          ? await promptFacts
+              .chat?.(
+                sink.threadContext as ThreadContext,
+                byId(sink.currentId)?.at ?? new Date(),
+                byId(sink.currentId)?.id,
+                this.threadsRead.get(chatKey),
+              )
+              // A read that fails leaves the turn to answer without it.
+              .catch(() => null)
+          : null;
+        if (chatKey && chatRead) chatShown = { thread: chatKey, last: byId(sink.currentId)?.id };
         const opening =
           // Not when the unseen messages fill the catch-up already, so a
           // platform that rations reads, such as Slack, keeps its read.
+          !chatRead &&
           !this.isSubagent &&
           this.threadFresh &&
           !this.threadContextInjected &&
@@ -4505,7 +4529,7 @@ class AgentSessionImpl implements AgentSession {
           threadShown = { thread, last: current?.id };
         }
         userPrompt = catchUpPrompt(userPrompt, {
-          unseen: opening ? [...opening, ...unseen] : unseen,
+          unseen: [...(chatRead ?? opening ?? []), ...unseen],
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
           current,
@@ -4516,6 +4540,13 @@ class AgentSessionImpl implements AgentSession {
               : {}),
         });
       }
+      // Where one session answers many chats, each turn names the chat and
+      // thread its message was said in.
+      const placeLine =
+        promptFacts && !this.isSubagent
+          ? promptFacts.place?.(sink.threadContext as ThreadContext, sink.inThread)
+          : null;
+      if (placeLine) userPrompt = `${placeLine}\n\n${userPrompt}`;
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);
       if (deviceFolderBlock) {
@@ -4699,6 +4730,7 @@ class AgentSessionImpl implements AgentSession {
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
             if (threadShown) this.threadsRead.set(threadShown.thread, threadShown.last);
+            if (chatShown) this.threadsRead.set(chatShown.thread, chatShown.last);
             if (this.deps.promptFacts && unseenMessageIds.length > 0) {
               try {
                 this.deps.promptFacts.seen(unseenMessageIds, sink.romeSessionId, sink.turnId);
