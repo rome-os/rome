@@ -173,6 +173,8 @@ import {
   storedLocationAnswer,
 } from "../../webchat/location-card.js";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
+import { AI_TOOL_SIGN_IN_CARD_ID } from "@rome/api-types/ai-tool-sign-in-card";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
 import { agentToolNames } from "../../wiring/agent-tools.js";
 
@@ -714,6 +716,9 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       componentId: LOCATION_CARD_ID,
       emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
     },
+    // Only core agent tools send these.
+    { componentId: AI_TOOL_SIGN_IN_CARD_ID, emittedBy: () => false },
+    { componentId: ADD_DEVICE_CARD_ID, emittedBy: () => false },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.

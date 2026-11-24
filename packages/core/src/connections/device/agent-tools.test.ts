@@ -10,6 +10,7 @@ import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js"
 import type { DeviceManageResult, DeviceRunResult } from "../../desktops/node-devices.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import {
+  addDevice,
   type DeviceToolDeps,
   readDevices,
   removeDevice,
@@ -21,6 +22,7 @@ import { type DeviceReport, deviceReportSchema } from "./report.js";
 import { DeviceConnectionsRepository } from "./repository.js";
 
 whoMayAskSuite(readDevices, {});
+whoMayAskSuite(addDevice, {});
 whoMayAskSuite(runOnDeviceTool, { operation: "device.status" });
 whoMayAskSuite(renameDevice, { deviceId: "dev-phone", name: "Work iPhone" });
 whoMayAskSuite(removeDevice, { deviceId: "dev-phone" });
@@ -236,6 +238,37 @@ describe("the Devices page's tools", () => {
 
       expect(result).toEqual({ status: "error", error: expect.stringMatching(/^not_connected:/) });
       expect(runs).toEqual([]);
+    });
+  });
+
+  describe("adding a device", () => {
+    it("shows the add-device card, which answers once a device not listed now is added", async () => {
+      const result = await callTool(addDevice, deps, {});
+
+      expect(result).toEqual({
+        status: "pending_interaction",
+        interaction: {
+          appId: "core",
+          promptText: "Add a device in Settings › Devices with Link device.",
+          render: {
+            kind: "inline",
+            componentId: "add-device-card",
+            props: { deviceIds: ["dev-phone", "dev-mac"] },
+            builtin: true,
+          },
+        },
+      });
+    });
+
+    it("still shows the instructions when Rome Cloud's list cannot be read", async () => {
+      deps.devices.listDevices = async () => null;
+
+      const result = await callTool(addDevice, deps, {});
+
+      expect(result.status === "pending_interaction" && result.interaction.render).toMatchObject({
+        componentId: "add-device-card",
+        props: {},
+      });
     });
   });
 

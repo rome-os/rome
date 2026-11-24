@@ -22,6 +22,7 @@ const NAMES = [
   "system:connect_service",
   "system:disconnect_service",
   "system:read_devices",
+  "system:add_device",
   "system:run_on_device",
   "system:rename_device",
   "system:remove_device",

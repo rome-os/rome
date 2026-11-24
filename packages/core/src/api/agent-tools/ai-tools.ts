@@ -3,13 +3,17 @@
 // one, and change the default. The page reads the same accounts and default
 // (`GET /api/ai-tools/status`), logs out through the same operation
 // (agent/application/model-logout.ts) and changes the default through the
-// same `DefaultProviders.choose`. The sign-in card is `ai-tools-card`, which
-// embeds the page's own sign-in panel. Vocabulary: docs/domains/agents.md.
+// same `DefaultProviders.choose`. The sign-in card embeds the page's own
+// sign-in panel for the AI tools it names. Vocabulary: docs/domains/agents.md.
 // How a tool is declared: docs/concepts/actions.md#core-agent-tools.
 //
 // The agent context never imports apps/, so these tools live beside the
 // page's routes rather than in agent/.
 
+import {
+  AI_TOOL_SIGN_IN_CARD_ID,
+  type AiToolSignInCardProps,
+} from "@rome/api-types/ai-tool-sign-in-card";
 import { z } from "zod";
 import {
   type AccountedProviderId,
@@ -103,31 +107,31 @@ export const readAiTools = agentTool({
 export const signInAiTool = agentTool({
   name: "system:sign_in_ai_tool",
   description:
-    "Ask the guardian to sign in to an AI tool, Claude or ChatGPT, through a card in the chat where they finish the sign-in. Use it when the guardian asks to sign in to or connect Claude or ChatGPT, or when no AI tool is signed in and chats cannot run. Only in the guardian's private chat, in a turn their own message started. Check what is signed in with system:read_ai_tools",
+    "Ask the guardian to sign in to an AI tool, Claude or ChatGPT, through a card in the chat where they finish the sign-in, whether or not another AI tool is signed in. Use it when the guardian asks to sign in to, connect or add Claude or ChatGPT, when a sign-in expired, or when no AI tool is signed in and chats cannot run. Only in the guardian's private chat, in a turn their own message started. Check what is signed in with system:read_ai_tools",
   sideEffects: "write",
-  input: z.object({ aiTool: aiTool.optional() }),
+  input: z.object({
+    aiTool: aiTool
+      .optional()
+      .describe(
+        'The AI tool: "claude" for Claude, "chatgpt" for ChatGPT. Default: every one not signed in.',
+      ),
+  }),
   run: async (input, { deps }) => {
     const reports = deps.accounts.read();
-    const wanted = input.aiTool;
-    if (wanted && signedInNow(reports[AI_TOOLS[wanted].provider])) {
-      return { message: `${AI_TOOLS[wanted].name} is already signed in. No card shown.` };
-    }
-    // The card answers itself once any AI tool is signed in, so it shows the
-    // sign-in only while none is.
-    const signedInTool = (Object.keys(AI_TOOLS) as AiTool[]).find((id) =>
-      signedInNow(reports[AI_TOOLS[id].provider]),
-    );
-    if (signedInTool) {
-      const name = wanted ? AI_TOOLS[wanted].name : "another AI tool";
+    const asked = input.aiTool ? [input.aiTool] : (Object.keys(AI_TOOLS) as AiTool[]);
+    const aiTools = asked.filter((id) => !signedInNow(reports[AI_TOOLS[id].provider]));
+    if (aiTools.length === 0) {
       return {
-        message: `${AI_TOOLS[signedInTool].name} is signed in, so the chat cannot show a sign-in card. Tell the guardian to sign in to ${name} in Settings › AI Tools.`,
+        message: input.aiTool
+          ? `${AI_TOOLS[input.aiTool].name} is already signed in. No card shown.`
+          : "Claude and ChatGPT are both signed in. No card shown.",
       };
     }
-    const name = wanted ? AI_TOOLS[wanted].name : "Claude or ChatGPT";
+    const names = aiTools.map((id) => AI_TOOLS[id].name).join(" or ");
     return card({
-      componentId: "ai-tools-card",
-      props: {},
-      ask: `Sign in to ${name} in Settings › AI Tools, so Rome can run chats.`,
+      componentId: AI_TOOL_SIGN_IN_CARD_ID,
+      props: { aiTools } satisfies AiToolSignInCardProps,
+      ask: `Sign in to ${names} in Settings › AI Tools.`,
     });
   },
 });

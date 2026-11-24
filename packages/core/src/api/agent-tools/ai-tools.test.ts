@@ -128,9 +128,10 @@ describe("reading the AI tools", () => {
 });
 
 describe("signing in to an AI tool", () => {
-  it("returns the AI Tools card, which embeds the page's sign-in, while no AI tool is signed in", async () => {
+  it("returns the sign-in card for the AI tool asked for while another is signed in", async () => {
     const { deps } = rome({
-      reports: { anthropic: reportOf("unauthorized"), openai: reportOf("expired") },
+      reports: { anthropic: reportOf("available"), openai: reportOf("unauthorized") },
+      current: "anthropic",
     });
 
     const result = await callTool(signInAiTool, deps, { aiTool: "chatgpt" });
@@ -139,37 +140,59 @@ describe("signing in to an AI tool", () => {
       status: "pending_interaction",
       interaction: {
         appId: "core",
-        promptText: "Sign in to ChatGPT in Settings › AI Tools, so Rome can run chats.",
-        render: { kind: "inline", componentId: "ai-tools-card", props: {}, builtin: true },
+        promptText: "Sign in to ChatGPT in Settings › AI Tools.",
+        render: {
+          kind: "inline",
+          componentId: "ai-tool-sign-in-card",
+          props: { aiTools: ["chatgpt"] },
+          builtin: true,
+        },
       },
+    });
+  });
+
+  it("offers an AI tool whose sign-in expired", async () => {
+    const { deps } = rome({ reports: { anthropic: reportOf("expired") } });
+
+    const result = await callTool(signInAiTool, deps, { aiTool: "claude" });
+
+    expect(result.status === "pending_interaction" && result.interaction.render).toMatchObject({
+      componentId: "ai-tool-sign-in-card",
+      props: { aiTools: ["claude"] },
+    });
+  });
+
+  it("offers every AI tool not signed in when none is named", async () => {
+    const none = rome({ reports: { anthropic: reportOf("unauthorized") } });
+    const one = rome({ reports: { anthropic: reportOf("available") } });
+
+    const both = await callTool(signInAiTool, none.deps, {});
+    const other = await callTool(signInAiTool, one.deps, {});
+
+    expect(both.status === "pending_interaction" && both.interaction).toMatchObject({
+      promptText: "Sign in to Claude or ChatGPT in Settings › AI Tools.",
+      render: { props: { aiTools: ["claude", "chatgpt"] } },
+    });
+    expect(other.status === "pending_interaction" && other.interaction.render).toMatchObject({
+      props: { aiTools: ["chatgpt"] },
     });
   });
 
   it("shows no card for an AI tool already signed in", async () => {
-    const { deps } = rome({ reports: { anthropic: reportOf("available") } });
+    const { deps } = rome({
+      reports: { anthropic: reportOf("available"), openai: reportOf("available") },
+    });
 
-    const result = await callTool(signInAiTool, deps, { aiTool: "claude" });
+    const named = await callTool(signInAiTool, deps, { aiTool: "claude" });
+    const unnamed = await callTool(signInAiTool, deps, {});
 
-    expect(result).toEqual({
+    expect(named).toEqual({
       status: "ok",
       data: { message: "Claude is already signed in. No card shown." },
     });
-  });
-
-  // The card answers itself once any AI tool is signed in, so it could not show this sign-in.
-  it("sends the guardian to Settings while another AI tool is signed in", async () => {
-    const { deps } = rome({
-      reports: { anthropic: reportOf("available"), openai: reportOf("unauthorized") },
-    });
-
-    const result = await callTool(signInAiTool, deps, { aiTool: "chatgpt" });
-
-    expect(result).toEqual({
+    expect(unnamed).toEqual({
       status: "ok",
-      data: {
-        message:
-          "Claude is signed in, so the chat cannot show a sign-in card. Tell the guardian to sign in to ChatGPT in Settings › AI Tools.",
-      },
+      data: { message: "Claude and ChatGPT are both signed in. No card shown." },
     });
   });
 });
