@@ -41,9 +41,8 @@ export interface MessageSender {
   readonly name?: string;
   /** The sender's handle on the platform, such as a username. */
   readonly handle?: string;
-  /** A bot account said it. A webhook that speaks for a person is that
-   *  person's, which Discord still asks People about until ZHA-230 moves
-   *  that question out. Absent where the platform does not tell. */
+  /** The platform says a bot account said it, as with a Discord webhook.
+   *  Absent where the platform does not tell. */
   readonly isBot?: boolean;
 }
 
