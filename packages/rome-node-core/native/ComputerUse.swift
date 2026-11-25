@@ -534,7 +534,6 @@ final class RPCServer: @unchecked Sendable {
     private var recoveryTimer: Timer?
     private var recoveryChild: Process?
     private var pendingRelaunch: UUID?
-    private var shutdownScheduled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -597,9 +596,6 @@ final class RPCServer: @unchecked Sendable {
                         } else {
                             guard !gate.active || ["cancel", "end", "stop_status", "verify"].contains(method) else {
                                 throw NativeFailure("helper_restarting", details: ["terminalCause": "host_stopped"])
-                            }
-                            guard !native.isShuttingDown || ["cancel", "end", "stop_status"].contains(method) else {
-                                throw NativeFailure("helper_stopping", details: ["terminalCause": "host_stopped"])
                             }
                             guard let params = request["params"] as? [String: Any] else { throw NativeFailure("invalid_params") }
                             // Each connection has a worker. Stop admission may close while the input lane is still busy.
@@ -673,7 +669,7 @@ final class RPCServer: @unchecked Sendable {
     }
 
     private func restartControlComponent() {
-        guard recoveryTimer == nil, pendingRelaunch == nil, let engine, !engine.isShuttingDown, let stateDirectory else {
+        guard recoveryTimer == nil, pendingRelaunch == nil, let engine, let stateDirectory else {
             permissions.recoveryFailed("The control component cannot restart right now. Check access again.")
             return
         }
@@ -745,20 +741,12 @@ final class RPCServer: @unchecked Sendable {
                     "instanceId": instanceId, "permissionRecovery": permissions.progress.read(),
                     "capabilities": ["actions": []], "pid": ProcessInfo.processInfo.processIdentifier]
         case "requestPermissions":
-            guard engine?.isShuttingDown != true else {
-                throw NativeFailure("helper_stopping", details: ["terminalCause": "host_stopped"])
-            }
             permissions.show()
             return Permissions.status()
         case "shutdown":
-            guard let engine else { throw NativeFailure("helper_stopping") }
-            let params = request["params"] as? [String: Any]
-            let idleOnly = params?["idleOnly"] as? Bool == true
-            try engine.beginShutdown(idleOnly: idleOnly)
-            if !shutdownScheduled {
-                shutdownScheduled = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSApp.terminate(nil) }
-            }
+            guard engine?.isBusy != true else { throw NativeFailure("input_busy") }
+            engine?.cancelAll()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSApp.terminate(nil) }
             return ["stopping": true]
         default:
             throw NativeFailure("unsupported_method")

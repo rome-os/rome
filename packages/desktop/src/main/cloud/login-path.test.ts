@@ -14,7 +14,7 @@ function fakeShell(body: string): string {
 describe("loginShellPath", () => {
   it("reads PATH from between the markers, ignoring startup output", async () => {
     // Stands in for a login shell: prints a banner, then runs the command.
-    const shell = fakeShell('echo "Welcome back"\nPATH=/opt/homebrew/bin:/usr/bin /bin/sh -c "$2"');
+    const shell = fakeShell('echo "Welcome back"\nPATH=/opt/homebrew/bin:/usr/bin sh -c "$2"');
     expect(await loginShellPath(shell)).toBe("/opt/homebrew/bin:/usr/bin");
   });
 

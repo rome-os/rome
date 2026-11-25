@@ -7,7 +7,6 @@ final class NativeEngine: @unchecked Sendable {
     private let lane = NSLock()
     private var busy = false
     private var permissionRecovery = false
-    private var shuttingDown = false
     private var workspaceSuspended = false
     private var workspaceEpoch: UInt64 = 0
     private var focusCleanupScheduled = false
@@ -27,7 +26,6 @@ final class NativeEngine: @unchecked Sendable {
     }
 
     var isBusy: Bool { stateLock.lock(); defer { stateLock.unlock() }; return busy }
-    var isShuttingDown: Bool { stateLock.lock(); defer { stateLock.unlock() }; return shuttingDown }
     var activeSessionCount: Int { windowControl.activeCount }
     var allCapturesStopped: Bool { windowControl.allCapturesStopped }
 
@@ -36,28 +34,9 @@ final class NativeEngine: @unchecked Sendable {
         cancelAll(reason: "host_stopped")
     }
 
-    func beginShutdown(idleOnly: Bool) throws {
-        guard lane.try() else { throw NativeFailure("input_busy") }
-        defer { lane.unlock() }
-        try stateLock.withLock {
-            guard !busy else { throw NativeFailure("input_busy") }
-            guard !permissionRecovery else { throw NativeFailure("helper_restarting") }
-            if idleOnly && windowControl.activeCount > 0 {
-                throw NativeFailure("helper_busy")
-            }
-            shuttingDown = true
-        }
-        if !idleOnly {
-            cancelAll(reason: "host_stopped")
-        }
-    }
-
     private func admissionEpoch() throws -> UInt64 {
         try stateLock.withLock {
             guard !permissionRecovery else { throw NativeFailure("helper_restarting") }
-            guard !shuttingDown else {
-                throw NativeFailure("helper_stopping", details: ["terminalCause": "host_stopped"])
-            }
             guard !workspaceSuspended else {
                 throw NativeFailure("system_sleep", details: ["terminalCause": "system_sleep"])
             }
@@ -436,65 +415,13 @@ final class NativeEngine: @unchecked Sendable {
         busyRelease.signal()
         group.wait()
 
-        // Atomic idle-only shutdown must reject active sessions without cancelling them or closing admission.
-        do {
-            try engine.beginShutdown(idleOnly: true)
-            throw NativeFailure("self_check_failed", "Idle-only shutdown accepted an active session.")
-        } catch let error as NativeFailure {
-            try check(error.code == "helper_busy", "Idle-only shutdown must reject active sessions with helper_busy.")
-        }
-        try check(!engine.isShuttingDown && engine.windowControl.selfTestTerminal(unrelatedId) == nil,
-                  "Rejected idle-only shutdown must leave active sessions and admission intact.")
-        let shutdownBusyEntered = DispatchSemaphore(value: 0)
-        let shutdownBusyRelease = DispatchSemaphore(value: 0)
-        group.enter()
-        DispatchQueue.global().async {
-            try? engine.withLane { shutdownBusyEntered.signal(); shutdownBusyRelease.wait() }
-            group.leave()
-        }
-        shutdownBusyEntered.wait()
-        do {
-            try engine.beginShutdown(idleOnly: true)
-            throw NativeFailure("self_check_failed", "Shutdown entered while the input lane was busy.")
-        } catch let error as NativeFailure {
-            try check(error.code == "input_busy", "Shutdown must reject a busy input lane.")
-        }
-        try check(!engine.isShuttingDown, "Busy shutdown rejection must not close admission.")
-        shutdownBusyRelease.signal()
-        group.wait()
-
         engine.beginPermissionRecovery()
         do {
             _ = try engine.admissionEpoch()
             throw NativeFailure("self_check_failed", "Permission recovery left input admission open.")
         } catch let error as NativeFailure { try check(error.code == "helper_restarting", "Permission recovery must close native admission.") }
-        do {
-            try engine.beginShutdown(idleOnly: true)
-            throw NativeFailure("self_check_failed", "Idle-only shutdown succeeded during permission recovery.")
-        } catch let error as NativeFailure {
-            try check(error.code == "helper_restarting", "Shutdown must refuse to race with permission recovery.")
-        }
         try check(engine.activeSessionCount == 0 && engine.allCapturesStopped,
                   "Permission recovery must terminate old sessions before restart.")
-
-        let idleEngine = try NativeEngine(stateDirectory: directory)
-        try idleEngine.beginShutdown(idleOnly: true)
-        try check(idleEngine.isShuttingDown, "Idle shutdown must latch shuttingDown before returning.")
-        do {
-            _ = try idleEngine.admissionEpoch()
-            throw NativeFailure("self_check_failed", "Idle shutdown left native admission open.")
-        } catch let error as NativeFailure {
-            try check(error.code == "helper_stopping", "Idle shutdown must close native admission atomically.")
-        }
-        try idleEngine.beginShutdown(idleOnly: true)
-        assertions += 1
-
-        let forcedEngine = try NativeEngine(stateDirectory: directory)
-        let forcedId = try forcedEngine.windowControl.selfTestRegisterSession(owner: selfPeer, windowID: 903)
-        try forcedEngine.beginShutdown(idleOnly: false)
-        try check(forcedEngine.isShuttingDown && forcedEngine.activeSessionCount == 0
-                  && forcedEngine.windowControl.selfTestTerminal(forcedId) == "host_stopped",
-                  "Non-idle shutdown must close admission and stop active sessions.")
         return assertions + (try RPCServer.selfCheck()) + (try WindowAXState.selfCheck()) + (try WindowAXInvalidation.selfCheck())
             + (try WindowEventFactory.selfCheck()) + (try WindowAction.selfCheck()) + (try WindowEventDispatcher.selfCheck())
             + (try NativeWindow.selfCheck(stopDirectory: engine.stopDirectory)) + (try PointerMotion.selfCheck()) + (try VirtualPointer.selfCheck())

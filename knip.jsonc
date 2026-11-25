@@ -172,9 +172,6 @@
       ]
     },
     "packages/rome-node-cli": {
-      // scripts/package-smoke.mjs verifies whether npm installed @rome-os/node-core's
-      // optional darwin-arm64 helper package in an isolated temp prefix.
-      "ignoreDependencies": ["@rome-os/node-core-darwin-arm64"],
       "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },

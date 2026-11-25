@@ -1084,14 +1084,12 @@ remains available for other devices.
 
 Instance startup and enrollment prepare the caller token through the core
 library. The existing Cloud device endpoints and Gateway protocol handle communication.
-Configure the npm Trusted Publishers for `@rome-os/node`, `@rome-os/node-core`,
-and `@rome-os/node-core-darwin-arm64` before their package releases. Building an
-archive does not publish it.
+Configure the npm Trusted Publishers for `@rome-os/node` and `@rome-os/node-core`
+before their package releases. Building an archive does not publish it.
 
 The main CI runs the unit suites of both packages on Linux. The
-[package workflow](../.github/workflows/rome-node.yml) packs `@rome-os/node`,
-`@rome-os/node-core`, and `@rome-os/node-core-darwin-arm64`, installs the archives
-with npm on Linux and Apple Silicon macOS, verifies that Linux skips the optional
-macOS helper while macOS installs it, and starts a daemon from the installed core
-package. Windows and browser/two-computer acceptance still require real environments.
+[package workflow](../.github/workflows/rome-node.yml) packs both packages, installs
+the archives with npm, and starts a daemon from the installed core package. CI does
+not run on macOS or Windows, so behavior specific to those platforms is unverified.
+Browser authorization and two-computer acceptance also require real environments.
 Platform simulations and type checks do not establish those results.
