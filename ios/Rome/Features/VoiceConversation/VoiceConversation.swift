@@ -29,7 +29,13 @@ final class VoiceConversation {
     private var path: NWPathMonitor?
     private var reconnect = VoiceReconnect()
     private var retry: Task<Void, Never>?
+    /// Ends the conversation once the reconnect window is over, however the calls go.
+    private var deadline: Task<Void, Never>?
     private var online = true
+    /// Rome said `ready` on some socket: only then is a drop called again.
+    private var established = false
+    /// Ends the conversation when a call or Siri never says it ended.
+    private var interruption: Task<Void, Never>?
 
     init(request: URLRequest, chatId: String, audio: VoiceConversationAudio, session: URLSession = .shared, handlers: Handlers) {
         self.request = request
@@ -63,20 +69,29 @@ final class VoiceConversation {
         let socket = session.webSocketTask(with: request)
         task = socket
         replyRate = nil
-        sender.attach(socket)
+        // One step: microphone audio queued meanwhile goes after `start`, never before it.
+        sender.attach(socket, first: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate))
         socket.resume()
-        sender.send(text: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate))
         heardFromRome(within: VoiceConversationWire.openLimit)
         receive(socket)
     }
 
     /// The connection to Rome dropped: a network change, a lost signal, or
-    /// Rome falling quiet. The microphone goes on, and the phone calls Rome
-    /// again while the network allows, for up to `reconnectWindow`. What
-    /// Rome was saying is lost, and the reply stays in the chat.
+    /// Rome falling quiet. Once the conversation has started, the microphone
+    /// goes on, and the phone calls Rome again while the network allows, for
+    /// up to `reconnectWindow` from the first drop. What Rome was saying is
+    /// lost, and the reply stays in the chat. A conversation that never
+    /// started ends at once, so a refusal shows.
     private func lost() {
         guard !done else { return }
-        guard reconnect.lost(at: .now) else { return finish(.connectionLost) }
+        guard established, reconnect.lost(at: .now) else { return finish(.connectionLost) }
+        if deadline == nil {
+            deadline = Task { [weak self] in
+                try? await Task.sleep(for: VoiceConversationWire.reconnectWindow)
+                guard !Task.isCancelled else { return }
+                self?.finish(.connectionLost)
+            }
+        }
         quiet?.cancel()
         sender.close(sending: nil)
         task = nil
@@ -97,9 +112,30 @@ final class VoiceConversation {
         connect()
     }
 
+    /// A call or Siri took the audio. Its end resumes the conversation, and
+    /// so does the app coming to the front, since iOS may never say it ended.
+    /// After `interruptionLimit` with neither, the conversation ends.
+    func interrupted() {
+        guard !done else { return }
+        interruption?.cancel()
+        interruption = Task { [weak self] in
+            try? await Task.sleep(for: VoiceConversationWire.interruptionLimit)
+            guard !Task.isCancelled else { return }
+            self?.finish(.interrupted)
+        }
+    }
+
+    /// The app came to the front: an interruption that never said it ended is over.
+    func cameToFront() {
+        guard interruption != nil else { return }
+        resumeAudio()
+    }
+
     /// The guardian's call or Siri ended and the system lets the app go on.
     func resumeAudio() {
         guard !done else { return }
+        interruption?.cancel()
+        interruption = nil
         do {
             try audio.resume()
         } catch {
@@ -114,7 +150,7 @@ final class VoiceConversation {
     }
 
     /// Ends the conversation: the guardian's End with nil, or the phone's own
-    /// `reason`, such as the app going to the background.
+    /// `reason`, such as a call that kept the microphone.
     func end(_ reason: VoiceConversationStopReason? = nil) {
         finish(reason, tellingRome: true)
     }
@@ -125,6 +161,8 @@ final class VoiceConversation {
         audio.close()
         quiet?.cancel()
         retry?.cancel()
+        deadline?.cancel()
+        interruption?.cancel()
         path?.cancel()
         path = nil
         // A stop, if Rome should hear one, goes out before the socket closes.
@@ -200,7 +238,10 @@ final class VoiceConversation {
         switch message {
         case .ready(let rate):
             replyRate = rate
+            established = true
             reconnect.recovered()
+            deadline?.cancel()
+            deadline = nil
         case .state(let state): handlers.onState(state)
         case .clear: audio.clear()
         case .alive: break
@@ -216,12 +257,12 @@ private final class ConversationSender: @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var muted = false
 
-    func attach(_ task: URLSessionWebSocketTask) {
-        queue.async { self.task = task }
-    }
-
-    func send(text: String) {
-        queue.async { self.task?.send(.string(text)) { _ in } }
+    /// Sends on `task` from now, `first` before anything else.
+    func attach(_ task: URLSessionWebSocketTask, first: String) {
+        queue.async {
+            self.task = task
+            task.send(.string(first)) { _ in }
+        }
     }
 
     func send(audio: Data) {

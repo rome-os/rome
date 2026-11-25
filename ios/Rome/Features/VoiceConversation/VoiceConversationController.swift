@@ -45,7 +45,7 @@ final class VoiceConversationController {
         state = .listening
         muted = false
         active = true
-        // The screen locking would send the app to the background and end the conversation.
+        // In front, the screen stays on while the conversation runs.
         UIApplication.shared.isIdleTimerDisabled = true
         let audio = makeAudio()
         self.audio = audio
@@ -125,10 +125,18 @@ final class VoiceConversationController {
 
     /// A call, Siri or another app taking the microphone stops the audio. When
     /// that ends and the system says the app may go on, the conversation goes
-    /// on; otherwise it ends with a line that goes by itself.
+    /// on; otherwise it ends with a line that goes by itself. iOS may never
+    /// say it ended: the app coming to the front resumes it too.
     private func observe() {
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.conversation?.cameToFront() }
+        })
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            if type == AVAudioSession.InterruptionType.began.rawValue {
+                MainActor.assumeIsolated { self?.conversation?.interrupted() }
+                return
+            }
             guard type == AVAudioSession.InterruptionType.ended.rawValue else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
             MainActor.assumeIsolated {

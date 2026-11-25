@@ -101,6 +101,8 @@ enum VoiceConversationWire {
     static let reconnectWindow: Duration = .seconds(30)
     /// How long it waits between two calls.
     static let reconnectEvery: Duration = .seconds(2)
+    /// A call or Siri that never says it ended ends the conversation after this long.
+    static let interruptionLimit: Duration = .seconds(600)
 
     /// The first message: the chat to talk in, and the microphone's rate.
     static func start(chatId: String, sampleRate: Int) -> String {
