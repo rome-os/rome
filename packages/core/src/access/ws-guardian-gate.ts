@@ -4,6 +4,7 @@ import { isLoopbackHostname } from "@rome-os/libs/net";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { mayEnter } from "./entry.js";
+import { holdEntry } from "./held-entry.js";
 import { resolveSessionActorFromMaterial, upgradeActorMaterial } from "./session-actor.js";
 import type { DashboardAllowList, TeamActor } from "./team.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
@@ -37,7 +38,8 @@ function fromAllowedOrigin(req: IncomingMessage, actor: TeamActor): boolean {
  * not a browser page on a non-loopback host, and a member, from the dashboard's
  * own origin. A browser on another origin is refused whatever credential it
  * carries. Resolves the person, or null once it has written the 401, 403 or
- * 500.
+ * 500. Once the person may no longer enter it destroys the socket, so the
+ * caller only cleans up when its socket closes.
  */
 export async function gateUpgrade(
   req: IncomingMessage,
@@ -59,6 +61,10 @@ export async function gateUpgrade(
       rejectUpgrade(socket, 403, "Forbidden");
       return null;
     }
+    socket.once(
+      "close",
+      holdEntry(actor, dashboardAccess, () => socket.destroy()),
+    );
     return actor;
   } catch (err) {
     log.error("guardian upgrade check failed", {

@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
+import { type Duplex, PassThrough } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { guardianAuth } from "../db/schema.js";
 import { createTestDb } from "../test/db.js";
@@ -29,12 +29,11 @@ function request(headers: Record<string, string> = {}, peerAddress = "127.0.0.1"
 
 function captureSocket() {
   let response = "";
-  const socket = {
-    destroyed: false,
+  const socket = Object.assign(new PassThrough(), {
     end(data: string) {
       response = data;
     },
-  } as unknown as Duplex;
+  }) as Duplex;
   return { socket, response: () => response };
 }
 
