@@ -104,7 +104,7 @@ function harness(
     chats: {
       keep: async (chatId, provider) => {
         kept.push({ chatId, provider });
-        return "claude-opus-5-5";
+        return "anthropic/claude-opus-5-5[1m]";
       },
       follow: async (chatId) => {
         followed.push(chatId);
@@ -463,7 +463,12 @@ describe("automatic recovery, the same in every chat", () => {
 
   it("never moves a model its owner picked: a capacity limit shows the wait card", async () => {
     const h = harness(
-      { chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" } },
+      {
+        chat: {
+          largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+          largeModelSelectionBy: "owner",
+        },
+      },
       { anthropic: reportOf("available"), openai: reportOf("available") },
     );
     await h.fail("chat", opusLimit);
@@ -525,7 +530,7 @@ describe("the three cards", () => {
 
   it("shows the model card, with a model of the same provider, for a model not in the plan", async () => {
     const h = harness(
-      { chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "owner" } },
+      { chat: { largeModelSelection: "openai/gpt-6.1-sol", largeModelSelectionBy: "owner" } },
       { openai: reportOf("available"), anthropic: reportOf("available") },
       { defaultProvider: "openai" },
     );
@@ -540,7 +545,7 @@ describe("the three cards", () => {
 
   it("offers the provider's other model for a model the resolver refused", async () => {
     const h = harness(
-      { chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "owner" } },
+      { chat: { largeModelSelection: "openai/gpt-6.1-sol", largeModelSelectionBy: "owner" } },
       { openai: reportOf("available") },
       { defaultProvider: "openai" },
     );
@@ -563,7 +568,7 @@ describe("the three cards", () => {
       [],
     );
     expect(part).toMatchObject({ card: "model", replacement: { selection: expect.any(String) } });
-    expect(part?.replacement?.selection).not.toBe("gpt-6-1-sol");
+    expect(part?.replacement?.selection).not.toBe("openai/gpt-6.1-sol");
   });
 
   it("learns a quota card's reset time from the account read that follows", async () => {
@@ -781,7 +786,10 @@ describe("a card's button", () => {
 
   it("moves a model its owner picked to the same strength, still theirs", async () => {
     const chats: Record<string, Row> = {
-      chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+      chat: {
+        largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+        largeModelSelectionBy: "owner",
+      },
     };
     const h = harness(chats, {
       anthropic: reportOf("usage_limit_reached"),
@@ -791,23 +799,26 @@ describe("a card's button", () => {
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
     expect(chats.chat).toMatchObject({
-      largeModelSelection: "gpt-6-1-sol",
+      largeModelSelection: "openai/gpt-6.1-sol",
       largeModelSelectionBy: "owner",
     });
     expect(h.kept).toEqual([]);
   });
 
-  it("switches a model card to the model it names", async () => {
+  it("switches a legacy model card to its original fixed target", async () => {
     const chats: Record<string, Row> = {
-      chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "owner" },
+      chat: { largeModelSelection: "openai/gpt-6.1-sol", largeModelSelectionBy: "owner" },
     };
     const h = harness(chats, { openai: reportOf("available") }, { defaultProvider: "openai" });
     await h.fail("chat", notInPlan);
     const [card] = await h.failures.cards();
-    await h.failures.switchCard(card!.messageId, { kind: "model", selection: "gpt-5-6-terra" });
+    await h.failures.switchCard(card!.messageId, {
+      kind: "model",
+      selection: "gpt-5-6-terra",
+    });
     await flush();
     expect(chats.chat).toMatchObject({
-      largeModelSelection: "gpt-5-6-terra",
+      largeModelSelection: "openai/gpt-5.6-terra",
       largeModelSelectionBy: "owner",
     });
     expect(h.cardIn("chat")?.resolved).toMatchObject({
@@ -992,7 +1003,7 @@ describe("a card's options stay as written, and Retry is on every card", () => {
 
   it("Use Rome credits on a held chat's card moves existing chats, held ones included", async () => {
     const chats: Record<string, Row> = {
-      chat: { largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
+      chat: { largeModelSelection: "anthropic/claude-haiku-5-5", largeModelSelectionBy: "owner" },
     };
     const h = harness(
       chats,
@@ -1006,14 +1017,17 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     expect(h.chose).toEqual([{ provider: "rome_credits", moveExisting: true }]);
     // An owner's pick stays theirs.
     expect(chats.chat).toMatchObject({
-      largeModelSelection: "claude-haiku",
+      largeModelSelection: "anthropic/claude-haiku-5-5",
       largeModelSelectionBy: "owner",
     });
   });
 
   it("a card's switch of an owner's pick moves its conversation's hold with it", async () => {
     const chats: Record<string, Row> = {
-      chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+      chat: {
+        largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+        largeModelSelectionBy: "owner",
+      },
     };
     const h = harness(chats, {
       anthropic: reportOf("usage_limit_reached"),
@@ -1022,7 +1036,7 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     await h.fail("chat", quota);
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
-    expect(h.picked).toEqual([{ chatId: "chat", selection: "gpt-6-1-sol" }]);
+    expect(h.picked).toEqual([{ chatId: "chat", selection: "openai/gpt-6.1-sol" }]);
   });
 
   it("an error other than a logged-out provider stays an error, not a fresh card", async () => {
@@ -1146,7 +1160,7 @@ describe("Rome credits, the instance's choice", () => {
   it("makes them the default from a card, for every chat, and runs the stopped turn", async () => {
     const chats: Record<string, Row> = {
       a: {},
-      b: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+      b: { largeModelSelection: "anthropic/claude-opus-5-5[1m]", largeModelSelectionBy: "owner" },
     };
     const h = harness(
       chats,
@@ -1163,7 +1177,7 @@ describe("Rome credits, the instance's choice", () => {
     expect(h.kept).toEqual([]);
     expect(h.followed).toEqual([]);
     expect(chats.b).toMatchObject({
-      largeModelSelection: "claude-opus-5-5",
+      largeModelSelection: "anthropic/claude-opus-5-5[1m]",
       largeModelSelectionBy: "owner",
     });
     expect(h.runs.map((run) => run.threadId)).toEqual(["a"]);
@@ -1176,7 +1190,12 @@ describe("Rome credits, the instance's choice", () => {
 
   it("names Rome credits used up, and offers no switch, for any chat while they run", async () => {
     const h = harness(
-      { chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" } },
+      {
+        chat: {
+          largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+          largeModelSelectionBy: "owner",
+        },
+      },
       { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
       { defaultProvider: "rome_credits", signedIn: noAccount, credits: true },
     );

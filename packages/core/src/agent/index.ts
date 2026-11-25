@@ -150,6 +150,7 @@ export {
   CODEX_SOL_MODEL,
   CODEX_TERRA_MODEL,
   isModelSelectionId,
+  canonicalModelSelection,
   MODEL_SELECTIONS,
   type ModelSelection,
   type ModelSelectionId,

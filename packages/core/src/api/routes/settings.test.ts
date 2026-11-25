@@ -38,6 +38,15 @@ describe("Settings API", () => {
 
   afterEach(() => testDb.close());
 
+  it("writes a legacy model preference as its original fixed target and rejects unknown choices", async () => {
+    expect((await putSettings(app, { webchatLargeModel: "claude-opus" })).status).toBe(200);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect((await putSettings(app, { webchatLargeModel: "unknown" })).status).toBe(400);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect((await putSettings(app, { webchatLargeModel: "auto" })).status).toBe(200);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("auto");
+  });
+
   it("validates and persists the Codex credits preference and refreshes availability", async () => {
     const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
     expect((await putSettings(app, { "aiTools.codex.allowCredits": "true" })).status).toBe(400);
