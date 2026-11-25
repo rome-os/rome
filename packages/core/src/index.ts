@@ -466,7 +466,11 @@ import {
 } from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
-import { type InboundRecording, inboundRecording } from "./connections/inbound-recording.js";
+import {
+  HEARD_FOR_MS,
+  type InboundRecording,
+  inboundRecording,
+} from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
 import type { MessagePageCursor } from "./webchat/repository.js";
@@ -2574,6 +2578,7 @@ async function main() {
       // Nobody is told yet. Answering such a sender with the way to connect
       // their account passes `tell` here.
       onRecord: unknownSenders({
+        heardForMs: HEARD_FOR_MS,
         isRomes: (account) =>
           connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
         isOwnAccount: (connectionId) => {
