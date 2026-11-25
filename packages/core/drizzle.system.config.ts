@@ -15,6 +15,7 @@ export default defineConfig({
     "identities",
     "identity_accounts",
     "members",
+    "account_claims",
     "channel_mappings",
     "sentinel_log",
     "approvals",

@@ -190,6 +190,24 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
+ * Claims on accounts nobody holds (docs/domains/identity.md#claim). Keyed by a
+ * hash of the sign-in link's token, never the token. One claim per account:
+ * starting another replaces it.
+ */
+export const accountClaims = sqliteTable(
+  "account_claims",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    confirmedAt: integer("confirmed_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("idx_account_claims_account").on(table.platform, table.accountId)],
+);
+
+/**
  * The members: each person with a role in this Rome (docs/domains/access.md#member).
  * Deleting the person deletes their row. The partial unique index holds the
  * Rome to one guardian.

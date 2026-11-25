@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { identities, identityAccounts } from "../db/schema.js";
 
-type Exec = DrizzleDb | DrizzleTx;
+/** A database, or a transaction open on it. */
+export type Exec = DrizzleDb | DrizzleTx;
 
 /** An account, by its platform and the platform's own id. */
 export interface Account {
@@ -120,7 +121,8 @@ function accountIs(account: Account) {
   );
 }
 
-function holderOf(exec: Exec, account: Account): string | null {
+/** The id of the person who holds `account`, or null when nobody does. */
+export function holderOf(exec: Exec, account: Account): string | null {
   return (
     exec
       .select({ identityId: identityAccounts.identityId })

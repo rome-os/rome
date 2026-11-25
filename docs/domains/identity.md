@@ -33,6 +33,18 @@ An account belongs to at most one person.
 - A person made with an account that belongs to someone is not made at all.
 - An account is free again once the person who held it is deleted or the account is removed from them.
 
+## Claim
+
+How an account nobody holds becomes a person's. Rome starts a claim on the account and sends its sign-in link to whoever uses the account. A person who opens the link while signed in and confirms it gets the account. In code, the steps are in [`packages/core/src/identity/application/account-claims.ts`](../../packages/core/src/identity/application/account-claims.ts).
+
+- A claim is only for an account nobody holds. Starting one on an account a person holds is refused, and nothing changes.
+- An account has at most one claim. Starting another replaces the earlier one, whose link then leads nowhere.
+- A claim can be confirmed for 15 minutes after it starts, and once.
+- Opening the link changes nothing. Only confirming writes.
+- Confirming gives the account to the person and uses the claim up, together. When another person took the account since the claim started, it is refused, and nothing changes. Confirming for the person who already holds the account uses the claim up and changes nothing else.
+- The link carries a random token. Rome stores only its hash, so the stored claim cannot be turned back into a link.
+- The person who confirms is the one the sign-in is. Identity asks nothing more of them than that the person exists.
+
 ## Decided against
 
 - **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is a member.
