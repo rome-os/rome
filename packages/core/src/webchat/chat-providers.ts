@@ -85,6 +85,9 @@ export function pinnedModelOf(
       ? { by: "kept", providerId: held, selection: stored, model: selection.model }
       : { by: "kept", providerId: held, selection: null, model: null };
   }
+  if (stored && stored !== "auto") {
+    return { by: "owner", providerId: held ?? "unknown", selection: stored, model: stored };
+  }
   if (!held) return null;
   return { by: "kept", providerId: held, selection: null, model: null };
 }
@@ -172,15 +175,13 @@ export interface ChatProviders {
   followingCount(): Promise<number>;
 }
 
-/** The selection that runs `model`, ignoring a context-window suffix. */
-export function selectionOfModel(model: string): ModelSelectionId | null {
-  const bare = model.replace(/\[[^\]]*\]$/, "");
-  for (const selection of Object.values(MODEL_SELECTIONS)) {
-    if (selection.model === model || selection.model.replace(/\[[^\]]*\]$/, "") === bare) {
-      return selection.id as ModelSelectionId;
-    }
-  }
-  return null;
+/** The selection for the exact native ID; context variants remain distinct. */
+export function selectionOfModel(model: string, providerId?: string): ModelSelectionId | null {
+  const matches = Object.values(MODEL_SELECTIONS).filter(
+    (selection) =>
+      selection.model === model && (!providerId || selection.providerId === providerId),
+  );
+  return matches.length === 1 ? matches[0]!.id : null;
 }
 
 export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
@@ -194,14 +195,19 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     agentName: string | null,
     stored: string | null,
     provider: AccountedProviderId,
-  ): Promise<ModelSelectionId> => {
+  ): Promise<ModelSelectionId | null> => {
+    // A hold can preserve a session pin without inventing a menu selection.
+    if (stored && !isModelSelectionId(stored)) return null;
     const codexAccount = deps.accounts.read().openai?.account;
+    const last = isModelSelectionId(stored)
+      ? null
+      : await deps.lastModel?.(chatId, agentName).catch(() => null);
     const ran = isModelSelectionId(stored)
       ? stored
-      : await deps.lastModel?.(chatId, agentName).then(
-          (last) => (last ? selectionOfModel(last.model) : null),
-          () => null,
-        );
+      : last
+        ? selectionOfModel(last.model, last.providerId)
+        : null;
+    if (last?.providerId === provider && !ran) return null;
     if (ran) {
       if (MODEL_SELECTIONS[ran].providerId === provider) return ran;
       return selectionOfStrength(provider, strengthOfSelection(ran, codexAccount), codexAccount);
@@ -259,6 +265,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     provider: AccountedProviderId,
   ) => {
     const selection = await on(chatId, agentName, stored, provider);
+    if (selection === null) return null;
     await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "kept");
     deps.selectModel(chatId, agentName, selection);
     return selection;
@@ -281,7 +288,9 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         // Rome credits stop the moment an account is logged in: nothing stays on them.
         if (!change.from || change.from === "rome_credits") return;
         const provider = providerOfDefault(change.from);
-        const chats = await deps.webchatRepo.followingChats();
+        const chats = (await deps.webchatRepo.followingChats()).filter(
+          (chat) => !held.has(webchatSessionKey(chat.id)),
+        );
         const agents = await deps.webchatRepo.modelSelectionsOf(chats.map((chat) => chat.id));
         for (const chat of chats) {
           const agentName = agents.get(chat.id)?.agentName ?? null;
@@ -367,7 +376,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
           const next = current
             ? await on(chatId, chat.agentName ?? null, null, providerOfDefault(current))
             : null;
-          if (next) await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
+          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
           deps.selectModel(chatId, chat.agentName ?? null, next);
           return next;
         }

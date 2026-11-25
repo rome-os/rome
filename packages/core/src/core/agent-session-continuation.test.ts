@@ -276,14 +276,14 @@ describe("continuation notice through Sessions", () => {
 
   it("moves an open chat to another provider and tells the new thread to read the earlier chat, once", async () => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "Should I get a pet? A cat, but I worry about allergies.");
     await chatTurn(session, "My locker code is 4417.");
     expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
 
     // The guardian picks a Codex model in the open chat: the same live session
     // takes it from its next turn.
-    expect(await acquire(manager, "gpt-6-luna")).toBe(session);
+    expect(await acquire(manager, "openai/gpt-6-luna")).toBe(session);
     await chatTurn(session, "Which animal was it, and what was my worry?");
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna"]);
@@ -330,9 +330,9 @@ describe("continuation notice through Sessions", () => {
 
   it("has the old model write a handoff when the default moves off a provider that still runs", async () => {
     const manager = createManager({ handoffs: handoffsOver("- send_email(to: a@b.c)") });
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "My locker code is 4417.");
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     await chatTurn(session, "What is my locker code?");
 
     // One private turn on the old thread, on the old model, asked for the note.
@@ -354,11 +354,11 @@ describe("continuation notice through Sessions", () => {
       state,
       handoffs: handoffsOver("- send_email(to: a@b.c, subject: Rent)"),
     });
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "Email the landlord about rent.");
     const anthropicCalls = anthropic.calls.length;
     state.anthropic = reportOf("usage_limit_reached");
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     await chatTurn(session, "Did that go out?");
 
     expect(anthropic.calls).toHaveLength(anthropicCalls);
@@ -376,10 +376,12 @@ describe("continuation notice through Sessions", () => {
       onRomeCredits: () => onCredits.instance,
     });
     // ChatGPT is the default and logged out: the open refuses rather than spend credits.
-    await expect(acquire(manager, "gpt-6-luna")).rejects.toThrow(/not signed in|unavailable/i);
+    await expect(acquire(manager, "openai/gpt-6-luna")).rejects.toThrow(
+      /not signed in|unavailable/i,
+    );
     // Credits made the instance's choice, the same open runs, with no flag from the opener.
     onCredits.instance = true;
-    const session = await acquire(manager, "gpt-6-luna");
+    const session = await acquire(manager, "openai/gpt-6-luna");
     await chatTurn(session, "Hello on credits.");
     expect(openai.calls.at(-1)?.prompt).toContain("Hello on credits.");
   });
@@ -393,11 +395,11 @@ describe("continuation notice through Sessions", () => {
         },
       }),
     });
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "Email the landlord about rent.");
     // The old provider still runs, but its private handoff turn fails.
     anthropic.failing.next = 1;
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     await chatTurn(session, "Did that go out?");
 
     const prompt = openai.calls[0]?.prompt ?? "";
@@ -414,12 +416,12 @@ describe("continuation notice through Sessions", () => {
         fallback: async () => null,
       }),
     });
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "Email the landlord about rent.");
     // The old provider runs, but its handoff turn answers long after the deadline.
     anthropic.stalling.next = 1;
     anthropic.stalling.ms = 2_000;
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     // Date is faked here: the wall clock tells whether the switch waited.
     const started = performance.now();
     await chatTurn(session, "Did that go out?");
@@ -435,10 +437,10 @@ describe("continuation notice through Sessions", () => {
 
   it("has no position to branch at until a turn runs on the new provider's thread", async () => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     openai.naming.atOpen = false;
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
 
     const events: AgentEvent[] = [];
     for await (const event of session.fork!({ prompt: "side question" })) {
@@ -458,7 +460,7 @@ describe("continuation notice through Sessions", () => {
     ["left no position", () => (anthropic.positions.reported = false)],
   ])("never branches at an earlier turn when the latest one %s", async (_label, arrange) => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     arrange();
     await chatTurn(session, "second");
@@ -478,9 +480,9 @@ describe("continuation notice through Sessions", () => {
 
   it("keeps the notice due until a turn on the new thread returns a result", async () => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     openai.failing.next = 1;
     await chatTurn(session, "where were we?");
     await chatTurn(session, "where were we?");
@@ -494,9 +496,9 @@ describe("continuation notice through Sessions", () => {
 
   it("continues the same provider's thread on another model without a notice", async () => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
-    await acquire(manager, "claude-opus-5-5");
+    await acquire(manager, "anthropic/claude-opus-5-5[1m]");
     await chatTurn(session, "second");
 
     expect(anthropic.calls.map((call) => call.model)).toEqual([
@@ -515,11 +517,11 @@ describe("continuation notice through Sessions", () => {
 
   it("tells the new thread about the earlier chat when a cold open lands on another provider", async () => {
     const first = createManager();
-    const session = await acquire(first, "claude-sonnet");
+    const session = await acquire(first, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     await first.shutdown();
 
-    const resumed = await acquire(createManager(), "gpt-6-luna");
+    const resumed = await acquire(createManager(), "openai/gpt-6-luna");
     expect(resumed.sessionId).toBe(session.sessionId);
     await chatTurn(resumed, "second");
     const notice = continuationOf(openai.calls[0]?.prompt);
@@ -529,11 +531,11 @@ describe("continuation notice through Sessions", () => {
 
   it("resumes its own thread on a cold open without a notice", async () => {
     const first = createManager();
-    const session = await acquire(first, "claude-sonnet");
+    const session = await acquire(first, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     await first.shutdown();
 
-    const resumed = await acquire(createManager(), "claude-sonnet");
+    const resumed = await acquire(createManager(), "anthropic/claude-sonnet-5-5");
     await chatTurn(resumed, "second");
     expect(anthropic.opened[1]?.thread).toEqual({
       kind: "resume",
@@ -545,29 +547,43 @@ describe("continuation notice through Sessions", () => {
 
   it("starts a new generation (a reset) without a notice", async () => {
     const first = createManager();
-    const session = await acquire(first, "claude-sonnet");
+    const session = await acquire(first, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     await first.shutdown();
 
     const retired = (await sessionRepository.current(key.channelThreadKey, `core:${AGENT}`))!;
     await sessionRepository.replace(retired, retired.replace());
-    await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
+    await chatTurn(await acquire(createManager(), "openai/gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
 
   it("does not repeat the notice when the first chat turn has no earlier thread", async () => {
-    const session = await acquire(createManager(), "claude-sonnet");
+    const session = await acquire(createManager(), "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     expect(continuationOf(anthropic.calls[0]?.prompt)).toBeNull();
   });
 
   it.each([
-    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "concierge"],
-    [true, "gpt-6-1-sol", "claude-opus-5-5", "openai", "anthropic", "concierge"],
+    [
+      true,
+      "anthropic/claude-opus-5-5[1m]",
+      "openai/gpt-6.1-sol",
+      "anthropic",
+      "openai",
+      "concierge",
+    ],
+    [
+      true,
+      "openai/gpt-6.1-sol",
+      "anthropic/claude-opus-5-5[1m]",
+      "openai",
+      "anthropic",
+      "concierge",
+    ],
     // A topic chat is a Concierge chat like the main one.
-    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "topic-1"],
-    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", CHAT],
-    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", CHAT],
+    [true, "anthropic/claude-opus-5-5[1m]", "openai/gpt-6.1-sol", "anthropic", "openai", "topic-1"],
+    [false, "anthropic/claude-sonnet-5-5", "openai/gpt-6-luna", "anthropic", "openai", CHAT],
+    [false, "openai/gpt-6-luna", "anthropic/claude-sonnet-5-5", "openai", "anthropic", CHAT],
   ] as const)("cold background resume concierge=%s %s to %s (%s to %s) in %s", async (concierge, from, to, source, target, chatId) => {
     const agentName = concierge ? "core:concierge" : AGENT;
     if (concierge) {
@@ -644,11 +660,11 @@ describe("continuation notice through Sessions", () => {
 
   it("clears an open chat's selection with null and keeps it with undefined", async () => {
     const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
+    const session = await acquire(manager, "anthropic/claude-sonnet-5-5");
     await chatTurn(session, "first");
     await acquire(manager);
     await chatTurn(session, "second");
-    await acquire(manager, "gpt-6-luna");
+    await acquire(manager, "openai/gpt-6-luna");
     await acquire(manager, null);
     await chatTurn(session, "third");
 
