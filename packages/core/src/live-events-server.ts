@@ -5,9 +5,7 @@
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: a
 // dashboard admin gets every topic the guardian gets. `concierge.activity`
-// carries the caller's own Concierge chats, `chat.tasks:<id>` only the
-// caller's own Concierge chat, and another owner's Concierge or task chat is
-// not found.
+// carries the caller's own Concierge chats.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too. The phone app marks its socket with
