@@ -28,7 +28,6 @@ enum VoiceConversationStopReason: String, Sendable, Equatable {
     case microphoneBlocked = "microphone-blocked"
     case microphoneFailed = "microphone-failed"
     case connectionLost = "connection-lost"
-    case backgrounded
     case interrupted
 
     /// The line the field shows, in the dashboard's words.
@@ -43,14 +42,13 @@ enum VoiceConversationStopReason: String, Sendable, Equatable {
         case .microphoneBlocked: String(localized: "Microphone blocked. Allow it in Settings")
         case .microphoneFailed: String(localized: "The microphone could not start")
         case .connectionLost: String(localized: "Connection to Rome lost. The voice conversation ended")
-        case .backgrounded: String(localized: "The voice conversation ended when Rome went to the background")
         case .interrupted: String(localized: "The voice conversation ended when another app used the microphone")
         }
     }
 
-    /// The guardian left the app, or a call took the microphone: nothing went
-    /// wrong, so the line goes by itself once seen.
-    var endsWithoutFault: Bool { self == .backgrounded || self == .interrupted }
+    /// A call or another app kept the microphone: nothing went wrong, so the
+    /// line goes by itself once seen.
+    var endsWithoutFault: Bool { self == .interrupted }
 }
 
 /// A message from the instance on `/ws/voice-conversation`. The guardian's
@@ -99,6 +97,10 @@ enum VoiceConversationWire {
     static let quietLimit: Duration = .seconds(3)
     /// Opening the socket on a slow mobile network gets this long first.
     static let openLimit: Duration = .seconds(10)
+    /// After the connection drops, the phone calls Rome again for this long.
+    static let reconnectWindow: Duration = .seconds(30)
+    /// How long it waits between two calls.
+    static let reconnectEvery: Duration = .seconds(2)
 
     /// The first message: the chat to talk in, and the microphone's rate.
     static func start(chatId: String, sampleRate: Int) -> String {

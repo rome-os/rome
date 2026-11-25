@@ -3,9 +3,10 @@ import SwiftUI
 import UIKit
 
 /// One message field's voice conversation: whether it runs, Rome's state,
-/// mute, and why the last one ended on its own. Like voice input, it needs
-/// the screen: the screen stays on while it runs, and the app going to the
-/// background or a call taking the microphone ends it.
+/// mute, and why the last one ended on its own. As in a call, it goes on with
+/// the screen locked or another app in front (the `audio` background mode). A
+/// call or Siri pauses it, and it goes on after unless the system says not to.
+/// The screen stays on while it runs in front.
 @MainActor
 @Observable
 final class VoiceConversationController {
@@ -122,16 +123,21 @@ final class VoiceConversationController {
         noticeTimer.cancel()
     }
 
-    /// The app going to the background, or a call, Siri or another app taking
-    /// the microphone, ends the conversation at once. It never resumes by itself.
+    /// A call, Siri or another app taking the microphone stops the audio. When
+    /// that ends and the system says the app may go on, the conversation goes
+    /// on; otherwise it ends with a line that goes by itself.
     private func observe() {
-        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.conversation?.end(.backgrounded) }
-        })
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
-            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            guard raw == AVAudioSession.InterruptionType.began.rawValue else { return }
-            MainActor.assumeIsolated { self?.conversation?.end(.interrupted) }
+            let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            guard type == AVAudioSession.InterruptionType.ended.rawValue else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            MainActor.assumeIsolated {
+                if options.contains(.shouldResume) {
+                    self?.conversation?.resumeAudio()
+                } else {
+                    self?.conversation?.end(.interrupted)
+                }
+            }
         })
     }
 }

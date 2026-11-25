@@ -27,6 +27,9 @@ final class VoiceConversation {
     private var done = false
     private var quiet: Task<Void, Never>?
     private var path: NWPathMonitor?
+    private var reconnect = VoiceReconnect()
+    private var retry: Task<Void, Never>?
+    private var online = true
 
     init(request: URLRequest, chatId: String, audio: VoiceConversationAudio, session: URLSession = .shared, handlers: Handlers) {
         self.request = request
@@ -41,11 +44,7 @@ final class VoiceConversation {
             guard await audio.requestAccess() else { return finish(.microphoneBlocked) }
             // Ended while the system asked.
             guard !done else { return }
-            let socket = session.webSocketTask(with: request)
-            task = socket
-            sender.attach(socket)
-            socket.resume()
-            sender.send(text: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate))
+            connect()
             do {
                 let sender = sender
                 try audio.start(onChunk: { chunk in sender.send(audio: chunk) }, onLost: { [weak self] in
@@ -54,9 +53,57 @@ final class VoiceConversation {
             } catch {
                 return finish(.microphoneFailed)
             }
-            heardFromRome(within: VoiceConversationWire.openLimit)
-            receive(socket)
             watchNetwork()
+        }
+    }
+
+    /// Opens a socket to Rome and starts the conversation on it. The audio
+    /// sent before `start` goes nowhere.
+    private func connect() {
+        let socket = session.webSocketTask(with: request)
+        task = socket
+        replyRate = nil
+        sender.attach(socket)
+        socket.resume()
+        sender.send(text: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate))
+        heardFromRome(within: VoiceConversationWire.openLimit)
+        receive(socket)
+    }
+
+    /// The connection to Rome dropped: a network change, a lost signal, or
+    /// Rome falling quiet. The microphone goes on, and the phone calls Rome
+    /// again while the network allows, for up to `reconnectWindow`. What
+    /// Rome was saying is lost, and the reply stays in the chat.
+    private func lost() {
+        guard !done else { return }
+        guard reconnect.lost(at: .now) else { return finish(.connectionLost) }
+        quiet?.cancel()
+        sender.close(sending: nil)
+        task = nil
+        audio.clear()
+        handlers.onState(.thinking)
+        retry?.cancel()
+        retry = Task { [weak self] in
+            try? await Task.sleep(for: VoiceConversationWire.reconnectEvery)
+            guard !Task.isCancelled else { return }
+            self?.callAgain()
+        }
+    }
+
+    private func callAgain() {
+        guard !done, task == nil else { return }
+        // Offline: the network coming back calls again, or the window runs out.
+        guard online else { return lost() }
+        connect()
+    }
+
+    /// The guardian's call or Siri ended and the system lets the app go on.
+    func resumeAudio() {
+        guard !done else { return }
+        do {
+            try audio.resume()
+        } catch {
+            finish(.interrupted)
         }
     }
 
@@ -77,6 +124,7 @@ final class VoiceConversation {
         done = true
         audio.close()
         quiet?.cancel()
+        retry?.cancel()
         path?.cancel()
         path = nil
         // A stop, if Rome should hear one, goes out before the socket closes.
@@ -92,18 +140,29 @@ final class VoiceConversation {
         quiet = Task { [weak self] in
             try? await Task.sleep(for: limit)
             guard !Task.isCancelled else { return }
-            self?.finish(.connectionLost)
+            self?.lost()
         }
     }
 
     private func watchNetwork() {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            guard path.status != .satisfied else { return }
-            Task { @MainActor in self?.finish(.connectionLost) }
+            let online = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(online: online) }
         }
         monitor.start(queue: .main)
         path = monitor
+    }
+
+    private func networkChanged(online: Bool) {
+        guard !done else { return }
+        self.online = online
+        if !online {
+            if task != nil { lost() }
+        } else if task == nil {
+            retry?.cancel()
+            callAgain()
+        }
     }
 
     private enum Received: Sendable {
@@ -124,7 +183,7 @@ final class VoiceConversation {
             Task { @MainActor in
                 guard let self, !self.done, self.task === socket else { return }
                 switch received {
-                case .failed: return self.finish(.connectionLost)
+                case .failed: return self.lost()
                 case .audio(let chunk):
                     self.heardFromRome()
                     if let rate = self.replyRate { self.audio.play(chunk, sampleRate: rate) }
@@ -139,7 +198,9 @@ final class VoiceConversation {
 
     private func handle(_ message: VoiceConversationServerMessage) {
         switch message {
-        case .ready(let rate): replyRate = rate
+        case .ready(let rate):
+            replyRate = rate
+            reconnect.recovered()
         case .state(let state): handlers.onState(state)
         case .clear: audio.clear()
         case .alive: break
@@ -182,5 +243,23 @@ private final class ConversationSender: @unchecked Sendable {
             guard let last else { return task.cancel(with: .normalClosure, reason: nil) }
             task.send(.string(last)) { _ in task.cancel(with: .normalClosure, reason: nil) }
         }
+    }
+}
+
+/// How long a dropped conversation keeps calling Rome again: from the first
+/// drop until Rome is back, at most `VoiceConversationWire.reconnectWindow`.
+struct VoiceReconnect {
+    private var since: ContinuousClock.Instant?
+
+    /// The connection dropped at `now`. True while the phone may still call again.
+    mutating func lost(at now: ContinuousClock.Instant) -> Bool {
+        let first = since ?? now
+        since = first
+        return now - first < VoiceConversationWire.reconnectWindow
+    }
+
+    /// Rome answered again: a later drop gets the whole window.
+    mutating func recovered() {
+        since = nil
     }
 }

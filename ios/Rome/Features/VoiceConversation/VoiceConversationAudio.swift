@@ -15,6 +15,9 @@ protocol VoiceConversationAudio: AnyObject {
     func play(_ chunk: Data, sampleRate: Int)
     /// Drops the reply not played yet, at once.
     func clear()
+    /// Starts the microphone and the speaker again after a call or Siri
+    /// stopped them. What Rome said meanwhile is dropped, not played late.
+    func resume() throws
     /// How loud the microphone is now, 0 to 1.
     var microphoneLevel: Float { get }
     /// How loud the reply playing now is, 0 to 1.
@@ -74,6 +77,11 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
     private let reply = LevelReading()
     private var routeChanges: NSObjectProtocol?
     private var configurationChanges: NSObjectProtocol?
+    /// Where the microphone's chunks go, kept to start it again.
+    private var onChunk: (@Sendable (Data) -> Void)?
+    /// A call or Siri has the audio: the engine stays stopped until `resume`.
+    private var paused = false
+    private var interruptions: NSObjectProtocol?
 
     func requestAccess() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -104,6 +112,7 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
             throw error
         }
         running = true
+        self.onChunk = onChunk
         routeChanges = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
             let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
             MainActor.assumeIsolated {
@@ -112,6 +121,11 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
         }
         configurationChanges = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.restart(onChunk: onChunk, onLost: onLost) }
+        }
+        interruptions = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            guard type == AVAudioSession.InterruptionType.began.rawValue else { return }
+            MainActor.assumeIsolated { self?.paused = true }
         }
     }
 
@@ -147,7 +161,8 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
     /// iOS stops the engine when a route changes the input's format, as when a
     /// Bluetooth headset is taken off. Both go on from the route that took over.
     private func restart(onChunk: @escaping @Sendable (Data) -> Void, onLost: @MainActor () -> Void) {
-        guard running else { return }
+        // During a call the engine cannot start: `resume` starts it after.
+        guard running, !paused else { return }
         capture?.flush()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -178,6 +193,21 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
         if engine.isRunning, !player.isPlaying { player.play() }
     }
 
+    func resume() throws {
+        guard running, let onChunk else { return }
+        paused = false
+        try AVAudioSession.sharedInstance().setActive(true)
+        player.stop()
+        reply.reset()
+        capture?.flush()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        try tapInput(onChunk: onChunk)
+        engine.prepare()
+        try engine.start()
+        player.play()
+    }
+
     func clear() {
         guard running else { return }
         // Stopping drops every buffer scheduled; the next chunk starts it again.
@@ -195,6 +225,9 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
         routeChanges = nil
         if let configurationChanges { NotificationCenter.default.removeObserver(configurationChanges) }
         configurationChanges = nil
+        if let interruptions { NotificationCenter.default.removeObserver(interruptions) }
+        interruptions = nil
+        onChunk = nil
         engine.inputNode.removeTap(onBus: 0)
         player.removeTap(onBus: 0)
         player.stop()
@@ -271,6 +304,7 @@ final class RecordedConversationAudio: VoiceConversationAudio {
 
     func play(_ chunk: Data, sampleRate: Int) { reply.set(SpeakerphoneAudio.loudness(of: chunk)) }
     func clear() { reply.reset() }
+    func resume() throws { reply.reset() }
     var microphoneLevel: Float { microphone.current }
     var replyLevel: Float { reply.current }
     func close() { source.close() }

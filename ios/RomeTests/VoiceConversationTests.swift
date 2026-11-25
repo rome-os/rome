@@ -38,12 +38,12 @@ import Testing
         #expect(VoiceConversationWire.sampleRate == VoiceInputWire.sampleRate)
     }
 
-    @Test func onlyLeavingTheAppOrACallEndsWithoutAFault() {
+    @Test func onlyACallThatKeepsTheMicrophoneEndsWithoutAFault() {
         let all: [VoiceConversationStopReason] = [
             .unavailable, .listeningFailed, .speakingFailed, .chatRefused, .timeLimit, .badRequest,
-            .microphoneBlocked, .microphoneFailed, .connectionLost, .backgrounded, .interrupted,
+            .microphoneBlocked, .microphoneFailed, .connectionLost, .interrupted,
         ]
-        #expect(all.filter(\.endsWithoutFault) == [.backgrounded, .interrupted])
+        #expect(all.filter(\.endsWithoutFault) == [.interrupted])
         for reason in all { #expect(!reason.notice.isEmpty) }
         #expect(VoiceConversationStopReason.microphoneBlocked.notice == String(localized: "Microphone blocked. Allow it in Settings"))
     }
@@ -123,20 +123,69 @@ import Testing
         #expect(controller.notice == nil)
     }
 
-    @Test func leavingTheAppEndsItWithALineThatGoesByItself() async {
+    @Test func lockingTheScreenOrOpeningAnotherAppKeepsItGoing() async throws {
         let audio = FakeAudio(allowed: true)
         // The app's own center would send every other test to the background too.
         let center = NotificationCenter()
         let controller = VoiceConversationController(center: center, makeAudio: { audio })
         controller.start(request: Self.request, chat: "chat")
+        await waitUntil { audio.started }
         center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.active)
+        #expect(!audio.closed)
+        controller.end()
+    }
+
+    @Test func aCallThatEndsLetsItGoOnWithoutPlayingWhatWasSaidMeanwhile() async {
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        #expect(controller.active)
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallThatKeepsTheMicrophoneEndsItWithALineThatGoesByItself() async {
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+        ])
         await waitUntil { !controller.active }
         #expect(!controller.active)
-        #expect(controller.notice == .backgrounded)
-        #expect(controller.notice?.endsWithoutFault == true)
+        #expect(controller.notice == .interrupted)
+        #expect(audio.resumed == 0)
         // Leaving the chat takes a line that goes by itself down with it.
         controller.leave()
         #expect(controller.notice == nil)
+    }
+
+    @Test func aDroppedConnectionIsCalledAgainForThirtySecondsFromTheFirstDrop() {
+        var reconnect = VoiceReconnect()
+        let start = ContinuousClock.now
+        #expect(reconnect.lost(at: start))
+        #expect(reconnect.lost(at: start + .seconds(29)))
+        #expect(!reconnect.lost(at: start + .seconds(30)))
+        // Rome answered again: the next drop gets the whole window.
+        reconnect.recovered()
+        #expect(reconnect.lost(at: start + .seconds(40)))
+        #expect(reconnect.lost(at: start + .seconds(69)))
+        #expect(!reconnect.lost(at: start + .seconds(71)))
     }
 
     @Test func theGuardiansEndLeavesNoLine() async {
@@ -230,6 +279,7 @@ private final class FakeAudio: VoiceConversationAudio {
     let allowed: Bool
     private(set) var started = false
     private(set) var closed = false
+    private(set) var resumed = 0
     var microphoneLevel: Float = 0
     var replyLevel: Float = 0
 
@@ -239,5 +289,6 @@ private final class FakeAudio: VoiceConversationAudio {
     func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws { started = true }
     func play(_ chunk: Data, sampleRate: Int) {}
     func clear() {}
+    func resume() throws { resumed += 1 }
     func close() { closed = true }
 }
