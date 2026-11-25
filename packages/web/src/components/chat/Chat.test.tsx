@@ -70,6 +70,7 @@ const conciergeVoice = rs.hoisted(() => ({
   heard: null as null | ((text: string) => void),
   turn: null as null | ((text: string, inputId: string) => void),
   stopped: null as null | ((reason: "chat-refused") => void),
+  start: null as null | (() => void),
 }));
 // The chats a voice conversation started in the mocked Concierge composer talks in.
 const conciergeVoiceChats = rs.hoisted(() => [] as string[]);
@@ -481,6 +482,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onVoiceHeard?: (text: string) => void;
       onVoiceTurn?: (text: string, inputId: string) => void;
       onVoiceStopped?: (reason: "chat-refused") => void;
+      onVoiceStart?: () => void;
       startChat?: () => Promise<string>;
     },
     ref,
@@ -489,6 +491,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     conciergeVoice.heard = props.onVoiceHeard ?? null;
     conciergeVoice.turn = props.onVoiceTurn ?? null;
     conciergeVoice.stopped = props.onVoiceStopped ?? null;
+    conciergeVoice.start = props.onVoiceStart ?? null;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
@@ -4419,6 +4422,29 @@ describe("Chat Concierge jump to a message", () => {
       fireEvent.click(row.querySelector('button[aria-label="message.share"]')!);
       await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
       expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-2");
+    });
+
+    it("closes the chain when a voice conversation starts, so the words grow in sight", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+
+      act(() => conciergeVoice.start?.());
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
     });
 
     it("sends implicitly in the chain and restores the placeholder on close", async () => {

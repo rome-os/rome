@@ -1163,6 +1163,7 @@ export function Chat({
   // owner's private history, so there it starts with none picked. Turns are
   // picked on the chat itself, so a reply chain in focus closes first.
   const closeChain = chain.close;
+  const startVoiceInChat = useCallback(() => void closeChain(), [closeChain]);
   const enterShareMode = useCallback(() => {
     void closeChain();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
@@ -3437,6 +3438,8 @@ export function Chat({
                         onVoiceHeard={setVoiceHeard}
                         onVoiceTurn={showVoiceTurn}
                         onVoiceStopped={voiceStopped}
+                        // The conversation talks in the chat itself, so a reply chain in focus closes first.
+                        onVoiceStart={startVoiceInChat}
                         startChat={startSession ? startConversationChat : undefined}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}

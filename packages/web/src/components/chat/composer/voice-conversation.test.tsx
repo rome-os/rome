@@ -63,6 +63,7 @@ function renderComposer(
   chat: {
     chatId: string | null;
     startChat?: () => Promise<string>;
+    onVoiceStart?: () => void;
     onVoiceHeard?: (text: string) => void;
     onVoiceTurn?: (text: string, inputId: string) => void;
   } = { chatId: "concierge" },
@@ -219,6 +220,17 @@ describe("voice conversation in the Concierge's message field", () => {
     renderComposer(true);
     const reopened = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
     expect(reopened.value).toBe("Also remind me at seven");
+  });
+
+  it("tells the chat a conversation starts, as the click starts it", async () => {
+    const order: string[] = [];
+    renderComposer(true, undefined, {
+      chatId: "concierge",
+      onVoiceStart: () => order.push("chat"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    order.push(`started ${conversation.started.length}`);
+    expect(order).toEqual(["chat", "started 1"]);
   });
 
   it("takes the words not sent yet out of the chat when the composer goes away", async () => {

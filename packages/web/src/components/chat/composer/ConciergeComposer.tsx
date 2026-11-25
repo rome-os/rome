@@ -108,6 +108,8 @@ export interface ConciergeComposerProps {
   onVoiceTurn?: (text: string, inputId: string) => void;
   /** A voice conversation ended on its own, for `reason`. */
   onVoiceStopped?: (reason: ConversationStopReason) => void;
+  /** The guardian starts a voice conversation. */
+  onVoiceStart?: () => void;
   /** Creates the chat a draft's voice conversation talks in, and answers its id. */
   startChat?: () => Promise<string>;
   /** The chat's own model pick. Unset hides the model row. */
@@ -137,6 +139,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       onVoiceHeard,
       onVoiceTurn,
       onVoiceStopped,
+      onVoiceStart,
       startChat,
       modelSelection,
       onSend,
@@ -728,7 +731,12 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
             {conversation.available && !conversation.active && !voice.active && !uploadInFlight ? (
-              <VoiceConversationButton onStart={conversation.start} />
+              <VoiceConversationButton
+                onStart={() => {
+                  onVoiceStart?.();
+                  conversation.start();
+                }}
+              />
             ) : null}
             {conversation.active ? (
               <>
