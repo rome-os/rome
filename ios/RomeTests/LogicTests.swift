@@ -418,6 +418,13 @@ final class StubBackend: RomeBackend {
     func me() async throws -> AccountIdentity? { nil }
     func sendFeedback(_ text: String) async throws {}
     func upgradeCheck() async throws -> UpgradeCheck { throw APIError.network }
+    /// What `voiceConversationInfo` answers, or the error it throws.
+    var conversationInfo: VoiceConversationInfo?
+    var conversationError: APIError?
+    func voiceConversationInfo() async throws -> VoiceConversationInfo? {
+        if let conversationError { throw conversationError }
+        return conversationInfo
+    }
     func startUpgrade(target: String) async throws -> UpgradeStarted { throw APIError.network }
     func buildInfo() async throws -> BuildInfo { throw APIError.network }
 }

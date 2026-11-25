@@ -532,6 +532,46 @@ private final class HeldAnimators {
         }
     }
 
+    /// The same chat on screen twice, as when the shell fades out while a
+    /// new one fades in: the newest owns the shared rows, the old one never
+    /// takes them back, and the old one leaving keeps the new surface.
+    @Test func aSecondCopyOfTheChatTakesTheSharedRowsAndKeepsThem() async throws {
+        let backend = FakeBackend()
+        backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
+        backend.stored = (0..<12).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "concierge", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index)", createdAt: String(format: "2026-11-22T10:%02d:00Z", index), chatThreadId: "m\(index)")
+        }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "rcf-copies-\(UUID().uuidString)")
+        let workspace = Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: directory.appending(path: "Drafts"), instance: "test"))
+        defer { workspace.stop(); try? FileManager.default.removeItem(at: directory) }
+        await workspace.openConcierge()
+        await workspace.concierge.reload()
+        let store = workspace.concierge
+        let copies = ChatCopies()
+        let host = UIHostingController(rootView: ChatCopiesView(workspace: workspace, copies: copies).environment(AppModel()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil }
+        func lists() -> [UICollectionView] { descendants(host.view).compactMap { $0.accessibilityIdentifier == "transcript" ? $0 as? UICollectionView : nil } }
+        try await until("the first copy to mount") { lists().count == 1 && !(lists().first?.visibleCells.isEmpty ?? true) && store.focusPosition.surface != nil }
+        let old = try #require(lists().first)
+        let oldSurface = try #require(store.focusPosition.surface)
+        copies.new = true
+        try await until("the second copy to mount") { lists().count == 2 && store.focusPosition.surface !== oldSurface }
+        let new = try #require(lists().first { $0 !== old })
+        try await settled("both copies") { [old.contentOffset.y, new.contentOffset.y, new.contentSize.height] }
+        #expect(store.focusPosition.main === new, "The newest copy owns the shared rows")
+        let surface = try #require(store.focusPosition.surface)
+        copies.old = false
+        try await until("the old copy to go") { lists().count == 1 }
+        try await settled("the new copy") { [new.contentOffset.y, new.contentSize.height] }
+        #expect(store.focusPosition.main === new)
+        #expect(store.focusPosition.surface === surface && surface.window != nil, "The old copy leaving keeps the new surface")
+        #expect(surface.subviews.contains { $0.alpha > 0 }, "The new copy still shows its rows")
+    }
 
 }
 
@@ -617,5 +657,22 @@ struct SeededThreadFocusHTTPTests {
         #expect(abs(try y(main, transcript: store) - before) < 1)
         capture("closed")
         print("RCF real held HTTP native anchor=\(before), successful hydration and inverse, no sends")
+    }
+}
+
+/// Two copies of Chat on one store, each shown on its own switch.
+@MainActor @Observable private final class ChatCopies {
+    var old = true
+    var new = false
+}
+
+private struct ChatCopiesView: View {
+    let workspace: Workspace
+    let copies: ChatCopies
+    var body: some View {
+        ZStack {
+            if copies.old { ChatScreen(workspace: workspace, shell: ShellActions()).id("old") }
+            if copies.new { ChatScreen(workspace: workspace, shell: ShellActions()).id("new") }
+        }
     }
 }

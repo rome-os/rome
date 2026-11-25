@@ -112,6 +112,12 @@ export interface ApiConfig {
  */
 export interface ApiDeps {
   computerUseLocal?: { deviceId: string; name: string };
+  /** True when ROME_JWT_SECRET meets protected approval strength. Defaults to true when omitted in unit tests. */
+  computerUseSigningSecretReady?: boolean;
+  /** Native macOS computer-use controller used to proactively cancel bindings on revocation. */
+  nativeComputerUse?: {
+    cancelDevice(deviceId: string, actor?: { userId: string; accountId?: string }): Promise<void>;
+  };
   agentNameEvents?: AgentNameEvents;
   /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
@@ -119,7 +125,7 @@ export interface ApiDeps {
   channelsService: ChannelsService;
   chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
+  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
