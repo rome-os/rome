@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Network
 import UIKit
 import Testing
 @testable import Rome
@@ -38,12 +39,12 @@ import Testing
         #expect(VoiceConversationWire.sampleRate == VoiceInputWire.sampleRate)
     }
 
-    @Test func onlyLeavingTheAppOrACallEndsWithoutAFault() {
+    @Test func onlyACallThatKeepsTheMicrophoneEndsWithoutAFault() {
         let all: [VoiceConversationStopReason] = [
             .unavailable, .listeningFailed, .speakingFailed, .chatRefused, .timeLimit, .badRequest,
-            .microphoneBlocked, .microphoneFailed, .connectionLost, .backgrounded, .interrupted,
+            .microphoneBlocked, .microphoneFailed, .connectionLost, .interrupted,
         ]
-        #expect(all.filter(\.endsWithoutFault) == [.backgrounded, .interrupted])
+        #expect(all.filter(\.endsWithoutFault) == [.interrupted])
         for reason in all { #expect(!reason.notice.isEmpty) }
         #expect(VoiceConversationStopReason.microphoneBlocked.notice == String(localized: "Microphone blocked. Allow it in Settings"))
     }
@@ -123,20 +124,189 @@ import Testing
         #expect(controller.notice == nil)
     }
 
-    @Test func leavingTheAppEndsItWithALineThatGoesByItself() async {
+    @Test func lockingTheScreenOrOpeningAnotherAppKeepsItGoing() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
         let audio = FakeAudio(allowed: true)
         // The app's own center would send every other test to the background too.
         let center = NotificationCenter()
         let controller = VoiceConversationController(center: center, makeAudio: { audio })
-        controller.start(request: Self.request, chat: "chat")
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
         center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.active)
+        #expect(!audio.closed)
+        controller.end()
+    }
+
+    @Test func aCallThatEndsLetsItGoOnWithoutPlayingWhatWasSaidMeanwhile() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        #expect(controller.active)
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallThatKeepsTheMicrophoneEndsItWithALineThatGoesByItself() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+        ])
         await waitUntil { !controller.active }
         #expect(!controller.active)
-        #expect(controller.notice == .backgrounded)
-        #expect(controller.notice?.endsWithoutFault == true)
+        #expect(controller.notice == .interrupted)
+        #expect(audio.resumed == 0)
         // Leaving the chat takes a line that goes by itself down with it.
         controller.leave()
         #expect(controller.notice == nil)
+    }
+
+    @Test func comingBackToTheAppResumesACallThatNeverSaidItEnded() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        // Coming to the front with no call under way resumes nothing.
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(audio.resumed == 0)
+        // iOS never says the call ended: coming back to the app resumes it.
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func comingBackToTheAppDuringTheCallKeepsItPaused() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call goes on: the audio cannot start, and the conversation waits.
+        audio.refusesResume = true
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(audio.resumed == 0)
+        // The call ends.
+        audio.refusesResume = false
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallThatEndsWhileTheAudioCannotStartWaitsForTheApp() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call ends with the phone locked, and the audio cannot start yet.
+        audio.refusesResume = true
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.resumed == 0)
+        // The guardian comes back to the app: the audio starts.
+        audio.refusesResume = false
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallPausesTheReconnectWindowAndItsEndGivesAWholeOne() {
+        var window = ReconnectWindow()
+        // A drop starts the window, once.
+        let first = window.dropped()
+        let again = window.dropped()
+        #expect(first && !again)
+        // A call: the window stops, and a drop meanwhile starts none.
+        window.pause()
+        let duringCall = window.dropped()
+        #expect(!duringCall && !window.running)
+        // The call ends with the connection still down: a whole window from now.
+        let afterCall = window.resumed(connected: false)
+        #expect(afterCall && window.running)
+        // Rome answers again; a call that ends with the connection up starts none.
+        window.recovered()
+        window.pause()
+        let connected = window.resumed(connected: true)
+        #expect(!connected && !window.running)
+    }
+
+    @Test func aFirstConnectionKeepsTheFirstWordsAndAReconnectWaitsForReady() {
+        var gate = MicrophoneGate()
+        // The guardian may speak at once: their first words go out behind `start`.
+        gate.attached(reconnecting: false)
+        #expect(gate.open)
+        // A reconnect drops what comes before Rome is ready, so no burst follows a slow handshake.
+        gate.attached(reconnecting: true)
+        #expect(!gate.open)
+        gate.ready()
+        #expect(gate.open)
+    }
+
+    @Test func aConversationRomeNeverAnsweredEndsAtOnceAndSaysSo() async {
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        // Nothing listens on port 9: the first connection fails, and is not called again.
+        controller.start(request: Self.request, chat: "chat")
+        await waitUntil { !controller.active }
+        #expect(!controller.active)
+        #expect(controller.notice == .connectionLost)
     }
 
     @Test func theGuardiansEndLeavesNoLine() async {
@@ -230,6 +400,7 @@ private final class FakeAudio: VoiceConversationAudio {
     let allowed: Bool
     private(set) var started = false
     private(set) var closed = false
+    private(set) var resumed = 0
     var microphoneLevel: Float = 0
     var replyLevel: Float = 0
 
@@ -239,5 +410,48 @@ private final class FakeAudio: VoiceConversationAudio {
     func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws { started = true }
     func play(_ chunk: Data, sampleRate: Int) {}
     func clear() {}
+    /// The system still keeps the audio, as during a call.
+    var refusesResume = false
+    func resume() throws {
+        if refusesResume { throw VoiceAudioError.noInput }
+        resumed += 1
+    }
     func close() { closed = true }
+}
+
+/// A local port that takes connections and never answers: a socket to it
+/// waits in its opening handshake, so a conversation on it stays on.
+private final class SilentServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var held: [NWConnection] = []
+
+    init() throws {
+        listener = try NWListener(using: .tcp, on: .any)
+        listener.newConnectionHandler = { [weak self] connection in
+            connection.start(queue: .global())
+            self?.hold(connection)
+        }
+        listener.start(queue: .global())
+    }
+
+    private func hold(_ connection: NWConnection) {
+        lock.withLock { held.append(connection) }
+    }
+
+    /// The socket's request, once the port is open.
+    func request() async throws -> URLRequest {
+        for _ in 0..<200 {
+            if let port = listener.port?.rawValue, port != 0 {
+                return URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/ws/voice-conversation")!)
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw CancellationError()
+    }
+
+    func stop() {
+        listener.cancel()
+        lock.withLock { for connection in held { connection.cancel() } }
+    }
 }
