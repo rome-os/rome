@@ -121,12 +121,7 @@ export function insertAccountIn(
   account: Account,
   now: Date,
 ): AccountRefusal | null {
-  const known = exec
-    .select({ id: identities.id })
-    .from(identities)
-    .where(eq(identities.id, personId))
-    .get();
-  if (!known) return "unknown";
+  if (!personKnown(exec, personId)) return "unknown";
   const holder = holderOf(exec, account);
   if (holder !== null) return holder === personId ? null : "taken";
   exec
@@ -136,8 +131,15 @@ export function insertAccountIn(
   return null;
 }
 
-/** The id of the person who holds `account`, or null when nobody does. */
-export function holderOf(exec: Exec, account: Account): string | null {
+/** Whether Rome knows a person with `personId`. */
+export function personKnown(exec: Exec, personId: string): boolean {
+  return (
+    exec.select({ id: identities.id }).from(identities).where(eq(identities.id, personId)).get() !==
+    undefined
+  );
+}
+
+function holderOf(exec: Exec, account: Account): string | null {
   return (
     exec
       .select({ identityId: identityAccounts.identityId })

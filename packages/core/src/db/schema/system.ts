@@ -190,23 +190,22 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
- * Claims on accounts nobody holds (docs/domains/identity.md#claim). Keyed by a
- * hash of the sign-in link's token, never the token. One claim per account:
- * starting another replaces it.
+ * Open codes for adding an account to a person (docs/domains/identity.md#claim).
+ * Keyed by a hash of the code, never the code. One row per person: a new code
+ * replaces the earlier one, and deleting the person deletes their row.
  */
 export const accountClaims = sqliteTable(
   "account_claims",
   {
-    tokenHash: text("token_hash").primaryKey(),
-    platform: text("platform").notNull(),
-    accountId: text("account_id").notNull(),
-    /** The account's name as the platform shows it, for the person confirming. */
-    label: text("label"),
+    codeHash: text("code_hash").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-    confirmedAt: integer("confirmed_at", { mode: "timestamp" }),
+    usedAt: integer("used_at", { mode: "timestamp" }),
   },
-  (table) => [uniqueIndex("idx_account_claims_account").on(table.platform, table.accountId)],
+  (table) => [uniqueIndex("idx_account_claims_person").on(table.personId)],
 );
 
 /**
