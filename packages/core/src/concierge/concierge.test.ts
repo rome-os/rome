@@ -35,11 +35,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { conciergeMessageTurns } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
-import type {
-  AgentTurnFailedBeforeStart,
-  TurnLifecycleListener,
-  RomeToolResult,
-} from "../agent/index.js";
+import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { CONCIERGE_REACTIONS } from "@rome/api-types/concierge";
 import { startConciergeEvents } from "./events.js";
 import { MIN_FLUSH_SPACING_MS, RETRY_MS, TaskEventCoalescer } from "./task-events.js";
@@ -2371,7 +2367,8 @@ describe("Concierge tools", () => {
   });
 
   describe("card_forward sends a card of a task chat by its id", () => {
-    const text = (result: RomeToolResult) => JSON.parse(result.content[0].text);
+    const text = (result: { content: Array<{ text: string }> }) =>
+      JSON.parse(result.content[0].text);
     const stored = (s: ReturnType<typeof setup>) =>
       (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
     const HEALTH = {
@@ -2717,7 +2714,7 @@ describe("Concierge tools", () => {
 });
 
 describe("Concierge task list tools", () => {
-  const text = (result: RomeToolResult) => JSON.parse(result.content[0].text);
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
 
   it("chat_start makes the task of its chat, whose id is the chat's, and answers the chat's id", async () => {
     const s = setup();
@@ -2746,7 +2743,7 @@ describe("Concierge task list tools", () => {
 });
 
 describe("Concierge task chats", () => {
-  const text = (result: RomeToolResult) => JSON.parse(result.content[0].text);
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
   const anchorOf = async (s: ReturnType<typeof setup>, taskId: string) =>
     (await s.taskRepo.getWithChat(taskId))?.sourceMessageId;
 
@@ -5510,7 +5507,7 @@ describe("Concierge chats", () => {
 });
 
 describe("Concierge connect_card", () => {
-  const text = (result: RomeToolResult) => JSON.parse(result.content[0].text);
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
   const MAIL_CONNECT = {
     kind: "composio",
     method: "POST",
@@ -5884,7 +5881,8 @@ describe("Concierge tasks started for a guardian message", () => {
     };
     const replyOfId = (s: ReturnType<typeof setup>, id: string) =>
       s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.replyTo;
-    const idOf = (result: RomeToolResult) => JSON.parse(result.content[0].text).messageId as string;
+    const idOf = (result: { content: Array<{ text: string }> }) =>
+      JSON.parse(result.content[0].text).messageId as string;
 
     it("replies to the task's start message and settles the result as told", async () => {
       const { s, taskId } = await finishedWith(concluded("Found 3 flights. Which one?"));

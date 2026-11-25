@@ -70,7 +70,7 @@ export function parseToolText(result: RomeToolResult): unknown {
 }
 
 function parseToolResult(result: RomeToolResult): unknown {
-  const text = result.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
+  const text = result.content.map((item) => item.text).join("\n");
   if (result.isError) throw new Error(text);
   try {
     return JSON.parse(text);

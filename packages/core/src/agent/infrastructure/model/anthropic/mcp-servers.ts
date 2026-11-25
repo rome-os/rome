@@ -35,8 +35,8 @@ export function anthropicToolName(group: RomeToolGroup, tool: RomeToolDefinition
 
 // The Claude Agent SDK's `tool()` callback is generically typed against the
 // zod shape it's given, and its return type covers the full
-// `text/image/audio/resource` block union. Pipe through an `unknown`-cast
-// `sdkTool` to skirt the inference.
+// `text/image/audio/resource` block union. Rome's tools always answer with
+// text blocks. Pipe through an `unknown`-cast `sdkTool` to skirt the inference.
 function wrapRomeTool(tools: RomeTools, group: RomeToolGroup, toolDef: RomeToolDefinition) {
   const wrappedSdkTool = sdkTool as unknown as (
     name: string,
@@ -57,16 +57,12 @@ function wrapRomeTool(tools: RomeTools, group: RomeToolGroup, toolDef: RomeToolD
       // this metadata key. Re-check it whenever upgrading the SDK: changing or
       // removing the key breaks parent-child subagent association.
       const toolUseId = meta?.["claudecode/toolUseId"];
-      const result = await tools.callTool(
+      return tools.callTool(
         group,
         toolDef.name,
         args ?? {},
         typeof toolUseId === "string" ? { toolUseId } : undefined,
       );
-      return {
-        content: result.content,
-        ...(result.isError === undefined ? {} : { isError: result.isError }),
-      };
     },
   );
 }
@@ -97,10 +93,6 @@ export function buildAnthropicMcpServers({
 
   if (tools.listTools("subagents").length > 0) {
     mcpServers.subagents = server("subagents");
-  }
-
-  if (tools.listTools("computer").length > 0) {
-    mcpServers.computer = server("computer");
   }
 
   if (externalMcpServers) {

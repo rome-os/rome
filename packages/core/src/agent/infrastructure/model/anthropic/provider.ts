@@ -26,11 +26,6 @@ import type {
 } from "../../../domain/model-port.js";
 import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
-import {
-  computerToolTraceInput,
-  computerToolTraceOutput,
-  isComputerTool,
-} from "../../../domain/computer-use.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
 import { anthropicStop, claudeStoppedTurnResult } from "./stop.js";
@@ -398,16 +393,14 @@ function extractToolResultMessages(
   const payload = message.message;
   const content = Array.isArray(payload?.content) ? payload.content : [];
   const contentResults = content.filter(isToolResultParam).map((block): ModelTurnActivityEvent => {
-    const tool = normalizeToolName(toolUseNames.get(block.tool_use_id) ?? "unknown");
-    const output = isComputerTool(tool)
-      ? computerToolTraceOutput(block.is_error === true)
-      : typeof block.is_error === "boolean"
+    const output =
+      typeof block.is_error === "boolean"
         ? { content: block.content, isError: block.is_error }
         : block.content;
     return {
       type: "tool_result",
       toolUseId: block.tool_use_id,
-      tool,
+      tool: normalizeToolName(toolUseNames.get(block.tool_use_id) ?? "unknown"),
       output,
       endedAt: new Date().toISOString(),
       // The Messages API marks a failed tool result with `is_error`; its
@@ -423,13 +416,12 @@ function extractToolResultMessages(
   if (parentToolUseId && "tool_use_result" in message) {
     // `tool_use_result` has no documented failure signal, so this result
     // leaves `isError` unset ("the producer cannot tell").
-    const tool = normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown");
     return [
       {
         type: "tool_result",
         toolUseId: parentToolUseId,
-        tool,
-        output: isComputerTool(tool) ? computerToolTraceOutput() : message.tool_use_result,
+        tool: normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown"),
+        output: message.tool_use_result,
         endedAt: new Date().toISOString(),
       },
     ];
@@ -801,7 +793,6 @@ export class AnthropicProvider implements ModelProvider {
                 } else if (evt.delta.type === "input_json_delta" && evt.delta.partial_json) {
                   const toolBlock = streamToolBlocks.get(evt.index);
                   if (toolBlock) {
-                    if (isComputerTool(toolBlock.name)) continue;
                     if (pendingText !== null) {
                       yield textBlock(pendingText, "commentary", pendingTextBlockId);
                       pendingText = null;
@@ -878,7 +869,7 @@ export class AnthropicProvider implements ModelProvider {
                   type: "tool_use",
                   id: block.id,
                   tool: normalizedToolName,
-                  input: computerToolTraceInput(normalizedToolName, block.input),
+                  input: block.input,
                   startedAt: new Date().toISOString(),
                 };
               }
