@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
+import { asGuardian } from "../../test/signed-in.js";
 import { shareRoutes } from "./share.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import type { ChatShareSnapshot } from "../share-snapshot.js";
@@ -532,7 +533,7 @@ describe("Share chat", () => {
       ]),
       "topic-turn",
     );
-    const manage = createWebchatRuntime(deps).routes;
+    const manage = asGuardian(createWebchatRuntime(deps).routes);
 
     const created = await manage.request("/chat/sessions/topic/share", {
       method: "POST",
@@ -624,7 +625,7 @@ describe("Share chat", () => {
     });
 
     it("lists the guardian's live links across their chats, newest first, with each chat's name", async () => {
-      const manage = createWebchatRuntime(deps).routes;
+      const manage = asGuardian(createWebchatRuntime(deps).routes);
       const res = await manage.request("/chat/shares");
       expect(res.status).toBe(200);
       const shares = (await res.json()) as OwnerShare[];
