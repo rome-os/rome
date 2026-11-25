@@ -13,7 +13,7 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 Whether what someone says on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names.
 
 - The guardian, a member, and an agent acting for the guardian ([delegate link](people.md#delegate-link)) are let in, as they are at that moment.
-- Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a sender whose address the connection could not verify, and everyone when no answer can be had.
+- Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a member whose sign-in Rome cannot find, a sender whose address the connection could not verify, and everyone when no answer can be had.
 - The answer is asked before anything hears the message, and stays with it. Nothing acts on it yet.
 - A message from an unknown sender that addresses one of Rome's [own accounts](chats.md#own-account) can be told of once it is on record, at most once, and nothing waits for that. What a bot or an app posted, and what one of Rome's accounts said, is never told of.
 - Rome answers such a sender with a link to the dashboard's connect page, where a person gets a code to send back. The link is the same for everyone, so Rome answers in the chat itself, to the sender alone where the connection offers that, at most once a day for an account and once in ten minutes for a chat.

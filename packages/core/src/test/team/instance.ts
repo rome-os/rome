@@ -36,6 +36,8 @@ import { ownerOfChat } from "../../webchat/owner.js";
 import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
+import { backfillMembers } from "../../access/application/backfill-members.js";
+import { invitedEmailsSaved, memberContext } from "../../access/application/members.js";
 import { allowVerifierServer, guardNetwork } from "./network.js";
 
 export const GUARDIAN = {
@@ -88,7 +90,7 @@ export interface Instance {
    *  handler `startApi` attaches. */
   listen(): Promise<{ port: number; server: Server; close(): Promise<void> }>;
   /** Puts the dashboard email list back to the one the instance booted with,
-   *  in the database and in the live access state. */
+   *  in the database, in the live access state and in the members. */
   restoreDashboardList(): Promise<void>;
   close(): Promise<void>;
 }
@@ -174,6 +176,9 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     updatedAt: new Date(0),
   });
   const baseline = await seedBaseline(db);
+  // The daemon brings the members in line with the seat and the list at boot,
+  // so the guardian and each listed email are a person with a role.
+  await backfillMembers(db);
 
   const testDeps = await buildTestDeps(db);
   // The daemon loads `main` and the Concierge from the installed first-party
@@ -307,6 +312,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
         cloudEmailAccess: options.dashboardEmails,
       });
       await deps.dashboardAccessState.load(db);
+      await invitedEmailsSaved(memberContext(db), options.dashboardEmails);
     },
     async close() {
       for (const server of servers) await server.close().catch(() => {});
