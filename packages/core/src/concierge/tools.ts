@@ -1309,7 +1309,7 @@ export async function buildConciergeTools(
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. `from` is the name a message showed for who wrote it. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. `from` names the person who wrote a message. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1337,6 +1337,12 @@ export async function buildConciergeTools(
           const taskStatus = row ? (await tasks.statusOf([row])).get(chatId) : undefined;
           const running = service.dashboard.chats.isRunning(chatId);
           const plan = running ? service.dashboard.chats.turnPlan(chatId) : null;
+          // A message keeps its writer's name, except the guardian's.
+          const profile = await service.owners.profileOf(GUARDIAN_OWNER);
+          const guardian = profile.name ?? profile.email ?? profile.role;
+          const writerOf = (message: SaidMessage) =>
+            message.senderName ??
+            (message.saidBy?.account.id === GUARDIAN_OWNER ? guardian : undefined);
           return {
             chatId,
             title: chat.name,
@@ -1357,7 +1363,7 @@ export async function buildConciergeTools(
             messages: said.map((message) => ({
               id: message.id,
               role: message.direction === "fromRome" ? "assistant" : "user",
-              ...(message.senderName ? { from: message.senderName } : {}),
+              from: writerOf(message),
               text: message.body.text,
               // A task chat's card is its message, and its id is the one
               // `card_forward` takes.

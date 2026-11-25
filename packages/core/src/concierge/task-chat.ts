@@ -162,6 +162,7 @@ function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): Sai
     id: line.key,
     direction: link?.role === "prompt" ? "toRome" : line.direction,
     place,
+    ...(line.saidBy && !line.saidBy.agent ? { saidBy: { account: line.saidBy.account } } : {}),
     ...(line.senderName === undefined ? {} : { senderName: line.senderName }),
     body: { text: messageContentText(line.parts) ?? "" },
     at: line.at,

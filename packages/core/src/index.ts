@@ -48,6 +48,7 @@ import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./instance/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
+import { guardianAuth } from "./db/schema.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
 import { createRomeCloudAgentsClient } from "./connections/integrations/rome-cloud-agents.js";
@@ -1399,7 +1400,7 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
-  // A chat private to one person rings them when an action in it notifies.
+  // A chat private to one person rings them when a turn that acts for no one notifies.
   const privateOwnerOfChat = async (chatId: string) =>
     privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
@@ -1511,6 +1512,8 @@ async function main() {
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
+      guardianEmail: async () =>
+        (await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1))[0]?.email,
     }),
     webchatRepo,
     sessionRepository,
