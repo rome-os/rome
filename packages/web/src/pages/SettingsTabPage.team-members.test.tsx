@@ -25,8 +25,11 @@ function mockSettingsBackend(options?: {
   cloudEmailAccess?: string[];
   failPut?: boolean;
   putError?: { error: string; limit: number };
+  /** How many loads of the list fail before one succeeds. */
+  failedLoads?: number;
 }) {
   const putBodies: unknown[] = [];
+  let failedLoads = options?.failedLoads ?? 0;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -47,6 +50,10 @@ function mockSettingsBackend(options?: {
           return { ok: false, status: 500, json: async () => ({ error: "boom" }) } as Response;
         }
         return ok({});
+      }
+      if (failedLoads > 0) {
+        failedLoads--;
+        return { ok: false, status: 502, json: async () => ({ error: "bad gateway" }) } as Response;
       }
       return ok({ cloudEmailAccess: options?.cloudEmailAccess ?? ["ada@example.com"] });
     }
@@ -72,11 +79,11 @@ function mockSettingsBackend(options?: {
   return { putBodies };
 }
 
-function renderAdvancedSettings() {
+function renderSettings(path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/settings/advanced"]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/settings/:tab" element={<SettingsPage />} />
         </Routes>
@@ -85,46 +92,45 @@ function renderAdvancedSettings() {
   );
 }
 
-describe("SettingsPage Access Control section", () => {
-  it("renders Admins as a row under the Access and privacy title", async () => {
+describe("SettingsPage Team tab", () => {
+  it("shows the people who can use this Rome, and Advanced no longer lists them", async () => {
     mockSettingsBackend();
-    renderAdvancedSettings();
-
-    const sectionTitle = await screen.findByRole("heading", {
-      level: 2,
-      name: "Access and privacy",
-    });
-    const emailsTitle = await screen.findByText("Admins", {
-      selector: "[data-slot=form-row-label]",
-    });
+    renderSettings("/settings/team");
 
     expect(
-      sectionTitle.compareDocumentPosition(emailsTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      await screen.findByText("People", { selector: "[data-slot=form-row-label]" }),
     ).toBeTruthy();
+    expect(screen.getByText("People here can use this Rome as you do.")).toBeTruthy();
+    expect(await screen.findByText("ada@example.com")).toBeTruthy();
+    cleanup();
+
+    renderSettings("/settings/advanced");
+    await screen.findByRole("heading", { level: 2, name: "Access and privacy" });
+    expect(screen.queryByText("ada@example.com")).toBeNull();
   });
 
-  it("lists the saved admins with an account count and no save button", async () => {
+  it("lists the saved people with a count and no save button", async () => {
     mockSettingsBackend({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
 
     expect(await screen.findByText("ada@example.com")).toBeTruthy();
     expect(screen.getByText("lin@example.com")).toBeTruthy();
-    expect(screen.getByText("2 accounts")).toBeTruthy();
+    expect(screen.getByText("2 people")).toBeTruthy();
     // Changes save automatically — there is no explicit save button.
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 
   it("adds an email on Enter and auto-saves the full list", async () => {
     const { putBodies } = mockSettingsBackend();
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
-    const input = await screen.findByLabelText("Add email address");
+    const input = await screen.findByLabelText("Email of their Rome account");
     await user.type(input, "lin@example.com{Enter}");
 
     expect(screen.getByText("lin@example.com")).toBeTruthy();
     expect((input as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("2 accounts")).toBeTruthy();
+    expect(screen.getByText("2 people")).toBeTruthy();
     await waitFor(() =>
       expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
     );
@@ -132,10 +138,10 @@ describe("SettingsPage Access Control section", () => {
 
   it("splits a pasted list into individual emails and auto-saves once", async () => {
     const { putBodies } = mockSettingsBackend({ cloudEmailAccess: [] });
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
-    const input = await screen.findByLabelText("Add email address");
+    const input = await screen.findByLabelText("Email of their Rome account");
     await user.click(input);
     await user.paste("ada@example.com, lin@example.com grace@example.com");
 
@@ -153,10 +159,10 @@ describe("SettingsPage Access Control section", () => {
 
   it("keeps an invalid address in the input with an error and does not save", async () => {
     const { putBodies } = mockSettingsBackend();
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
-    const input = await screen.findByLabelText("Add email address");
+    const input = await screen.findByLabelText("Email of their Rome account");
     await user.type(input, "not-an-email{Enter}");
 
     expect((input as HTMLInputElement).value).toBe("not-an-email");
@@ -168,21 +174,21 @@ describe("SettingsPage Access Control section", () => {
     const { putBodies } = mockSettingsBackend({
       cloudEmailAccess: ["ada@example.com", "lin@example.com"],
     });
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Remove lin@example.com" }));
     expect(screen.queryByText("lin@example.com")).toBeNull();
-    expect(screen.getByText("1 account")).toBeTruthy();
+    expect(screen.getByText("1 person")).toBeTruthy();
     await waitFor(() => expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com"] }]));
   });
 
   it("rolls the list back when auto-save fails", async () => {
     const { putBodies } = mockSettingsBackend({ failPut: true });
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
-    const input = await screen.findByLabelText("Add email address");
+    const input = await screen.findByLabelText("Email of their Rome account");
     await user.type(input, "lin@example.com{Enter}");
 
     await waitFor(() =>
@@ -191,7 +197,26 @@ describe("SettingsPage Access Control section", () => {
     // The rejected address is removed again; the saved list is untouched.
     await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
     expect(screen.getByText("ada@example.com")).toBeTruthy();
-    expect(screen.getByText("1 account")).toBeTruthy();
+    expect(screen.getByText("1 person")).toBeTruthy();
+  });
+
+  it("shows a failed load with a retry, and lets no one be added until the list loads", async () => {
+    const { putBodies } = mockSettingsBackend({ failedLoads: 1 });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Failed to load the team")).toBeTruthy();
+    expect(screen.queryByText("Only you can use this Rome until you add someone.")).toBeNull();
+    expect(screen.queryByLabelText("Email of their Rome account")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    const input = await screen.findByLabelText("Email of their Rome account");
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() =>
+      expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
+    );
   });
 
   it.each([
@@ -200,10 +225,10 @@ describe("SettingsPage Access Control section", () => {
   ])("names the limit a refused save broke (%o)", async (putError, message) => {
     const toastError = rs.spyOn(toast, "error");
     mockSettingsBackend({ putError });
-    renderAdvancedSettings();
+    renderSettings("/settings/team");
     const user = userEvent.setup();
 
-    const input = await screen.findByLabelText("Add email address");
+    const input = await screen.findByLabelText("Email of their Rome account");
     await user.type(input, "lin@example.com{Enter}");
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(message));

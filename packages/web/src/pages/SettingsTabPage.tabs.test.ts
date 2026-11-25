@@ -10,5 +10,6 @@ describe("SettingsTabPage tabs (Connection migration)", () => {
     expect(normalizeTab("connections")).toBe("Connections");
     expect(normalizeTab("appearance")).toBe("Appearance");
     expect(normalizeTab("advanced")).toBe("Advanced");
+    expect(normalizeTab("team")).toBe("Team");
   });
 });

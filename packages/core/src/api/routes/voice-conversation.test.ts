@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import type { VoiceInputSource } from "../../voice-input/index.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
@@ -6,6 +7,7 @@ import { voiceConversationRoutes } from "./voice-conversation.js";
 
 const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
 const visitor: SessionActor = { kind: "visitor", accountId: "a", email: "a@example.com" };
+const dashboardAccessState = new DashboardAccessState();
 const speaker = { open: async () => ({ ok: false, reason: "not-configured" }) } as SpeakerSource;
 // Rome Cloud's voice input list, as the microphone reads it.
 const voiceList = (available: boolean) => {
@@ -22,9 +24,9 @@ const voiceList = (available: boolean) => {
 
 async function ask(
   actor: SessionActor | null,
-  deps: Parameters<typeof voiceConversationRoutes>[0],
+  deps: Omit<Parameters<typeof voiceConversationRoutes>[0], "dashboardAccessState">,
 ) {
-  const app = voiceConversationRoutes(deps);
+  const app = voiceConversationRoutes({ dashboardAccessState, ...deps });
   const request = async () => (await app.request("/voice-conversation")).json();
   return actor ? runWithSessionActor(actor, request) : request();
 }
@@ -43,7 +45,21 @@ describe("GET /api/voice-conversation", () => {
     expect(await ask(guardian, { speaker })).toEqual({ available: false });
   });
 
-  it("offers none to anyone but the guardian, without asking Rome Cloud", async () => {
+  it("offers it to a dashboard admin on the guardian's voice input list", async () => {
+    const team = new DashboardAccessState();
+    team.setCloudEmailAccess(["a@example.com"]);
+    const app = voiceConversationRoutes({
+      dashboardAccessState: team,
+      speaker,
+      voiceInput: voiceList(true).source,
+    });
+    const answer = await runWithSessionActor(visitor, async () =>
+      (await app.request("/voice-conversation")).json(),
+    );
+    expect(answer).toEqual({ available: true });
+  });
+
+  it("offers none to anyone off the team, without asking Rome Cloud", async () => {
     const list = voiceList(true);
     expect(await ask(visitor, { speaker, voiceInput: list.source })).toEqual({ available: false });
     expect(await ask(null, { speaker, voiceInput: list.source })).toEqual({ available: false });

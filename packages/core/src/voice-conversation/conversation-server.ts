@@ -2,8 +2,10 @@
 // plays what comes down. Rome listens on a transcription stream with endpoint
 // detection, and `conversation.ts` sends each turn to the chat and speaks the
 // reply. Messages are in `@rome/api-types/voice-conversation`. Only the
-// guardian may connect, and only while Rome Cloud lets their account use
-// voice input. Rome keeps no audio: frames go straight to the provider.
+// team may connect, and only while Rome Cloud lets the guardian's account use
+// voice input. A person dropped from the allow-list loses the conversation
+// before their next turn, or at the next membership check. Rome keeps no
+// audio: frames go straight to the provider.
 
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -20,7 +22,8 @@ import {
   runWithSessionActor,
   type SessionActor,
 } from "../access/session-actor.js";
-import { gateUpgrade } from "../access/ws-guardian-gate.js";
+import { type DashboardAllowList, isOnTeam } from "../access/team.js";
+import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DrizzleDb } from "../db/index.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
@@ -40,31 +43,40 @@ const MAX_CONVERSATION_MS = 30 * 60 * 1000;
 // A microphone delivers audio no faster than real time. The slack covers
 // frames that arrive in a burst after a network stall.
 const AUDIO_SLACK_MS = 5_000;
+// How often an open conversation rereads the allow-list, as `/ws/events` does on its ping.
+const TEAM_CHECK_INTERVAL_MS = 25_000;
 
 export interface VoiceConversationDeps {
   /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
   listening: Pick<VoiceInputSource, "open">;
   speaker: SpeakerSource;
-  /** Whether `chatId` can take spoken turns, asked before any session opens. */
+  /** Whether `chatId` can take spoken turns from the ambient session actor, asked before any session opens. */
   canTalkIn(chatId: string): Promise<boolean>;
-  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
+  /** Sends the speaker's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
   send(chatId: string, text: string, signal: AbortSignal): Promise<ReplyTurn>;
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
   maxConversationMs?: number;
+  /**
+   * Whether the person on the socket is still on the team. Asked before any
+   * session opens, before each turn, and every 25 s, and the conversation ends
+   * with `chat-refused` once it answers false. Default: always on the team.
+   */
+  onTeam?: () => boolean;
 }
 
 /**
- * Serves `/ws/voice-conversation` to the guardian while Rome Cloud lets their
- * account use voice input, the list the microphone follows. For any other
- * account the path answers 404, as no client offers the conversation. Rome
- * Cloud is asked only once the caller is proven to be the guardian.
+ * Serves `/ws/voice-conversation` to the team while Rome Cloud lets the
+ * guardian's account use voice input, the list the microphone follows.
+ * Otherwise the path answers 404, as no client offers the conversation. Rome
+ * Cloud is asked only once the caller is proven to be on the team.
  */
 export function attachVoiceConversationServer(
   httpServer: Server,
   db: DrizzleDb,
   deps: VoiceConversationDeps & {
     listening: Pick<VoiceInputSource, "open" | "info" | "available">;
+    dashboardAccess: DashboardAllowList;
   },
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
@@ -78,17 +90,20 @@ export function attachVoiceConversationServer(
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
-    void gateUpgrade(req, socket, db)
+    void gateUpgrade(req, socket, db, deps.dashboardAccess)
       .then(async (caller) => {
         if (!caller || socket.destroyed) return;
-        if (caller.kind !== "guardian") return rejectUpgrade(socket, 403, "Forbidden");
-        // Only now, for the proven guardian, ask Rome Cloud's list.
+        // Only now, for a proven team member, ask Rome Cloud's list.
         const { available } = await deps.listening.info();
         if (socket.destroyed) return;
         if (!available) return rejectUpgrade(socket, 404, "Not Found");
-        // The guardian the upgrade proved, so each spoken turn is theirs, as a typed one is.
-        const actor = await enrichGuardianActor(db, caller);
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps, actor));
+        // The person the upgrade proved, so each spoken turn is theirs, as a typed one is.
+        const actor: SessionActor =
+          caller.kind === "guardian"
+            ? await enrichGuardianActor(db, caller)
+            : actorOfUpgrade(caller);
+        const onTeam = () => isOnTeam(actor, deps.dashboardAccess);
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { ...deps, onTeam }, actor));
       })
       .catch((err) => {
         log.error("voice conversation upgrade failed", {
@@ -119,6 +134,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   let alive: ReturnType<typeof setInterval> | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
   let chatId: string | null = null;
+  const onTeam = deps.onTeam ?? (() => true);
 
   const reply = (message: VoiceConversationServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -128,6 +144,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     send: (text, signal) => {
       const to = chatId;
       if (!to) return Promise.reject(new Error("no chat"));
+      if (!onTeam()) return Promise.reject(new Error("off the team"));
       return actor
         ? runWithSessionActor(actor, () => deps.send(to, text, signal))
         : deps.send(to, text, signal);
@@ -157,6 +174,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const settle = (outcome: string) => {
+    clearInterval(teamCheck);
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
     conversation.close();
@@ -173,6 +191,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     settle(last.type === "error" ? last.reason : last.type);
   }
   const fail = (reason: VoiceConversationStopReason) => close({ type: "error", reason });
+  const teamCheck = setInterval(() => {
+    if (!onTeam()) fail("chat-refused");
+  }, TEAM_CHECK_INTERVAL_MS);
 
   // Counts one frame, or ends the conversation when the client sends audio
   // faster than a microphone records it.
@@ -190,7 +211,12 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   async function begin(sampleRate: number) {
     starting = true;
     // A chat that cannot take spoken turns is refused before any paid session opens.
-    if (!chatId || !(await deps.canTalkIn(chatId))) return fail("chat-refused");
+    const to = chatId;
+    if (!to || !onTeam()) return fail("chat-refused");
+    const canTalk = actor
+      ? await runWithSessionActor(actor, () => deps.canTalkIn(to))
+      : await deps.canTalkIn(to);
+    if (!canTalk) return fail("chat-refused");
     if (closed) return;
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {

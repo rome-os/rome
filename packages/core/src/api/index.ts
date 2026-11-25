@@ -415,7 +415,11 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.phoneWatching,
         deps.dashboardActivity,
       );
-      const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
+      const nodeConsole = attachNodeConsoleServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+      );
       const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       const voiceInput = attachVoiceInputServer(
@@ -427,6 +431,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       );
       const voiceConversation = deps.speaker
         ? attachVoiceConversationServer(server as Server, deps.db, {
+            dashboardAccess: deps.dashboardAccessState,
             listening: deps.voiceInput ?? NO_VOICE_INPUT,
             speaker: deps.speaker,
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),

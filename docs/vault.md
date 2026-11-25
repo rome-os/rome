@@ -69,7 +69,7 @@ The vault also needs a signer that checks the PIN. Rome asks the signer for its 
 | --- | --- |
 | Store, grants and PIN | [`packages/signer/src/vault.ts`](../packages/signer/src/vault.ts), `secrets.json` and `vault-pin.json` in the signer's key directory (mode 0600) |
 | Signer routes | `GET /v1/secrets`, `PUT` and `DELETE /v1/secrets/:name`, `POST /v1/grants`, `POST /v1/pin`, `POST /v1/reset`, `GET /v1/health` |
-| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), guardian only |
+| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), the [team](concepts/people.md#team) only |
 | Actions | `vault_search` and `vault_apply` in [`rome_apps/system/src/actions/`](../rome_apps/system/src/actions/) |
 | CLI | [`packages/signer/src/vault-cli.ts`](../packages/signer/src/vault-cli.ts), linked as `vault` |
 
@@ -81,5 +81,5 @@ The dashboard routes under `/api/vault`:
 | `PUT /api/vault/:name` | Save a value | Yes, browser session only |
 | `DELETE /api/vault/:name` | Remove a secret | No |
 | `POST /api/vault/pin` | Set the first PIN | Browser session only |
-| `POST /api/vault/reset` | Delete every secret and set a new PIN | Browser session only |
+| `POST /api/vault/reset` | Delete every secret and set a new PIN | No, the guardian's browser session only |
 | `POST /api/vault/grants` | Grant a secret and approve its `vault_apply` request | Yes, browser session only |

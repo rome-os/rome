@@ -38,6 +38,11 @@ import { GUARDIAN_ONLY, type Permission } from "../../access/permissions.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
+import {
+  resolveSessionActorFromMaterial,
+  sessionActorMaterial,
+} from "../../access/session-actor.js";
+import { isOnTeam } from "../../access/team.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
 import { getEmbeddedAppHref, getFullAppHref } from "../../apps/app-routes.js";
@@ -348,11 +353,11 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // Registered before the `:appId` GET so the static segment wins, reserving
   // "events" as an app id — same trick as `/apps/updates` above.
   //
-  // Guardian-only on purpose: app existence and change-timing must never leak
-  // to visitors or anonymous callers, so the gate runs before the stream opens.
+  // Team-only on purpose: app existence and change-timing must never leak to
+  // app visitors or anonymous callers, so the gate runs before the stream opens.
   app.get("/apps/events", async (c) => {
-    const guardian = await resolveGuardianSession(c, deps.db);
-    if (!guardian) {
+    const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
+    if (!isOnTeam(actor, deps.dashboardAccessState)) {
       return c.json({ error: "Not authenticated" }, 401);
     }
     return streamSSE(c, async (sse) => {

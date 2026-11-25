@@ -1,0 +1,161 @@
+{
+  "about": "Operations a signed-out caller and a visitor nobody invited may call. The team check fails on any other operation that answers either of them with anything but 401 or 403, and on an entry here that refuses a signed-out caller or that the surface no longer has. Add an entry only for an operation that is public by design, with the reason.",
+  "operations": [
+    {
+      "route": "ALL /desktop-proxy",
+      "reason": "Ordinary HTTP on the desktop proxy path answers 404 to everyone. The socket upgrade on it is checked as WS /desktop-proxy/verifier."
+    },
+    {
+      "route": "ALL /desktop-proxy/*",
+      "reason": "Ordinary HTTP on the desktop proxy path answers 404 to everyone. The socket upgrade on it is checked as WS /desktop-proxy/verifier."
+    },
+    {
+      "route": "GET /app-assets/:appId/:version/*",
+      "reason": "An app's static files, which the forward_auth probe serves without a session like every path outside /api."
+    },
+    {
+      "route": "GET /app-og/*",
+      "reason": "An app's static files, which the forward_auth probe serves without a session like every path outside /api."
+    },
+    {
+      "route": "GET /app-manifest/*",
+      "reason": "An app's static files, which the forward_auth probe serves without a session like every path outside /api."
+    },
+    {
+      "route": "GET /app-icon/*",
+      "reason": "An app's static files, which the forward_auth probe serves without a session like every path outside /api."
+    },
+    {
+      "route": "GET /api/health",
+      "reason": "Health and uptime probes."
+    },
+    {
+      "route": "GET /api/uptime",
+      "reason": "Health and uptime probes."
+    },
+    {
+      "route": "POST /api/auth/login",
+      "reason": "Signing in and out, and the SPA's bootstrap, which run before a session exists."
+    },
+    {
+      "route": "POST /api/auth/logout",
+      "reason": "Signing in and out, and the SPA's bootstrap, which run before a session exists."
+    },
+    {
+      "route": "GET /api/auth/me",
+      "reason": "Signing in and out, and the SPA's bootstrap, which run before a session exists."
+    },
+    {
+      "route": "GET /api/bootstrap",
+      "reason": "Signing in and out, and the SPA's bootstrap, which run before a session exists."
+    },
+    {
+      "route": "POST /api/instance/enroll/start",
+      "reason": "Enrolling and adopting the instance, which run before a guardian exists."
+    },
+    {
+      "route": "GET /api/instance/enroll/callback",
+      "reason": "Enrolling and adopting the instance, which run before a guardian exists."
+    },
+    {
+      "route": "GET /api/instance/enroll/status",
+      "reason": "Enrolling and adopting the instance, which run before a guardian exists."
+    },
+    {
+      "route": "POST /api/instance/adopt",
+      "reason": "Enrolling and adopting the instance, which run before a guardian exists."
+    },
+    {
+      "route": "POST /api/auth/cloud/start",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/cloud/native/start",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/cloud/native/complete",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "GET /api/auth/cloud/callback",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/visitor/start",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/visitor/logout",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "GET /api/auth/visitor/callback",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/visitor/native/start",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "POST /api/auth/visitor/native/complete",
+      "reason": "Signing in through Rome Cloud, as the guardian or as a visitor."
+    },
+    {
+      "route": "GET /api/oauth/providers",
+      "reason": "OAuth legs the probe waves through under /api/oauth/*: each carries its own credential."
+    },
+    {
+      "route": "GET /api/oauth/:provider/start",
+      "reason": "OAuth legs the probe waves through under /api/oauth/*: each carries its own credential."
+    },
+    {
+      "route": "POST /api/oauth/:provider/start",
+      "reason": "OAuth legs the probe waves through under /api/oauth/*: each carries its own credential."
+    },
+    {
+      "route": "POST /api/oauth/redeem",
+      "reason": "OAuth legs the probe waves through under /api/oauth/*: each carries its own credential."
+    },
+    {
+      "route": "POST /api/setups/return",
+      "reason": "The connect return leg, which the system browser opens without the guardian's cookie."
+    },
+    {
+      "route": "ALL /api/share/*",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/tree",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/resolve",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/file",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/asset",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/asset/:fileName",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/download",
+      "reason": "Share links: the token in the path is the credential."
+    },
+    {
+      "route": "GET /api/share/:token/projects/search",
+      "reason": "Share links: the token in the path is the credential."
+    }
+  ]
+}

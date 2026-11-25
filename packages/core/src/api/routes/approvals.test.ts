@@ -97,6 +97,27 @@ describe("Approvals API", () => {
       }
     });
 
+    it("lets a dashboard admin list and decide approvals, recording who decided", async () => {
+      const deps = { ...(await buildTestDeps(testDb.db)), approvalHandler };
+      deps.dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
+      const teammate = new Hono();
+      teammate.use("*", (_c, next) =>
+        runWithSessionActor({ kind: "visitor", accountId: "ada", email: "ada@example.com" }, next),
+      );
+      teammate.route("/", approvalsRoutes(deps));
+
+      expect((await teammate.request("/approvals")).status).toBe(200);
+      const response = await teammate.request(`/approvals/${baseline.approvals.pendingId}/reject`, {
+        method: "POST",
+        headers: { "sec-fetch-site": "same-origin" },
+      });
+      expect(response.status).toBe(202);
+      const decided = await new ApprovalsRepository(testDb.db).findById(
+        baseline.approvals.pendingId,
+      );
+      expect(decided?.resolvedBy).toBe("visitor:ada");
+    });
+
     it("lists baseline approvals (unfiltered)", async () => {
       const res = await app.request("/approvals");
       expect(res.status).toBe(200);

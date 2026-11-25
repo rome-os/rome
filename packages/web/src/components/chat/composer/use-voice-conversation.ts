@@ -12,14 +12,19 @@ import {
  * A voice conversation in `chatId`, run from the composer. The composer offers
  * it only where `available` holds; Rome checks the chat again when it starts.
  * A draft with `startChat` offers it too: starting creates the chat.
+ * `onUnsent` gets the guardian's words a conversation ended before sending.
  */
 export function useVoiceConversation({
   chatId,
   startChat,
+  onUnsent,
 }: {
   chatId: string | null | undefined;
   startChat?: () => Promise<string>;
+  onUnsent?: (text: string) => void;
 }) {
+  const onUnsentRef = useRef(onUnsent);
+  onUnsentRef.current = onUnsent;
   const info = useVoiceConversationInfo();
   const conversationRef = useRef<VoiceConversation | null>(null);
   const [active, setActive] = useState(false);
@@ -46,13 +51,14 @@ export function useVoiceConversation({
       onAsking: setAsking,
       onHeard: setHeard,
       onCaption: setCaption,
-      onEnded: (reason) => {
+      onEnded: (reason, unsent) => {
         conversationRef.current = null;
         setActive(false);
         setAsking(false);
         setMuted(false);
         mutedRef.current = false;
         setStopped(reason);
+        if (unsent) onUnsentRef.current?.(unsent);
       },
     });
   }, [chatId, startChat]);

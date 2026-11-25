@@ -1,9 +1,14 @@
 // `/api/personal-data/*`: where the guardian's devices push personal data, and where
 // they read what Rome holds. Contract: docs/personal-data.md#routes.
 
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { z } from "zod";
-import { resolveGuardianSession } from "../access/guardian-session.js";
+import {
+  resolveSessionActorFromMaterial,
+  type SessionActor,
+  sessionActorMaterial,
+} from "../access/session-actor.js";
+import { bySignedInSession, type DashboardAllowList, isOnTeam } from "../access/team.js";
 import type { DrizzleDb } from "../db/index.js";
 import { readCappedBody } from "../lib/read-capped-body.js";
 import { createLogger } from "../logger.js";
@@ -22,20 +27,30 @@ export interface PersonalDataRoutesDeps {
   db: DrizzleDb;
   personalData: PersonalDataRepository;
   now?: () => number;
-  /** Who the request is. Default: the guardian session resolved from the request. */
-  guardianSession?: typeof resolveGuardianSession;
+  dashboardAccessState: DashboardAllowList;
+  /** Who the request is. Default: the session actor resolved from the request's cookies. */
+  sessionActor?: (c: Context) => Promise<SessionActor>;
 }
 
 export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   const app = new Hono();
   const now = deps.now ?? Date.now;
+  const sessionActor =
+    deps.sessionActor ??
+    ((c: Context) => resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db));
   const recentIngests = new Map<string, number[]>();
 
-  // Only the guardian's own signed-in session reads or writes personal data.
-  // A loopback caller, which an agent's shell is, does not count here.
+  // A team member's own signed-in session reads personal data. Only the
+  // guardian's writes it, because the store has no owner and agents read
+  // everything in it as the guardian's. A loopback caller, which an agent's
+  // shell is, does not count here.
   app.use("/personal-data/*", async (c, next) => {
-    const session = await (deps.guardianSession ?? resolveGuardianSession)(c, deps.db);
-    if (!session || session.via !== "cookie") {
+    const actor = await sessionActor(c);
+    if (!isOnTeam(actor, deps.dashboardAccessState) || !bySignedInSession(actor)) {
+      return c.json({ error: "Guardian session required" }, 403);
+    }
+    const reads = c.req.method === "GET" || c.req.method === "HEAD";
+    if (!reads && actor.kind !== "guardian") {
       return c.json({ error: "Guardian session required" }, 403);
     }
     c.header("Cache-Control", "no-store");

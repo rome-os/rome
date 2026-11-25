@@ -3646,6 +3646,8 @@ describe("Concierge events", () => {
   it.each([
     ["rejected", "guardian", "rejected by the guardian"],
     ["approved", "guardian", "approved by the guardian"],
+    ["rejected", "visitor:acct-2", "rejected by a teammate"],
+    ["approved", "visitor:acct-2", "approved by a teammate"],
   ])("tells the Concierge an approval was %s after its task's turn ended (%s)", async (status, resolvedBy, said) => {
     const s = setup();
     const { chatId } = await startTask(s);
