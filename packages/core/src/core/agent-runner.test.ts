@@ -9310,8 +9310,10 @@ describe("AgentRunner", () => {
       ).rejects.toThrow(/Unknown action: send_message/);
     });
 
-    it("executeAction refuses an action's bare name, and names no action the agent lacks", async () => {
+    it("executeAction resolves a legacy name before checking the allow-list", async () => {
       const legacyBindings = createEmptyLegacyArtifactBindings();
+      const actionId = formatArtifactId("review-app", "demo_action");
+      claimLegacyArtifactName(legacyBindings, "action", "demo_action", actionId);
       actionRegistry = new ActionRegistryImpl({ legacyBindings });
       actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
 
@@ -9364,13 +9366,11 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      // test-main allows `demo_action`, which names no action now, so the
-      // agent holds no action to suggest.
-      expect(await listActionNames(captured[0].tools)).toEqual([]);
+      expect(await listActionNames(captured[0].tools)).toEqual([actionId]);
       await expect(
         executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
-      ).rejects.toThrow(/^Unknown action: demo_action$/);
-      expect(executed).toEqual([]);
+      ).resolves.toEqual({ reviewed: true });
+      expect(executed).toEqual([{ path: "src/index.ts" }]);
     });
 
     it("passes built-in tools from agent config to model provider", async () => {

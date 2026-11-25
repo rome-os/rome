@@ -25,10 +25,6 @@ function buildActionLoader(actions: Record<string, FakeActionConfig>) {
       if (!(name in actions)) return undefined;
       return { name, ...actions[name] };
     },
-    getAllRecords: () =>
-      new Map(
-        Object.entries(actions).map(([name, config]) => [name, { config: { name, ...config } }]),
-      ),
   } as unknown as NonNullable<ApiDeps["actionLoader"]>;
 }
 
@@ -61,8 +57,6 @@ describe("Webhooks API", () => {
       ...(await buildTestDeps(testDb.db)),
       actionLoader: buildActionLoader({
         send_message: { webhook: true },
-        "system:send_note": { webhook: true },
-        "system:internal_tick": { webhook: false },
         internal_only: { webhook: false },
         approval_gated: { webhook: true, requiresApproval: true },
       }),
@@ -103,23 +97,6 @@ describe("Webhooks API", () => {
         body: JSON.stringify({ args: {} }),
       });
       expect(res.status).toBe(404);
-    });
-
-    it("names the full ID of the webhook action a bare name meant", async () => {
-      const app = buildApp(baseDeps, async () => ({ status: "ok" }));
-      const post = (name: string) =>
-        app.request(`/webhooks/${name}`, {
-          method: "POST",
-          headers: { "x-api-key": API_KEY, "Content-Type": "application/json" },
-          body: JSON.stringify({ args: {} }),
-        });
-
-      const bare = await post("send_note");
-      const notWebhook = await post("internal_tick");
-
-      expect(bare.status).toBe(404);
-      expect(await bare.json()).toMatchObject({ didYouMean: "system:send_note" });
-      expect(await notWebhook.json()).not.toHaveProperty("didYouMean");
     });
 
     it("returns 403 for non-webhook-enabled actions", async () => {

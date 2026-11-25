@@ -93,7 +93,7 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     isExplicitAction?: ReturnType<typeof rs.fn>;
-    suggestAction?: ReturnType<typeof rs.fn>;
+    canonicalActionName?: ReturnType<typeof rs.fn>;
     validateActionArgs?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
@@ -125,7 +125,7 @@ function makeServer(
     appStore,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
     isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
-    suggestAction: overrides.suggestAction ?? rs.fn(() => undefined),
+    canonicalActionName: overrides.canonicalActionName ?? rs.fn(() => undefined),
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
@@ -675,18 +675,18 @@ describe("WorkerRpcServer param validation", () => {
     expect(hasRegisteredAction).toHaveBeenCalledWith("send_message");
   });
 
-  it("answers actions.suggest from the main action registry", async () => {
-    const suggestAction = rs.fn((name: string) =>
+  it("answers actions.canonicalName from the main action registry", async () => {
+    const canonicalActionName = rs.fn((name: string) =>
       name === "resume_session" ? "system:resume_session" : undefined,
     );
-    const { server } = makeServer({ suggestAction });
+    const { server } = makeServer({ canonicalActionName });
     const fake = connect(server);
 
-    const known = await rpc(fake, "actions.suggest", { actionName: "resume_session" });
-    const unknown = await rpc(fake, "actions.suggest", { actionName: "nope" });
+    const known = await rpc(fake, "actions.canonicalName", { actionName: "resume_session" });
+    const unknown = await rpc(fake, "actions.canonicalName", { actionName: "nope" });
 
-    expect(known.result).toEqual({ suggestion: "system:resume_session" });
-    expect(unknown.result).toEqual({ suggestion: null });
+    expect(known.result).toEqual({ canonicalName: "system:resume_session" });
+    expect(unknown.result).toEqual({ canonicalName: null });
   });
 
   it("answers actions.isExplicit from the main action registry", async () => {

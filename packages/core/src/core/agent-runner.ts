@@ -178,7 +178,7 @@ export class AgentRunner {
     private agentLoader: AgentCatalog,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
-    private actionRegistry?: Pick<ActionRegistry, "getForAgent">,
+    private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
     /** Chats' lines a run names by the platform's ids. Given, a recorded
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
@@ -210,9 +210,10 @@ export class AgentRunner {
     const agent = this.agentLoader.find(agentName);
     if (!agent) return false;
     const actions = agent.definition.actions ?? [];
+    const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
     return this.actionRegistry
       .getForAgent(actions)
-      .some((action) => action.config.name === actionName);
+      .some((action) => action.config.name === canonical);
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
