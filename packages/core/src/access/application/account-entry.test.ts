@@ -87,6 +87,7 @@ describe("accountEntry", () => {
     });
     for (const account of [
       { platform: "email", id: "unauthenticated:owner@example.com" },
+      { platform: "email", id: " Unauthenticated:Owner@example.com" },
       { platform: "slack", id: " " },
       { platform: "", id: OWNER.id },
     ]) {
