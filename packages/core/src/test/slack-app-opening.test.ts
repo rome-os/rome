@@ -106,6 +106,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
           memberChannels: async () => ({ channels: [] }),
           addReaction: async () => {},
           removeReaction: async () => {},
+          postEphemeral: async () => {},
         },
         readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
       });
@@ -192,6 +193,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         memberChannels: async () => ({ channels: [] }),
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -244,6 +246,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -319,6 +322,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -389,6 +393,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
       },
       // Slack's pacing, scaled down: one thread read per 300 ms.
       repliesGate: new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 }),
@@ -443,6 +448,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });

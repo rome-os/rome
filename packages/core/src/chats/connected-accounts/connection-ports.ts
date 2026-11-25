@@ -19,10 +19,12 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import type {
   Connection,
   TalkFeatureName,
   TalkHistoryRead,
+  TalkPrivateMessaging,
   Talker,
 } from "../../connections/types.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
@@ -277,6 +279,7 @@ function connectionSend(backing: Backing): ChannelSend {
   // channel that cannot reach an account directly.
   const notConnected = () => Promise.reject(new AccountNotConnected(channel));
   const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
+  const unbackedPrivately: TalkPrivateMessaging = { sendOnlyTo: notConnected };
   return {
     async send(chatId, message) {
       const connection = connectionFor(backing);
@@ -294,6 +297,27 @@ function connectionSend(backing: Backing): ChannelSend {
         callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
       const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
       return direct;
+    },
+    get privately() {
+      const connection = connectionFor(backing);
+      if (!connection) return unbackedPrivately;
+      // As `direct`: while talk is locked, the port stands and asks whichever
+      // talker is live when it is called.
+      const offered = connection.withTalker((talker) => talker.privateMessaging !== undefined);
+      if (offered === false) return null;
+      const privately: TalkPrivateMessaging = {
+        async sendOnlyTo(chatId, accountId, text, options) {
+          // Every kind would send a blank text as an empty message, which its
+          // platform refuses in its own words.
+          if (!text.trim()) {
+            throw new SendRefused("empty", `A private message to ${accountId} needs text`);
+          }
+          return callTalker(connection, (talker) =>
+            talker.privateMessaging?.sendOnlyTo(chatId, accountId, text, options),
+          );
+        },
+      };
+      return privately;
     },
     get activity() {
       const connection = connectionFor(backing);
