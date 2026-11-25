@@ -36,6 +36,9 @@ import { ownerOfChat } from "../../webchat/owner.js";
 import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
+import { backfillMembers } from "../../access/application/backfill-members.js";
+import { invitedEmailsSaved, memberContext } from "../../access/application/members.js";
+import { accountClaimStarted, claimContext } from "../../identity/application/account-claims.js";
 import { allowVerifierServer, guardNetwork } from "./network.js";
 
 export const GUARDIAN = {
@@ -78,6 +81,9 @@ export interface SeededIds {
   personId: string;
   executionId: string;
   sentinelId: string;
+  /** Tokens of open claims on accounts nobody holds: one only read, one
+   *  confirmed. Confirming uses a claim up, so the read has its own. */
+  claimTokens: { read: string; confirm: string };
 }
 
 export interface Instance {
@@ -88,7 +94,7 @@ export interface Instance {
    *  handler `startApi` attaches. */
   listen(): Promise<{ port: number; server: Server; close(): Promise<void> }>;
   /** Puts the dashboard email list back to the one the instance booted with,
-   *  in the database and in the live access state. */
+   *  in the database, in the live access state and in the members. */
   restoreDashboardList(): Promise<void>;
   close(): Promise<void>;
 }
@@ -174,6 +180,9 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     updatedAt: new Date(0),
   });
   const baseline = await seedBaseline(db);
+  // The daemon brings the members in line with the seat and the list at boot,
+  // so the guardian and each listed email are a person with a role.
+  await backfillMembers(db);
 
   const testDeps = await buildTestDeps(db);
   // The daemon loads `main` and the Concierge from the installed first-party
@@ -256,6 +265,19 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     args: {},
     chatId: null,
   });
+  // Each caller runs on an instance of its own, so each confirms its own claim.
+  const claims = claimContext(db);
+  const claimTokens = {
+    read: (
+      await accountClaimStarted(claims, { platform: "discord", accountId: "verifier-claim-read" })
+    ).token,
+    confirm: (
+      await accountClaimStarted(claims, {
+        platform: "discord",
+        accountId: "verifier-claim-confirm",
+      })
+    ).token,
+  };
   const ids: SeededIds = {
     chatId,
     conciergeChatIds,
@@ -264,6 +286,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     personId: baseline.persons.innerCircleId,
     executionId: baseline.actionExecutions.rootSuccessId,
     sentinelId: baseline.sentinelLog.unknownSenderId,
+    claimTokens,
   };
 
   const { app } = buildApp(deps, { port: 0, host: "127.0.0.1" });
@@ -307,6 +330,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
         cloudEmailAccess: options.dashboardEmails,
       });
       await deps.dashboardAccessState.load(db);
+      await invitedEmailsSaved(memberContext(db), options.dashboardEmails);
     },
     async close() {
       for (const server of servers) await server.close().catch(() => {});
