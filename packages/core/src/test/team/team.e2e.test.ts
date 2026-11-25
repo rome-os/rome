@@ -121,7 +121,7 @@ describe("the check", () => {
 });
 
 describe("the removal check", () => {
-  it("fails a stand-in whose save keeps the teammate on the list", async () => {
+  it("fails a stand-in whose save keeps the member on the list", async () => {
     const result = await runRule3Dashboard({ standIn: "teammate-kept" });
     expect(result.pass).toBe(false);
     const checked = result.sockets.filter((s) => s.verdict !== "unverified");
@@ -129,6 +129,7 @@ describe("the removal check", () => {
       expect.arrayContaining(["WS /ws/events", "WS /ws/voice-conversation"]),
     );
     expect(checked.every((s) => s.verdict === "open")).toBe(true);
+    expect(checked.every((s) => s.newConnection?.refused === false)).toBe(true);
     expect(result.nextCall.refused).toBe(false);
   }, 120_000);
 });
