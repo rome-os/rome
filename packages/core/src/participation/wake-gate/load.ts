@@ -12,6 +12,9 @@ export interface WakeGateLoaderDeps {
   bondLevelsSetting(key: "trustedBondLevels" | "replyToBondLevels"): Promise<string[] | null>;
   policies(): Promise<Policy[]>;
   connectionKindOf: ConnectionKindOfChannel;
+  /** Whether the account behind a connection serves its whole workspace.
+   *  Absent, none does. */
+  servesWorkspace?: (connectionId: string) => boolean;
 }
 
 /** Builds each chat's wake gate from its current settings. Both bond-level
@@ -30,6 +33,7 @@ export function wakeGateLoader(deps: WakeGateLoaderDeps): WakeGateFor {
       replyToLevels: replyTo ?? DEFAULT_LEVELS,
       policies,
       connectionKindOf: deps.connectionKindOf,
+      servesWorkspace: deps.servesWorkspace?.(chat.connectionId) === true,
     });
   };
 }

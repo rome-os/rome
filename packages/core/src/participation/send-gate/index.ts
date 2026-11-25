@@ -39,3 +39,4 @@ export type SendDecision = "send" | "check" | "ask_guardian" | "refuse";
 export type SendGate = (request: SendRequest) => SendDecision;
 
 export { guardedSend } from "./guarded-send.js";
+export { workspaceSend } from "./workspace-send.js";

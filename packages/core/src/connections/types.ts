@@ -506,6 +506,13 @@ export interface ConnectionDescriptor {
    *  Concierge as its agent, so it answers from its first message. Absent, it
    *  starts with none until the guardian links one. */
   startsWithConcierge?: boolean;
+  /** True when an account of this kind serves the whole workspace it is in
+   *  (docs/domains/participation.md#workspace-account): anyone the account
+   *  hears acts with the guardian's access, so their direct message or
+   *  mention wakes its agent, and its agent speaks in the account's chats
+   *  without a check. Absent, only the bond levels the agent replies to wake
+   *  it. */
+  servesWorkspace?: boolean;
   /** The chat rules the kind's chats offer the guardian, and the values it
    *  fixes for the rules it does not offer. Core owns the rules and runs
    *  them. A kind that hears messages declares it: one that leaves it unset

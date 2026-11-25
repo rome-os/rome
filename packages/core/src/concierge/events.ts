@@ -884,7 +884,8 @@ export function startConciergeEvents(
     // as the guardian's: only a turn the guardian started, or one no person
     // started, such as a task's report, gets one.
     const othersTurn =
-      thread.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian";
+      thread.senderBondLevel !== undefined &&
+      !service.actsWithGuardianAccess(chat.channel, thread.senderBondLevel === "guardian");
     if (
       !othersTurn &&
       shouldNudge({

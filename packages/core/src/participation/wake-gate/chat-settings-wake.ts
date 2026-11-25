@@ -1,3 +1,4 @@
+import { actsWithGuardianAccess } from "../guardian-access.js";
 import type { PolicyInput } from "./policy/policy-engine.js";
 import { decidePolicy } from "./policy/policy-engine.js";
 import type { Addressed } from "../addressing.js";
@@ -17,6 +18,9 @@ export interface ChatWakeSettings extends PolicyInput {
   whenOthersMentioned: "ignore" | "respond";
   /** The bond levels the agent replies to. Anyone else stays quiet. */
   replyToLevels: readonly string[];
+  /** The account serves its whole workspace, so a message addressed to it
+   *  wakes the agent whoever sent it. Absent, it does not. */
+  servesWorkspace?: boolean;
 }
 
 /**
@@ -24,9 +28,11 @@ export interface ChatWakeSettings extends PolicyInput {
  * off stays quiet, so does another bot's message the chat does not take, a
  * message that mentions only others where the chat ignores those, and one
  * addressed to nobody in a chat that wakes only on a mention. Then a policy
- * block blocks, a sender below the reply-to levels
- * stays quiet, a trusted sender or a policy allow wakes the agent, and anyone
- * else goes to review. A stranger reads as bond level `other`.
+ * block blocks. On an account that serves its workspace, a message
+ * addressed to it wakes the agent then, whoever sent it. Otherwise a sender
+ * below the reply-to levels stays quiet, a trusted sender or a policy allow
+ * wakes the agent, and anyone else goes to review. A stranger reads as bond
+ * level `other`.
  */
 export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
   return (message, sender) => {
@@ -45,6 +51,17 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
       threadType: message.place === "direct" ? "private" : "group",
     });
     if (policy.action === "block") return "block";
+    // Whoever may act with the guardian's access wakes the agent when they
+    // address it. The guardian wakes by the levels below, as before.
+    if (
+      addressedOf(message) === "rome" &&
+      actsWithGuardianAccess({
+        servesWorkspace: settings.servesWorkspace === true,
+        guardian: false,
+      })
+    ) {
+      return "wake";
+    }
     if (!settings.replyToLevels.includes(bondLevel)) return "quiet";
     if (settings.trustedLevels.includes(bondLevel) || policy.action === "allow") return "wake";
     return "review";

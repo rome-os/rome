@@ -297,6 +297,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     // A new workspace answers as the guardian's Concierge from its first
     // message (docs/adrs/channels-and-connectors-are-one-connection.md).
     startsWithConcierge: true,
+    // Rome's app serves the whole workspace it is installed in.
+    servesWorkspace: true,
     // An official app offers no chat rules: every chat runs at the defaults.
     chatRules: { offers: [] },
     // A task chat sends, reads and searches Slack through the connector's

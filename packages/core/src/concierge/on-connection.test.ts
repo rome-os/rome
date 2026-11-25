@@ -59,6 +59,25 @@ describe("the Concierge on a connection", () => {
     expect(CONNECTION_PROMPT).toContain("Never approve anything yourself.");
   });
 
+  it("tells anyone on an account that serves its workspace that they may ask for a task", () => {
+    const serves = (thread: { channel: string; connectionId?: string }) =>
+      thread.connectionId === "slack";
+    const setup = conciergePlaceSetup(
+      "core:concierge",
+      { channel: "slack_app", connectionId: "slack" },
+      serves,
+    );
+    expect(setup?.systemPromptPrefix).toContain("Anyone in this workspace may ask for one.");
+    expect(setup?.systemPromptPrefix).not.toContain("Only the guardian may ask for one");
+    expect(setup?.systemPromptPrefix).not.toContain("Only the guardian's messages take one");
+    // Every other account, and the Concierge without the rule, keep theirs.
+    expect(
+      conciergePlaceSetup("core:concierge", { channel: "discord_app", connectionId: "d" }, serves)
+        ?.systemPromptPrefix,
+    ).toBe(CONNECTION_PROMPT);
+    expect(conciergePlaceSetup("core:concierge", { channel: "webchat" }, () => true)).toBeNull();
+  });
+
   it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {
     expect(CONNECTION_PROMPT).toContain("`system:fetch_channel_history`");
     expect(CONNECTION_PROMPT).toContain("Some connections cannot read their history");
