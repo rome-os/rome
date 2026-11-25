@@ -3,7 +3,6 @@
 //
 //   GET    /api/people              -> PeopleList (curated people only)
 //   GET    /api/accounts            -> AccountDirectory
-//   POST   /api/people/link-code    -> LinkCodeResponse
 //
 // The vocabulary is docs/concepts/people.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId) —
@@ -715,18 +714,6 @@ interface CreatePersonRequest {
 
 /** A create request with its defaults applied: what the write is given. */
 export type NewPerson = Required<CreatePersonRequest>;
-
-/**
- * `POST /api/people/link-code`: a code the guardian sends, in a direct message
- * from their own account, to any of Rome's accounts on any platform. Redeeming
- * it links that account to the guardian.
- * One code is outstanding at a time and it is used once.
- */
-export interface LinkCodeResponse {
-  code: string;
-  /** Epoch milliseconds. */
-  expiresAt: number;
-}
 
 // ---------------------------------------------------------------------------
 // Display names a channel account falls back to

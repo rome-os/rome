@@ -84,7 +84,6 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import type { PeopleRepository } from "../people/model/people-repository.js";
-import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -790,7 +789,6 @@ export async function buildTestDeps(
     appConnectionAccessRepo,
     sessionRepository,
     peopleRepo,
-    guardianLinkCodes: new GuardianLinkCodes(),
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,

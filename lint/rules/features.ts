@@ -8,7 +8,7 @@ import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Domains laid out as `<domain>/<feature>`, each with its features. A domain adopting the layout joins this list. */
 export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
-  people: ["guardian-profile", "link-code", "person-history", "phone-book"],
+  people: ["guardian-profile", "person-history", "phone-book"],
 };
 
 /**
@@ -17,10 +17,6 @@ export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
  * the wiring or a test.
  */
 const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> = {
-  "people/link-code": {
-    files: ["connections/kinds/discord/discord.ts", "connections/kinds/feishu/feishu.ts"],
-    why: "Discord and Feishu hold back a message that is a link code, so it never reaches a chat",
-  },
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
     why: "an assistant's page sends to an account through directPlace, and answers with person history's respondToSend so every send the dashboard reads has one shape",

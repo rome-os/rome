@@ -28,11 +28,4 @@ describe("Discord message text", () => {
     expect(discordInboundText("<@123> <@456> /STOP", () => "Rome")).toBe("/stop");
     expect(discordInboundText("/stop", () => undefined)).toBe("/stop");
   });
-
-  it("reads a link code after mentions alone as the bare code, so admission voids it", () => {
-    expect(discordInboundText("<@123> ROME-7KQ2M9XA", () => "Rome")).toBe("ROME-7KQ2M9XA");
-    expect(discordInboundText("<@123> ROME-7KQ2M9XA please", () => "Rome")).toBe(
-      "@Rome ROME-7KQ2M9XA please",
-    );
-  });
 });
