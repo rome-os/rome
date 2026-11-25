@@ -202,6 +202,29 @@ describe("OrderedAdmission", () => {
     expect(heard).toEqual(["next"]);
   });
 
+  it("asks once whom an admitted message is let in as, and nobody about one it leaves out", async () => {
+    const asked: string[] = [];
+    const admission = new OrderedAdmission(
+      async (_id, _kind, message) => message.messageId !== "left-out",
+      {},
+      async (connectionId, message) => {
+        asked.push(`${connectionId}/${message.messageId}`);
+        return message.messageId === "ada" ? "Ada" : undefined;
+      },
+    );
+    const heard: unknown[] = [];
+    for (const id of ["ada", "sam", "left-out"]) {
+      await admission.deliver(connection, inbound(id), async (message, person) => {
+        heard.push([message.messageId, person]);
+      });
+    }
+    expect(asked).toEqual(["conn-1/ada", "conn-1/sam"]);
+    expect(heard).toEqual([
+      ["ada", "Ada"],
+      ["sam", undefined],
+    ]);
+  });
+
   it("resolves a delivery admission refuses, which Rome leaves out", async () => {
     const admission = new OrderedAdmission(async () => false);
     const heard: string[] = [];

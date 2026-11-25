@@ -10,6 +10,7 @@ import type {
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
 import { SenderLabels } from "../chats/sender-labels.js";
+import { markEntered } from "../participation/entrance.js";
 import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
@@ -61,7 +62,8 @@ function gate(): { opened: Promise<void>; open: () => void } {
   return { opened, open };
 }
 
-/** A channel whose deliveries the test drives. */
+/** A channel whose deliveries the test drives, let in as Alice unless another
+ *  answer is given. */
 function fakeChannel(name: string) {
   const handlers: ((event: InboundEvent) => Promise<void>)[] = [];
   const channel: Channel = {
@@ -75,13 +77,14 @@ function fakeChannel(name: string) {
       media: null,
     },
   };
-  const deliver = async (incoming: ChannelMessage) => {
+  const deliver = async (incoming: ChannelMessage, person: string | null = "Alice") => {
     for (const handler of handlers) {
-      await handler({
+      const event: InboundEvent = {
         kind: "message",
         message: incoming,
         ref: { connectionId: `connection:${name}`, chatId: incoming.chatId },
-      });
+      };
+      await handler(markEntered(event, person ?? undefined));
     }
   };
   return { channel, deliver, handlers };
@@ -188,6 +191,33 @@ describe("messagesSaid", () => {
     expect(session?.chatId).toBe(line?.chatId);
     expect(session?.accountId).toBe(BOT.id);
     expect(session?.threadId).toBeNull();
+  });
+
+  it("records what someone who is not let in said, hands it to no hook", async () => {
+    const port = said;
+    const heard: SaidInboundEvent[] = [];
+    port.subscribe(async (event) => {
+      heard.push(event);
+      await port.decided(event.recorded);
+    });
+    port.subscribe(async (event) => {
+      heard.push(event);
+      await port.decided(event.recorded);
+    });
+    await telegram.deliver(message({ senderId: "mallory-tg", text: "/stop" }), null);
+    await settled();
+
+    expect(lines()).toHaveLength(1);
+    expect(heard).toEqual([]);
+    expect(testDb.db.select().from(romeSessions).all()).toEqual([]);
+
+    const at = new Date(Date.now() + 60_000);
+    await telegram.deliver(message({ messageId: "tg-2", timestamp: at }));
+    await settled();
+    expect(heard).toHaveLength(2);
+    // Decided at once, so the next turn there may read it.
+    const session = heard[0]?.recorded.chatRecordId ?? "";
+    expect(wiring.links.unseen(session).map((line) => line.text)).toContain("Hello");
   });
 
   it("neither records nor hears a redelivery twice", async () => {

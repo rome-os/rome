@@ -18,6 +18,7 @@ import { createLogger } from "../logger.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
+import { enteredAs } from "../participation/entrance.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import type { TurnLinks } from "./turn-links.js";
 
@@ -107,6 +108,12 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           // Handed to nobody, as while a hook is being swapped: nothing will
           // decide its wake, so it stands decided as a message no agent
           // answered.
+          settle(event, hearer);
+          return;
+        }
+        // The one line that decides whether a hook hears a recorded message
+        // of someone not let in.
+        if (!enteredAs(heard)) {
           settle(event, hearer);
           return;
         }
