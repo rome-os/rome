@@ -183,7 +183,9 @@ export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFil
       }
     }
     if (!record || !trusted) {
-      log.warn(`Refused an app that was not put on the Desktop by Rome (pid ${shim.pid})`);
+      log.warn(
+        `Refused ${shim.bundleId} (pid ${shim.pid}): not an app Rome put on the Desktop`,
+      );
       shim.quit();
       return;
     }
@@ -235,7 +237,11 @@ export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFil
     const ours = new Set(previous.map((r) => r.bundlePath));
     const destination = desktopPath(app.getPath("desktop"), name, ours);
 
-    const installId = randomBytes(6).toString("hex");
+    // A replaced copy keeps its bundle id, which macOS has already registered
+    // for that path and a Dock pin points at.
+    const installId =
+      previous.find((r) => r.bundlePath === destination)?.installId ??
+      randomBytes(6).toString("hex");
     const bundleId = shimBundleId(hostId, installId);
     const staging = await mkdtemp(join(tmpdir(), "rome-app-shim-"));
     try {
