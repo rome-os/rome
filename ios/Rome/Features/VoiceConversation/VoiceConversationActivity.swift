@@ -25,14 +25,12 @@ final class VoiceConversationLiveActivityPresence: VoiceConversationPresence {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         // One left by an app that was closed mid-conversation goes.
-        let leftovers = Activity<VoiceConversationActivityAttributes>.activities
+        let leftovers = Set(Activity<VoiceConversationActivityAttributes>.activities.map(\.id))
         activity = try? Activity.request(
             attributes: VoiceConversationActivityAttributes(),
             content: ActivityContent(state: VoiceConversationActivityAttributes.ContentState(), staleDate: nil)
         )
-        Task {
-            for leftover in leftovers { await leftover.end(nil, dismissalPolicy: .immediate) }
-        }
+        Self.end(leftovers)
         #endif
     }
 
@@ -40,7 +38,20 @@ final class VoiceConversationLiveActivityPresence: VoiceConversationPresence {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard let activity else { return }
         self.activity = nil
-        Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        Self.end([activity.id])
         #endif
     }
+
+    #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+    /// Ends the activities with these ids. They are looked up again off the
+    /// main actor, by id, since an `Activity` cannot cross between actors.
+    private static func end(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        Task.detached {
+            for activity in Activity<VoiceConversationActivityAttributes>.activities where ids.contains(activity.id) {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
+    #endif
 }
