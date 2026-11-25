@@ -38,7 +38,7 @@ export function registerOutlookActions(
       name: OUTLOOK_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). Calendar, contacts and other Graph APIs stay on Composio. outlook_not_connected means no Rome-managed Microsoft connection reads Outlook mail: Outlook is then the Composio Outlook connection, for reading and for sending with its own tools. Suggest connecting Microsoft only when connect_service takes kind microsoft.",
+        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). Calendar, contacts and other Graph APIs stay on Composio. outlook_not_connected means no Rome-managed Microsoft connection reads Outlook mail: Outlook is then the Composio Outlook connection, for reading and for sending with its own tools. Suggest connecting Microsoft only when connect_service takes kind microsoft or core:concierge_following_list lists a microsoft service.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -113,7 +113,7 @@ export function registerOutlookActions(
       name: OUTLOOK_SEND_ACTION,
       type: "system",
       description:
-        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections. outlook_connection_changed means the connectionId is stale: read /v1.0/me again. Never send either message through Composio or another mailbox.",
+        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections. outlook_connection_changed means the connectionId is stale: read /v1.0/me again and follow its answer. Never answer outlook_send_not_granted by sending through Composio or another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -155,7 +155,7 @@ export function registerOutlookActions(
         return {
           status: "error",
           error:
-            "outlook_connection_changed: No Rome-managed Microsoft connection has this connectionId. Read /v1.0/me again for the current connectionId, and never switch to Composio for this message. Nothing was sent.",
+            "outlook_connection_changed: No Rome-managed Microsoft connection has this connectionId. Read /v1.0/me again: send with its connectionId, or through Composio only if it answers outlook_not_connected. Nothing was sent.",
         };
       if (!connection.act)
         return {

@@ -26,7 +26,7 @@ export function registerGmailActions(
       name: GMAIL_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Attachment downloads are not supported through this connection. Returns connectionId for core:gmail_send; profile returns the From emailAddress. gmail_not_connected means no Rome-managed Google connection reads Gmail: Gmail is then the Composio Gmail connection, for reading and for sending with its own tools. Suggest connecting Google only when connect_service takes kind google.",
+        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Attachment downloads are not supported through this connection. Returns connectionId for core:gmail_send; profile returns the From emailAddress. gmail_not_connected means no Rome-managed Google connection reads Gmail: Gmail is then the Composio Gmail connection, for reading and for sending with its own tools. Suggest connecting Google only when connect_service takes kind google or core:concierge_following_list lists a google service.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -101,7 +101,7 @@ export function registerGmailActions(
       name: GMAIL_SEND_ACTION,
       type: "system",
       description:
-        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Google connection: with none, send through the Composio Gmail connection's tools. gmail_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Google in Settings → Connections. gmail_connection_changed means the connectionId is stale: read the profile again. Never send either message through Composio or another mailbox.",
+        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Google connection: with none, send through the Composio Gmail connection's tools. gmail_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Google in Settings → Connections. gmail_connection_changed means the connectionId is stale: read the profile again and follow its answer. Never answer gmail_send_not_granted by sending through Composio or another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -145,7 +145,7 @@ export function registerGmailActions(
         return {
           status: "error",
           error:
-            "gmail_connection_changed: No Rome-managed Google connection has this connectionId. Read /gmail/v1/users/me/profile again for the current connectionId, and never switch to Composio for this message. Nothing was sent.",
+            "gmail_connection_changed: No Rome-managed Google connection has this connectionId. Read /gmail/v1/users/me/profile again: send with its connectionId, or through Composio only if it answers gmail_not_connected. Nothing was sent.",
         };
       if (!connection.act)
         return {
