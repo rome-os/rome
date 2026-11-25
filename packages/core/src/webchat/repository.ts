@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
@@ -1164,7 +1165,8 @@ export class WebChatRepository {
       projectName,
       projectPath,
       deviceFolder,
-      largeModelSelection: largeModelSelection ?? null,
+      largeModelSelection:
+        canonicalModelSelection(largeModelSelection) ?? largeModelSelection ?? null,
       largeModelSelectionBy: largeModelSelection ? largeModelSelectionBy : null,
       agentName,
       type: storedSessionType(type),
@@ -1931,7 +1933,10 @@ export class WebChatRepository {
   ) {
     await this.db
       .update(romeSessions)
-      .set({ largeModelSelection, largeModelSelectionBy: largeModelSelection ? by : null })
+      .set({
+        largeModelSelection: canonicalModelSelection(largeModelSelection) ?? largeModelSelection,
+        largeModelSelectionBy: largeModelSelection ? by : null,
+      })
       .where(eq(romeSessions.id, id));
   }
 

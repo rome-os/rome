@@ -1,3 +1,4 @@
+import { fixedNativeModel } from "@rome/api-types/models";
 // CodexAppServerProvider — the "openai" provider over the codex app-server
 // JSON-RPC protocol. This is the only Codex surface (wired in index.ts); shared
 // model/env/auth/accounting helpers live in codex/common.ts.
@@ -660,7 +661,7 @@ export class CodexAppServerProvider implements ModelProvider {
       isolated: boolean;
     },
   ): Promise<ModelSession> {
-    const modelName = stripLegacyReasoningSuffix(params.config.model);
+    const modelName = stripLegacyReasoningSuffix(fixedNativeModel(this.id, params.config.model));
     const outputValidator = params.config.outputSchema
       ? compileOutputSchema(params.config.outputSchema)
       : undefined;

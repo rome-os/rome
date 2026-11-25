@@ -266,7 +266,7 @@ describe("ConciergeComposer", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: /Show all \d+ models/ }));
     expect((await names()).length).toBeGreaterThan(4);
     await userEvent.click(screen.getByRole("menuitemradio", { name: "GPT-6 Luna" }));
-    expect(onChange).toHaveBeenCalledWith("gpt-6-luna");
+    expect(onChange).toHaveBeenCalledWith("openai/gpt-6-luna");
   });
 
   it("leaves the model out when the chat cannot change its model", async () => {

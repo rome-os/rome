@@ -1,3 +1,4 @@
+import type { ModelIdentity } from "./models.js";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 
 export type SessionsRange = "24h" | "7d" | "30d" | "all";
@@ -97,7 +98,10 @@ export interface RomeSessionExplorerRecord {
   name: string;
   displayTitle: string;
   personaId: string | null;
+  /** Provider-qualified fixed identity key; legacy values can remain when unresolved. */
   largeModelSelection: string | null;
+  modelSelection?: ModelIdentity | null;
+  modelSelectionError?: string;
   projectName: string;
   projectPath: string | null;
   agentName: string | null;

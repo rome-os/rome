@@ -134,3 +134,14 @@ describe("agent exact model configuration", () => {
     ).toContain("outputSchema");
   });
 });
+
+it.each([
+  "opus",
+  "sonnet",
+  "claude-opus",
+  "claude-sonnet",
+  "default",
+  "gpt-latest",
+])("rejects floating exact modelId %s without interpreting it as a menu choice", (modelId) => {
+  expect(issuePaths({ provider: "anthropic", modelId })).toContain("modelId");
+});

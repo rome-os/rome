@@ -1,3 +1,4 @@
+import { canonicalModelSelection, MODEL_CATALOG } from "@rome/api-types/models";
 import type { DefaultModelProvider } from "@rome/api-types/chat";
 import type { ReasoningEffort } from "./chat-types";
 import { LARGE_MODEL_OPTIONS } from "./model-options";
@@ -23,15 +24,16 @@ export const DEFAULT_LARGE_MODEL_SELECTION = "auto";
 // because option.id is a member of the same union.
 export const COMMON_LARGE_MODEL_IDS: ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]["id"]> = [
   "auto",
-  "claude-opus-5-5",
-  "gpt-6-astra",
+  "anthropic/claude-opus-5-5[1m]",
+  "openai/gpt-6-astra",
 ];
 
-/** Which provider family runs a model id: claude-* on Claude, gpt-* on ChatGPT. */
+/** The provider of a catalog identity or exact native ID; unknown IDs have no inferred provider. */
 export function modelFamily(modelId: string): "anthropic" | "openai" | null {
-  if (modelId.startsWith("claude-")) return "anthropic";
-  if (modelId.startsWith("gpt-")) return "openai";
-  return null;
+  const id = canonicalModelSelection(modelId);
+  return (
+    MODEL_CATALOG.find((entry) => entry.id === id || entry.modelId === modelId)?.providerId ?? null
+  );
 }
 
 /**
@@ -57,6 +59,7 @@ export function runnableLargeModelOptions(
   signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
   selected: string,
 ): ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]> {
+  selected = canonicalModelSelection(selected) ?? selected;
   return LARGE_MODEL_OPTIONS.filter(
     (option) => option.id === selected || canRunModel(option.id, signedIn),
   );

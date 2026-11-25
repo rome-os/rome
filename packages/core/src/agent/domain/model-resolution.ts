@@ -1,3 +1,4 @@
+import { canonicalModelSelection, fixedNativeModel } from "@rome/api-types/models";
 // Model resolution: which provider and model a run uses. The ask is a tier or
 // an exact model, and resolveModel answers it from facts the resolver reads.
 // A provider must be usable first, then its login must allow the model.
@@ -100,9 +101,9 @@ export type ModelResolutionOutcome =
   | { ok: false; failure: ModelResolutionFailure };
 
 const CLAUDE_TIER_MODELS: Record<ModelTier, string> = {
-  large: "claude-opus-5-5[1m]",
-  medium: "claude-sonnet-5-5",
-  small: "claude-haiku-5-5",
+  large: MODEL_SELECTIONS["anthropic/claude-opus-5-5[1m]"].model,
+  medium: MODEL_SELECTIONS["anthropic/claude-sonnet-5-5"].model,
+  small: MODEL_SELECTIONS["anthropic/claude-haiku-5-5"].model,
 };
 
 const MOCK_TIER_MODELS: Record<ModelTier, string> = CLAUDE_TIER_MODELS;
@@ -135,7 +136,7 @@ function tierModel(
 ): string {
   if (providerId === "mock") return MOCK_TIER_MODELS[tier];
   const chosen = tierModels?.[providerId]?.[tier];
-  if (chosen) return chosen;
+  if (chosen) return fixedNativeModel(providerId, chosen);
   return providerId === "openai" ? codexTierModel(tier, codex) : CLAUDE_TIER_MODELS[tier];
 }
 
@@ -188,6 +189,8 @@ export function resolveModel(
   request: ModelResolutionRequest,
   facts: ModelResolutionFacts,
 ): ModelResolutionOutcome {
+  if (request.kind === "exact")
+    request = { ...request, model: fixedNativeModel(request.providerId, request.model) };
   const { reports } = facts;
   // A Rome credits login serves Codex only while credits are the default, or,
   // with no default set, while no AI account is logged in. Any other ask reads
@@ -356,7 +359,9 @@ function modelAsk(
 ): ModelResolutionRequest {
   if (selectionId) {
     // A one-off override runs the selection's strength on that provider.
-    const id = override ? followingSelection(selectionId, override) : selectionId;
+    const saved = canonicalModelSelection(selectionId);
+    if (!saved) throw new Error(`Unknown model selection: ${selectionId}`);
+    const id = override ? followingSelection(saved, override) : saved;
     const { providerId, model } = MODEL_SELECTIONS[id];
     return { kind: "exact", providerId, model };
   }
@@ -365,7 +370,11 @@ function modelAsk(
       throw new Error("An agent modelId requires a provider and cannot be combined with tier");
     }
     if (pin && pin.providerId === agent.providerId) return { kind: "exact", ...pin };
-    return { kind: "exact", providerId: agent.providerId, model: agent.modelId };
+    return {
+      kind: "exact",
+      providerId: agent.providerId,
+      model: fixedNativeModel(agent.providerId, agent.modelId),
+    };
   }
   if (!agent.tier) {
     throw new Error("Agent config requires a tier or a provider with modelId");

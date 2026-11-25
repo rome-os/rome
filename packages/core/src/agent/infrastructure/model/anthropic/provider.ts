@@ -1,3 +1,4 @@
+import { fixedNativeModel } from "@rome/api-types/models";
 import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
@@ -560,7 +561,7 @@ export class AnthropicProvider implements ModelProvider {
       // guardian; Rome never wants it.
       CLAUDE_CODE_SILENT_TURN_REMINDER: "0",
     };
-    const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
+    const effectiveModel = fixedNativeModel(this.id, queryEnv.ANTHROPIC_MODEL ?? model);
     const authRevokedSource = queryContext.authRevokedSource;
     const providerId = this.id;
     // An abort that reached no SDK result still ends as a stopped turn.

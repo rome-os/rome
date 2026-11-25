@@ -1,3 +1,8 @@
+import {
+  modelIdentityOf,
+  readModelSelectionInput,
+  type ModelIdentity,
+} from "@rome/api-types/models";
 import { clearChatDraft } from "./chat-draft-storage";
 import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
@@ -171,16 +176,30 @@ export async function renameSession(sessionId: string, name: string): Promise<Ch
   return jsonOrThrow<ChatSession>(res);
 }
 
+function modelSelectionFields(largeModelSelection?: unknown, modelSelection?: unknown) {
+  const id = readModelSelectionInput({ largeModelSelection, modelSelection });
+  return id === undefined
+    ? {}
+    : {
+        largeModelSelection: id,
+        modelSelection: id === "auto" ? null : modelIdentityOf(id),
+      };
+}
+
 /** Store the model an open chat runs on from its next turn. "auto" clears it. */
 export async function updateSessionModel(
   sessionId: string,
-  largeModelSelection: string,
+  choice: string | ModelIdentity | null,
 ): Promise<ChatSession> {
+  const fields =
+    typeof choice === "string"
+      ? modelSelectionFields(choice)
+      : modelSelectionFields(undefined, choice);
   const res = await fetch(`/api/chat/sessions/${sessionId}/model`, {
     method: "PATCH",
     credentials: "include",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ largeModelSelection }),
+    body: JSON.stringify(fields),
   });
   return jsonOrThrow<ChatSession>(res);
 }
@@ -430,6 +449,7 @@ export interface CreateSessionInput {
   personaId?: string;
   projectPath: string;
   largeModelSelection?: string;
+  modelSelection?: ModelIdentity | null;
   // The turn, not the session, carries reasoning effort; a turn that omits it
   // gets the guardian's stored preference.
   reasoningEffort?: ReasoningEffort;
@@ -456,7 +476,10 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
     method: "POST",
     credentials: "include",
     headers: JSON_HEADERS,
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...input,
+      ...modelSelectionFields(input.largeModelSelection, input.modelSelection),
+    }),
   });
   return jsonOrThrow<ChatSession>(res);
 }
@@ -631,7 +654,11 @@ export async function postSessionTurnJson(
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ inputId: randomUUID(), ...body }),
+    body: JSON.stringify({
+      inputId: randomUUID(),
+      ...body,
+      ...modelSelectionFields(body.largeModelSelection, body.modelSelection),
+    }),
   });
   return parseTurnResponse(res);
 }
@@ -755,6 +782,21 @@ export async function postSessionTurn(
   body: FormData,
   options: PostSessionTurnOptions = {},
 ): Promise<PostTurnResult> {
+  const stored = body.get("largeModelSelection");
+  const structured = body.get("modelSelection");
+  if (
+    (stored !== null && typeof stored !== "string") ||
+    (structured !== null && typeof structured !== "string")
+  )
+    throw new Error("Model identity fields must be text");
+  const fields = modelSelectionFields(
+    stored ?? undefined,
+    structured === null ? undefined : JSON.parse(structured),
+  );
+  if (fields.largeModelSelection !== undefined) {
+    body.set("largeModelSelection", fields.largeModelSelection);
+    body.set("modelSelection", JSON.stringify(fields.modelSelection));
+  }
   if (!body.has("inputId")) body.set("inputId", randomUUID());
   if (options.onUploadProgress) {
     return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress, options.signal);

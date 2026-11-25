@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   isUnreachableStatus,
+  createSession,
+  updateSessionModel,
   listSessionMessagePage,
   plainErrorText,
   postSessionTurn,
@@ -292,5 +294,69 @@ describe("listSessionMessagePage", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/chat/sessions/s1/messages?limit=10&before=c1");
     expect(page).toMatchObject({ messages: [], nextCursor: "t1" });
+  });
+});
+
+describe("fixed model identity transport", () => {
+  const identity = { providerId: "anthropic", modelId: "claude-opus-4-8[1m]" };
+  function capture() {
+    const fetch = rs.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chat",
+            turnId: "turn",
+            sessionId: "chat",
+            disposition: "started",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    rs.stubGlobal("fetch", fetch);
+    return fetch;
+  }
+  it("sends a legacy selection as its fixed native identity, not an upstream alias", async () => {
+    const fetch = capture();
+    await updateSessionModel("chat", "claude-opus");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      largeModelSelection: "anthropic/claude-opus-4-8[1m]",
+      modelSelection: identity,
+    });
+  });
+  it("accepts an exact pair when creating or updating a chat", async () => {
+    const fetch = capture();
+    await createSession({ name: "Fixed", projectPath: "default", modelSelection: identity });
+    await updateSessionModel("chat", identity);
+    for (const [, options] of fetch.mock.calls)
+      expect(JSON.parse(options.body)).toMatchObject({
+        largeModelSelection: "anthropic/claude-opus-4-8[1m]",
+        modelSelection: identity,
+      });
+  });
+  it("does not overwrite conflicting JSON fields to make them appear consistent", async () => {
+    const fetch = capture();
+    await expect(
+      postSessionTurnJson("chat", {
+        largeModelSelection: "claude-sonnet",
+        modelSelection: identity,
+      }),
+    ).rejects.toThrow("conflicting");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("serializes the identical pair for multipart sends without changing attachments", async () => {
+    const fetch = capture();
+    const body = new FormData();
+    body.set("largeModelSelection", "claude-opus");
+    body.set("text", "Keep my input");
+    await postSessionTurn("chat", body);
+    expect(fetch.mock.calls[0][1].body).toBe(body);
+    expect(body.get("largeModelSelection")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect(JSON.parse(String(body.get("modelSelection")))).toEqual(identity);
+    expect(body.get("text")).toBe("Keep my input");
+  });
+  it("does not turn an unknown draft into Auto or send it", async () => {
+    const fetch = capture();
+    await expect(updateSessionModel("chat", "unknown-old-choice")).rejects.toThrow("unknown");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

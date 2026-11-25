@@ -1,3 +1,4 @@
+import { readModelSelectionInput, modelIdentityOf } from "@rome/api-types/models";
 import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
@@ -1925,8 +1926,15 @@ export const handlers = [
   http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
-    const { largeModelSelection } = (await request.json()) as { largeModelSelection: string };
-    found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
+    try {
+      const id = readModelSelectionInput(await request.json());
+      if (!id)
+        return HttpResponse.json({ error: "A model selection is required" }, { status: 400 });
+      found.largeModelSelection = id === "auto" ? null : id;
+      found.modelSelection = modelIdentityOf(id);
+    } catch (error) {
+      return HttpResponse.json({ error: String(error) }, { status: 400 });
+    }
     return HttpResponse.json(found);
   }),
   // Thumbs on an assistant turn. A chat's rows hydrate from one read once the

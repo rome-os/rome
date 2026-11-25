@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -45,7 +46,7 @@ describe("ModelSelectorMenu", () => {
   });
 
   it("keeps a pinned non-curated model visible (with its check) when collapsed", () => {
-    render(<ModelSelectorMenu {...baseProps()} value="claude-haiku" />);
+    render(<ModelSelectorMenu {...baseProps()} value="anthropic/claude-haiku-5-5" />);
 
     // Haiku is not curated, but it is the current selection, so it stays
     // visible without expanding — a deliberately pinned model is not stranded.
@@ -89,7 +90,7 @@ describe("ModelSelectorMenu", () => {
     await user.type(screen.getByPlaceholderText("Search models…"), "6.1");
     await user.click(await screen.findByRole("option", { name: "GPT-6.1 Sol" }));
 
-    expect(props.onChange).toHaveBeenCalledWith("gpt-6-1-sol");
+    expect(props.onChange).toHaveBeenCalledWith("openai/gpt-6.1-sol");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -110,7 +111,7 @@ describe("ModelSelectorMenu", () => {
 
     await user.click(screen.getByRole("option", { name: /Opus 5\.5/ }));
 
-    expect(props.onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    expect(props.onChange).toHaveBeenCalledWith("anthropic/claude-opus-5-5[1m]");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -131,7 +132,7 @@ describe("ModelSelectorMenu", () => {
     await user.type(screen.getByPlaceholderText("Search models…"), "sonnet");
     await waitFor(() => expect(optionNames()).toContain("Sonnet 5.5"));
     await user.click(screen.getByRole("option", { name: /Sonnet/ }));
-    expect(props.onChange).toHaveBeenCalledWith("claude-sonnet");
+    expect(props.onChange).toHaveBeenCalledWith("anthropic/claude-sonnet-5-5");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
 
     // Selecting a row flips the parent's `open` prop rather than going through
@@ -170,7 +171,7 @@ describe("ModelSelectorMenu sign-ins", () => {
     render(
       <ModelSelectorMenu
         {...baseProps()}
-        value="gpt-6-luna"
+        value="openai/gpt-6-luna"
         signedIn={{ anthropic: true, openai: false, rome_credits: false }}
       />,
     );
@@ -195,9 +196,16 @@ it.each([
       screen.getByRole("button", { name: language === "en" ? "Model" : "模型" }).textContent,
     ).toContain(label);
     await userEvent.setup().click(row);
-    expect(props.onChange).toHaveBeenCalledWith(value);
+    expect(props.onChange).toHaveBeenCalledWith(canonicalModelSelection(value));
   } finally {
     view.unmount();
     await i18n.changeLanguage("en");
   }
+});
+
+it("shows an unknown saved choice verbatim instead of naming it Auto", () => {
+  render(<ModelSelectorMenu {...baseProps()} value="unrecognized-old-choice" />);
+  expect(screen.getByRole("button", { name: "Model" }).textContent).toContain(
+    "unrecognized-old-choice",
+  );
 });

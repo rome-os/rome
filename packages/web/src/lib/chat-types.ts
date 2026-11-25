@@ -1,3 +1,4 @@
+import type { ModelIdentity } from "@rome/api-types/models";
 import type { DeviceFolder, DeviceList } from "@rome/api-types/devices";
 import type { ChatMessageSender, TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
@@ -23,6 +24,8 @@ export interface ChatSession {
   name: string;
   personaId: string | null;
   largeModelSelection?: string | null;
+  modelSelection?: ModelIdentity | null;
+  modelSelectionError?: string;
   /** Whether the chat follows the default provider. Absent from an older server. */
   followsDefault?: boolean;
   /**

@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, MoreHorizontal, X } from "lucide-react";
@@ -53,6 +54,7 @@ export function ModelSelectorMenu({
   signedIn = null,
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
+  value = canonicalModelSelection(value) ?? value;
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -82,9 +84,11 @@ export function ModelSelectorMenu({
   // Resolved from `options` (not raw LARGE_MODEL_OPTIONS) so the trigger renders
   // the same translated label as the rows, with no second lookup path.
   // "auto" belongs to no provider, so it is always among the options.
-  const selected =
-    options.find((option) => option.id === value) ??
-    options.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
+  const selected = options.find((option) => option.id === value) ?? {
+    id: value,
+    label: value,
+    rowLabel: value,
+  };
 
   const trimmedQuery = query.trim().toLowerCase();
 

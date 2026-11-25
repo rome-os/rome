@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -21,7 +22,9 @@ function providerName(providerId: string, t: TFunction<"chat">): string {
 
 /** The model an owner picked, by the names the selector uses, else its provider. */
 function pickedName(pin: PinnedModel, provider: string, t: TFunction<"chat">): string {
-  const option = LARGE_MODEL_OPTIONS.find((candidate) => candidate.id === pin.selection);
+  const option = LARGE_MODEL_OPTIONS.find(
+    (candidate) => candidate.id === (canonicalModelSelection(pin.selection) ?? pin.selection),
+  );
   return pin.model
     ? modelDisplayName(pin.model)
     : option

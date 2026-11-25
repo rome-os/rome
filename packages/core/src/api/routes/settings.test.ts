@@ -38,6 +38,28 @@ describe("Settings API", () => {
 
   afterEach(() => testDb.close());
 
+  it("writes a legacy model preference as its original fixed target and rejects unknown choices", async () => {
+    expect((await putSettings(app, { webchatLargeModel: "claude-opus" })).status).toBe(200);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect((await putSettings(app, { webchatLargeModel: "unknown" })).status).toBe(400);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect((await putSettings(app, { webchatLargeModel: "auto" })).status).toBe(200);
+    expect(await deps.settingsRepo.get("webchatLargeModel")).toBe("auto");
+  });
+
+  it("rejects floating native tier models instead of silently resolving them", async () => {
+    expect(
+      (await putSettings(app, { tierModelMappings: { anthropic: { large: "opus" } } })).status,
+    ).toBe(400);
+    expect(await deps.settingsRepo.get("tierModelMappings")).toBeNull();
+    const fixed = {
+      anthropic: { large: "claude-opus-4-8[1m]" },
+      openai: { small: "gpt-6.1-sol-2026-09-29" },
+    };
+    expect((await putSettings(app, { tierModelMappings: fixed })).status).toBe(200);
+    expect(await deps.settingsRepo.get("tierModelMappings")).toEqual(fixed);
+  });
+
   it("validates and persists the Codex credits preference and refreshes availability", async () => {
     const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
     expect((await putSettings(app, { "aiTools.codex.allowCredits": "true" })).status).toBe(400);

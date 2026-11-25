@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 // Which provider a chat runs on when it does not follow the default: the
 // guardian switched only this chat from a card, or changed the default
 // without moving the chats already there. Such a chat is pinned to a model
@@ -66,7 +67,8 @@ export function pinnedModelOf(
   chat: { largeModelSelection?: string | null; largeModelSelectionBy?: string | null },
   held?: AccountedProviderId,
 ): PinnedModel | null {
-  const stored = chat.largeModelSelection ?? null;
+  const stored =
+    canonicalModelSelection(chat.largeModelSelection) ?? chat.largeModelSelection ?? null;
   const by = chat.largeModelSelectionBy ?? null;
   if (isModelSelectionId(stored)) {
     const selection = MODEL_SELECTIONS[stored];
@@ -84,6 +86,9 @@ export function pinnedModelOf(
     return selection.providerId === held
       ? { by: "kept", providerId: held, selection: stored, model: selection.model }
       : { by: "kept", providerId: held, selection: null, model: null };
+  }
+  if (stored && stored !== "auto") {
+    return { by: "owner", providerId: held ?? "unknown", selection: stored, model: stored };
   }
   if (!held) return null;
   return { by: "kept", providerId: held, selection: null, model: null };
@@ -172,15 +177,13 @@ export interface ChatProviders {
   followingCount(): Promise<number>;
 }
 
-/** The selection that runs `model`, ignoring a context-window suffix. */
-export function selectionOfModel(model: string): ModelSelectionId | null {
-  const bare = model.replace(/\[[^\]]*\]$/, "");
-  for (const selection of Object.values(MODEL_SELECTIONS)) {
-    if (selection.model === model || selection.model.replace(/\[[^\]]*\]$/, "") === bare) {
-      return selection.id as ModelSelectionId;
-    }
-  }
-  return null;
+/** The selection for the exact native ID; context variants remain distinct. */
+export function selectionOfModel(model: string, providerId?: string): ModelSelectionId | null {
+  const matches = Object.values(MODEL_SELECTIONS).filter(
+    (selection) =>
+      selection.model === model && (!providerId || selection.providerId === providerId),
+  );
+  return matches.length === 1 ? matches[0]!.id : null;
 }
 
 export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
@@ -195,11 +198,19 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     stored: string | null,
     provider: AccountedProviderId,
   ): Promise<ModelSelectionId> => {
+    if (stored && !isModelSelectionId(stored))
+      throw new Error(`Unknown stored model selection: ${stored}`);
     const codexAccount = deps.accounts.read().openai?.account;
     const ran = isModelSelectionId(stored)
       ? stored
       : await deps.lastModel?.(chatId, agentName).then(
-          (last) => (last ? selectionOfModel(last.model) : null),
+          (last) => {
+            if (!last) return null;
+            const exact = selectionOfModel(last.model, last.providerId);
+            if (!exact && last.providerId === provider)
+              throw new Error(`Cannot replace the fixed model ${last.model} with a catalog model`);
+            return exact;
+          },
           () => null,
         );
     if (ran) {
