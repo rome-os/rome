@@ -1,5 +1,6 @@
-// The one place what a connection delivers inward passes. It asks the entry once
-// for each, before any agent or app sees it.
+// The one place what a connection delivers inward passes: a message or a
+// command. It asks the entry once for each, before any agent or app sees it,
+// and hands on only what someone let in said or did.
 // Vocabulary: docs/domains/participation.md#entry.
 
 import { createLogger } from "../logger.js";
@@ -7,10 +8,25 @@ import type { EntryAccount, EntryPort } from "./entry.js";
 
 const log = createLogger("entrance");
 
+/** Why whoever ran a command gets no answer to it, shown only to them. */
+const COMMAND_REFUSED = "Only the guardian and members of this Rome can run its commands.";
+
+/** Commands a connection reports, as `connections/command.ts` describes them. */
+interface RunCommands<C> {
+  ran(command: C): Promise<string>;
+  suggest(command: C, option: string, typed: string): Promise<readonly string[]>;
+}
+
 export interface Entrance<Person> {
   /** Whom a message is let in as, or nothing. The port that hears it marks it
    *  ({@link markEntered}), since it is recorded either way. */
   message(sender: EntryAccount): Promise<Person | undefined>;
+  /** `commands`, reached only by someone let in. Anyone else is told so and
+   *  gets no suggestions. `platform` is the one the commands are run on. */
+  commands<C extends { sender: { accountId: string } }, All extends RunCommands<C>>(
+    platform: string,
+    commands: All & RunCommands<C>,
+  ): All;
 }
 
 export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
@@ -23,6 +39,17 @@ export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
   return {
     async message(sender) {
       return (await letIn(sender, "message"))?.person;
+    },
+    commands(platform, commands) {
+      const ranByOneLetIn = async (command: { sender: { accountId: string } }) =>
+        (await letIn({ platform, id: command.sender.accountId }, "command")) !== null;
+      return {
+        ...commands,
+        ran: async (command) =>
+          (await ranByOneLetIn(command)) ? commands.ran(command) : COMMAND_REFUSED,
+        suggest: async (command, option, typed) =>
+          (await ranByOneLetIn(command)) ? commands.suggest(command, option, typed) : [],
+      };
     },
   };
 }

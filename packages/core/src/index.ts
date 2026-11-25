@@ -285,7 +285,7 @@ import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
-import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
+import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { createChatTurns } from "./core/chat-turns.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
@@ -1319,13 +1319,6 @@ async function main() {
     stopActiveConversationTurn(input, {
       chatTurns,
       sessions: { turn: (id) => agentSessionManager.turn(id) },
-      isGuardian: async (service, senderId) => {
-        const platform = stopSenderPlatform(input.ref, service, {
-          accountOf: (connectionId) => accounts.accountOf(connectionId),
-          platformOfChannel,
-        });
-        return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
-      },
     });
   const romeCloudAccess = (): RomeCloudAccess | null => {
     const credentialId = instanceCredentialId();
@@ -2409,16 +2402,18 @@ async function main() {
     ),
     // A Discord bot's slash commands read and change its chats' rules.
     discordCommandsOf: (connectionId) =>
-      chatCommands({
-        connectionId,
-        service: "discord",
-        settings: chatSettings,
-        chatStop,
-        personOf: (accountId) => peopleRepo.byAccount({ platform: "discord", id: accountId }),
-        listAgents: () => agentLoader.list().map((agent) => agent.name),
-        hasAgent: (name) => agentLoader.find(name) !== undefined,
-        accountAgent: () => accountAgentOf(connectionId) ?? null,
-      }),
+      entrance.commands(
+        "discord",
+        chatCommands({
+          connectionId,
+          service: "discord",
+          settings: chatSettings,
+          chatStop,
+          listAgents: () => agentLoader.list().map((agent) => agent.name),
+          hasAgent: (name) => agentLoader.find(name) !== undefined,
+          accountAgent: () => accountAgentOf(connectionId) ?? null,
+        }),
+      ),
     // The account that connected is the guardian's own, so People links it.
     onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {

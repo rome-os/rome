@@ -1,13 +1,12 @@
 import type { ChatRef } from "@rome-os/app-runtime";
 
-/** The turn running in a chat, and the platform user whose message started it. */
+/** The turn running in a chat. */
 export interface ChatTurn {
   turnId: string;
-  initiatorId?: string;
 }
 
 /**
- * Which turn runs in each connected account's chat, and who started it. The
+ * Which turn runs in each connected account's chat. The
  * web chat side holds it for Participation until Participation has a home of
  * its own. The newest turn started in a chat is its turn; ending an older one
  * leaves it in place.

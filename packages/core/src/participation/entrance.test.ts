@@ -26,6 +26,34 @@ describe("entrance", () => {
       { platform: "slack", id: "sam" },
     ]);
   });
+
+  it("runs a command for someone let in alone, and keeps the list", async () => {
+    const { asked, entrance: door } = onlyAda();
+    const ran: string[] = [];
+    const commands = door.commands("discord", {
+      list: ["stop"],
+      ran: async (command: { sender: { accountId: string } }) => {
+        ran.push(command.sender.accountId);
+        return "Stopped.";
+      },
+      suggest: async (
+        _command: { sender: { accountId: string } },
+        _option: string,
+        _typed: string,
+      ) => ["main"],
+    });
+    const by = (accountId: string) => ({ sender: { accountId } });
+    expect(commands.list).toEqual(["stop"]);
+    expect(await commands.ran(by("ada"))).toBe("Stopped.");
+    expect(await commands.ran(by("sam"))).toBe(
+      "Only the guardian and members of this Rome can run its commands.",
+    );
+    expect(ran).toEqual(["ada"]);
+    expect(await commands.suggest(by("ada"), "name", "")).toEqual(["main"]);
+    expect(await commands.suggest(by("sam"), "name", "")).toEqual([]);
+    expect(asked[0]).toEqual({ platform: "discord", id: "ada" });
+    expect(asked).toHaveLength(4);
+  });
 });
 
 describe("markEntered", () => {

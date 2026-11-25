@@ -109,8 +109,6 @@ describe("AgentSessionBridge turn routing", () => {
 
     startTurn();
     await rs.waitFor(() => expect(chatTurns.runningIn(ref)?.turnId).toBe("turn-1"));
-    expect(chatTurns.runningIn(ref)?.initiatorId).toBe("user-1");
-
     expect(turns.get("turn-1")).toMatchObject({ sessionId: "session-1", finished: false });
 
     finishTurn();
