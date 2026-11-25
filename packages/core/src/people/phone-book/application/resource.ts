@@ -47,26 +47,11 @@ export interface PeopleReadDeps extends SendDeps {
 
 /** A person as the repository reads them: the row and the accounts linked to
  *  it. */
-export type PersonRow = Awaited<ReturnType<PeopleRepository["all"]>>[number];
+type PersonRow = Awaited<ReturnType<PeopleRepository["all"]>>[number];
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
   return serialize(deps, await deps.peopleRepo.all());
-}
-
-/** One curated person, or null when the id names none. */
-export async function readPerson(deps: PeopleReadDeps, id: string): Promise<PersonResource | null> {
-  const person = await findPerson(deps, id);
-  return person && (await serialize(deps, [person]))[0];
-}
-
-/** The person an id names, as stored — for a caller that needs the links
- *  rather than the resource. */
-export async function findPerson(
-  deps: Pick<PeopleReadDeps, "peopleRepo">,
-  id: string,
-): Promise<PersonRow | null> {
-  return deps.peopleRepo.byId(id);
 }
 
 /**

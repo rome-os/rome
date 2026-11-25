@@ -1,4 +1,3 @@
-import { generatePersonSlug, nextAvailablePersonId } from "@rome/api-types/persons";
 import { whatsAppDisplayName } from "@rome/api-types/people";
 import { compareMessages, type Message } from "@rome/api-types/message";
 
@@ -569,25 +568,6 @@ export function ownerOf(channel: string, channelUserId: string): PersonFixture |
   );
 }
 
-/**
- * The id `POST /api/people` mints, over the in-memory store. Both the slug
- * and the collision rule come from the shared derivation; all this adds is the
- * set of ids to resolve against, which is the one thing the two sides cannot
- * share — the repository resolves against the rows it queries, this against the
- * rows it holds.
- *
- * A name that slugs to nothing gets a uuid on the real route.
- * `crypto.randomUUID` is the browser's equivalent of core's `uuid()`.
- */
-export function nextPersonId(displayName: string): string {
-  const base = generatePersonSlug(displayName);
-  if (!base) return crypto.randomUUID();
-  return nextAvailablePersonId(
-    base,
-    persons.map((person) => person.id),
-  );
-}
-
 /** What the account's own platform calls it, then the name its sender put on a
  *  message, then the address itself — the order `DirectoryAccount.displayName`
  *  and `LinkedAccount.displayName` both name. Never the linked person's name. */
@@ -620,35 +600,11 @@ export function accountTimeline(ref: AccountRef): Message[] {
   return timelineForChannels([ref]);
 }
 
-/**
- * What Rome has said through the send route: the mock's stand-in for Rome's
- * own transcript of a send the channel took.
- */
-const deliveredEntries: (Message & { channelUserId: string })[] = [];
-
-/** Put a sent message where the timeline will find it. */
-export function recordDelivered(
-  account: AccountRef,
-  entry: Omit<Message, "source" | "direction">,
-): void {
-  deliveredEntries.push({
-    ...entry,
-    source: account.channel,
-    channelUserId: account.channelUserId,
-    direction: "outbound",
-  });
-}
-
 /** One channel set's dynamics, newest first. The row's `latest` is this
  *  sequence's head, so the two cannot disagree about what happened last. */
 function timelineForChannels(channels: AccountRef[]): Message[] {
   const entries: Message[] = [];
   for (const mapping of channels) {
-    for (const sent of deliveredEntries) {
-      if (sent.source !== mapping.channel || sent.channelUserId !== mapping.channelUserId) continue;
-      const { channelUserId: _address, ...entry } = sent;
-      entries.push(entry);
-    }
     if (mapping.channel === "whatsapp") {
       const jid = mapping.channelUserId;
       const mirrored = threads[jid] ?? [];

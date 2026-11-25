@@ -46,7 +46,7 @@ export function WhatsAppIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function WeChatIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+function WeChatIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"

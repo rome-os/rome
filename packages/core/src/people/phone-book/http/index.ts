@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { PhoneBookDeps } from "../deps.js";
-import { accountDecisionRoutes } from "./account-decisions.js";
 import { accountsRoutes } from "./accounts.js";
 import { peopleRoutes } from "./people.js";
 
@@ -8,8 +7,5 @@ import { peopleRoutes } from "./people.js";
 // skipping this mount.
 
 export function phoneBookRoutes(deps: PhoneBookDeps): Hono {
-  return new Hono()
-    .route("/", peopleRoutes(deps))
-    .route("/", accountsRoutes(deps))
-    .route("/", accountDecisionRoutes(deps));
+  return new Hono().route("/", peopleRoutes(deps)).route("/", accountsRoutes(deps));
 }

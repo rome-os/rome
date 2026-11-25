@@ -17,19 +17,12 @@ import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
 // the shell stay eager. Every other route is split into its own chunk so the
-// initial bundle for /chat doesn't ship Settings, People, Memory, Apps, etc.
+// initial bundle for /chat doesn't ship Settings, Memory, Apps, etc.
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 const OnboardPage = lazy(() => import("./pages/OnboardPage"));
 const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
-const PeoplePage = lazy(() => import("./pages/PeoplePage"));
-// The /people redirect lives with the views it forwards to, so the paths are
-// written once; it rides their chunk, which is the one about to render anyway.
-const PeopleIndexRedirect = lazy(() =>
-  import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
-);
-const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
 const AssistantsPage = lazy(() => import("./pages/AssistantsPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
@@ -165,14 +158,9 @@ export default function App() {
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
             <Route path="/assistants" element={<AssistantsPage />} />
-            {/* The person page takes its own segment rather than sharing the
-                roster's: a person id is a slug of the display name the guardian
-                gave them, so `directory` is an id they can mint, and a static
-                route beside it would leave such a person unreachable. */}
-            <Route path="/people" element={<PeopleIndexRedirect />} />
-            <Route path="/people/latest" element={<PeopleIndexRedirect />} />
-            <Route path="/people/directory" element={<PeoplePage />} />
-            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+            {/* The dashboard has no People pages; old links land on the home
+                page. */}
+            <Route path="/people/*" element={<Navigate to="/" replace />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
