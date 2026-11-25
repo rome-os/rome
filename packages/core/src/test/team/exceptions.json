@@ -1,5 +1,5 @@
 {
-  "rule": "A check runs every dashboard operation once as the guardian and once as a teammate, and the results match. Exceptions: billing, deleting the instance, removing the guardian.",
+  "rule": "A check runs every dashboard operation once as the guardian and once as a teammate, and the results match. Exceptions, which are what owning the instance means: billing, deleting the instance, and the guardian's seat.",
   "exceptions": [
     {
       "name": "billing",
@@ -10,19 +10,8 @@
       "routes": []
     },
     {
-      "name": "removing the guardian",
+      "name": "the guardian's seat",
       "routes": ["POST /api/vault/reset"]
-    },
-    {
-      "name": "the guardian's own",
-      "routes": [
-        "POST /api/personal-data/ingest",
-        "PUT /api/personal-data/sources/:source/origins/:origin/state",
-        "DELETE /api/personal-data/sources/:source/origins/:origin",
-        "PUT /api/device-connections",
-        "POST /api/people/link-code",
-        "POST /api/settings/guardian-timezone/detected"
-      ]
     }
   ]
 }
