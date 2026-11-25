@@ -284,7 +284,7 @@ requests. A framing or request error without a usable ID uses JSON `null`.
 | `windows` | Optional `application` | `windows` array of eligible windows |
 | `bind` | Numeric `window` | `binding` UUID and `window` record |
 | `unbind` | `binding` UUID | `binding`, `released:true` |
-| `observe` | `binding`, optional Boolean `screenshot` | `binding`, `tree`, `truncated`, `refTTLms`, optional `screenshot` |
+| `observe` | `binding`, optional element ref `element`, optional Boolean `screenshot` | `binding`, `tree`, `truncated`, `refTTLms`, optional `screenshot` |
 | `act` (Accessibility) | `binding`, `element` ref, `action`, optional `value` | `binding`, `dispatched:true` |
 | `act` (input) | `binding`, `action`, and the fields in the input table | `binding`, `dispatched:true` |
 | `stop`, `cancel` | | `stop` and `reason` |
@@ -306,7 +306,11 @@ A later bind of that window returns a fresh UUID.
 
 Tree nodes have `ref`, `role`, `actions`, `children` and optional `title`,
 `description` and `value`. A ref stays stable while a node remains present
-across successive observations within the 15-second TTL. Read `actions` to
+across successive observations within the 15-second TTL. If the tree is
+truncated, pass a current ref from that binding as `element` to observe
+its subtree. A shortened string value includes `valueTruncated: true`.
+A scoped observation expands its root's string value up to 16384 UTF-8 bytes
+when the response fits the frame limit. The screenshot still covers the whole window. Read `actions` to
 choose between `press`, `set_value`, `increment` and `decrement`.
 `set_value` takes a string of up to 16384 UTF-8 bytes for text input, a Boolean
 for a checkbox, or a number within the slider's range. Increment and decrement

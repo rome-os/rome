@@ -9,14 +9,91 @@ struct WindowRow {
     let pid: pid_t
     let bounds: CGRect
     var visible = true
+    var title: String?
 }
 
-func uniqueRoot(_ row: WindowRow, rows: [WindowRow], roots: [CGRect]) -> Int? {
-    guard row.visible, rows.lazy.filter({ $0.id == row.id }).count == 1 else { return nil }
-    let windows = rows.filter { $0.pid == row.pid && $0.bounds == row.bounds }
-    let matches = roots.indices.filter { roots[$0] == row.bounds }
-    guard windows.count == 1, windows.first?.id == row.id, matches.count == 1 else { return nil }
-    return matches.first
+struct WindowRoot {
+    let bounds: CGRect
+    var title: String?
+}
+
+private func chromeTitleMatches(_ cgTitle: String, _ axTitle: String) -> Bool {
+    let browserTitle = cgTitle + " - Google Chrome"
+    let profilePrefix = browserTitle + " - "
+    return axTitle == cgTitle || axTitle == browserTitle ||
+        (axTitle.hasPrefix(profilePrefix) && axTitle.count > profilePrefix.count)
+}
+
+func uniqueRoot(_ row: WindowRow, rows: [WindowRow], roots: [WindowRoot],
+                pinned: [CGWindowID: Int] = [:], focused: Int? = nil, chromeTitles: Bool = false) -> Int? {
+    guard row.visible, rows.lazy.filter({ $0.visible && $0.id == row.id }).count == 1 else { return nil }
+    let windows = rows.filter { $0.visible && $0.pid == row.pid && $0.bounds == row.bounds }
+    let candidates = roots.indices.filter { roots[$0].bounds == row.bounds }
+    guard windows.contains(where: { $0.id == row.id }) else { return nil }
+    if windows.count == 1, candidates.count == 1 { return candidates.first }
+
+    let ids = Set(windows.map(\.id))
+    var pairs = pinned.filter { ids.contains($0.key) && candidates.contains($0.value) }
+    if let pinned = pairs[row.id] { return pinned }
+    if chromeTitles {
+        // Chrome adds the product and profile to AX titles. Require a complete, unambiguous match.
+        if ids.count == windows.count, candidates.count == windows.count {
+            let named = windows.compactMap { window -> (CGWindowID, Int)? in
+                guard let title = window.title, !title.isEmpty else { return nil }
+                let matches = candidates.filter { index in
+                    roots[index].title.map { chromeTitleMatches(title, $0) } ?? false
+                }
+                guard matches.count == 1, let index = matches.first,
+                      pairs[window.id].map({ $0 == index }) ?? true else { return nil }
+                return (window.id, index)
+            }
+            if named.count == windows.count, Set(named.map { $0.1 }).count == windows.count {
+                pairs = Dictionary(uniqueKeysWithValues: named)
+            }
+        }
+    } else {
+        for window in windows {
+            guard pairs[window.id] == nil, let title = window.title, !title.isEmpty,
+                  windows.filter({ $0.title == title }).count == 1 else { continue }
+            let named = candidates.filter { roots[$0].title == title }
+            if named.count == 1, let index = named.first, !pairs.values.contains(index) { pairs[window.id] = index }
+        }
+    }
+    if let named = pairs[row.id] { return named }
+    guard windows.count == candidates.count else { return nil }
+    // Core Graphics gives front-to-back order. AXWindows makes no order guarantee.
+    if let front = windows.first, let focused, candidates.contains(focused),
+       pairs[front.id] == nil, !pairs.values.contains(focused) {
+        pairs[front.id] = focused
+    }
+    if let paired = pairs[row.id] { return paired }
+    let remaining = candidates.filter { !pairs.values.contains($0) }
+    return remaining.count == 1 ? remaining.first : nil
+}
+
+func pinnedWindow(_ previous: WindowRow, rows: [WindowRow], rootBounds: CGRect) -> WindowRow? {
+    let windows = rows.filter { $0.visible && $0.id == previous.id }
+    guard windows.count == 1, let window = windows.first,
+          window.pid == previous.pid, window.bounds == rootBounds else { return nil }
+    return window
+}
+
+func observedElement<Element>(_ ref: String, in refs: [String: Element], expires: TimeInterval, at uptime: TimeInterval) throws -> Element {
+    guard uptime < expires, let element = refs[ref] else { throw Failure("element_unavailable") }
+    return element
+}
+
+func observedTextValue(_ source: String, expanded: Bool) -> (value: String, truncated: Bool) {
+    let scalars = source.unicodeScalars
+    guard expanded else {
+        let prefix = scalars.prefix(160)
+        return (String(prefix), prefix.endIndex != scalars.endIndex)
+    }
+    let bytes = source.utf8
+    guard var end = bytes.index(bytes.startIndex, offsetBy: 16_384, limitedBy: bytes.endIndex),
+          end != bytes.endIndex else { return (source, false) }
+    while end.samePosition(in: scalars) == nil { bytes.formIndex(before: &end) }
+    return (String(decoding: bytes[..<end], as: UTF8.self), true)
 }
 
 final class DesktopAccess: @unchecked Sendable {
@@ -79,6 +156,12 @@ private func owner(_ element: AXUIElement) -> pid_t? {
     return AXUIElementGetPid(element, &pid) == .success ? pid : nil
 }
 
+private func focusedRoot(_ app: AXUIElement) -> AXUIElement? {
+    guard let root = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(root) == AXUIElementGetTypeID()
+    else { return nil }
+    return (root as! AXUIElement)
+}
+
 private func boundsOfRoot(_ root: AXUIElement) -> CGRect? {
     guard let position = attribute(root, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
           let size = attribute(root, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
@@ -87,6 +170,14 @@ private func boundsOfRoot(_ root: AXUIElement) -> CGRect? {
           AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
     let bounds = CGRect(origin: point, size: dimensions)
     return validBounds(bounds) ? bounds : nil
+}
+
+private func eligibleRoot(_ root: AXUIElement, pid: pid_t) -> CGRect? {
+    AXUIElementSetMessagingTimeout(root, 0.06)
+    guard owner(root) == pid, attribute(root, kAXRoleAttribute) as? String == kAXWindowRole,
+          attribute(root, kAXMinimizedAttribute) as? Bool == false,
+          attribute(root, kAXModalAttribute) as? Bool != true else { return nil }
+    return boundsOfRoot(root)
 }
 
 func validBounds(_ bounds: CGRect) -> Bool {
@@ -108,10 +199,13 @@ struct WindowBindings<Context> {
     private var owners: [CGWindowID: String] = [:]
 
     var count: Int { bindings.count }
+    var activeContexts: [Context] { bindings.values.filter { $0.capture.isActive }.map(\.context) }
 
-    mutating func requireAvailable(_ window: CGWindowID) throws {
+    mutating func requireAvailable(_ window: CGWindowID, stillMatches: (Context) -> Bool = { _ in true }) throws {
         guard let id = owners[window] else { return }
-        if bindings[id]?.capture.isActive == true { throw Failure("window_already_bound") }
+        if let binding = bindings[id], binding.capture.isActive, stillMatches(binding.context) {
+            throw Failure("window_already_bound")
+        }
         remove(id)
     }
 
@@ -220,17 +314,22 @@ final class Windows: @unchecked Sendable {
         guard AXIsProcessTrusted() else { throw Failure("accessibility_permission_required") }
         guard let raw = Self.onScreen() else { throw Failure("console_unavailable") }
         try access.check(rows: raw)
-        guard let all = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-        else { throw Failure("window_unavailable") }
-        return all.compactMap {
-            guard ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+        return raw.compactMap {
+            guard $0[kCGWindowIsOnscreen as String] as? Bool == true,
+                  ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
                   let id = ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value, id != 0,
                   let pid = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid != getpid(),
                   let dictionary = $0[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: dictionary as CFDictionary), validBounds(bounds)
             else { return nil }
-            return WindowRow(id: id, pid: pid, bounds: bounds, visible: $0[kCGWindowIsOnscreen as String] as? Bool == true)
+            return WindowRow(id: id, pid: pid, bounds: bounds, title: $0[kCGWindowName as String] as? String)
         }
+    }
+
+    private func applicationRoots(_ axApp: AXUIElement) -> [AXUIElement]? {
+        AXUIElementSetMessagingTimeout(axApp, 0.06)
+        guard let roots = elements(axApp, kAXWindowsAttribute, limit: 129), roots.count <= 128 else { return nil }
+        return roots
     }
 
     private func matches(_ rows: [WindowRow], pid: pid_t, deadline: TimeInterval) -> [Match] {
@@ -240,23 +339,30 @@ final class Windows: @unchecked Sendable {
               let executable = app.executableURL?.path, canonicalPath(executable) == identity.executable else { return [] }
 
         let axApp = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(axApp, 0.06)
-        guard let roots = elements(axApp, kAXWindowsAttribute, limit: 129), roots.count <= 128 else { return [] }
+        guard let roots = applicationRoots(axApp) else { return [] }
         var verifiedRoots: [AXUIElement] = []
-        var geometry: [CGRect] = []
+        var candidates: [WindowRoot] = []
         for root in roots {
             guard ProcessInfo.processInfo.systemUptime < deadline else { return [] }
-            AXUIElementSetMessagingTimeout(root, 0.06)
-            guard owner(root) == pid, attribute(root, kAXRoleAttribute) as? String == kAXWindowRole,
-                  let bounds = boundsOfRoot(root) else { return [] }
+            guard let bounds = eligibleRoot(root, pid: pid) else { continue }
             verifiedRoots.append(root)
-            geometry.append(bounds)
+            candidates.append(WindowRoot(bounds: bounds, title: attribute(root, kAXTitleAttribute) as? String))
+        }
+        var focused: Int?
+        if app.isActive, let root = focusedRoot(axApp), app.isActive {
+            focused = verifiedRoots.firstIndex { CFEqual($0, root) }
+        }
+        var pinned: [CGWindowID: Int] = [:]
+        for context in bindings.activeContexts where context.match.identity == identity {
+            if let index = verifiedRoots.firstIndex(where: { CFEqual($0, context.match.root) }) {
+                pinned[context.match.row.id] = index
+            }
         }
         guard (try? identity.verify()) != nil else { return [] }
         return rows.compactMap { row in
-            guard ProcessInfo.processInfo.systemUptime < deadline, row.pid == pid, let index = uniqueRoot(row, rows: rows, roots: geometry),
-                  attribute(verifiedRoots[index], kAXMinimizedAttribute) as? Bool == false,
-                  attribute(verifiedRoots[index], kAXModalAttribute) as? Bool != true else { return nil }
+            guard ProcessInfo.processInfo.systemUptime < deadline, row.pid == pid,
+                  let index = uniqueRoot(row, rows: rows, roots: candidates, pinned: pinned, focused: focused,
+                                         chromeTitles: bundleID == "com.google.Chrome") else { return nil }
             return Match(row: row, identity: identity, root: verifiedRoots[index], app: app)
         }
     }
@@ -301,7 +407,7 @@ final class Windows: @unchecked Sendable {
 
     func bind(_ id: CGWindowID) throws -> [String: Any] {
         try live()
-        try bindings.requireAvailable(id)
+        try bindings.requireAvailable(id) { (try? sameWindow($0.match)) != nil }
         let rows = try rows()
         try requireRecording()
         guard let row = rows.first(where: { $0.id == id }),
@@ -340,12 +446,14 @@ final class Windows: @unchecked Sendable {
     private func sameWindow(_ previous: Match) throws -> Match {
         let rows = try rows()
         try previous.identity.verify()
-        guard let match = matches(rows, pid: previous.row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
-                .first(where: { $0.row.id == previous.row.id }),
-              match.identity == previous.identity, CFEqual(match.root, previous.root) else {
+        let app = AXUIElementCreateApplication(previous.identity.pid)
+        guard let roots = applicationRoots(app), roots.contains(where: { CFEqual($0, previous.root) }),
+              let bounds = eligibleRoot(previous.root, pid: previous.identity.pid),
+              let row = pinnedWindow(previous.row, rows: rows, rootBounds: bounds) else {
             throw Failure("window_unavailable")
         }
-        return match
+        try previous.identity.verify()
+        return Match(row: row, identity: previous.identity, root: previous.root, app: previous.app)
     }
 
     private func checkLive(_ binding: Binding) throws {
@@ -410,13 +518,16 @@ final class Windows: @unchecked Sendable {
         return minimum.doubleValue...maximum.doubleValue
     }
 
-    func observe(_ id: String, screenshot: Bool) throws -> ([String: Any], Wire.Image?) {
+    func observe(_ id: String, element: String?, screenshot: Bool) throws -> ([String: Any], Wire.Image?) {
         var value = try bindings.current(id)
         let match = try revalidate(value)
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.6
-        let previous = value.context.expires > ProcessInfo.processInfo.systemUptime ? value.context.refs : [:]
+        let now = ProcessInfo.processInfo.systemUptime
+        let deadline = now + 0.6
+        let previous = value.context.expires > now ? value.context.refs : [:]
+        let root = try element.map { try observedElement($0, in: previous, expires: value.context.expires, at: now) } ?? match.root
         var refs: [String: AXUIElement] = [:]
         var truncated = false
+        var expandedValue: (value: String, truncated: Bool)?
 
         func visit(_ node: AXUIElement, depth: Int) throws -> [String: Any]? {
             try checkLive(value)
@@ -435,7 +546,15 @@ final class Windows: @unchecked Sendable {
             if attribute(node, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole {
                 let raw = attribute(node, kAXValueAttribute)
                 if let string = raw as? String {
-                    tree["value"] = String(string.unicodeScalars.prefix(160))
+                    let preview = observedTextValue(string, expanded: false)
+                    tree["value"] = preview.value
+                    if preview.truncated {
+                        tree["valueTruncated"] = true
+                        if depth > 0 { truncated = true }
+                        if depth == 0, element != nil {
+                            expandedValue = observedTextValue(string, expanded: true)
+                        }
+                    }
                 } else if let number = raw as? NSNumber, number.doubleValue.isFinite {
                     tree["value"] = number
                 }
@@ -446,7 +565,20 @@ final class Windows: @unchecked Sendable {
             return tree
         }
 
-        guard let tree = try visit(match.root, depth: 0) else { throw Failure("window_unavailable") }
+        guard var tree = try visit(root, depth: 0) else {
+            throw Failure(element == nil ? "window_unavailable" : "element_unavailable")
+        }
+        if let expandedValue {
+            var expanded = tree
+            expanded["value"] = expandedValue.value
+            expanded["valueTruncated"] = expandedValue.truncated ? true : nil
+            // Leave space for the RPC envelope and optional screenshot metadata.
+            if let encoded = try? JSONSerialization.data(withJSONObject: expanded),
+               encoded.count <= Wire.metadataLimit - 2_048 {
+                tree = expanded
+            }
+        }
+        if tree["valueTruncated"] as? Bool == true { truncated = true }
         let image = screenshot ? try capture(value) : nil
         _ = try revalidate(value)
         value.context.refs = refs
@@ -458,8 +590,8 @@ final class Windows: @unchecked Sendable {
     func act(_ id: String, element ref: String, action: String, input: Request.Value?) throws -> [String: Any] {
         let value = try bindings.current(id)
         let match = try revalidate(value)
-        guard value.context.expires > ProcessInfo.processInfo.systemUptime, let node = value.context.refs[ref],
-              belongs(node, to: match), let role = text(node, kAXRoleAttribute) else { throw Failure("element_unavailable") }
+        let node = try observedElement(ref, in: value.context.refs, expires: value.context.expires, at: ProcessInfo.processInfo.systemUptime)
+        guard belongs(node, to: match), let role = text(node, kAXRoleAttribute) else { throw Failure("element_unavailable") }
         guard actions(node, role: role).contains(action) else { throw Failure("action_unavailable") }
 
         let property: CFTypeRef?
@@ -538,9 +670,8 @@ final class Windows: @unchecked Sendable {
         }
 
         func focused() -> Bool {
-            guard frontmost(), let root = attribute(app, kAXFocusedWindowAttribute),
-                  CFGetTypeID(root) == AXUIElementGetTypeID() else { return false }
-            return CFEqual(root, match.root)
+            guard frontmost(), let root = focusedRoot(app) else { return false }
+            return CFEqual(root, match.root) && frontmost()
         }
 
         func checkTarget() throws {
@@ -559,7 +690,7 @@ final class Windows: @unchecked Sendable {
         }
 
         var shouldFocus = true
-        try action.execute(window: row.id, locate: { try WindowInput.global($0, in: row.bounds) },
+        try action.execute(window: row, locate: { try WindowInput.global($0, in: row.bounds) },
                            lookupKey: { name, flags in
             DispatchQueue.main.sync { WindowInput.physicalKey(name, flags: flags) }
         }, send: { point, events in

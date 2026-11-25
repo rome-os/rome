@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
@@ -179,24 +180,25 @@ struct WindowInput {
     }
 
     // send validates before dispatching a batch. release can run after send rejects the drag.
-    func execute(window: CGWindowID, locate: (CGPoint) throws -> CGPoint,
+    func execute(window: WindowRow, locate: (CGPoint) throws -> CGPoint,
                  lookupKey: (String, CGEventFlags) -> (CGKeyCode, CGEventFlags)?,
                  send: (CGPoint?, [CGEvent]) throws -> Void, release: (CGEvent) throws -> Void) throws {
         guard let source = CGEventSource(stateID: .privateState) else { throw Failure("action_rejected") }
+        var eventNumber = Int.random(in: 1...1_000_000_000)
         func mouse(_ type: CGEventType, at point: CGPoint, button: Button = .left, count: Int = 0) throws -> CGEvent {
-            guard let event = CGEvent(mouseEventSource: source, mouseType: type,
-                                      mouseCursorPosition: point, mouseButton: button.button) else {
+            // Bridging to Quartz flips the input Y against the main display. Keep the encoded
+            // position window-local so AppKit can hit-test the named window on receipt.
+            let location = CGPoint(x: point.x - window.bounds.minX,
+                                   y: CGDisplayBounds(CGMainDisplayID()).height - (point.y - window.bounds.minY))
+            guard let kind = NSEvent.EventType(rawValue: UInt(type.rawValue)),
+                  let event = NSEvent.mouseEvent(with: kind, location: location,
+                                                 modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue)),
+                                                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Int(window.id),
+                                                 context: nil, eventNumber: eventNumber, clickCount: count,
+                                                 pressure: count == 0 || type == button.events.up ? 0 : 1)?.cgEvent else {
                 throw Failure("action_rejected")
             }
             event.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button.button.rawValue))
-            event.setIntegerValueField(.mouseEventClickState, value: Int64(count))
-            return pointer(event, at: point)
-        }
-        func pointer(_ event: CGEvent, at point: CGPoint) -> CGEvent {
-            event.location = point
-            event.flags = flags
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window))
-            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window))
             return event
         }
         func key(_ code: CGKeyCode, flags: CGEventFlags, chars: [UniChar] = []) throws {
@@ -221,6 +223,7 @@ struct WindowInput {
             for index in 1...count {
                 try send(point, [mouse(button.events.down, at: point, button: button, count: index),
                                  mouse(button.events.up, at: point, button: button, count: index)])
+                eventNumber += 1
             }
         case .move(let local):
             let point = try locate(local)
@@ -228,29 +231,38 @@ struct WindowInput {
         case .drag(let from, let to, let button, let steps):
             let start = try locate(from), end = try locate(to)
             try send(end, [])
-            let up = try mouse(button.events.up, at: end, button: button, count: 1)
+            var up = try mouse(button.events.up, at: start, button: button, count: 1)
             try send(start, [mouse(button.events.down, at: start, button: button, count: 1)])
-            var last = start
             do {
                 for step in 1...steps {
                     let fraction = CGFloat(step) / CGFloat(steps)
                     let point = step == steps ? end : CGPoint(x: start.x + (end.x - start.x) * fraction,
                                                              y: start.y + (end.y - start.y) * fraction)
                     Thread.sleep(forTimeInterval: 0.008)
+                    let nextUp = try mouse(button.events.up, at: point, button: button, count: 1)
                     try send(point, [mouse(button.events.drag, at: point, button: button, count: 1)])
-                    last = point
+                    up = nextUp
                 }
                 try send(end, [up])
             } catch {
-                up.location = last
                 try? release(up)
                 throw error
             }
         case .scroll(let local, let x, let y):
             let point = try locate(local)
-            guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+            guard let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                       wheel1: -y, wheel2: -x, wheel3: 0) else { throw Failure("action_rejected") }
-            try send(point, [pointer(event, at: point)])
+            let event = try mouse(.mouseMoved, at: point)
+            // The wheel initializer has no window number parameter. Keep the AppKit routing
+            // information and copy the deltas from a Core Graphics wheel event.
+            event.type = .scrollWheel
+            for field in [CGEventField.scrollWheelEventIsContinuous, .scrollWheelEventDeltaAxis1, .scrollWheelEventDeltaAxis2,
+                          .scrollWheelEventPointDeltaAxis1, .scrollWheelEventPointDeltaAxis2,
+                          .scrollWheelEventFixedPtDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis2,
+                          .scrollWheelEventMomentumPhase, .scrollWheelEventScrollPhase] {
+                event.setIntegerValueField(field, value: wheel.getIntegerValueField(field))
+            }
+            try send(point, [event])
         case .key(let name):
             if let code = Self.keys[name.lowercased()] {
                 try key(code, flags: flags)

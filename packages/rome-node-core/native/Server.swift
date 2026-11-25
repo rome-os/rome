@@ -567,7 +567,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                             result = try windows.unbind(id)
                         case "observe":
                             guard let id = args?.binding else { throw Failure("invalid_request") }
-                            (result, image) = try windows.observe(id, screenshot: args?.screenshot ?? false)
+                            (result, image) = try windows.observe(id, element: args?.element, screenshot: args?.screenshot ?? false)
                         default:
                             guard let args, let id = args.binding, let action = args.action else {
                                 throw Failure("invalid_request")

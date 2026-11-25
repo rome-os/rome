@@ -74,19 +74,86 @@ final class SelfTest {
         let second = WindowRow(id: 2, pid: 42, bounds: first.bounds.offsetBy(dx: 300, dy: 0))
         let ghost = WindowRow(id: 3, pid: 42, bounds: first.bounds.offsetBy(dx: 700, dy: 0))
         let differentPID = WindowRow(id: 4, pid: 43, bounds: first.bounds)
-        let roots = [first.bounds, second.bounds]
+        let roots = [WindowRoot(bounds: first.bounds), WindowRoot(bounds: second.bounds)]
         let rows = [first, second, ghost, differentPID]
         try expect(uniqueRoot(first, rows: rows, roots: roots) == 0, "first same-PID window")
         try expect(uniqueRoot(second, rows: rows, roots: roots) == 1, "second same-PID window")
         try expect(uniqueRoot(ghost, rows: rows, roots: roots) == nil, "ghost has no AX root")
-        try expect(uniqueRoot(first, rows: rows, roots: [first.bounds, first.bounds]) == nil, "ambiguous AX roots")
+        let coincidentRoots = [WindowRoot(bounds: first.bounds), WindowRoot(bounds: first.bounds)]
+        try expect(uniqueRoot(first, rows: rows, roots: coincidentRoots) == nil, "ambiguous AX roots")
         try expect(uniqueRoot(first, rows: rows + [WindowRow(id: 5, pid: 42, bounds: first.bounds)], roots: roots) == nil,
                    "ambiguous CG rows")
         let offscreen = WindowRow(id: 5, pid: 42, bounds: first.bounds, visible: false)
-        try expect(uniqueRoot(first, rows: rows + [offscreen], roots: roots) == nil, "offscreen geometry can create ambiguity")
+        try expect(uniqueRoot(first, rows: rows + [offscreen], roots: roots) == 0, "offscreen CG rows cannot make a match ambiguous")
         try expect(uniqueRoot(offscreen, rows: [offscreen], roots: roots) == nil, "offscreen window is ineligible")
         try expect(uniqueRoot(first, rows: [second], roots: roots) == nil, "closed CG window fails revalidation")
-        try expect(uniqueRoot(first, rows: rows, roots: [second.bounds]) == nil, "closed AX root fails revalidation")
+        try expect(uniqueRoot(first, rows: rows, roots: [roots[1]]) == nil, "closed AX root is unavailable")
+        let popup = WindowRow(id: 6, pid: first.pid, bounds: first.bounds)
+        let stack = [popup, offscreen, differentPID, first]
+        try expect(uniqueRoot(popup, rows: stack, roots: coincidentRoots, focused: 1) == 1,
+                   "frontmost coincident CG window pairs with the focused AX root")
+        try expect(uniqueRoot(first, rows: stack, roots: coincidentRoots, focused: 1) == 0,
+                   "the remaining coincident CG window pairs with the remaining AX root")
+        try expect(uniqueRoot(first, rows: stack, roots: coincidentRoots) == nil,
+                   "coincident CG and AX windows need evidence beyond array order")
+        try expect(uniqueRoot(popup, rows: stack, roots: roots, focused: 0) == nil,
+                   "focus cannot pair coincident windows if CG and AX counts disagree")
+        try expect(uniqueRoot(first, rows: stack, roots: roots, pinned: [first.id: 0]) == 0,
+                   "a bound window stays discoverable when a coincident CG window has no AX root")
+        try expect(uniqueRoot(popup, rows: stack, roots: roots, pinned: [first.id: 0], focused: 0) == nil,
+                   "an unpaired popup cannot take the existing window's root")
+        try expect(uniqueRoot(popup, rows: stack, roots: coincidentRoots, pinned: [first.id: 0]) == 1,
+                   "a pinned match resolves its peer even when the application is in the background")
+        var named = first
+        named.title = "Document"
+        let namedRoots = [WindowRoot(bounds: first.bounds, title: "Document"), coincidentRoots[1]]
+        try expect(uniqueRoot(named, rows: [popup, named], roots: namedRoots) == 0, "unique titles pair coincident windows")
+        try expect(uniqueRoot(popup, rows: [popup, named], roots: namedRoots) == 1, "a unique title resolves the unnamed peer")
+        try expect(uniqueRoot(popup, rows: [popup, named], roots: [namedRoots[0], namedRoots[0]]) == nil,
+                   "duplicate AX titles do not identify a window")
+        var namedPeer = popup
+        namedPeer.title = "Another document"
+        let chromeRoots = [WindowRoot(bounds: first.bounds, title: "Another document - Google Chrome"),
+                           WindowRoot(bounds: first.bounds, title: "Document - Google Chrome - Test profile")]
+        let coincidentChrome = [named, namedPeer]
+        try expect(uniqueRoot(named, rows: coincidentChrome, roots: chromeRoots, chromeTitles: true) == 1,
+                   "Chrome pairs an AX title with its profile suffix independently of window order")
+        try expect(uniqueRoot(namedPeer, rows: coincidentChrome, roots: chromeRoots, chromeTitles: true) == 0,
+                   "Chrome pairs a titled window without a profile suffix")
+        try expect(uniqueRoot(named, rows: coincidentChrome, roots: chromeRoots) == nil,
+                   "Chrome title decorations are not interpreted in other applications")
+        let incompleteChrome = [WindowRoot(bounds: first.bounds, title: "Unrelated"), chromeRoots[1]]
+        try expect(uniqueRoot(named, rows: coincidentChrome, roots: incompleteChrome, chromeTitles: true) == nil,
+                   "a partial decorated title match cannot select a window")
+        namedPeer.title = "Document - Google Chrome - Test profile"
+        let ambiguousChrome = [WindowRoot(bounds: first.bounds, title: "Document - Google Chrome"),
+                               WindowRoot(bounds: first.bounds, title: namedPeer.title)]
+        try expect(uniqueRoot(namedPeer, rows: [named, namedPeer], roots: ambiguousChrome, chromeTitles: true) == nil,
+                   "an exact title cannot take a Chrome root with a conflicting decorated match")
+        try expect(pinnedWindow(first, rows: stack, rootBounds: first.bounds)?.id == first.id,
+                   "an existing binding survives a coincident popup")
+        try expect(pinnedWindow(first, rows: [popup], rootBounds: first.bounds) == nil, "closing the original CG window revokes it")
+        try expect(pinnedWindow(first, rows: [first], rootBounds: second.bounds) == nil, "divergent AX geometry revokes the binding")
+        try expect(pinnedWindow(first, rows: [first, first], rootBounds: first.bounds) == nil, "duplicate CG IDs revoke the binding")
+        try expect(pinnedWindow(first, rows: [WindowRow(id: first.id, pid: differentPID.pid, bounds: first.bounds)],
+                                rootBounds: first.bounds) == nil, "CG owner changes revoke the binding")
+        try expect(pinnedWindow(first, rows: [WindowRow(id: first.id, pid: first.pid, bounds: first.bounds, visible: false)],
+                                rootBounds: first.bounds) == nil, "offscreen CG windows revoke the binding")
+        let refs = ["subtree": 1]
+        try expect(try observedElement("subtree", in: refs, expires: 15, at: 14) == 1, "an observation can use a current subtree")
+        try rejects("element_unavailable") { _ = try observedElement("subtree", in: refs, expires: 15, at: 15) }
+        try rejects("element_unavailable") { _ = try observedElement("another binding", in: refs, expires: 15, at: 14) }
+        let longText = String(repeating: "中文Rome\n\t🚀", count: 40)
+        let preview = observedTextValue(longText, expanded: false)
+        try expect(preview.truncated && preview.value.unicodeScalars.count == 160, "the observation marks a shortened text preview")
+        let expanded = observedTextValue(longText, expanded: true)
+        try expect(!expanded.truncated && expanded.value.utf8.elementsEqual(longText.utf8),
+                   "a scoped observation preserves long text and Unicode code units")
+        let leading = String(repeating: "a", count: 16_383)
+        let bounded = observedTextValue(leading + "🚀end", expanded: true)
+        try expect(bounded.truncated && bounded.value == leading, "the byte cap stops at a scalar boundary")
+        let maximum = observedTextValue(leading + "a", expanded: true)
+        try expect(!maximum.truncated && maximum.value.utf8.count == 16_384, "the exact byte limit is not truncated")
         try rejects("accessibility_permission_required") {
             try DesktopAccess.require(trusted: false, console: true)
         }
@@ -260,7 +327,14 @@ final class SelfTest {
         try rejects("binding_unavailable") { _ = try registry.current(rebound) }
         let fresh = try bind(1)
         registry.remove(rebound)
-        try expect(try registry.current(fresh).capture.isActive, "stale callback cannot revoke a newer binding")
+        let active = try registry.current(fresh).capture
+        try expect(active.isActive, "stale callback cannot revoke a newer binding")
+        try registry.requireAvailable(1, stillMatches: { $0 == 2 })
+        try rejects("binding_unavailable") { _ = try registry.current(fresh) }
+        try expect(!active.isActive, "a replacement AX root releases an active capture")
+        let replacement = try bind(1)
+        try expect(replacement != fresh && (try registry.current(replacement).capture.isActive),
+                   "a reused CG window ID can bind without an action on the stale binding")
         registry.stopAll()
     }
 
@@ -288,16 +362,21 @@ final class SelfTest {
         let document = row(11, pid, bounds)
         let popup = row(12, pid, bounds, layer: 1)
         let foreignPopup = row(13, getpid(), bounds, layer: 1)
+        let highLayer = CGWindowLevelForKey(.screenSaverWindow) + 100
+        let highOverlay = row(14, 97, bounds, layer: highLayer)
+        let highOverlayAway = row(15, 97, bounds.offsetBy(dx: 400, dy: 0), layer: highLayer)
         func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target) throws {
             try WindowInput.verifyStack(rows, target: target, point: point) { $0 == 99 }
         }
         try verify([cursor, adjacent, expected, helper], at: point)
         try verify([expected, adjacent, helper])
         try rejects("window_coordinate_out_of_bounds") { try verify([expected], at: CGPoint(x: -70, y: 70)) }
-        for blocker in [helper, foreignPopup] {
+        for blocker in [helper, foreignPopup, highOverlay] {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
             try rejects("window_occluded") { try verify([blocker, expected]) }
         }
+        try expect((try? verify([highOverlayAway, expected], at: point)) != nil,
+                   "a high overlay outside the target does not block input")
         for blocker in [document, popup] {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
         }
@@ -331,7 +410,7 @@ final class SelfTest {
             events.removeAll()
             checks.removeAll()
             releases = 0
-            try action.execute(window: target.id, locate: { try WindowInput.global($0, in: bounds) },
+            try action.execute(window: target, locate: { try WindowInput.global($0, in: bounds) },
                                lookupKey: lookup, send: { point, batch in
                 guard checks.count < limit else { throw Failure("session_stopped") }
                 checks.append(point)
@@ -345,17 +424,23 @@ final class SelfTest {
         try expect(events.map(\.type) == Array(repeating: [.otherMouseDown, .otherMouseUp], count: 3).flatMap { $0 },
                    "middle triple-click has three down/up pairs")
         try expect(events.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2, 3, 3], "click counts advance per pair")
-        try expect(events.allSatisfy { $0.location == point && $0.flags.contains([.maskCommand, .maskShift]) &&
-                   $0.getIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent) == Int64(target.id) },
-                   "click flags and recipient fields")
+        let local = CGPoint(x: 10, y: 20)
+        try expect(checks == [point, point, point] && events.allSatisfy {
+            $0.location == local && $0.flags.contains([.maskCommand, .maskShift]) &&
+                NSEvent(cgEvent: $0)?.windowNumber == Int(target.id)
+        }, "click validates global coordinates and carries AppKit window routing with local coordinates")
+        let clickNumbers = events.map { $0.getIntegerValueField(.mouseEventNumber) }
+        try expect(clickNumbers[0] == clickNumbers[1] && clickNumbers[2] == clickNumbers[3] &&
+                   clickNumbers[4] == clickNumbers[5] && Set(clickNumbers).count == 3, "each click has a paired event number")
         try run(action("move", ["x": 10, "y": 20]))
         try expect(events.map(\.type) == [.mouseMoved] && checks == [point], "move validates and posts one event")
         let drag = try action("drag", ["x": 10, "y": 20, "toX": 20, "toY": 40, "steps": 2, "button": "right"])
         try run(drag)
         try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged, .rightMouseDragged, .rightMouseUp],
                    "drag emits a down, interpolated steps and an up")
-        let midpoint = CGPoint(x: -185, y: 80)
-        try expect(events[1].location == midpoint && events[3].location == CGPoint(x: -180, y: 90) && releases == 0,
+        let midpoint = CGPoint(x: 15, y: 30)
+        try expect(checks[2] == CGPoint(x: -185, y: 80) && events[1].location == midpoint &&
+                   events[3].location == CGPoint(x: 20, y: 40) && releases == 0,
                    "drag hits midpoint and exact endpoint")
         try rejects("session_stopped") { try run(drag, limit: 3) }
         try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged, .rightMouseUp] && releases == 1 &&
@@ -370,7 +455,8 @@ final class SelfTest {
         }
         try expect(events.isEmpty && checks.isEmpty, "invalid drag destination fails before sending")
         try run(action("scroll", ["x": 10, "y": 20, "deltaX": -5, "deltaY": 12]))
-        try expect(events.count == 1 && events[0].type == .scrollWheel && events[0].location == point &&
+        try expect(events.count == 1 && events[0].type == .scrollWheel && checks == [point] && events[0].location == local &&
+                   NSEvent(cgEvent: events[0])?.windowNumber == Int(target.id) &&
                    events[0].getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == -12 &&
                    events[0].getIntegerValueField(.scrollWheelEventPointDeltaAxis2) == 5, "scroll direction uses pixel units")
 
