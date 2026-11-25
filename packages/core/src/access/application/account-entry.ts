@@ -42,7 +42,9 @@ export function accountEntry(deps: AccountEntryDeps) {
 
   const guardian = async (): Promise<AccountEntry> => {
     const actor = await guardianActor(deps.db);
-    return actor?.kind === "guardian" ? { kind: "entered", person: actor } : REFUSED;
+    return actor?.kind === "guardian"
+      ? { kind: "entered", person: { ...actor, via: "account" } }
+      : REFUSED;
   };
 
   /** A member as their own sign-in names them, or by their person's id when
@@ -51,7 +53,7 @@ export function accountEntry(deps: AccountEntryDeps) {
     const accounts = await members.identity.accountsOf(personId);
     const email = accounts.find((each) => each.platform === ROME_CLOUD_EMAIL_PLATFORM)?.accountId;
     const signedIn = email ? await profiles.accountIdOf(email) : null;
-    return { kind: "visitor", accountId: signedIn ?? personId, email: email ?? "" };
+    return { kind: "visitor", accountId: signedIn ?? personId, email: email ?? "", via: "account" };
   };
 
   return async (account: { platform: string; id: string }): Promise<AccountEntry> => {

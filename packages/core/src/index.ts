@@ -764,7 +764,7 @@ async function main() {
   });
   // What people say or press on a connection passes this before it starts
   // anything (docs/domains/participation.md#entry).
-  const entrance = entranceOf({
+  const entrance = entranceOf<SessionActor>({
     enter: accountEntry({
       db,
       actsForGuardian: async (account) => {

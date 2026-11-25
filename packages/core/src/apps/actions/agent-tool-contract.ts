@@ -103,6 +103,25 @@ const CASES: ReadonlyArray<{
     write: "needs_guardian",
   },
   {
+    name: "a member let in on a connection",
+    turn: {
+      actor: { ...visitor, via: "account" },
+      channelContext: { channel: "slack", threadId: "C1" },
+    },
+    "read-only": null,
+    write: "private_only",
+  },
+  {
+    name: "the guardian let in on a connection, in a private chat there",
+    turn: {
+      actor: { ...guardianLoopback, via: "account" },
+      audience: "private",
+      channelContext: { channel: "telegram", threadId: "D1" },
+    },
+    "read-only": null,
+    write: "needs_guardian",
+  },
+  {
     name: "a turn no one started in a visitor's chat",
     turn: { channelContext: { channel: "webchat", threadId: "visitor-chat" } },
     "read-only": "guardian_only",
