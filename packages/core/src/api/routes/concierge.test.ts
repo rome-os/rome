@@ -341,9 +341,7 @@ describe("POST /concierge/chats/:chatId/service-connected", () => {
           rules: {},
         }),
       },
-      conciergeChat: async (id: string) =>
-        id in chatOwners ? { id, name: id, main: false } : null,
-      ownerOfChat: async (id: string) => chatOwners[id] ?? null,
+      ownerOfLiveChat: async (id: string) => chatOwners[id] ?? null,
       serviceConnected,
     } as unknown as ConciergeService;
     return mount(testDb, concierge, {} as ApiDeps["webchatRepo"]);

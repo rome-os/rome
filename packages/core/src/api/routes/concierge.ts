@@ -160,9 +160,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
     const { concierge, following, error } = await followingOf(c);
     if (error) return error;
     const chatId = c.req.param("chatId");
-    const owner = (await concierge.conciergeChat(chatId))
-      ? await concierge.ownerOfChat(chatId)
-      : null;
+    const owner = await concierge.ownerOfLiveChat(chatId);
     if (owner === null) {
       return c.json({ error: "No such Concierge chat" }, 404);
     }

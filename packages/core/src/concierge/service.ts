@@ -607,6 +607,12 @@ export class ConciergeService {
     return chat && isConciergeChat(chat) && !this.isMainChat(chat) ? ownerOf(chat) : null;
   }
 
+  /** Whose Concierge chat `chatId` is, or null when it is none or archived. */
+  async ownerOfLiveChat(chatId: string): Promise<ConciergeOwner | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    return chat && isConciergeChat(chat) && !chat.archivedAt ? ownerOf(chat) : null;
+  }
+
   /** A Concierge chat that is not archived, as a list shows it, or null. */
   async conciergeChat(chatId: string): Promise<ConciergeChatRef | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);

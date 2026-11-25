@@ -89,9 +89,7 @@ describe("/chats/:chatId/tasks", () => {
         calls.push(`cancel ${chatId} ${checkId}`);
         return true;
       },
-      conciergeChat: async (chatId: string) =>
-        OWNERS[chatId] ? { id: chatId, name: chatId, main: true } : null,
-      ownerOfChat: async (chatId: string) => OWNERS[chatId] ?? null,
+      ownerOfLiveChat: async (chatId: string) => OWNERS[chatId] ?? null,
       stopTask: async (taskId: string, by: string) => {
         calls.push(`stop ${taskId} ${by}`);
         return 0;

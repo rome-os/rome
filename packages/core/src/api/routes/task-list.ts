@@ -47,14 +47,6 @@ export function chatTaskListOf(deps: TaskListApiDeps): ChatTaskList | null {
   return list;
 }
 
-/** Whose Concierge chat `chatId` is: its owner, or null when it is none or archived. */
-async function ownerOfTaskList(
-  concierge: ConciergeService,
-  chatId: string,
-): Promise<string | null> {
-  return (await concierge.conciergeChat(chatId)) ? concierge.ownerOfChat(chatId) : null;
-}
-
 /**
  * How to subscribe to chat `chatId`'s task list, or null when it has none.
  * Subscribed, it emits `tasks_changed` whenever the list may have changed.
@@ -63,7 +55,7 @@ export async function chatTaskEvents(
   deps: TaskListApiDeps,
   chatId: string,
 ): Promise<((emit: LiveEventEmit) => () => void) | null> {
-  const owner = deps.concierge ? await ownerOfTaskList(deps.concierge, chatId) : null;
+  const owner = (await deps.concierge?.ownerOfLiveChat(chatId)) ?? null;
   return owner === null ? null : (emit) => subscribeChatTasks(deps, chatId, owner, emit);
 }
 
@@ -104,7 +96,7 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     const list = chatTaskListOf(deps);
     if (!concierge || !list) return c.json({ error: "Concierge is not available" }, 404);
     const chatId = c.req.param("chatId") ?? "";
-    const owner = await ownerOfTaskList(concierge, chatId);
+    const owner = await concierge.ownerOfLiveChat(chatId);
     if (owner === null) {
       return c.json({ error: "No such Concierge chat" }, 404);
     }
