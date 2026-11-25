@@ -16,7 +16,7 @@ import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 
 /** `POST /account-codes`, for the guardian and members alike. Answers
- *  `{ code, expiresAt, expiresInSeconds }`. `now` is the clock codes expire by. */
+ *  `{ code, expiresInSeconds }`. `now` is the clock codes expire by. */
 export function accountCodesRoutes(
   deps: Pick<ApiDeps, "db">,
   now: () => Date = () => new Date(),
@@ -62,10 +62,9 @@ export function accountCodesRoutes(
         403,
       );
     }
-    const { code, expiresAt } = await accountCodeIssued(codes, personId);
+    const { code } = await accountCodeIssued(codes, personId);
     return c.json({
       code,
-      expiresAt: expiresAt.toISOString(),
       expiresInSeconds: ACCOUNT_CODE_LIFETIME_MS / 1000,
     } satisfies AccountCodeIssued);
   });

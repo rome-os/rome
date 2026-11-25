@@ -1718,7 +1718,6 @@ export const handlers = [
       Array.from({ length: 6 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
     const issued: AccountCodeIssued = {
       code: `ROME-${group()}-${group()}`,
-      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
       expiresInSeconds: 600,
     };
     return HttpResponse.json(issued);

@@ -59,9 +59,8 @@ describe("account codes API", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as AccountCodeIssued;
-    expect(Object.keys(body).sort()).toEqual(["code", "expiresAt", "expiresInSeconds"]);
+    expect(Object.keys(body).sort()).toEqual(["code", "expiresInSeconds"]);
     expect(looksLikeAccountCode(body.code)).toBe(true);
-    expect(body.expiresAt).toBe("2026-11-25T10:10:00.000Z");
     expect(body.expiresInSeconds).toBe(600);
     expect(await redeemedBy(body.code)).toBe(ann.id);
   });

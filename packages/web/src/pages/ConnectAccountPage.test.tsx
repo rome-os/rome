@@ -18,14 +18,8 @@ afterEach(() => {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** A code as the server gives it: `seconds` to live, and `expiresAt` on the
- *  server's clock, which this browser's clock need not match. */
-const issued = (code: string, seconds: number, serverNow = Date.now()) =>
-  json({
-    code,
-    expiresAt: new Date(serverNow + seconds * 1000).toISOString(),
-    expiresInSeconds: seconds,
-  });
+/** A code as the server gives it, with `seconds` to live. */
+const issued = (code: string, seconds: number) => json({ code, expiresInSeconds: seconds });
 
 function renderPage(...responses: Response[]) {
   const fetch = rs.spyOn(globalThis, "fetch");
@@ -90,10 +84,9 @@ describe("ConnectAccountPage", () => {
   });
 
   it("shows a fresh code when the browser clock runs 15 minutes fast", async () => {
-    const serverNow = Date.now();
     rs.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
-    rs.setSystemTime(serverNow + 15 * 60_000);
-    renderPage(issued("ROME-ABCDEF-GHJKMN", 600, serverNow));
+    rs.setSystemTime(Date.now() + 15 * 60_000);
+    renderPage(issued("ROME-ABCDEF-GHJKMN", 600));
     getCode();
     expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
     expect(screen.getByText(/Stops working in (10:00|9:59)/)).toBeTruthy();

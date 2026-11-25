@@ -4,10 +4,8 @@
 /** A code just given to the signed-in person. It is shown this once. */
 export interface AccountCodeIssued {
   code: string;
-  /** ISO 8601. After it the code adds nothing. */
-  expiresAt: string;
-  /** How long the code lasts from when it was given. Count down from this, not
-   *  `expiresAt`, so a browser clock that is wrong does not change it. */
+  /** How long the code lasts from when it was given. Count down from this,
+   *  so a browser clock that is wrong does not change it. */
   expiresInSeconds: number;
 }
 
