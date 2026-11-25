@@ -99,17 +99,20 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
 
 /**
  * Voids every code every message a history read answers carries, on
- * every kind of connection, so a code Rome missed live, such as one said
- * where Rome's account hears only mentions or edited in later, is dead before
- * the page is handed on. A page with no code-shaped token costs no database
- * read.
+ * every channel, so a code Rome missed live is dead before the page is handed
+ * on: one said where Rome's account hears only mentions, edited in later, or
+ * kept only in a copy Rome mirrors, such as the guardian's own WhatsApp
+ * messages. A page with no code-shaped token costs no database read.
  */
 export function accountCodeReadBack(deps: Pick<AccountCodeAdmissionDeps, "codes">): ReadBack {
-  return async (messages) => {
-    const codes = new Set(messages.flatMap(accountCodesSeenIn));
+  const voided = async (codes: Set<string>) => {
     if (codes.size === 0) return;
     for (const code of codes) await accountCodeVoided(deps.codes, code);
     log.info("account code voided in a history read", { codes: codes.size });
+  };
+  return {
+    messages: (page) => voided(new Set(page.flatMap(accountCodesSeenIn))),
+    entries: (page) => voided(new Set(page.flatMap((entry) => accountCodesIn(entry.body ?? "")))),
   };
 }
 

@@ -12,13 +12,24 @@ import {
 } from "../../identity/application/account-codes.js";
 import { createIdentity } from "../../identity/identity.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { noAccounts } from "../../test/helpers.js";
+import {
+  linkedinMessages,
+  linkedinThreadParticipants,
+  linkedinThreads,
+  waMessages,
+} from "../../db/schema.js";
+import { linkedInMessages } from "../history/linkedin-messages.js";
+import { whatsAppMessages } from "../history/whatsapp-messages.js";
 import {
   ACCOUNT_CODE_ANSWERS,
   accountCodeAdmission,
   accountCodeReadBack,
 } from "./account-code-admission.js";
 import { OrderedAdmission } from "./admission.js";
-import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
+import type { Channel } from "./connected-account.js";
+import { channelList, joinLaterChannel } from "./connected-account-list.js";
+import type { ConnectionPortsDeps } from "./connection-ports.js";
 
 const ANN_SLACK = { platform: "slack", accountId: "T1:U7" };
 
@@ -455,17 +466,16 @@ describe("a history read from the platform", () => {
         unlocked(connection),
       registeredKinds: () => ["slack_app"],
     };
-    const ports = connectionPorts(
-      {
-        registry,
-        channelOf: () => "slack_app",
-        readBack: accountCodeReadBack({ codes }),
-      } as unknown as ConnectionPortsDeps,
-      "slack_app",
-    );
+    const channels = channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: { registry, channelOf: () => "slack_app" } as unknown as ConnectionPortsDeps,
+      readBack: accountCodeReadBack({ codes }),
+    });
     // The port an app's `ChannelsService.query` and an agent's read of the
     // chat's earlier messages both go through.
-    const history = ports!.messages!;
+    const history = channels.find((channel) => channel.name === "slack_app")!.messages!;
     const read = () => history.query({ chatId: "C1" as ChatId });
     // A code tried afterwards from a direct message, which a dead code fails.
     const dead = (code: string) =>
@@ -538,5 +548,227 @@ describe("a history read from the platform", () => {
     platform.push(said("lunch at noon?", 1), said("yes", 2));
 
     expect((await read()).map((m) => m.text)).toEqual(["yes", "lunch at noon?"]);
+  });
+});
+
+describe("a history Rome mirrors from the platform", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => {
+    testDb?.close();
+    testDb = undefined;
+  });
+
+  const CONTACT = "15550001@s.whatsapp.net";
+  const MEMBER = "ACoAAMEMBER";
+
+  /** The channel list as Rome builds it, over the WhatsApp and LinkedIn
+   *  mirrors a sync fills, which no talker delivers from. */
+  function setup() {
+    testDb = createTestDb();
+    const db = testDb.db;
+    const codes = accountCodeContext(db);
+    const identity = createIdentity(db);
+    const channels = channelList({
+      db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      readBack: accountCodeReadBack({ codes }),
+    });
+    const channel = (name: string) => channels.find((each) => each.name === name)!.messages!;
+    const dead = (code: string) =>
+      expect(
+        accountCodeRedeemed(codes, code, { platform: "slack", accountId: "T1:U9" }),
+      ).rejects.toBeInstanceOf(AccountCodeUsedError);
+    const live = (code: string) =>
+      expect(
+        accountCodeRedeemed(codes, code, { platform: "slack", accountId: "T1:U9" }),
+      ).resolves.toBeDefined();
+    return { db, codes, identity, channel, dead, live };
+  }
+
+  /** The guardian's own WhatsApp message, which the mirror keeps and no
+   *  subscriber hears live. */
+  function guardianSaidOnWhatsApp(db: TestDb["db"], text: string): void {
+    db.insert(waMessages)
+      .values({
+        id: "w1",
+        chatJid: CONTACT,
+        senderJid: null,
+        fromMe: true,
+        timestamp: new Date("2026-11-25T10:00:00Z"),
+        type: "text",
+        text,
+        hasMedia: false,
+        createdAt: new Date(),
+      })
+      .run();
+  }
+
+  /** The guardian's own LinkedIn message, as the inbox poller mirrors it. */
+  function guardianSaidOnLinkedIn(db: TestDb["db"], text: string): void {
+    const at = new Date("2026-11-25T10:00:00Z");
+    db.insert(linkedinThreads)
+      .values({
+        threadId: "t1",
+        threadUrl: "https://www.linkedin.com/messaging/thread/t1/",
+        isGroup: false,
+        unread: false,
+        firstSyncedAt: at,
+        updatedAt: at,
+      })
+      .run();
+    db.insert(linkedinThreadParticipants)
+      .values([
+        { threadId: "t1", participantId: "ACoAASELF", firstSyncedAt: at },
+        { threadId: "t1", participantId: MEMBER, firstSyncedAt: at },
+      ])
+      .run();
+    db.insert(linkedinMessages)
+      .values({
+        messageId: "l1",
+        threadId: "t1",
+        sentAt: at,
+        senderIsSelf: true,
+        senderName: "Self",
+        senderProfileUrl: "https://www.linkedin.com/in/ACoAASELF/",
+        text,
+        createdAt: at,
+      })
+      .run();
+  }
+
+  for (const [name, said, store, chatId, address] of [
+    ["whatsapp", guardianSaidOnWhatsApp, whatsAppMessages, CONTACT, CONTACT],
+    ["linkedin", guardianSaidOnLinkedIn, linkedInMessages, "t1", MEMBER],
+  ] as const) {
+    it(`voids a code only the ${name} mirror holds when the chat is queried, and hands the page on unchanged`, async () => {
+      const { db, codes, identity, channel, dead } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, ann.id);
+      said(db, `here is mine: ${code}`);
+
+      const read = { chatId: chatId as ChatId };
+      const page = await channel(name).query(read);
+
+      expect(page).toEqual(await store(db).query(read));
+      expect(page.map((m) => m.text)).toEqual([`here is mine: ${code}`]);
+      await dead(code);
+    });
+
+    it(`voids a code only the ${name} mirror holds when a person's timeline reads it`, async () => {
+      const { db, codes, identity, channel, dead } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, ann.id);
+      said(db, code);
+
+      const accounts = [{ channel: name, addresses: [address] }];
+      const head = await channel(name).byAccount!.latest(accounts);
+
+      expect(head?.body).toBe(code);
+      await dead(code);
+    });
+  }
+
+  it("leaves a code the mirror holds usable until something reads it", async () => {
+    const { db, codes, identity, channel, live } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const { code } = await accountCodeIssued(codes, ann.id);
+    guardianSaidOnWhatsApp(db, code);
+
+    expect(
+      await channel("whatsapp").byAccount!.count([{ channel: "whatsapp", addresses: [CONTACT] }]),
+    ).toBe(1);
+
+    await live(code);
+  });
+});
+
+describe("every channel's history", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => {
+    testDb?.close();
+    testDb = undefined;
+  });
+
+  it("voids a code on every channel the list holds and on one that joins later", async () => {
+    testDb = createTestDb();
+    const codes = accountCodeContext(testDb.db);
+    const identity = createIdentity(testDb.db);
+    // One code per channel, each a person's own, so each read is shown to
+    // void its own.
+    const issued: string[] = [];
+    const codeFor = async () => {
+      const person = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, person.id);
+      issued.push(code);
+      return code;
+    };
+    const ownCode = await codeFor();
+    const talkerCode = await codeFor();
+    const laterCode = await codeFor();
+
+    const answering = (name: string, text: string) =>
+      message(text, { channel: name, chatId: "C1" as ChatId, thread: { kind: "group" } });
+    const own: Channel = {
+      name: "webchat",
+      send: null,
+      inbound: null,
+      accounts: null,
+      directory: null,
+      messages: { query: async () => [answering("webchat", ownCode)], byAccount: null },
+    };
+    const connectionOf = (id: string, text: string) => ({
+      id,
+      connectionKind: "slack_app",
+      withTalker: (call: (talker: object) => unknown) =>
+        call({
+          send: async (chatId: ChatId) => ({ messageId: "sent", chatId }),
+          history: { read: async () => [answering("slack_app", text)] },
+        }),
+      hearTalker: () => () => {},
+    });
+    const first = connectionOf("c1", talkerCode);
+    const later = connectionOf("c2", laterCode);
+    const connections = [first];
+    const registry = {
+      getDescriptor: () => ({ capabilities: { talker: { reads: true } } }),
+      find: () => connections,
+      onUnlocked: () => {},
+      registeredKinds: () => ["slack_app"],
+    };
+    const channelOf = (connection: { id: string }) =>
+      connection.id === "c1" ? "slack_app" : "slack_app-2";
+    const readBack = accountCodeReadBack({ codes });
+    const channels = channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: { registry, channelOf } as unknown as ConnectionPortsDeps,
+      own: [own],
+      readBack,
+    });
+    connections.push(later);
+    joinLaterChannel(
+      { registry, channelOf, channels, readBack } as unknown as Parameters<
+        typeof joinLaterChannel
+      >[0],
+      later,
+    );
+
+    const reading = channels.filter((channel) => channel.messages);
+    expect(reading.map((channel) => channel.name).sort()).toEqual([
+      "linkedin",
+      "slack_app",
+      "slack_app-2",
+      "webchat",
+      "whatsapp",
+    ]);
+    for (const channel of reading) await channel.messages!.query({ chatId: "C1" as ChatId });
+
+    for (const code of issued) {
+      await expect(
+        accountCodeRedeemed(codes, code, { platform: "slack", accountId: "T1:U9" }),
+      ).rejects.toBeInstanceOf(AccountCodeUsedError);
+    }
   });
 });

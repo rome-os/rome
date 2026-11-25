@@ -6,7 +6,9 @@
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
+import type { Message } from "@rome/api-types/message";
 import { DeliveryRefused } from "../../connections/types.js";
+import type { Messages } from "../history/messages.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 import { createLogger } from "../../logger.js";
 
@@ -19,10 +21,46 @@ export type Admission = (
   message: ChannelMessage,
 ) => Promise<boolean>;
 
-/** A step that runs on every page a history read from the platform answers,
- *  and finishes before the page is handed on. It changes no message and drops
- *  none. Admission's sibling for messages read back rather than heard live. */
-export type ReadBack = (messages: readonly ChannelMessage[]) => Promise<void>;
+/** A step that runs on every page a channel's history answers, read from the
+ *  platform or from a copy Rome keeps of it, and finishes before the page is
+ *  handed on. It changes no message and drops none. Admission's sibling for
+ *  messages read back rather than heard live. */
+export interface ReadBack {
+  /** A page `Messages.query` answers. */
+  messages(page: readonly ChannelMessage[]): Promise<void>;
+  /** A page a per-account read answers, for a person's timeline. */
+  entries(page: readonly Message[]): Promise<void>;
+}
+
+/**
+ * `messages` with `readBack` run on every page each of its reads answers
+ * before the page is returned. `count` hands on no message, so it runs
+ * unchanged.
+ */
+export function readingBack(messages: Messages, readBack: ReadBack): Messages {
+  const byAccount = messages.byAccount;
+  return {
+    ...(messages.live === undefined ? {} : { live: messages.live }),
+    async query(request) {
+      const page = await messages.query(request);
+      await readBack.messages(page);
+      return page;
+    },
+    byAccount: byAccount && {
+      async read(request) {
+        const page = await byAccount.read(request);
+        await readBack.entries(page);
+        return page;
+      },
+      count: (accounts) => byAccount.count(accounts),
+      async latest(accounts) {
+        const head = await byAccount.latest(accounts);
+        if (head) await readBack.entries([head]);
+        return head;
+      },
+    },
+  };
+}
 
 /** How long one admission may hold its conversation. Admission is a few
  *  database reads, so fifteen seconds means the database is stuck. */

@@ -30,12 +30,7 @@ import type {
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
-import {
-  type Admission,
-  OrderedAdmission,
-  type OrderedAdmissionOptions,
-  type ReadBack,
-} from "./admission.js";
+import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
@@ -54,9 +49,6 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
-  /** Runs on each page a history read from the platform answers, before the
-   *  page is handed on. */
-  readBack?: ReadBack;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
@@ -204,10 +196,9 @@ function connectionDirectory(backing: Backing): AccountChats {
  * backs the channel now, one chat at a time. A cursor from an earlier page
  * (`after`) names the message the page ended on, so it reads as `olderThan`
  * that message. With no bound, it reads back as far as `limit` reaches.
- * `deps.readBack` runs on each page before it is returned.
  */
 function connectionMessages(backing: Backing): Messages {
-  const { deps, channel } = backing;
+  const { channel } = backing;
   return {
     live: true,
     byAccount: null,
@@ -230,7 +221,6 @@ function connectionMessages(backing: Backing): Messages {
         limit: queryLimit(limit),
       };
       const messages = await callTalker(connection, (talker) => talker.history?.read(chatId, read));
-      await deps.readBack?.(messages);
       // A later channel of the kind names itself, not the kind's first one.
       return messages.map((message) => ({ ...message, channel }));
     },

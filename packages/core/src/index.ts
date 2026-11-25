@@ -781,8 +781,9 @@ async function main() {
     registry: connectionRegistry,
     platformOf: senderPlatformOf,
   });
-  // A code a history read from the platform finds is voided before the page
-  // is handed on, as admission voids one heard live.
+  // A code any channel's history read finds, from the platform or from a copy
+  // Rome mirrors, is voided before the page is handed on, as admission voids
+  // one heard live.
   const readBack = accountCodeReadBack({ codes: accountCodes });
   // Read at each message, once the chat settings below exist.
   const heardInChat = heardUnlessSwitchedOff({
@@ -2493,7 +2494,6 @@ async function main() {
     connections: {
       registry: connectionRegistry,
       admit,
-      readBack,
       channelOf,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -2516,6 +2516,7 @@ async function main() {
       )
       .map((record) => ({ name: record.id, connectionKind: record.connectionKind })),
     own: [webchat],
+    readBack,
   });
   builtChannels = channels;
   recordedChannels.push(...chatsWired.recordedSends(channels));
