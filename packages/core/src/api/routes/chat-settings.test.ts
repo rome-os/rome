@@ -57,12 +57,11 @@ describe("chat settings routes", () => {
     });
   });
 
-  it("records a member's update and reset as the member's", async () => {
-    const { app, update, reset } = harness({
-      kind: "visitor",
-      accountId: "ada",
-      email: "ada@example.com",
-    });
+  it.each<{ kind: "guardian" | "member"; person: SessionActor }>([
+    { kind: "guardian", person: { kind: "guardian", userId: "admin", via: "cookie" } },
+    { kind: "member", person: { kind: "visitor", accountId: "ada", email: "ada@example.com" } },
+  ])("records a $kind's update and reset as a $kind's", async ({ kind, person }) => {
+    const { app, update, reset } = harness(person);
     const send = (path: string, method: string) =>
       app.request(path, {
         method,
@@ -71,7 +70,7 @@ describe("chat settings routes", () => {
       });
     expect((await send("/chat-settings", "PATCH")).status).toBe(200);
     expect((await send("/chat-settings/reset", "POST")).status).toBe(200);
-    const actor = { kind: "member", id: "dashboard" };
+    const actor = { kind, id: "dashboard" };
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ actor }));
     expect(reset).toHaveBeenCalledWith(expect.objectContaining({ actor }));
   });
