@@ -9,6 +9,7 @@ import { actionExecutionContext } from "../apps/actions/context.js";
 import type { RoutineEngine } from "./engine.js";
 import type { Routine, Trigger } from "./types.js";
 import { resolveOneOffDate as resolveInZone } from "./schedule-trigger-provider.js";
+import { guardianAuth } from "../db/schema.js";
 import { createRoutine } from "./create.js";
 
 /** Run `fn` as if invoked by app `callerAppId` via its app-context runAction —
@@ -1718,6 +1719,19 @@ describe("create_routine — for an action in an app's worker", () => {
     const id = (result as { data: { routineId: string } }).data.routineId;
     expect(await repo.creatorOf(id)).toEqual(visitor);
     expect((await repo.findById(id))?.chatId).toBe("chat-1");
+  });
+
+  it("acts for no one when no person can be told", async () => {
+    await testDb.db
+      .insert(guardianAuth)
+      .values({ id: "seat", userId: "seat", passwordHash: "unused", createdAt: new Date() });
+    const id = await repo.create({
+      name: "nudge",
+      trigger: { type: "manual" },
+      actionName: "do_thing",
+      args: {},
+    });
+    expect(await repo.creatorOf(id)).toEqual({ kind: "anonymous" });
   });
 
   it("acts for no one when the worker's action acts for no one", async () => {
