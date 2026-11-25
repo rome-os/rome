@@ -307,7 +307,7 @@ One thing a participant said or did in a chat.
 
 A read-only copy of chosen turns of a dashboard chat, which anyone with its link can open at `/share/<token>` without signing in.
 
-- Every dashboard chat shares the same way: a common chat, a fork chat, a task chat and a [Concierge chat](#concierge-chat) alike. Its owner picks the turns in the chat's share mode, from Share chat in the chat's menu, and makes the link there. Share chat starts with every turn picked, except in a Concierge chat, where it starts with none.
+- Every dashboard chat shares the same way: a common chat, a fork chat, a task chat and a [Concierge chat](#concierge-chat) alike. Any member picks the turns in the chat's share mode, from Share chat in the chat's menu, and makes the link there. Share chat starts with every turn picked, except in a Concierge chat, where it starts with none.
 - Share on a message opens the same share mode with that message's turn already picked. Its owner can make the link at once or pick more turns. There is no link to one message on its own.
 - A link carries the picked turns' messages, and the app and project panels its owner leaves in. App panels start in and the project panel starts out, since it opens every file in the project. It never carries the work behind the messages, from any chat: no trace, tool call or subagent, and the page shows none, even for a link made before this rule. It also keeps the name the chat showed for its agent, and the page labels the agent's turns by it.
 - The page shows a task chat named in a shared message by its title only, without its status or a way to open it.
