@@ -2,7 +2,12 @@ import { afterAll, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
+import { settings } from "../db/schema.js";
+import type { DrizzleDb } from "../db/index.js";
+import {
+  DASHBOARD_ACCESS_SETTING_KEY,
+  INVITED_EMAILS_DONE_KEY,
+} from "./dashboard-access-config.js";
 import { DashboardAccessStore } from "./dashboard-access-store.js";
 import {
   guardianSeatCreated,
@@ -15,6 +20,15 @@ import {
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allowlist-sync.js";
 
 const ORIGIN = "https://cloud.test";
+
+// Records what the members backfill records on its first run: the members are
+// the source of the list.
+function membersBecameSource(db: DrizzleDb): void {
+  db.insert(settings)
+    .values({ key: INVITED_EMAILS_DONE_KEY, value: true, updatedAt: new Date() })
+    .onConflictDoNothing()
+    .run();
+}
 
 interface Sent {
   url: string;
@@ -359,10 +373,33 @@ describe("syncStoredVisitorAllowList", () => {
   const testDb = createTestDb();
   afterAll(() => testDb.close());
 
+  it("queues nothing and logs an error while the members are not the source of the list", async () => {
+    // The first members backfill failed: the older list is still only in the record.
+    const settingsRepo = new SettingsRepository(testDb.db);
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+      cloudEmailAccess: ["ada@example.com"],
+      revision: 3,
+    });
+    const pushed: unknown[] = [];
+    const errors: string[] = [];
+
+    await syncStoredVisitorAllowList(
+      new DashboardAccessStore(settingsRepo, testDb.db),
+      { push: (list) => pushed.push(list) },
+      { error: (message: string) => errors.push(message) },
+    );
+
+    expect(pushed).toEqual([]);
+    expect(errors).toEqual([
+      "visitor allow-list not sent: the members' starting data did not load",
+    ]);
+  });
+
   it("queues the stored list with its stored revision", async () => {
     const settingsRepo = new SettingsRepository(testDb.db);
     await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision: 9 });
     await inviteMember(memberContext(testDb.db), "Ada@Example.com");
+    membersBecameSource(testDb.db);
     const pushed: unknown[] = [];
 
     await syncStoredVisitorAllowList(new DashboardAccessStore(settingsRepo, testDb.db), {
@@ -386,6 +423,7 @@ describe("VisitorAllowListSync — Rome Cloud ahead", () => {
       revision: 2,
     });
     await inviteMember(memberContext(testDb.db), "ada@example.com");
+    membersBecameSource(testDb.db);
     const store = new DashboardAccessStore(settingsRepo, testDb.db);
     const cloud = fakeCloud([], { held: 7 });
     const sync = new VisitorAllowListSync({
@@ -548,6 +586,7 @@ describe("VisitorAllowListSync — applied contract", () => {
     const settingsRepo = new SettingsRepository(testDb.db);
     await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision });
     await invitedEmailsSaved(memberContext(testDb.db), emails);
+    membersBecameSource(testDb.db);
     return new DashboardAccessStore(settingsRepo, testDb.db);
   }
 

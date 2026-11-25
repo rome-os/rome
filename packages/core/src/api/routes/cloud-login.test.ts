@@ -1118,14 +1118,15 @@ describe("/api/auth/cloud — request guards", () => {
 // Rome Cloud refuses to mint a code for a signed-in account that doesn't own the
 // instance and redirects back with `error=access_denied` (+ state + iss). The
 // login page has a single Rome Cloud button, so the cloud callback owns the
-// fork: with a dashboard allow-list, re-route into the visitor attestation
-// flow; without one, surface not_owner. Never a guardian session either way.
+// fork: with a member invited, re-route into the visitor attestation flow;
+// without one, surface not_owner. Never a guardian session either way.
 describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
   // Mount the cloud and visitor routers together so the dispatch can be
   // followed end-to-end: the pending entry the dispatch mints must be
   // redeemable at the visitor callback.
   async function buildApps(opts: { emails?: string[]; accountEmail?: string } = {}): Promise<Hono> {
     const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
     dashboardAccessState.setCloudEmailAccess(opts.emails ?? []);
     const deps = {
       ...(await buildTestDeps(testDb.db)),
@@ -1204,8 +1205,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     expect(done.headers.get("set-cookie")).toBeNull();
   });
 
-  it("surfaces not_owner when no dashboard allow-list exists", async () => {
-    insertGuardian({ accountId: "OWNER" });
+  it("surfaces not_owner when no member is invited, though the seat has an email", async () => {
+    insertGuardian({ accountId: "OWNER", email: "owner@example.com" });
     setInstanceTokenInMemory("romeinst_existing");
     const app = await buildApps();
 

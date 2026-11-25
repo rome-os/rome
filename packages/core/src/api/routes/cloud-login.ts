@@ -386,12 +386,12 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
       // The login UI has a single "Continue with Rome Cloud" button, so this
-      // callback owns the fork: when a member is invited or the seat has an
-      // email, re-route the browser into the visitor attestation flow
-      // (they already hold a Rome Cloud session — one redirect hop, no second
-      // credential entry, and the visitor callback still enforces the
-      // allow-list). With no member invited and no seat email there is
-      // nothing to dispatch to.
+      // callback owns the fork: when a member is invited, re-route the
+      // browser into the visitor attestation flow (they already hold a Rome
+      // Cloud session — one redirect hop, no second credential entry, and the
+      // visitor callback still enforces the allow-list). With no member
+      // invited there is nothing to dispatch to: the seat's email belongs to
+      // the Rome Cloud account that owns this box, which is never refused.
       // The error redirect carries `iss` like every authorize response
       // (RFC 9207); validate it before acting on the error, same as below.
       if (oauthError === "access_denied") {
@@ -404,7 +404,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           });
           return c.redirect(errorRedirect("iss"));
         }
-        if (deps.dashboardAccessState.hasSignInEmails()) {
+        if (deps.dashboardAccessState.hasCloudEmailAccess()) {
           const authorizeUrl = beginDashboardVisitorFlow();
           if (authorizeUrl) {
             log.info("cloud login not-owner; dispatching to dashboard admin flow");

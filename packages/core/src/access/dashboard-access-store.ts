@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -56,6 +57,20 @@ export class DashboardAccessStore {
       emails: await memberEmails(this.members),
       revision: readDashboardAccessRevision(stored),
     };
+  }
+
+  /**
+   * Whether the members are the source of the invited emails: the members
+   * backfill imported the older list, or a save ran. Until then the members
+   * may lack invited emails the settings record still holds.
+   */
+  membersAreSource(): boolean {
+    const marker = this.db
+      .select({ key: settings.key })
+      .from(settings)
+      .where(eq(settings.key, INVITED_EMAILS_DONE_KEY))
+      .get();
+    return marker !== undefined;
   }
 
   /**

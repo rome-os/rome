@@ -150,6 +150,28 @@ describe("backfillMembers", () => {
     ).toBe("member");
   });
 
+  it("makes the members the source of the invited emails once it has run", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    expect(store.membersAreSource()).toBe(false);
+
+    await backfillMembers(db);
+
+    expect(store.membersAreSource()).toBe(true);
+  });
+
+  it("makes the members the source of the invited emails after a save", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    await store.save({ cloudEmailAccess: ["ada@example.com"] });
+
+    expect(store.membersAreSource()).toBe(true);
+  });
+
   it("changes nothing on members an older build already brought in line with the list", async () => {
     testDb = createTestDb();
     const { db } = testDb;
