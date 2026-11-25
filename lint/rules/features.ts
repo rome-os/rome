@@ -23,7 +23,7 @@ const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> =
   },
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
-    why: "an assistant's page sends to an account the way a person's page does, through directPlace, and answers with the same respondToSend so the dashboard reads one shape",
+    why: "an assistant's page sends to an account through directPlace, and answers with person history's respondToSend so every send the dashboard reads has one shape",
   },
   "people/guardian-profile": {
     files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],
@@ -150,6 +150,6 @@ export const featureCrossings: ListedCrossing[] = [
     from: "people/phone-book/application/resource.ts",
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
-    why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
+    why: "A person in the people listing carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
   },
 ];

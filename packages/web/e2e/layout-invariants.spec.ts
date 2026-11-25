@@ -32,7 +32,6 @@ const ROUTES = [
   "/chat",
   "/apps",
   "/apps/inbox",
-  "/people",
   "/sessions",
   "/routines",
   "/sessions/events",

@@ -1,7 +1,7 @@
 /**
  * The Agents channel's address book: the other agents in this Rome's Cloud
  * account, such as the guardian's dots, and the agents of accounts linked
- * to it. Read live from Rome Cloud, so a dot is on the People page, and can be
+ * to it. Read live from Rome Cloud, so a dot is in the people listing, and can be
  * linked at a bond level, before it ever messages Rome. Contract: `Accounts`
  * (accounts.ts).
  *
@@ -28,7 +28,7 @@ import { pageAccounts } from "./account-paging.js";
 
 const log = createLogger("agents-accounts");
 
-/** How long one read of Cloud's agent list answers. A People page reads the
+/** How long one read of Cloud's agent list answers. `GET /api/people` reads the
  *  whole listing and resolves every stored address at once, so this keeps that
  *  to one request. */
 const READ_TTL_MS = 30_000;
@@ -48,7 +48,7 @@ function agentAccount(agentId: string, agent?: ExternalAgent): Account {
   };
 }
 
-/** The agents this Rome can message, read from Cloud. The People page and
+/** The agents this Rome can message, read from Cloud. The people listing and
  *  `system:send_message` by name share one read, so both see the same listing. */
 export interface ExternalAgents {
   /** Whether the guardian has connected Agents. Until then the channel
@@ -73,7 +73,7 @@ export function externalAgents(deps: {
       if (!deps.isConnected()) return Promise.resolve([]);
       if (read && now() - read.at < READ_TTL_MS) return read.agents;
       // A failed read is kept like any other, so an outage does not hold
-      // each People page load, or each send, for Cloud's timeout.
+      // each people listing, or each send, for Cloud's timeout.
       const agents = deps.client
         .agents()
         .then(({ self, agents }) => agents.filter((agent) => agent.agentId !== self.agentId));
@@ -102,9 +102,9 @@ export function agentsAccounts(external: ExternalAgents): Accounts {
                 compareCodePoints(a.name ?? a.id, b.name ?? b.id) || compareCodePoints(a.id, b.id),
             ),
         )
-        // Every address book is read for every People page, so an unreachable
+        // Every address book is read for every people listing, so an unreachable
         // Cloud, or a listing this Rome cannot read, lists no agents rather
-        // than failing the page.
+        // than failing the listing.
         .catch(() => [])
     );
   }

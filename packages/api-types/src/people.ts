@@ -2,37 +2,20 @@
 // they are reachable at:
 //
 //   GET    /api/people              -> PeopleList (curated people only)
-//   GET    /api/people/:id          -> PersonResource
-//   GET    /api/people/:id/messages?channel=&channelUserId= -> TimelinePage
 //   GET    /api/accounts            -> AccountDirectory
-//   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
-//   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
-//   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
-//   POST   /api/people/:id/messages -> SentMessage (200) | SendRefusal (409) | { error } (502)
-//
-// The rest are request types that lead, with the backend following (issues
-// #64, #65):
-//
-//   PATCH  /api/people/:id           -> PersonResource
-//   POST   /api/people/:id/merge     -> PersonResource
-//   DELETE /api/people/:id           -> 204
-//   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
-//   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
+//   POST   /api/people/link-code    -> LinkCodeResponse
 //
 // The vocabulary is docs/concepts/people.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId) —
 // its platform and its own address. The field keeps the name `channel`, and a
 // core that predates platform-keyed links sent the kind of connection in it.
 // The only fact about who is who that
-// Rome contributes is which person it belongs to. So the writes here move a
-// link between people; none of them creates or destroys the account under it.
+// Rome contributes is which person it belongs to.
 //
-// The bond ladder and an account's timeline paging (`TimelinePage`) live here.
-// What that timeline holds — the message shape, its order and its cursor — is
-// the message module's (`./message.ts`), which this file imports.
-//
-// A person carries no history of their own. A timeline is one account's, and
-// a person's page shows one of their accounts at a time.
+// The bond ladder and the timeline paging (`TimelinePage`) live here; the
+// assistants' routes page by it. What a timeline holds — the message shape,
+// its order and its cursor — is the message module's (`./message.ts`), which
+// this file imports.
 //
 // The account read is a contacts list: every account, ordered by name,
 // carrying nothing about what anyone said — it is where a guardian looks
@@ -78,10 +61,6 @@ export type PlacedBondLevel = Exclude<BondLadderLevel, "stranger" | "dismissed">
 export const ASSIGNABLE_BOND_LEVELS = ["inner-circle", "acquaintance", "other"] as const;
 
 export type AssignableBondLevel = (typeof ASSIGNABLE_BOND_LEVELS)[number];
-
-export function isAssignableBondLevel(value: unknown): value is AssignableBondLevel {
-  return ASSIGNABLE_BOND_LEVELS.includes(value as AssignableBondLevel);
-}
 
 /**
  * Bucket a stored `persons.bondLevel` onto the ladder. The column is free text
@@ -547,14 +526,14 @@ export interface LinkedAccount {
    * When this account itself was last active, in epoch seconds, or null when
    * nothing has ever passed on it.
    *
-   * Shown nowhere. It decides which account a person's page opens on
-   * ({@link defaultSendAccount}), the one the guardian last heard from, and
+   * It decides which account a send defaults to ({@link defaultSendAccount}),
+   * the one the guardian last heard from, and
    * only an account's own time can tell two accounts on one channel apart.
    */
   latestAt: number | null;
   /**
    * Rome's own accounts a send to this account may name as
-   * `SendMessageRequest.from`: each account on its platform a connection
+   * as `from`: each account on its platform a connection
    * backs, oldest first. Asked when the person is read, never stored. Absent
    * from a core that predates it.
    */
@@ -593,8 +572,7 @@ export function canSend(account: Pick<LinkedAccount, "send">): boolean {
  * recently, ties broken by address so the answer is the same on every reload.
  *
  * A default, not an inference. Rome never picks a recipient on the guardian's
- * behalf — {@link SendMessageRequest} names the account and has no form that
- * omits it. This only decides which of the offered accounts is filled in
+ * behalf. This only decides which of the offered accounts is filled in
  * first, and the surface showing it is expected to show it.
  *
  * Null when the person holds no account Rome can send to, which a caller must
@@ -617,9 +595,8 @@ export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAc
  * {@link normalizeBondLevel} rather than the contract pretending they cannot
  * exist.
  *
- * No activity. A history is one account's, read with
- * `GET /api/people/:id/messages` for that account, and a person is not a
- * history joined across their accounts.
+ * No activity beyond each account's `latestAt`: a person is not a history
+ * joined across their accounts.
  *
  * `memoryPath` is the profile Rome has written about them, as a path under the
  * memory root — the same address the memory file browser reads. Null when no
@@ -727,15 +704,9 @@ export function comparePeople(a: PersonResource, b: PersonResource): number {
   return byName !== 0 ? byName : compareCodePoints(a.id, b.id);
 }
 
-/**
- * `POST /api/people` — create, with optional atomic linking.
- *
- * Atomic means both-or-neither: if any named account is linked to a real
- * person, the whole request refuses with a {@link LinkConflict} and no person
- * is created. Accounts the dismissal machinery holds link silently, same as
- * {@link LinkAccountRequest}.
- */
-export interface CreatePersonRequest {
+/** A person as the people repository creates one: a name, a bond level, and
+ *  the accounts linked to them. */
+interface CreatePersonRequest {
   displayName: string;
   /** Defaults to "other". */
   bondLevel?: AssignableBondLevel;
@@ -744,103 +715,6 @@ export interface CreatePersonRequest {
 
 /** A create request with its defaults applied: what the write is given. */
 export type NewPerson = Required<CreatePersonRequest>;
-
-/**
- * Read a request body as a {@link NewPerson}, or say what is wrong with it.
- *
- * The rule rather than any one route's rule, so the backend and the dashboard's
- * mock refuse the same bodies with the same words — the page renders the
- * `error` string, so the wording is part of what a client is written against.
- *
- * A name is trimmed before it is judged, and whitespace alone is no name: it
- * slugs to nothing, so accepting it would mint a person whose id is a uuid the
- * guardian never sees a reason for.
- */
-export function parseCreatePersonRequest(body: unknown): { person: NewPerson } | { error: string } {
-  if (typeof body !== "object" || body === null) return { error: "displayName is required" };
-  const raw = body as Record<string, unknown>;
-
-  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
-  if (!displayName) return { error: "displayName is required" };
-
-  if (raw.bondLevel !== undefined && !isAssignableBondLevel(raw.bondLevel)) {
-    return { error: `bondLevel must be one of ${ASSIGNABLE_BOND_LEVELS.join(", ")}` };
-  }
-
-  if (raw.accounts !== undefined && !Array.isArray(raw.accounts)) {
-    return { error: "accounts must be an array of { channel, channelUserId }" };
-  }
-  // Keyed rather than pushed: naming one account twice asks for the state
-  // naming it once produces, and the link table holds one row per account, so
-  // the repeat would abort the write over a request that was never ambiguous.
-  const accounts = new Map<string, NewPerson["accounts"][number]>();
-  for (const entry of (raw.accounts ?? []) as unknown[]) {
-    const account = entry as Partial<NewPerson["accounts"][number]> | null;
-    if (!account?.channel || !account.channelUserId) {
-      return { error: "each account needs a channel and a channelUserId" };
-    }
-    const ref = { channel: account.channel, channelUserId: account.channelUserId };
-    accounts.set(`${ref.channel}\n${ref.channelUserId}`, ref);
-  }
-
-  return {
-    person: { displayName, bondLevel: raw.bondLevel ?? "other", accounts: [...accounts.values()] },
-  };
-}
-
-/** `PATCH /api/people/:id`. The guardian's bond level refuses to change. */
-export interface UpdatePersonRequest {
-  displayName?: string;
-  bondLevel?: AssignableBondLevel;
-}
-
-/**
- * Read a request body as an {@link UpdatePersonRequest}, or say what is wrong
- * with it. The rule rather than any one route's rule, for the reason
- * {@link parseCreatePersonRequest} states.
- *
- * An omitted field is one the update leaves alone, which is the whole
- * difference between this and a write of the person: a body naming only a bond
- * level must not blank the name. So a body naming neither is the empty update
- * rather than a bad request — it asks for the state the person is already in,
- * which is also what a retry of an update that already landed asks for.
- *
- * A body that is not an object is refused all the same. It names no field to
- * leave alone, so reading it as the empty update would answer a malformed
- * request with the person and a 200.
- *
- * `bondLevel` is checked against the levels a guardian may assign, so a body
- * naming "guardian" is refused here whoever it addresses. Whether the person
- * being addressed may move at all is `protectedPersonReason`'s question in
- * ./persons.ts, and it is a different one.
- */
-export function parseUpdatePersonRequest(
-  body: unknown,
-): { update: UpdatePersonRequest } | { error: string } {
-  if (typeof body !== "object" || body === null) {
-    return { error: "displayName or bondLevel is required" };
-  }
-  const raw = body as Record<string, unknown>;
-  const update: UpdatePersonRequest = {};
-
-  if (raw.displayName !== undefined) {
-    // Trimmed before it is judged, as a create's name is: whitespace alone is
-    // no name, and storing it would leave the person unfindable by the name
-    // the guardian typed.
-    const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
-    if (!displayName) return { error: "displayName cannot be empty" };
-    update.displayName = displayName;
-  }
-
-  if (raw.bondLevel !== undefined) {
-    if (!isAssignableBondLevel(raw.bondLevel)) {
-      return { error: `bondLevel must be one of ${ASSIGNABLE_BOND_LEVELS.join(", ")}` };
-    }
-    update.bondLevel = raw.bondLevel;
-  }
-
-  return { update };
-}
 
 /**
  * `POST /api/people/link-code`: a code the guardian sends, in a direct message
@@ -852,100 +726,6 @@ export interface LinkCodeResponse {
   code: string;
   /** Epoch milliseconds. */
   expiresAt: number;
-}
-
-/**
- * `POST /api/people/:id/accounts` — the link verb.
- *
- * Compare-and-swap on the account's current owner: linking an unlinked or
- * dismissed account needs no `transferFrom`, re-linking to the same person is
- * an idempotent no-op, and taking an account from another person requires
- * `transferFrom` naming that person exactly. Anything else answers 409 with a
- * {@link LinkConflict}. The explicitness is the point — a transfer
- * re-attributes the account's whole message history, so it never happens as
- * the side effect of an optimistic retry.
- */
-export interface LinkAccountRequest {
-  channel: string;
-  channelUserId: string;
-  transferFrom?: string;
-}
-
-/**
- * The request a body carries, or null when it is not one — a channel
- * {@link accountRef} cannot name and an empty identifier name no account, and
- * an empty `transferFrom` is a caller that meant to name an owner.
- */
-export function parseLinkAccountRequest(body: unknown): LinkAccountRequest | null {
-  if (typeof body !== "object" || body === null) return null;
-  const { channel, channelUserId, transferFrom } = body as Record<string, unknown>;
-  if (typeof channel !== "string" || !isChannelIdentifier(channel)) return null;
-  if (typeof channelUserId !== "string" || channelUserId === "") return null;
-  if (transferFrom === undefined) return { channel, channelUserId };
-  if (typeof transferFrom !== "string" || transferFrom === "") return null;
-  return { channel, channelUserId, transferFrom };
-}
-
-/**
- * The 409 body for a refused link or dismissal: names the current owner so the
- * caller can render the conflict and offer an explicit transfer. A dismissed
- * account never conflicts: a dismissal holds the account against nobody.
- *
- * The owner is null in one case: a `transferFrom` naming someone who does not
- * hold the account, where the account is now held by nobody. The caller's view
- * of the owner is stale either way, and this is the answer that says so.
- */
-export interface LinkConflict {
-  error: string;
-  channel: string;
-  channelUserId: string;
-  linkedPersonId: string | null;
-  linkedPersonName: string | null;
-}
-
-/** Phrase a {@link LinkConflict}, wording included, so every route and the
- *  mock refuse in the same words. */
-export function linkConflict(
-  account: { channel: string; channelUserId: string },
-  holder: { id: string; displayName: string } | null,
-): LinkConflict {
-  return {
-    error: holder
-      ? `${account.channel}:${account.channelUserId} is already linked to ${holder.displayName}`
-      : `${account.channel}:${account.channelUserId} is linked to nobody`,
-    channel: account.channel,
-    channelUserId: account.channelUserId,
-    linkedPersonId: holder?.id ?? null,
-    linkedPersonName: holder?.displayName ?? null,
-  };
-}
-
-/** `POST /api/people/:id/merge` — :id absorbs `from`: every link transfers
- *  atomically, then `from` is deleted. First-class rather than N transfers
- *  and a delete, because history re-attribution must not half-happen. */
-export interface MergeRequest {
-  from: string;
-}
-
-/**
- * Read a request body as a {@link MergeRequest} against the person absorbing
- * it, or say what is wrong with it.
- *
- * A merge into oneself is refused here rather than being read as a no-op: the
- * operation moves a person's links away and then deletes them, so a caller
- * that names the same person twice is describing a write that would end with
- * the survivor gone. That the two ids are one is visible in the request, so it
- * never reaches a transaction.
- */
-export function parseMergeRequest(
-  body: unknown,
-  into: string,
-): { merge: MergeRequest } | { error: string } {
-  if (typeof body !== "object" || body === null) return { error: "from is required" };
-  const { from } = body as Record<string, unknown>;
-  if (typeof from !== "string" || from === "") return { error: "from is required" };
-  if (from === into) return { error: "a person cannot be merged into themselves" };
-  return { merge: { from } };
 }
 
 // ---------------------------------------------------------------------------
@@ -960,7 +740,7 @@ export function parseMergeRequest(
  * display names), but the mock backend and the chat dialog derive the same
  * fallback, so the formatter lives with the contract they share.
  */
-export function formatWhatsAppPhone(value: string | null | undefined): string | null {
+function formatWhatsAppPhone(value: string | null | undefined): string | null {
   if (!value || value.endsWith("@lid") || value.endsWith("@g.us")) return null;
   // The device suffix is cut at the first colon rather than matched, because a
   // jid is untrusted input and `/:.+$/` over a run of colons backtracks
@@ -1008,76 +788,7 @@ export function whatsAppDisplayName(contact: {
 // ---------------------------------------------------------------------------
 
 /**
- * `POST /api/people/:id/messages` — say something to one of a person's
- * accounts.
- *
- * The account is named, always. There is no shape of this request that omits
- * it and no rule anywhere that fills it in, because every rule that could is a
- * rule that decides who receives a message on evidence too thin to carry it:
- * a message names its channel and not its address, so "reply where they
- * last wrote" cannot separate two numbers on one channel, and "use another
- * channel when this one is down" silently sends somewhere nobody chose.
- * {@link defaultSendAccount} exists for surfaces that want a preselected
- * account, and it is a default on screen rather than a decision off it.
- */
-export interface SendMessageRequest {
-  channel: string;
-  channelUserId: string;
-  text: string;
-  /**
-   * Rome's account the message goes out from, one of the person's account's
-   * `LinkedAccount.from`. Rome never substitutes another account for it.
-   * Absent, the send goes out from Rome's only account on the platform and is
-   * refused while Rome holds several there.
-   */
-  from?: Account;
-}
-
-/** An `Account` as a body spells it, or null where it names none. */
-function accountOf(value: unknown): Account | null {
-  if (typeof value !== "object" || value === null) return null;
-  const { platform, id } = value as Record<string, unknown>;
-  if (typeof platform !== "string" || typeof id !== "string") return null;
-  const named = { platform: platform.trim(), id: id.trim() };
-  return named.platform && named.id && isChannelIdentifier(named.platform) ? named : null;
-}
-
-export function parseSendMessageRequest(
-  body: unknown,
-): { request: SendMessageRequest } | { error: string } {
-  if (typeof body !== "object" || body === null) return { error: "body must be an object" };
-  const raw = body as Record<string, unknown>;
-  const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
-  const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
-  const text = typeof raw.text === "string" ? raw.text.trim() : "";
-  const from = accountOf(raw.from);
-  if (raw.from !== undefined && !from) {
-    return { error: "from must name one of Rome's accounts" };
-  }
-  if (!channel) return { error: "channel is required" };
-  if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
-  if (!channelUserId) return { error: "channelUserId is required" };
-  if (!text) return { error: "text is required" };
-  if (text.length > SEND_MESSAGE_MAX_LENGTH) {
-    return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
-  }
-  return {
-    request: {
-      channel,
-      channelUserId,
-      text,
-      ...(from ? { from } : {}),
-    },
-  };
-}
-
-/** Long enough for anything a person types, short enough that no adapter has to
- *  defend itself against a megabyte. Channels with tighter limits of their own
- *  still chunk or refuse downstream. */
-export const SEND_MESSAGE_MAX_LENGTH = 8000;
-
-/**
- * `POST /api/people/:id/messages` answered: the channel took the message.
+ * A send answered: the channel took the message.
  *
  * Not a {@link Message}. The message joins the timeline once the store that
  * answers for its conversation holds it: Rome's own record, or on a channel
