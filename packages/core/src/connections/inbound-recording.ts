@@ -20,7 +20,7 @@ const log = createLogger("inbound-recording");
 
 /** How long a recorded message waits for the other of Rome's accounts in its
  *  chat to hear it. */
-const HEARD_FOR_MS = 10 * 60_000;
+export const HEARD_FOR_MS = 10 * 60_000;
 
 /** Raises waiting in one place at which it is reported as backing up, as
  *  many messages as a channel port holds per address. The place's next
