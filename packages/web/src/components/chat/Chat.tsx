@@ -2467,10 +2467,9 @@ export function Chat({
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
     !displayedStreaming &&
     !voiceHeard;
-  // A pinned chat always says so in its last row, with one way back, an empty
-  // one too. The default is the guardian's: a visitor never sees it.
+  // A pinned chat always says so in its last row, with one way back, an empty one too.
   const pinnedHint =
-    mainSessionId && pinnedModel && !isArchived && viewer?.kind !== "visitor" ? (
+    mainSessionId && pinnedModel && !isArchived ? (
       <PinnedModelHint
         sessionId={mainSessionId}
         pinnedModel={pinnedModel}

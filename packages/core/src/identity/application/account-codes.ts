@@ -10,7 +10,7 @@ import {
   ACCOUNT_CODE_PREFIX as PREFIX,
   looksLikeAccountCode,
   normalizedAccountCode as normalizedCode,
-} from "../../lib/account-code-shape.js";
+} from "../account-code-shape.js";
 import { AccountCodeRepository } from "../account-code-repository.js";
 import {
   type Account,
