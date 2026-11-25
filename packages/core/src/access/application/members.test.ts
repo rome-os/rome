@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { identities, members } from "../../db/schema.js";
-import { AccountTakenError } from "../../identity/identity.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { GuardianRemovalError } from "../access.js";
 import {
@@ -12,15 +11,14 @@ import {
   memberContext,
   memberSignedIn,
   removeMember,
-  ROME_CLOUD_PLATFORM,
   roleOfAccount,
   seatAccounts,
 } from "./members.js";
 
-const OWNER_CLOUD = { platform: ROME_CLOUD_PLATFORM, accountId: "acct-owner" };
-const OWNER_EMAIL = { platform: "email", accountId: "owner@example.com" };
-const ADA_EMAIL = { platform: "email", accountId: "ada@example.com" };
-const ADA_CLOUD = { platform: ROME_CLOUD_PLATFORM, accountId: "acct-ada" };
+const OWNER_EMAIL = { platform: "rome-cloud-email", accountId: "owner@example.com" };
+const OWNER_SLACK = { platform: "slack", accountId: "T1:U0" };
+const ADA_EMAIL = { platform: "rome-cloud-email", accountId: "ada@example.com" };
+const ADA_SLACK = { platform: "slack", accountId: "T1:U2" };
 
 describe("members", () => {
   let testDb: TestDb | undefined;
@@ -38,10 +36,10 @@ describe("members", () => {
   describe("roleOfAccount", () => {
     it("answers the role of the person an account belongs to", async () => {
       const { ctx } = setup();
-      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD] });
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL] });
       await inviteMember(ctx, "Ada@Example.com");
 
-      expect(await roleOfAccount(ctx, OWNER_CLOUD)).toBe("guardian");
+      expect(await roleOfAccount(ctx, OWNER_EMAIL)).toBe("guardian");
       expect(await roleOfAccount(ctx, ADA_EMAIL)).toBe("member");
     });
 
@@ -58,13 +56,13 @@ describe("members", () => {
     it("lists each member's person, role and accounts, the guardian first", async () => {
       const { ctx } = setup();
       const ada = await inviteMember(ctx, ADA_EMAIL.accountId);
-      const owner = await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD], name: "Owner" });
+      const owner = await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL], name: "Owner" });
 
       expect(await listMembers(ctx)).toEqual([
         {
           person: { id: owner.id, name: "Owner", avatarUrl: null },
           role: "guardian",
-          accounts: [OWNER_CLOUD],
+          accounts: [OWNER_EMAIL],
         },
         {
           person: { id: ada.id, name: null, avatarUrl: null },
@@ -78,17 +76,17 @@ describe("members", () => {
   describe("guardianSeatCreated", () => {
     it("keeps one guardian, and a second call only adds the accounts they lack", async () => {
       const { db, ctx } = setup();
-      const first = await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD], name: "Owner" });
+      const first = await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL], name: "Owner" });
       const again = await guardianSeatCreated(ctx, {
-        accounts: [OWNER_CLOUD, OWNER_EMAIL],
+        accounts: [OWNER_EMAIL, OWNER_SLACK],
         name: "Other",
       });
-      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD, OWNER_EMAIL] });
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL, OWNER_SLACK] });
 
       expect(again).toEqual(first);
       expect(db.select().from(members).all()).toHaveLength(1);
       expect(db.select().from(identities).all()).toHaveLength(1);
-      expect((await listMembers(ctx))[0]?.accounts).toEqual([OWNER_EMAIL, OWNER_CLOUD]);
+      expect((await listMembers(ctx))[0]?.accounts).toEqual([OWNER_EMAIL, OWNER_SLACK]);
     });
 
     it("moves an account another person holds to the guardian", async () => {
@@ -101,55 +99,53 @@ describe("members", () => {
       expect(owner.id).not.toBe(ada.id);
     });
 
-    it("makes a seat's guardian with the seat's accounts, and a local seat's with none", async () => {
+    it("gives a seat's guardian the seat's email only, and a local seat's no account", async () => {
       const { ctx } = setup();
       await guardianSeatCreated(ctx, { accounts: seatAccounts({}), name: "owner" });
-      await guardianSeatCreated(ctx, {
-        accounts: seatAccounts({ accountId: "acct-owner", email: " Owner@Example.com" }),
-      });
+      expect((await listMembers(ctx))[0]?.accounts).toEqual([]);
+      await guardianSeatCreated(ctx, { accounts: seatAccounts({ email: " Owner@Example.com" }) });
 
       expect(await listMembers(ctx)).toEqual([
         {
           person: expect.objectContaining({ name: "owner" }),
           role: "guardian",
-          accounts: [OWNER_EMAIL, OWNER_CLOUD],
+          accounts: [OWNER_EMAIL],
         },
       ]);
     });
   });
 
   describe("guardianSeatRebound", () => {
-    const NEW_CLOUD = { platform: ROME_CLOUD_PLATFORM, accountId: "acct-new" };
-    const NEW_EMAIL = { platform: "email", accountId: "new@example.com" };
+    const NEW_EMAIL = { platform: "rome-cloud-email", accountId: "new@example.com" };
     const SLACK = { platform: "slack", accountId: "T1:U1" };
 
-    it("takes the seat's old accounts from the guardian and gives it the new ones, keeping the rest", async () => {
+    it("moves the guardian from the seat's old email to its new one, keeping the rest", async () => {
       const { ctx } = setup();
-      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD, OWNER_EMAIL, SLACK, ADA_EMAIL] });
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL, SLACK, ADA_EMAIL] });
 
-      const rebind = { previous: [OWNER_CLOUD, OWNER_EMAIL], current: [NEW_CLOUD, NEW_EMAIL] };
+      const rebind = {
+        previous: seatAccounts({ email: OWNER_EMAIL.accountId }),
+        current: seatAccounts({ email: NEW_EMAIL.accountId }),
+      };
       await guardianSeatRebound(ctx, rebind);
       await guardianSeatRebound(ctx, rebind);
 
-      expect(await roleOfAccount(ctx, OWNER_CLOUD)).toBeNull();
       expect(await roleOfAccount(ctx, OWNER_EMAIL)).toBeNull();
+      expect(await roleOfAccount(ctx, NEW_EMAIL)).toBe("guardian");
       expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-        [ADA_EMAIL, NEW_EMAIL, NEW_CLOUD, SLACK],
+        [ADA_EMAIL, NEW_EMAIL, SLACK],
       ]);
     });
 
-    it("keeps an old account the seat still names, and leaves an old account another person holds", async () => {
+    it("leaves an old email another person holds", async () => {
       const { ctx } = setup();
-      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD, OWNER_EMAIL] });
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL] });
       await ctx.identity.removeAccount(OWNER_EMAIL);
       const ada = await inviteMember(ctx, OWNER_EMAIL.accountId);
 
-      await guardianSeatRebound(ctx, {
-        previous: [OWNER_CLOUD, OWNER_EMAIL],
-        current: [OWNER_CLOUD],
-      });
+      await guardianSeatRebound(ctx, { previous: [OWNER_EMAIL], current: [NEW_EMAIL] });
 
-      expect(await roleOfAccount(ctx, OWNER_CLOUD)).toBe("guardian");
+      expect(await roleOfAccount(ctx, NEW_EMAIL)).toBe("guardian");
       expect((await ctx.identity.personOf(OWNER_EMAIL))?.id).toBe(ada.id);
     });
   });
@@ -176,16 +172,16 @@ describe("members", () => {
   describe("removeMember", () => {
     it("revokes the role, then deletes the person and frees their accounts", async () => {
       const { db, ctx, identity } = setup();
-      await inviteMember(ctx, ADA_EMAIL.accountId);
-      await memberSignedIn(ctx, { email: ADA_EMAIL.accountId, account: ADA_CLOUD });
+      const ada = await inviteMember(ctx, ADA_EMAIL.accountId);
+      await identity.addAccount(ada.id, ADA_SLACK);
 
       await removeMember(ctx, "ADA@example.com");
 
-      expect(await roleOfAccount(ctx, ADA_CLOUD)).toBeNull();
+      expect(await roleOfAccount(ctx, ADA_SLACK)).toBeNull();
       expect(await identity.personOf(ADA_EMAIL)).toBeNull();
-      expect(await identity.personOf(ADA_CLOUD)).toBeNull();
+      expect(await identity.personOf(ADA_SLACK)).toBeNull();
       expect(db.select().from(members).all()).toEqual([]);
-      await identity.createPerson({ accounts: [ADA_CLOUD] });
+      await identity.createPerson({ accounts: [ADA_SLACK] });
     });
 
     it("refuses to remove the guardian and changes nothing", async () => {
@@ -227,42 +223,47 @@ describe("members", () => {
   });
 
   describe("memberSignedIn", () => {
-    it("records a member's sign-in with their avatar, and no person for a visitor who is not one", async () => {
+    it("gives a member's person the avatar and no account, and no person to a visitor who is not one", async () => {
       const { db, ctx } = setup();
       const ada = await inviteMember(ctx, ADA_EMAIL.accountId);
 
       await memberSignedIn(ctx, {
         email: "Ada@example.com",
-        account: ADA_CLOUD,
         avatarUrl: "https://example.com/ada.png",
       });
-      await memberSignedIn(ctx, {
-        email: "zed@example.com",
-        account: { platform: ROME_CLOUD_PLATFORM, accountId: "acct-zed" },
-        avatarUrl: null,
-      });
+      await memberSignedIn(ctx, { email: "zed@example.com", avatarUrl: null });
 
       expect(await listMembers(ctx)).toEqual([
         {
           person: { id: ada.id, name: null, avatarUrl: "https://example.com/ada.png" },
           role: "member",
-          accounts: [ADA_EMAIL, ADA_CLOUD],
+          accounts: [ADA_EMAIL],
         },
       ]);
-      expect(
-        await roleOfAccount(ctx, { platform: ROME_CLOUD_PLATFORM, accountId: "acct-zed" }),
-      ).toBeNull();
       expect(db.select().from(identities).all()).toHaveLength(1);
     });
 
-    it("rejects an account another person holds", async () => {
-      const { ctx, identity } = setup();
-      await inviteMember(ctx, ADA_EMAIL.accountId);
-      await identity.createPerson({ accounts: [ADA_CLOUD] });
+    it("knows a sign-in with the guardian's email as the guardian's person", async () => {
+      const { db, ctx } = setup();
+      const owner = await guardianSeatCreated(ctx, {
+        accounts: seatAccounts({ email: OWNER_EMAIL.accountId }),
+        avatarUrl: "https://example.com/owner.png",
+      });
+      await invitedEmailsSaved(ctx, [OWNER_EMAIL.accountId]);
 
-      await expect(
-        memberSignedIn(ctx, { email: ADA_EMAIL.accountId, account: ADA_CLOUD }),
-      ).rejects.toBeInstanceOf(AccountTakenError);
+      await memberSignedIn(ctx, {
+        email: "Owner@Example.com",
+        avatarUrl: "https://example.com/visitor.png",
+      });
+
+      expect(await listMembers(ctx)).toEqual([
+        {
+          person: { id: owner.id, name: null, avatarUrl: "https://example.com/visitor.png" },
+          role: "guardian",
+          accounts: [OWNER_EMAIL],
+        },
+      ]);
+      expect(db.select().from(identities).all()).toHaveLength(1);
     });
   });
 });

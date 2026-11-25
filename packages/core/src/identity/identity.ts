@@ -7,6 +7,13 @@ import { type Person, IdentityRepository, type Account } from "./identity-reposi
 
 export type { Person, Account };
 
+/**
+ * The platform of a Rome Cloud sign-in's account: the email Rome Cloud
+ * reports, which Rome trusts Rome Cloud to have verified. It is not `email`,
+ * the sender address an email connection hears, which anyone can write.
+ */
+export const ROME_CLOUD_EMAIL_PLATFORM = "rome-cloud-email";
+
 /** An account asked to become a person's while it belongs to another person. */
 export class AccountTakenError extends Error {
   constructor(readonly account: Account) {
@@ -99,10 +106,13 @@ export function createIdentity(db: DrizzleDb): Identity {
   return new Identity(new IdentityRepository(db));
 }
 
-// An email account is stored trimmed and lowercased, the way Access
-// normalizes a visitor's email, so one address is one account however it was
-// typed. Identity imports no other context, so the rule is repeated here.
+// An account on either email platform is stored trimmed and lowercased, the
+// way Access normalizes a visitor's email, so one address is one account
+// however it was typed. Identity imports no other context, so the rule is
+// repeated here.
 function normalized(account: Account): Account {
-  if (account.platform !== "email") return account;
-  return { platform: "email", accountId: account.accountId.trim().toLowerCase() };
+  if (account.platform !== "email" && account.platform !== ROME_CLOUD_EMAIL_PLATFORM) {
+    return account;
+  }
+  return { platform: account.platform, accountId: account.accountId.trim().toLowerCase() };
 }

@@ -24,13 +24,14 @@ A person with a role, the guardian included. A member is a [person](identity.md#
 
 These coordinate Identity and Access. They are how Rome uses the rules above now, not rules of roles.
 
-- **A guardian's seat is created.** The guardian's person gets the seat's accounts, and is created with the guardian role when there is no guardian. An account that another person holds moves to the guardian.
-- **A guardian's seat is rebound** to another Rome Cloud account or email. The guardian's person loses the seat's old account and email and gets the new ones. Its other accounts stay, even an email that differs from the seat's, because Identity cannot tell which earlier seat or People link gave the guardian an account. For the same reason, the startup repair adds the seat's accounts and takes none away.
-- **A member is invited** by email. When nobody holds that email, a new person is created with the email as their account. Inviting the guardian's own email leaves them the guardian.
+- **A guardian's seat is created.** The guardian's person gets the seat's email as a `rome-cloud-email` account, and is created with the guardian role when there is no guardian. A local password seat has no email and gives no account. An email that another person holds moves to the guardian.
+- **A guardian's seat is rebound** to another email. The guardian's person loses the seat's old email and gets the new one. Its other accounts stay, even an email that differs from the seat's, because Identity cannot tell which earlier seat or People link gave the guardian an account. A rebind to another Rome Cloud account with the same email changes nothing.
+- **A member is invited** by email. When nobody holds that email as a `rome-cloud-email` account, a new person is created with it as their account. Inviting the guardian's own email leaves them the guardian.
 - **A member is removed.** Their role is revoked, then their person and every account of theirs are deleted, and each account then belongs to nobody.
 - **The invited emails are saved.** Each listed email is invited, and every member who holds none of them is removed.
-- **A member signs in.** Their person gets the account they signed in with. A sign-in by someone with no role creates no person.
+- **A member signs in** through Rome Cloud. The person behind the email as a `rome-cloud-email` account, the guardian or a member, gets the avatar Rome Cloud reports and no account, since the email is the account. A sign-in with the guardian's email is the guardian's person. A sign-in by someone with no role creates no person.
 - An account that would land on the guardian and on someone else stays with the guardian.
+- **Startup.** After migrations, the accounts an earlier build stored move to the sign-in platform: every Rome Cloud id stored as an account is removed, from any person, and each `email` account of a member, which only an invitation gave, becomes the same address on `rome-cloud-email`. The guardian gets the seat's email on `rome-cloud-email` and People's links to it, and loses the seat's address as an `email` account unless People links that address, as an email connection's. No other account is taken away. Only a rebind's own step does that. The invited emails then become the members. A second run changes nothing.
 
 ## Decided against
 

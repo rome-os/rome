@@ -204,13 +204,10 @@ describe("resolveAndRecordAccount", () => {
 
     const ctx = memberContext(testDb.db);
     expect(
-      await roleOfAccount(ctx, { platform: "email", accountId: "old@example.com" }),
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
     ).toBeNull();
     expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-      [
-        { platform: "email", accountId: "new@example.com" },
-        { platform: "rome-cloud", accountId: "acct-A" },
-      ],
+      [{ platform: "rome-cloud-email", accountId: "new@example.com" }],
     ]);
   });
 
@@ -311,30 +308,21 @@ describe("setGuardianAccount", () => {
     });
   });
 
-  it("moves the guardian's person off the old account and email onto the rebound ones", async () => {
+  it("moves the guardian's person off the old email onto the rebound one", async () => {
     await seedGuardian("acct-old", "old@example.com");
     const ctx = memberContext(testDb.db);
     const linked = { platform: "slack", accountId: "T1:U1" };
     await guardianSeatCreated(ctx, {
-      accounts: [
-        { platform: "rome-cloud", accountId: "acct-old" },
-        { platform: "email", accountId: "old@example.com" },
-        linked,
-      ],
+      accounts: [{ platform: "rome-cloud-email", accountId: "old@example.com" }, linked],
     });
 
     await setGuardianAccount(testDb.db, "acct-new", "New@Example.com");
 
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-old" })).toBeNull();
     expect(
-      await roleOfAccount(ctx, { platform: "email", accountId: "old@example.com" }),
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
     ).toBeNull();
     expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-      [
-        { platform: "email", accountId: "new@example.com" },
-        { platform: "rome-cloud", accountId: "acct-new" },
-        linked,
-      ],
+      [{ platform: "rome-cloud-email", accountId: "new@example.com" }, linked],
     ]);
   });
 });

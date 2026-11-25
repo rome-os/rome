@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { identities } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { AccountTakenError, createIdentity, UnknownPersonError } from "./identity.js";
+import {
+  AccountTakenError,
+  createIdentity,
+  ROME_CLOUD_EMAIL_PLATFORM,
+  UnknownPersonError,
+} from "./identity.js";
 
 const ANN_SLACK = { platform: "slack", accountId: "T1:U1" };
 const ANN_EMAIL = { platform: "email", accountId: "ann@example.com" };
@@ -126,6 +131,26 @@ describe("Identity", () => {
     expect((await identity.personOf({ platform: "email", accountId: "ANN@example.com" }))?.id).toBe(
       ann.id,
     );
+  });
+
+  it("stores a Rome Cloud sign-in's email trimmed and lowercased, apart from the same address as an email", async () => {
+    const { identity } = setup();
+    const ann = await identity.createPerson({
+      accounts: [{ platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: " Ann@Example.COM" }],
+    });
+
+    expect(await identity.accountsOf(ann.id)).toEqual([
+      { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: "ann@example.com" },
+    ]);
+    expect(
+      (
+        await identity.personOf({
+          platform: ROME_CLOUD_EMAIL_PLATFORM,
+          accountId: "ANN@example.com",
+        })
+      )?.id,
+    ).toBe(ann.id);
+    expect(await identity.personOf(ANN_EMAIL)).toBeNull();
   });
 
   it("removes one account and changes a person's name and avatar", async () => {
