@@ -16,7 +16,7 @@ interface FixtureApp {
   displayName: string;
   status: string;
   hasFrontend: boolean;
-  href: string;
+  href: string | null;
   iconUrl: string;
   origin: "local" | "builtin" | "appstore";
   installedAt: string | null;
@@ -178,6 +178,46 @@ describe("Recent apps on the rail", () => {
     expect(labels).not.toContain("Quiet App");
     const bravo = screen.getByRole("link", { name: "Bravo" });
     expect(bravo.previousElementSibling?.getAttribute("data-orientation")).toBe("horizontal");
+  });
+
+  it.each([
+    { name: "only unrenderable pins and no renderable recent apps", pinned: false, recent: false },
+    { name: "only unrenderable pins and a recent app", pinned: false, recent: true },
+    { name: "a renderable pin and a recent app", pinned: true, recent: true },
+  ])("places dividers between non-empty sections with $name", ({ pinned, recent }) => {
+    seed(
+      [
+        fixture("headless", "Headless", { hasFrontend: false }),
+        fixture("no-href", "No href", { href: null }),
+        fixture("no-href-recent", "No href recent", { href: null }),
+        ...(pinned ? [fixture("pinned", "Pinned app")] : []),
+        ...(recent ? [fixture("recent", "Recent app")] : []),
+      ],
+      { "no-href-recent": minutesAgo(2), recent: minutesAgo(1) },
+    );
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "people" },
+        { type: "app", id: "uninstalled" },
+        { type: "app", id: "headless" },
+        { type: "app", id: "no-href" },
+        ...(pinned ? [{ type: "app", id: "pinned" }] : []),
+      ]),
+    );
+    renderSidebar();
+
+    const nav = screen.getByRole("navigation");
+    const rows = nav.querySelectorAll('a[aria-label], [data-slot="separator"]');
+    expect(
+      Array.from(rows, (row) => row.getAttribute("aria-label") ?? row.getAttribute("data-slot")),
+    ).toEqual([
+      "Apps",
+      "Chat",
+      "Projects",
+      ...(pinned ? ["separator", "Pinned app"] : []),
+      ...(recent ? ["separator", "Recent app"] : []),
+    ]);
   });
 
   it("leaves a pinned app out of Recent, and Pin from the menu moves it to the pins", async () => {

@@ -145,6 +145,10 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
+  /** Voids every account code in a person's text before a dashboard chat
+   *  records it or hands it to an agent. No database read for a text with
+   *  none. */
+  voidAccountCodesIn: (text: string) => Promise<void>;
   /** Where a send into a place is said and put on record in Chats. */
   recording: SendRecording;
   /** The platforms Rome serves itself, each with its side of a send. The
