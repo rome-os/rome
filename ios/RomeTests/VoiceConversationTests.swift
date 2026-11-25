@@ -309,6 +309,25 @@ import Testing
         #expect(controller.notice == .connectionLost)
     }
 
+    @Test func aRunningConversationShowsOnTheLockScreenUntilItEnds() async {
+        let presence = FakePresence()
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio }, presence: presence)
+        controller.start(request: Self.request, chat: "chat")
+        #expect(presence.shown == 1)
+        #expect(presence.hidden == 0)
+        controller.end()
+        #expect(presence.hidden == 1)
+
+        // One that ends on its own goes too.
+        let refused = FakePresence()
+        let blocked = VoiceConversationController(makeAudio: { FakeAudio(allowed: false) }, presence: refused)
+        blocked.start(request: Self.request, chat: "chat")
+        #expect(refused.shown == 1)
+        await waitUntil { !blocked.active }
+        #expect(refused.hidden == 1)
+    }
+
     @Test func theGuardiansEndLeavesNoLine() async {
         let audio = FakeAudio(allowed: true)
         let controller = VoiceConversationController(makeAudio: { audio })
@@ -454,4 +473,13 @@ private final class SilentServer: @unchecked Sendable {
         listener.cancel()
         lock.withLock { for connection in held { connection.cancel() } }
     }
+}
+
+/// The Lock Screen and Dynamic Island, which tests leave alone: it counts.
+@MainActor
+private final class FakePresence: VoiceConversationPresence {
+    private(set) var shown = 0
+    private(set) var hidden = 0
+    func show() { shown += 1 }
+    func hide() { hidden += 1 }
 }
