@@ -5,6 +5,7 @@ import type { ChatSession } from "@/lib/chat-types";
 import { followDefaultProvider } from "@/lib/chat-api";
 import { LARGE_MODEL_OPTIONS } from "@/lib/chat-constants";
 import { modelDisplayName } from "@/lib/model-display";
+import { modelOptionLabel } from "@/lib/model-options";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { type DefaultModelProvider, useDefaultProvider } from "@/hooks/use-default-provider";
 
@@ -21,7 +22,11 @@ function providerName(providerId: string, t: TFunction<"chat">): string {
 /** The model an owner picked, by the names the selector uses, else its provider. */
 function pickedName(pin: PinnedModel, provider: string, t: TFunction<"chat">): string {
   const option = LARGE_MODEL_OPTIONS.find((candidate) => candidate.id === pin.selection);
-  return pin.model ? modelDisplayName(pin.model) : option ? t(option.labelKey) : provider;
+  return pin.model
+    ? modelDisplayName(pin.model)
+    : option
+      ? modelOptionLabel(option, t("modelSelector.options.auto"))
+      : provider;
 }
 
 /**
