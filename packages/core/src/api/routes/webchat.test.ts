@@ -279,10 +279,16 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
     }
     expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
-    // So do a fork of a turn and its rating.
-    for (const path of ["forks", "feedback"]) {
+    // So do a fork of a turn, its rating, a share and the checks.
+    for (const [path, init] of [
+      ["turns/t/forks", post],
+      ["turns/t/feedback", post],
+      ["share", post],
+      ["checks", {}],
+      ["checks/r-1", { method: "DELETE" }],
+    ] as const) {
       const refused = await runWithSessionActor(visitor, () =>
-        app.request(`/chat/sessions/concierge/turns/t/${path}`, post),
+        app.request(`/chat/sessions/concierge/${path}`, init),
       );
       expect(await refused.json()).toEqual({ error: "Session not found" });
     }

@@ -2785,8 +2785,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, chatGate);
   }
-  // Only its owner sends into a Concierge or task chat, forks it or rates its
-  // turns, since a turn there speaks to the owner.
+  // Only its owner sends into a Concierge or task chat, forks it, rates its
+  // turns, shares it or sees its checks, since a turn there speaks to the owner.
   const maySend = async (chatId: string) =>
     canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await currentChatOwner());
   // A turn answers for the chat it runs in: its dashboard stream's, its
@@ -3354,6 +3354,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    if (!(await maySend(sessionId))) return c.json({ error: "Session not found" }, 404);
     const pending = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
     // A check for a task names it, so the strip can say which task it is for.
     const tasks = deps.concierge?.deps.tasks.repo;
@@ -3370,6 +3371,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    if (!(await maySend(sessionId))) return c.json({ error: "Session not found" }, 404);
     // One for a task tells the Concierge, as from the task's row.
     const cancelled = await deps.concierge?.cancelCheckByOwner(sessionId, c.req.param("checkId"));
     if (!cancelled) return c.json({ error: "No such check in this chat" }, 404);
@@ -3519,6 +3521,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    if (!(await maySend(sessionId))) return c.json({ error: "Session not found" }, 404);
     const { session } = lookup;
 
     const body = await c.req
