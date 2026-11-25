@@ -86,6 +86,7 @@ describe("Slack app members who did not sign in (R12)", () => {
         openDirectMessage: async () => "D_NEW",
         addReaction: async () => {},
         removeReaction: async () => {},
+        postEphemeral: async () => {},
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),

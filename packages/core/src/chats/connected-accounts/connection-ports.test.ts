@@ -369,6 +369,80 @@ describe("send port", () => {
   });
 });
 
+describe("private messages port", () => {
+  /** A channel whose Connection's talker may be live and may offer private
+   *  messages, noting each one it is asked to send. */
+  function portsFor(options: { connected?: boolean } = {}) {
+    const sent: unknown[][] = [];
+    const live = { talker: true };
+    const talker: { privateMessaging?: object } = {};
+    const offerPrivately = () => {
+      talker.privateMessaging = {
+        async sendOnlyTo(...args: unknown[]) {
+          sent.push(args);
+        },
+      };
+    };
+    const connection = {
+      id: "conn-1",
+      service: "slack-app",
+      withTalker: (call: (talker: object) => unknown) => (live.talker ? call(talker) : undefined),
+      hearTalker: () => () => {},
+    };
+    const deps = {
+      registry: {
+        getDescriptor: () => ({ capabilities: { talker: {} } }),
+        find: () => (options.connected === false ? [] : [connection]),
+        onUnlocked: () => {},
+        registeredKinds: () => ["slack-app"],
+      },
+      channelOf: (each: { service: string }) => each.service,
+    } as unknown as ConnectionPortsDeps;
+    const send = () => connectionPorts(deps, "slack-app")!.send!;
+    return { send, sent, live, offerPrivately };
+  }
+
+  const chat = "C1" as ChatId;
+
+  it("rejects as not connected while no Connection backs the channel", async () => {
+    const { send } = portsFor({ connected: false });
+    const privately = send().privately;
+    expect(privately).not.toBeNull();
+    await expect(privately!.sendOnlyTo(chat, "U1", "Sign in here")).rejects.toBeInstanceOf(
+      AccountNotConnected,
+    );
+  });
+
+  it("is null while the live talker sends no private messages", () => {
+    const { send } = portsFor();
+    expect(send().privately).toBeNull();
+  });
+
+  it("stands while talk is locked, and sends on whichever talker is live when called", async () => {
+    const { send, sent, live, offerPrivately } = portsFor();
+    live.talker = false;
+    const privately = send().privately;
+    expect(privately).not.toBeNull();
+    await expect(privately!.sendOnlyTo(chat, "U1", "Sign in here")).rejects.toBeInstanceOf(
+      AccountNotConnected,
+    );
+
+    live.talker = true;
+    offerPrivately();
+    await privately!.sendOnlyTo(chat, "U1", "Sign in here", { replyToMessageId: "1.0" });
+    expect(sent).toEqual([[chat, "U1", "Sign in here", { replyToMessageId: "1.0" }]]);
+  });
+
+  it("refuses blank text as an empty message, and sends nothing", async () => {
+    const { send, sent, offerPrivately } = portsFor();
+    offerPrivately();
+    await expect(send().privately!.sendOnlyTo(chat, "U1", "  \n ")).rejects.toMatchObject({
+      reason: "empty",
+    });
+    expect(sent).toEqual([]);
+  });
+});
+
 describe("messages port", () => {
   /** A Connection whose talker reads its chat history live, and records each
    *  read it is asked for. */

@@ -159,6 +159,8 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
+import { invitedEmailsSaved, memberContext } from "./access/application/members.js";
+import { backfillMembers } from "./access/application/backfill-members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -513,6 +515,9 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
+  // The members as persons with a role (docs/domains/access.md), on top of
+  // Identity. Kept beside the allow-list and the seat, and nothing reads them yet.
+  const memberSteps = memberContext(db);
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -1332,8 +1337,8 @@ async function main() {
     outbox: usageOutboxRepo,
     attribution: usageAttribution,
     credential: () => {
-      const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.credentialId) : null;
+      const cloudAccess = romeCloudAccess();
+      return cloudAccess ? credentialFingerprint(cloudAccess.credentialId) : null;
     },
   });
   // Speech credentials for voice conversation mode. Only the speaker source
@@ -2657,6 +2662,12 @@ async function main() {
   // Question cards stored before cards were described as data get their
   // description (src/webchat/question-card-backfill.ts).
   backfillQuestionCards(db);
+  // The members learn the guardian's seat and the allow-list. Nothing reads
+  // them yet, so a failure is logged and Rome starts
+  // (src/access/application/backfill-members.ts).
+  await backfillMembers(db).catch((err: unknown) => {
+    log.warn("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
+  });
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.
@@ -2796,7 +2807,9 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, (emails) =>
+    invitedEmailsSaved(memberSteps, emails),
+  );
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
   });

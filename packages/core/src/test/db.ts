@@ -13,7 +13,7 @@ import type { AccountLink } from "@rome/api-types/account-agents";
 import type { ActionEngineRepositories } from "../apps/actions/engine.js";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import type { ChannelOf } from "../chats/connected-accounts/connection-ports.js";
-import type { DrizzleDb } from "../db/index.js";
+import { withImmediateTransactions, type DrizzleDb } from "../db/index.js";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
@@ -71,7 +71,7 @@ export function createTestDb(): TestDb {
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
-  const db = drizzle(sqlite, { schema }) as unknown as DrizzleDb;
+  const db = withImmediateTransactions(drizzle(sqlite, { schema })) as unknown as DrizzleDb;
 
   return {
     db,
@@ -89,7 +89,7 @@ export function createTestDbFile(path: string): () => TestDb & { sqlite: Databas
     sqlite.pragma("journal_mode = WAL");
     sqlite.pragma("foreign_keys = ON");
     return {
-      db: drizzle(sqlite, { schema }) as unknown as DrizzleDb,
+      db: withImmediateTransactions(drizzle(sqlite, { schema })) as unknown as DrizzleDb,
       sqlite,
       close: () => sqlite.close(),
     };

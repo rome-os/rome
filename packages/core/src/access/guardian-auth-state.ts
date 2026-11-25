@@ -4,6 +4,12 @@ import { guardianAuth, persons } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { proveIdentity, type ProveIdentityResult } from "../instance/instance-identity.js";
 import { createLogger } from "../logger.js";
+import {
+  guardianSeatRebound,
+  logStepFailure,
+  memberContext,
+  seatAccounts,
+} from "./application/members.js";
 
 const log = createLogger("guardian-account");
 
@@ -102,15 +108,38 @@ export async function setGuardianAccount(
   avatarUrl?: string | null,
 ): Promise<void> {
   const [guardian] = await db
-    .select({ accountId: guardianAuth.accountId })
+    .select({ accountId: guardianAuth.accountId, email: guardianAuth.email })
     .from(guardianAuth)
     .limit(1);
-  const sameAccount = guardian?.accountId === accountId;
+  if (!guardian) return;
+  const sameAccount = guardian.accountId === accountId;
   await db.update(guardianAuth).set({
     accountId,
     ...(email ? { email } : sameAccount ? {} : { email: null }),
     ...(avatarUrl !== undefined ? { avatarUrl } : sameAccount ? {} : { avatarUrl: null }),
   });
+  await guardianFollowsSeat(db, guardian);
+}
+
+// The members' guardian holds the seat's email, so a seat moved to another
+// email takes the guardian's person with it at once: the old email would
+// otherwise still answer guardian. Only the seat's values
+// from before the write are taken away, because Identity cannot tell a seat's
+// email from the same address carried from People.
+async function guardianFollowsSeat(db: DrizzleDb, before: { email: string | null }): Promise<void> {
+  const [after] = await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1);
+  const previous = seatAccounts(before);
+  const current = seatAccounts(after ?? {});
+  const unchanged =
+    previous.length === current.length &&
+    previous.every(
+      (account, i) =>
+        account.platform === current[i].platform && account.accountId === current[i].accountId,
+    );
+  if (unchanged) return;
+  await guardianSeatRebound(memberContext(db), { previous, current }).catch(
+    logStepFailure("guardian's accounts not moved with the rebound seat"),
+  );
 }
 
 export interface ResolveAndRecordOptions {
@@ -158,7 +187,7 @@ export async function recordResolvedAccount(
 
   try {
     const [guardian] = await db
-      .select({ id: guardianAuth.id, accountId: guardianAuth.accountId })
+      .select({ id: guardianAuth.id, accountId: guardianAuth.accountId, email: guardianAuth.email })
       .from(guardianAuth)
       .limit(1);
     if (!guardian) return;
@@ -174,6 +203,7 @@ export async function recordResolvedAccount(
         .set({ accountId: resolvedAccountId, ...profile })
         .where(eq(guardianAuth.id, guardian.id));
       log.info("recorded bound account", { accountId: resolvedAccountId });
+      await guardianFollowsSeat(db, guardian);
       return;
     }
 
@@ -187,6 +217,7 @@ export async function recordResolvedAccount(
 
     if (Object.keys(profile).length > 0) {
       await db.update(guardianAuth).set(profile).where(eq(guardianAuth.id, guardian.id));
+      await guardianFollowsSeat(db, guardian);
     }
   } catch (err) {
     log.warn("account record failed", {
