@@ -36,5 +36,5 @@ Two routes still let a dashboard admin change the guardian's own person, and bot
 Future diffs must respect:
 
 - A dashboard check asks whether the session actor is on the team. It never compares the actor's kind with `guardian` alone, except for the four exceptions.
-- Removing an email from the dashboard allow-list takes the person off the team at their next request.
+- Removing an email from the dashboard allow-list takes the person off the team at their next request or connection. A live connection they have open stays until it closes.
 - A visitor allow-listed for one app is not on the team.

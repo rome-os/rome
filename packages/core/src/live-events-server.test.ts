@@ -358,36 +358,6 @@ describe("live events WebSocket", () => {
     await client.subscribe("chat.status");
   });
 
-  it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {
-    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      await deps.webchatRepo.createSession("sess-a", "A");
-      const client = await connect({
-        "x-forwarded-for": "203.0.113.1",
-        "x-forwarded-host": "rome.example",
-        "x-forwarded-proto": "http",
-        cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
-        origin: "http://rome.example",
-      });
-      await client.subscribe("chat.status");
-
-      dashboardAccess.setCloudEmailAccess([]);
-      client.send({ type: "subscribe", topic: "chat.session:sess-a" });
-      expect(await client.next((m) => m.type === "error")).toEqual({
-        type: "error",
-        topic: "chat.session:sess-a",
-        message: "Forbidden",
-      });
-
-      const closed = new Promise<number>((resolve) => client.ws.once("close", resolve));
-      rs.advanceTimersByTime(25_000);
-      expect(await closed).toBe(1008);
-      await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
-    } finally {
-      rs.useRealTimers();
-    }
-  });
-
   it("acknowledges chat.status before replaying the running snapshot, then streams changes", async () => {
     await deps.webchatRepo.createSession("sess-running", "Running");
     const turn = deps.agentTurnStreamRegistry.register({
@@ -500,16 +470,6 @@ describe("live events WebSocket", () => {
     phone.send({ type: "activity", state: "active" });
     await phone.subscribe("chat.status");
     expect(dashboardActivity.isActive("guardian")).toBe(false);
-  });
-
-  it("ignores an active signal from a visitor dropped from the allow-list", async () => {
-    const visitor = await connect(visitorHeaders());
-    dashboardAccess.setCloudEmailAccess([]);
-    visitor.send({ type: "activity", state: "active" });
-    // An error answers the refused subscribe, after the signal before it ran.
-    visitor.send({ type: "subscribe", topic: "chat.status" });
-    await visitor.next((m) => m.type === "error");
-    expect(dashboardActivity.isActive("visitor:account-1")).toBe(false);
   });
 
   it("forwards session events for the subscribed session only, until unsubscribed", async () => {
