@@ -52,39 +52,15 @@ export function isStaticPublicPath(pathname: string): boolean {
   return matchesAny(pathname, STATIC_PUBLIC_PATHS);
 }
 
-// Backend-only first-party apps whose UI lives at a fixed host route instead of
-// an embedded app bundle (they ship no `web/`, so `/api/apps/<id>/manifest`
-// 404s). Centralized here so routing (App.tsx), the apps grid, and auth
-// classification all agree on which `/apps/<id>` paths are host pages.
-export const HOST_APP_ROUTES: Record<string, string> = {
-  inbox: "/apps/inbox",
-};
-
-export function getHostAppRoute(appId: string): string | null {
-  return HOST_APP_ROUTES[appId] ?? null;
-}
-
-// Paths under /apps/* that are host routes, not embeddable app bundles, so they
-// must never be classified as an app id — otherwise the public-app allowlist
-// could expose them without a session, and the auth gate would probe a manifest
-// that does not exist.
-const RESERVED_APP_ROUTE_IDS = new Set(Object.keys(HOST_APP_ROUTES));
-
 export function getRoutedAppId(pathname: string): string | null {
   const match = pathname.match(/^\/(?:full\/)?apps\/([^/]+)(?:\/|$)/);
   if (!match) return null;
 
-  let appId: string;
   try {
-    appId = decodeURIComponent(match[1]);
+    return decodeURIComponent(match[1]);
   } catch {
     return null;
   }
-
-  // Compare against the reserved set only after decoding: a percent-encoded id
-  // (/apps/%69nbox) must not slip past the guard and re-expose a host dashboard
-  // through the public-app allowlist.
-  return RESERVED_APP_ROUTE_IDS.has(appId) ? null : appId;
 }
 
 export function getApiAppId(pathname: string): string | null {

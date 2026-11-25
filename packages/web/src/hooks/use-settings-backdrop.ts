@@ -23,7 +23,7 @@ const REDIRECT_ONLY = [
   "/people/latest",
   "/events",
   "/guide",
-  "/apps/inbox/:rest/*",
+  "/apps/inbox/*",
   "/full/apps/inbox/*",
 ];
 

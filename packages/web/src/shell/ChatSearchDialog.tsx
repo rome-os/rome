@@ -37,7 +37,6 @@ import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { prettyAgentName } from "@/lib/agent-name";
-import { getHostAppRoute } from "@/lib/auth-routing";
 import {
   ChatApiError,
   createSession,
@@ -118,7 +117,7 @@ function normalizeSearchText(value: string): string {
 
 function openableAppHref(app: InstalledAppCard): string | null {
   if (!app.isEnabled || app.status !== "active" || app.phase !== "installed") return null;
-  return (app.hasFrontend && app.href ? app.href : null) ?? getHostAppRoute(app.id);
+  return app.hasFrontend && app.href ? app.href : null;
 }
 
 /** Catalog matching is intentionally narrower than chat matching: the whole
