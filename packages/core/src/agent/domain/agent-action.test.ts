@@ -123,6 +123,14 @@ describe("searchActions", () => {
     expect(found?.signature.endsWith("…")).toBe(true);
   });
 
+  it("matches no field that a result leaves out", () => {
+    expect(names("low|fast|high")).toEqual([]);
+  });
+
+  it("names the i flag when a /pattern/flags query is not a valid regex", () => {
+    expect(() => names("/(/")).toThrow(/case is ignored only with the i flag/);
+  });
+
   it("rejects a query that is not a valid regex", () => {
     expect(() => names("(")).toThrow("Invalid regex query");
   });

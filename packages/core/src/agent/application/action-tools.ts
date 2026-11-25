@@ -21,11 +21,7 @@ import type { RomeToolRunner } from "./rome-tool-runner.js";
 function requireAction(actions: AgentActions, turn: TurnFacts, actionName: string): AgentAction {
   const action = actions.find(turn, actionName);
   if (!action) {
-    // The catalog holds only actions this agent may call, so the hint names
-    // nothing it could not already list.
-    const named = actions.list(turn).filter((entry) => entry.name.endsWith(`:${actionName}`));
-    const hint = named.length === 1 ? `. Did you mean "${named[0]?.name}"?` : "";
-    throw new Error(`Unknown action: ${actionName}${hint}`);
+    throw new Error(`Unknown action: ${actionName}`);
   }
   return action;
 }
@@ -60,7 +56,7 @@ export function actionTools(
     {
       name: "read_action",
       description:
-        "Read one available action with each argument's full description. Search results already show the arguments as a signature; read an action when that is not enough.",
+        "Read one available action with each argument's full description. Search results already show the arguments as a signature; read an action when that is not enough, such as an argument shown as object or unknown, or one that depends on another argument.",
       inputSchema: {
         type: "object",
         properties: {

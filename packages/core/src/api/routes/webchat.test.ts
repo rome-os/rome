@@ -15,7 +15,9 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
+import { CallerConfigurationError } from "@rome-os/node-core/client";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { createNodeDevicesService } from "../../desktops/node-devices.js";
 import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
@@ -560,6 +562,301 @@ describe("Webchat API", () => {
     expect(internalTurn.status).toBe(200);
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("computerUseGrant");
+  });
+
+  it("blocks remote Mac computer use when signing secret is not protected, allows offline revocation with cancelDevice, short-circuits local target, and preserves Concierge supersedeRunning", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "11111111-2222-4333-8444-555555555555", name: "This computer" };
+    const remoteId = "46569840-79c2-4fff-9f18-b1c86d3d1ec4";
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    let onlineDevices = [{ id: remoteId, name: "Studio Mac", platform: "macos" }];
+    const listDevices = rs
+      .spyOn(deps.nodeDevices, "listDevices")
+      .mockImplementation(async () => ({ devices: onlineDevices }));
+    const cancelDevice = rs.fn(async () => {});
+    const submit = rs.fn((input: AgentTurnInput, _options?: SendTurnOptions) =>
+      testReceipt(
+        testTurnHandle({
+          turnId: "hardened-turn-1",
+          events: (async function* () {
+            yield { type: "result" as const, content: "Done" };
+          })(),
+        }),
+        input.inputId,
+      ),
+    );
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "hardened-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:hardened" },
+      selectModel: () => {},
+      release: () => {},
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+
+    // 1. Weak/dev signing secret disables remote Mac computer use completely.
+    const unsafeApp = createWebchatRuntime({
+      ...deps,
+      computerUseSigningSecretReady: false,
+      placeAudience: async () => "private",
+    }).routes;
+    const unsafeChat = (await (
+      await runWithSessionActor(guardian, () =>
+        unsafeApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Unsafe secret chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          unsafeApp.request(`http://rome.test/chat/sessions/${unsafeChat.id}/computer-use`),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          unsafeApp.request(
+            `http://rome.test/chat/sessions/${unsafeChat.id}/computer-use/${remoteId}`,
+            { method: "PUT", headers: { origin: "http://rome.test" } },
+          ),
+        )
+      ).status,
+    ).toBe(404);
+
+    // 2. Protected runtime: local short-circuit, Concierge supersedeRunning, and offline revocation.
+    const app = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      computerUseSigningSecretReady: true,
+      nativeComputerUse: { cancelDevice },
+      placeAudience: async () => "private",
+    }).routes;
+    const { id } = (await (
+      await runWithSessionActor(guardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Hardened chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    // Local PUT + POST /turns must NOT call nodeDevices.listDevices().
+    listDevices.mockClear();
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    expect(listDevices).not.toHaveBeenCalled();
+
+    const conciergeTurn = await runWithSessionActor(guardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://rome.test" },
+        body: JSON.stringify({
+          text: "Check my local window",
+          priority: "now",
+          computerUseDeviceId: local.deviceId,
+        }),
+      }),
+    );
+    expect(conciergeTurn.status).toBe(200);
+    expect(listDevices).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        priority: "after",
+        supersedeRunning: true,
+        computerUseGrant: expect.objectContaining({ deviceId: local.deviceId }),
+      }),
+    );
+
+    // Approve remote Mac, then take it offline/unlisted, and verify DELETE still revokes & cancels
+    // without blocking on remote cancelDevice round-trips and scoped to the revoking actor.
+    cancelDevice.mockImplementationOnce(() => new Promise<void>(() => {}));
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${remoteId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+    onlineDevices = [];
+    const revokedOffline = await runWithSessionActor(guardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/computer-use/${remoteId}`, {
+        method: "DELETE",
+        headers: { origin: "http://rome.test" },
+      }),
+    );
+    expect(revokedOffline.status).toBe(204);
+    expect(cancelDevice).toHaveBeenCalledWith(
+      remoteId,
+      expect.objectContaining({ userId: "seat" }),
+    );
+    const approvalKey = computerUseApprovalKey(guardian, remoteId, "mac");
+    expect(await deps.settingsRepo.get(approvalKey)).toBeNull();
+  });
+
+  it("returns 503 or discoveryDegraded when remote Mac device discovery fails transiently", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const local = {
+      deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02",
+      name: "This computer",
+    };
+    const remoteId = "992a6210-71d8-4233-858b-764acbbcfe30";
+    deps.nodeDevices.listDevices = rs.fn(async () => null);
+
+    // 1. Remote-only instance: discovery failure must surface 503 instead of 404.
+    const remoteOnlyApp = createWebchatRuntime({
+      ...deps,
+      computerUseSigningSecretReady: true,
+      placeAudience: async () => "private",
+    }).routes;
+    const { id: remoteChatId } = (await (
+      await runWithSessionActor(guardian, () =>
+        remoteOnlyApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Remote only" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request(`/chat/sessions/${remoteChatId}/computer-use`),
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request(
+            `http://rome.test/chat/sessions/${remoteChatId}/computer-use/${remoteId}`,
+            { method: "PUT", headers: { origin: "http://rome.test" } },
+          ),
+        )
+      ).status,
+    ).toBe(503);
+
+    // 2. Local + remote instance: returns 200 with local target and discoveryDegraded: true.
+    const hybridApp = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      computerUseSigningSecretReady: true,
+      placeAudience: async () => "private",
+    }).routes;
+    const { id: hybridChatId } = (await (
+      await runWithSessionActor(guardian, () =>
+        hybridApp.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Hybrid chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+
+    const degraded = await runWithSessionActor(guardian, () =>
+      hybridApp.request(`/chat/sessions/${hybridChatId}/computer-use`),
+    );
+    expect(degraded.status).toBe(200);
+    expect(await degraded.json()).toMatchObject({
+      deviceId: local.deviceId,
+      name: local.name,
+      discoveryDegraded: true,
+    });
+  });
+
+  it("treats unconfigured Cloud as empty remote devices rather than 503 or discoveryDegraded", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const local = {
+      deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02",
+      name: "This computer",
+    };
+    const unconfigured = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus: rs.fn(),
+      run: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
+      listDevices: async () => {
+        throw new CallerConfigurationError("not_configured", "Cloud is not configured");
+      },
+    }));
+    try {
+      const remoteOnlyApp = createWebchatRuntime({
+        ...deps,
+        nodeDevices: unconfigured,
+        computerUseSigningSecretReady: true,
+        placeAudience: async () => "private",
+      }).routes;
+      const { id: remoteChatId } = (await (
+        await runWithSessionActor(guardian, () =>
+          remoteOnlyApp.request("/chat/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "No cloud" }),
+          }),
+        )
+      ).json()) as { id: string };
+
+      expect(
+        (
+          await runWithSessionActor(guardian, () =>
+            remoteOnlyApp.request(`/chat/sessions/${remoteChatId}/computer-use`),
+          )
+        ).status,
+      ).toBe(404);
+
+      const localOnlyApp = createWebchatRuntime({
+        ...deps,
+        nodeDevices: unconfigured,
+        computerUseLocal: local,
+        computerUseSigningSecretReady: true,
+        placeAudience: async () => "private",
+      }).routes;
+      const { id: localChatId } = (await (
+        await runWithSessionActor(guardian, () =>
+          localOnlyApp.request("/chat/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "Local without cloud" }),
+          }),
+        )
+      ).json()) as { id: string };
+
+      const response = await runWithSessionActor(guardian, () =>
+        localOnlyApp.request(`/chat/sessions/${localChatId}/computer-use`),
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ deviceId: local.deviceId, name: local.name });
+      expect(body).not.toHaveProperty("discoveryDegraded");
+    } finally {
+      unconfigured.close();
+    }
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {

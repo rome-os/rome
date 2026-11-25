@@ -128,7 +128,7 @@ struct TopicChatScreen: View {
                     ConciergeStarters { send(text: $0.text) }
                 }
                 if !archived {
-                    TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, inThread: store?.threadFocus != nil, sharing: store?.share.isSelecting ?? false) { send() }
+                    TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, inThread: store?.threadFocus != nil, replying: store?.composerReply != nil || store?.threadFocus != nil, sharing: store?.share.isSelecting ?? false) { send() }
                 }
             }
             .shareModeComposer(store?.share)
@@ -272,6 +272,8 @@ private struct TopicComposer: View {
     @Binding var focused: Bool
     let attachments: ComposerAttachments
     let inThread: Bool
+    /// The field writes in a thread or replies to a message: no voice conversation.
+    let replying: Bool
     /// Share selection hides the field while it lasts.
     let sharing: Bool
     let onSend: () -> Void
@@ -286,7 +288,7 @@ private struct TopicComposer: View {
         let chat = chatId.flatMap(workspace.topics.chat)
         // Only "Message in <name>" is fitted.
         let name = inThread ? nil : TopicChatsStore.composerName(chat)
-        Composer(text: $draft, placeholder: inThread ? String(localized: "Message in thread") : TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, onSend: onSend)
+        Composer(text: $draft, placeholder: inThread ? String(localized: "Message in thread") : TopicChatsStore.composerPlaceholder(chat), named: name.map { NamedPlaceholder(name: $0, text: TopicChatsStore.messageIn) }, focused: $focused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: chatId, voiceField: .topicChat, onScreen: onScreen, conversationHere: !replying, onSend: onSend)
     }
 }
 
