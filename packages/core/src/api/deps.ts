@@ -125,7 +125,7 @@ export interface ApiDeps {
   channelsService: ChannelsService;
   chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
+  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;

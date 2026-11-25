@@ -116,6 +116,12 @@ export const PERSONAL_DATA_ROUTINE_REFUSED =
   "personal_data_private_only: A routine that reads personal data (Apple Health and other synced " +
   "data) must work for a private chat, such as one of the guardian's own dashboard chats.";
 
+/** Whether a routine bound to `actionName` reads personal data, by its
+ *  canonical name or the local name an agent may write. */
+function readsPersonalData(actionName: string): boolean {
+  return isPersonalDataAction(actionName) || isPersonalDataAction(`core:${actionName}`);
+}
+
 export class RoutinesRepository {
   /**
    * @param placeAudience Who can read a routine's chat. Absent, every chat is
@@ -334,7 +340,7 @@ export class RoutinesRepository {
         ? routineChatOf(data.actionName, data.args, data.madeIn)
         : data.chatId;
     // Refused when it is made, not on every fire.
-    if (isPersonalDataAction(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
+    if (readsPersonalData(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
     }
     const createdBy = await routineCreator(this.db, data);
@@ -371,7 +377,7 @@ export class RoutinesRepository {
   ) {
     if (
       data.actionName !== undefined &&
-      isPersonalDataAction(data.actionName) &&
+      readsPersonalData(data.actionName) &&
       (await this.audienceOf(id)) !== "private"
     ) {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
