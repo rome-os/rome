@@ -25,9 +25,10 @@ notarization ticket.
 Build a production bundle with `build --identity 'Apple signing identity'`.
 For controller keys, also pass `--provisioning-profile PATH` with a macOS
 provisioning profile for the explicit App ID of `com.rome.computer-use`.
-The script embeds the profile and signs the helper with its application
-identifier. The macOS data protection Keychain uses that identifier to
-restrict access to the key store. Sign with the same App ID across releases
+For local development, a macOS wildcard profile that covers the bundle ID
+also works. The script embeds the profile and signs the helper with a
+concrete application identifier. The macOS data protection Keychain uses it
+to restrict access to the key store. Sign with the same App ID across releases
 to retain the keys. A build without the profile supports session approval
 without a controller. Controller authorization and key management commands
 fail with `key_store_unavailable` when the Keychain cannot grant access.

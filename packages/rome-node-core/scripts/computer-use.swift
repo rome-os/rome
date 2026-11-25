@@ -166,6 +166,17 @@ func withPublication(_ output: URL, _ stageApp: (URL) throws -> Void) throws {
     }
 }
 
+func applicationIdentifier(in profile: [String: Any]) throws -> String {
+    let failure = BuildError("The macOS provisioning profile must authorize \(bundleID).")
+    guard let platforms = profile["Platform"] as? [String], platforms.contains("OSX"),
+          let entitlements = profile["Entitlements"] as? [String: Any],
+          let appID = entitlements["com.apple.application-identifier"] as? String,
+          let separator = appID.firstIndex(of: "."), separator != appID.startIndex else { throw failure }
+    let app = appID[appID.index(after: separator)...]
+    guard app == bundleID || app == "*" else { throw failure }
+    return appID[...separator] + bundleID
+}
+
 func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?) throws {
     guard selfTest ? identity == nil && profile == nil : identity != nil && identity != "-" && identity != "" else {
         throw BuildError("Choose either --self-test-build or an Apple code-signing --identity.")
@@ -191,12 +202,7 @@ func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?) t
                 let decoded = stage.appendingPathComponent("profile.plist")
                 try run("/usr/bin/security", ["cms", "-D", "-i", embedded.path, "-o", decoded.path])
                 let key = "com.apple.application-identifier"
-                guard let entitlements = try plist(decoded)["Entitlements"] as? [String: Any],
-                      let appID = entitlements[key] as? String,
-                      let separator = appID.firstIndex(of: "."), separator != appID.startIndex,
-                      String(appID[appID.index(after: separator)...]) == bundleID else {
-                    throw BuildError("The provisioning profile needs an explicit App ID for \(bundleID).")
-                }
+                let appID = try applicationIdentifier(in: plist(decoded))
                 let path = stage.appendingPathComponent("entitlements.plist")
                 let data = try PropertyListSerialization.data(fromPropertyList: [key: appID], format: .xml, options: 0)
                 try data.write(to: path)
@@ -215,6 +221,17 @@ func test(_ app: URL) throws {
         do { try action() }
         catch let error as BuildError where error.description == message { return }
         throw BuildError("Expected failure: \(message)")
+    }
+    func profile(_ id: String, platform: String = "OSX") -> [String: Any] {
+        ["Platform": [platform], "Entitlements": ["com.apple.application-identifier": id]]
+    }
+    let explicitID = "TESTTEAM00.\(bundleID)"
+    guard try applicationIdentifier(in: profile(explicitID)) == explicitID,
+          try applicationIdentifier(in: profile("TESTTEAM00.*")) == explicitID else {
+        throw BuildError("Expected a concrete helper application identifier.")
+    }
+    for invalid in [profile("TESTTEAM00.com.example.other"), profile("TESTTEAM00.*", platform: "iOS"), profile(".*")] {
+        try rejects("The macOS provisioning profile must authorize \(bundleID).") { _ = try applicationIdentifier(in: invalid) }
     }
     let root = try temporaryDirectory("/private/tmp/rome-native-build.XXXXXX", failure: "Cannot make test directory.")
     defer { try? files.removeItem(at: root) }
@@ -241,7 +258,7 @@ func test(_ app: URL) throws {
         try data.write(to: infoPlist(candidate), options: .atomic)
     }
     try rejects("The release helper needs a valid Developer ID Application signature.") { try validate(installed, release: true) }
-    print("Bundle checks passed (build lock, staging, atomic replacement, absent and unsigned release rejection).")
+    print("Bundle checks passed (profile authorization, build lock, staging, atomic replacement, absent and unsigned release rejection).")
 }
 
 func testNodeHandshake(_ app: URL, state: URL) throws {
