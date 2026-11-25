@@ -253,7 +253,7 @@ describe("agent model pins through Sessions", () => {
     const firstManager = createManager();
     const first = await firstManager.open(key, {
       workingDir: directory,
-      selectionId: "claude-sonnet",
+      selectionId: "anthropic/claude-sonnet-5-5",
     });
     await collect((await startAfter(first, { prompt: "use selected model" })).events());
     await firstManager.shutdown();

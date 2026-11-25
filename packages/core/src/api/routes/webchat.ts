@@ -1,3 +1,4 @@
+import { readModelSelectionInput } from "@rome/api-types/models";
 import { withTaskCards } from "../../concierge/task-cards.js";
 import {
   ConciergeTurnTiming,
@@ -90,7 +91,6 @@ import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
   WEBCHAT_LARGE_MODEL_SETTING_KEY,
-  normalizeWebchatLargeModelSelectionId,
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
@@ -2056,7 +2056,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const agentName = input.session.agentName ?? "main";
-    const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
     const channelThreadKey = webchatSessionKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
@@ -2069,6 +2068,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       heldSource = undefined;
     };
     try {
+      const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)
@@ -3084,6 +3084,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
   const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
+    try {
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 400);
+    }
     let deviceFolder: DeviceFolder | null = null;
     if (body.deviceFolder) {
       const { deviceId, path } = body.deviceFolder;
@@ -3131,7 +3136,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const message = err instanceof Error ? err.message : "Internal error";
       return answer({ error: message }, getWebchatProjectErrorStatus(message));
     }
-    const modelSelection = await resolveRequestedInitialModelSelection(body.largeModelSelection);
+    let modelSelection;
+    try {
+      modelSelection = await resolveRequestedInitialModelSelection(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 409);
+    }
     const personaId = await resolveRequestedPersonaId(body.personaId);
 
     // `agentName` locks this session to a non-main agent for its lifetime.
@@ -3418,16 +3428,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "A fork chat keeps the model it branched with" }, 409);
     }
     const body = await c.req.json<unknown>().catch(() => undefined);
-    const requested =
-      typeof body === "object" && body !== null
-        ? (body as { largeModelSelection?: unknown }).largeModelSelection
-        : undefined;
-    if (
-      typeof requested !== "string" ||
-      normalizeWebchatLargeModelSelectionId(requested) !== requested
-    ) {
-      return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
+    let requested;
+    try {
+      requested = readModelSelectionInput(
+        body && typeof body === "object"
+          ? (body as { largeModelSelection?: unknown }).largeModelSelection
+          : undefined,
+      );
+    } catch (error) {
+      return c.json({ error: String(error) }, 400);
     }
+    if (requested === undefined) return c.json({ error: "A model selection is required" }, 400);
     if (
       !isConciergeChat(lookup.session) &&
       (await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true
@@ -4186,6 +4197,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (contentType.includes("multipart/form-data")) {
       const form = await c.req.formData().catch(() => null);
       if (!form) return {};
+      const choice = form.get("largeModelSelection");
+      if (choice !== null && typeof choice !== "string")
+        throw new Error("Model selection must be text");
       const getString = (key: string) => {
         const value = form.get(key);
         return typeof value === "string" ? value : undefined;
@@ -4250,6 +4264,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       onTurn?: (turn: Promise<AgentTurnHandle>) => void;
     } = {},
   ): Promise<RouteAnswer> => {
+    try {
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 400);
+    }
     // A Concierge turn's timing starts when the owner's send reaches Rome.
     const receivedAtMs = Date.now();
     const actor = said.taskActor ?? (await currentSessionActor());
@@ -4687,17 +4706,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // model that thread pinned, unless it stores one of its own: kept by a
     // change of the default, or Rome's strength after Back to default. A
     // model the first message names does not apply to a branch.
-    const modelSelection =
-      session.parentSessionId !== null
-        ? resolveStoredModelSelection(largeModelSelection)
-        : await resolveSessionModelSelectionForTurn(
-            {
-              id: sessionId,
-              largeModelSelection,
-            },
-            messageCount,
-            body.largeModelSelection,
-          );
+    let modelSelection;
+    try {
+      modelSelection =
+        session.parentSessionId !== null
+          ? resolveStoredModelSelection(largeModelSelection)
+          : await resolveSessionModelSelectionForTurn(
+              {
+                id: sessionId,
+                largeModelSelection,
+              },
+              messageCount,
+              body.largeModelSelection,
+            );
+    } catch (error) {
+      return answer({ error: String(error) }, 409);
+    }
     const reasoningEffort = await chatReasoningEffort(session, body.reasoningEffort);
     const channelThreadKey = webchatSessionKey(sessionId);
 
@@ -5493,7 +5517,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   app.post("/chat/sessions/:id/turns", async (c) => {
-    const body = await parseChatSendBody(c);
+    let body: SendBody;
+    try {
+      body = await parseChatSendBody(c);
+    } catch {
+      return c.json({ error: "Invalid model identity or request body" }, 400);
+    }
     const sent = await handleChatSend(c.req.param("id"), body, {
       fromWidgetEvent: cameThroughWidgetEvent(c.env),
       askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),

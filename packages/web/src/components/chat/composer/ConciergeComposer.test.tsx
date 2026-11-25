@@ -242,7 +242,11 @@ describe("ConciergeComposer", () => {
 
   it.each([true, false])("opens the model submenu with selector=%s", async (selector) => {
     const onChange = rs.fn();
-    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } }, undefined, selector);
+    renderComposer(
+      { modelSelection: { value: "anthropic/claude-sonnet-5-5", onChange } },
+      undefined,
+      selector,
+    );
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     screen.getByRole("button", { name: "Add files or change the model" }).focus();
     await userEvent.keyboard("{Enter}");
@@ -255,13 +259,18 @@ describe("ConciergeComposer", () => {
     // Short list first: the common models plus the chat's own pick.
     const names = async () =>
       (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
-    expect(await names()).toEqual(["Auto (default provider)", "Opus 5.5", "Sonnet", "GPT-6 Astra"]);
+    expect(await names()).toEqual([
+      "Auto (default provider)",
+      "Opus 5.5",
+      "Sonnet 5.5",
+      "GPT-6 Astra",
+    ]);
     expect(screen.queryByRole("menuitemradio", { name: "GPT-6 Luna" })).toBeNull();
     // "Show all" expands the list in place and keeps the menu open.
     await userEvent.click(screen.getByRole("menuitem", { name: /Show all \d+ models/ }));
     expect((await names()).length).toBeGreaterThan(4);
     await userEvent.click(screen.getByRole("menuitemradio", { name: "GPT-6 Luna" }));
-    expect(onChange).toHaveBeenCalledWith("gpt-6-luna");
+    expect(onChange).toHaveBeenCalledWith("openai/gpt-6-luna");
   });
 
   it("leaves the model out when the chat cannot change its model", async () => {

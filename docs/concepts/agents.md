@@ -28,7 +28,7 @@ tools:
 systemPromptPrefix: Complete the requested coding task.
 ```
 
-`modelId` is the provider's model ID, not a WebChat selector slug. For example, `gpt-5.6-terra` is a provider ID while `gpt-5-6-terra` is a selector slug. IDs do not need to appear in Rome's WebChat catalog. Rome checks provider availability and known entitlements, and the provider validates IDs it receives. Declaring an ID does not grant access to that model.
+`modelId` is the provider's native model ID, not a WebChat selection key. For example, `gpt-5.6-terra` is a native ID and `openai/gpt-5.6-terra` is its selection key. The old `gpt-5-6-terra` token is accepted only as legacy input. IDs do not need to appear in Rome's WebChat catalog. Rome checks provider availability and known entitlements, and the provider validates IDs it receives. Declaring an ID does not grant access to that model.
 
 **Validation:**
 
