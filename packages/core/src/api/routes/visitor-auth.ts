@@ -229,8 +229,9 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
     }
 
     // Any visitor may also be on the dashboard list, so every sign-in keeps
-    // the profile. Chat shows it beside their messages, and a failed write
-    // costs only that, so it never fails the sign-in.
+    // the profile. Chat shows it beside their messages, and it names a member's
+    // messages on a platform as theirs. A failed write never fails the sign-in,
+    // and the next one writes it again.
     await visitorProfiles.record(accountId, { email, avatarUrl }).catch((err: unknown) => {
       log.warn("visitor profile write failed", {
         error: err instanceof Error ? err.message : String(err),
