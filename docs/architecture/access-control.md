@@ -14,7 +14,7 @@ Two policies decide reach, each held as its own setting:
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
 - Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
-- A failed lookup of a session is a person Rome cannot tell, who never counts as the guardian.
+- A failed lookup of a session is a person Rome cannot tell, who never acts as the guardian. Who may write is the entry check's.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/people.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
