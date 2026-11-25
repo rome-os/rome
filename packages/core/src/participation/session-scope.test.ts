@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { sessionOfChat } from "./session-scope.js";
+import { answersManyChats, sessionOfChat } from "./session-scope.js";
 
 describe("sessionOfChat", () => {
   const chat = { channel: "slack_app", chatId: "C1" };
@@ -16,5 +16,10 @@ describe("sessionOfChat", () => {
     expect(sessionOfChat({ channel: "slack_app", chatId: "D9" }, "account")).toEqual(
       sessionOfChat(chat, "account"),
     );
+  });
+
+  it("tells an account's session from a chat's own by its key", () => {
+    expect(answersManyChats(sessionOfChat(chat, "account").continuityKey)).toBe(true);
+    expect(answersManyChats(sessionOfChat(chat, "chat").continuityKey)).toBe(false);
   });
 });

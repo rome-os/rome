@@ -296,6 +296,7 @@ A [chat rule](#chat-rule) saying which session answers a chat: its own (`chat`, 
 
 - [Participation](participation.md#speaker) picks the session from it when a turn starts. The agent runs the turn in the session it is given and does not know which chats share it.
 - A session that answers more than one chat is shared, whichever chat opened it: what a direct message said in it is read as said where others read it.
+- Each turn of such a session belongs to the chat its message was said in, never to the chat that opened the session: its message, its catch-up, its record and its reply are that chat's. Its turns run one at a time, so a long turn in one chat delays the next turn in every other.
 - The account's session starts afresh by the [session reset](#chat-rule) of the chat whose message opens it.
 - No kind offers it to the guardian. A kind may fix it, as Rome's Slack app does.
 

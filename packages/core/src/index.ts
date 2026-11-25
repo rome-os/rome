@@ -1400,18 +1400,17 @@ async function main() {
       if (!added) throw new Error("This chat's account takes no reaction.");
       await added;
     },
-    // What the Concierge says in a chat on a connection goes out as the inbox
-    // sends an agent's reply: past the send gate, and Envoy where it asks, to
-    // the platform through the chat's speaker, which records it.
     // A report runs in the session the chat's messages run in.
     chatSessionKey: async ({ channel, threadId }) => {
       const connectionId = channelRecords.byId(channel)?.connectionId;
       const scope = connectionId
-        ? (await chatSettings.get({ connectionId, chatId: threadId as ChatId })).effective.session
-            .scope
+        ? await chatSessionScope({ connectionId, chatId: threadId as ChatId })
         : "chat";
-      return sessionOfChat({ channel, chatId: threadId }, scope).continuityKey;
+      return sessionOfChat({ channel, chatId: threadId }, scope ?? "chat").continuityKey;
     },
+    // What the Concierge says in a chat on a connection goes out as the inbox
+    // sends an agent's reply: past the send gate, and Envoy where it asks, to
+    // the platform through the chat's speaker, which records it.
     sayInChat: (chat, message) =>
       sayOnConnection(
         {

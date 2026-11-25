@@ -32,6 +32,7 @@ import {
   resetPolicyOfMessage,
   sessionOfMessage,
 } from "./chat-reset-policy.js";
+import { answersManyChats } from "../participation/session-scope.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { narrowerAudience } from "../agent/index.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
@@ -306,13 +307,20 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         });
 
         const prepared = await (async () => {
+          // A session that answers many chats records each turn in its own
+          // chat, never in the chat that opened the session.
+          const manyChats = answersManyChats(session.key.channelThreadKey);
+          const turnChat = manyChats
+            ? (namedChat ?? sessionInit.threadContext?.romeSessionId)
+            : namedChat;
+          const opened = manyChats ? undefined : openerChat(session);
           const conversation = resolveTurnConversation({
             agentName: req.key.agentName,
             agentSessionId: session.sessionId,
-            romeSessionId: namedChat,
-            openerChat: openerChat(session),
+            romeSessionId: turnChat,
+            openerChat: opened,
             sessionChat:
-              (openerChat(session) ?? namedChat)
+              (opened ?? turnChat)
                 ? undefined
                 : await findSessionChat(this.webchatRepo, session.sessionId),
             channelThreadKey: req.key.channelThreadKey,

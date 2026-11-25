@@ -22,6 +22,7 @@ import {
   resetPolicyOfMessage,
   sessionOfMessage,
 } from "./chat-reset-policy.js";
+import { answersManyChats } from "../participation/session-scope.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -299,21 +300,33 @@ export class AgentRunner {
     threadContext: ThreadContext | undefined,
     held: { submitted: boolean },
   ): AsyncIterable<AgentEvent> {
-    await openedInChat(this.webchatRepo, session, params.romeSessionId);
+    // A session that answers many chats records each turn in its own chat:
+    // the one the caller names, else the one its message was said in. The
+    // chat that opened the session never stands in for it.
+    const manyChats = answersManyChats(session.key.channelThreadKey);
+    const turnChat = manyChats
+      ? (params.romeSessionId ?? threadContext?.romeSessionId)
+      : params.romeSessionId;
+    await openedInChat(
+      this.webchatRepo,
+      session,
+      turnChat,
+      manyChats ? { replace: false } : undefined,
+    );
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
     // canonical key returned by the session row rather than requiring callers
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
-    const opened = openerChat(session);
+    const opened = manyChats ? undefined : openerChat(session);
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
-      romeSessionId: params.romeSessionId,
+      romeSessionId: turnChat,
       openerChat: opened,
       sessionChat:
-        (opened ?? params.romeSessionId)
+        (opened ?? turnChat)
           ? undefined
           : await findSessionChat(this.webchatRepo, session.sessionId),
       channelThreadKey,
