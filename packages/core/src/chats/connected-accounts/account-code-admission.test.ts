@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, InboundEvent } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
+import type * as connections from "../../connections/message.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
+import { legacyMessage } from "../../connections/test-fixtures.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
   type AccountCodeContext,
@@ -14,7 +16,7 @@ import { chatPromptFacts } from "../../core/chat-prompt-facts.js";
 import {
   ACCOUNT_CODE_ANSWERS,
   accountCodeAdmission,
-  accountCodesLeftOut,
+  withoutAccountCodes,
 } from "./account-code-admission.js";
 import { OrderedAdmission } from "./admission.js";
 import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
@@ -268,7 +270,7 @@ describe("account code admission", () => {
   });
 });
 
-describe("history read on an own account", () => {
+describe("what a subscriber and a history reader are handed on an own account", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
     testDb?.close();
@@ -276,9 +278,10 @@ describe("history read on an own account", () => {
   });
 
   /**
-   * A Slack app's direct message with Ann: every message live delivery
-   * hands admission, and the platform's own history of the same chat, read
-   * through the channel's messages port as Rome reads it.
+   * A Slack app's direct message with Ann, through the channel's ports as
+   * Rome builds them: live delivery runs admission and hands subscribers what
+   * is left, and the platform keeps every message, read back through the
+   * messages port.
    */
   function setup() {
     testDb = createTestDb();
@@ -291,42 +294,58 @@ describe("history read on an own account", () => {
       send: async (chatId: ChatId) => ({ messageId: "sent", chatId }),
       history: { read: async () => [...platform].reverse() },
     };
+    let hearTalker: ((said: connections.Message) => Promise<void>) | undefined;
     const connection = {
       id: "conn",
       connectionKind: "slack_app",
       withTalker: (call: (talker: object) => unknown) => call(talker),
-      hearTalker: () => () => {},
+      hearTalker: (listener: (said: connections.Message) => Promise<void>) => {
+        hearTalker = listener;
+        return () => {};
+      },
     };
     const registry = {
       get: () => connection,
       getDescriptor: () => ({ capabilities: { talker: { reads: true } } }),
       find: () => [connection],
-      onUnlocked: () => {},
+      onUnlocked: (_feature: string, unlocked: (c: typeof connection) => void) =>
+        unlocked(connection),
       registeredKinds: () => ["slack_app"],
-    };
-    const admission = new OrderedAdmission(
-      accountCodeAdmission({
-        codes,
-        linkOf,
-        registry: registry as unknown as Pick<ConnectionRegistry, "get">,
-        platformOf: () => ANN_SLACK.platform,
-      }),
-    );
-    let at = 0;
-    const deliver = async (text: string, senderId = ANN_SLACK.accountId) => {
-      at += 1;
-      const said = message(text, { messageId: `m${at}`, senderId, timestamp: new Date(at * 1000) });
-      platform.push(said);
-      await admission.deliver(connection, said, async () => {});
     };
     const ports = connectionPorts(
       {
         registry,
+        admit: accountCodeAdmission({
+          codes,
+          linkOf,
+          registry: registry as unknown as Pick<ConnectionRegistry, "get">,
+          platformOf: () => ANN_SLACK.platform,
+        }),
         channelOf: () => "slack_app",
-        readable: accountCodesLeftOut({ linkOf }),
+        handedOn: withoutAccountCodes({ linkOf }),
       } as unknown as ConnectionPortsDeps,
       "slack_app",
     );
+    // What a subscriber, and so Chats, an agent or an app, hears live.
+    const heard: ChannelMessage[] = [];
+    ports!.inbound!.subscribe(async (event: InboundEvent) => {
+      if (event.kind === "message") heard.push(event.message);
+    });
+    let at = 0;
+    const deliver = async (
+      text: string,
+      { senderId = ANN_SLACK.accountId, quoting }: { senderId?: string; quoting?: string } = {},
+    ) => {
+      at += 1;
+      const said = message(text, {
+        messageId: `m${at}`,
+        senderId,
+        timestamp: new Date(at * 1000),
+        ...(quoting === undefined ? {} : { replyTo: { messageId: "m1", content: quoting } }),
+      });
+      platform.push(said);
+      await hearTalker!(legacyMessage(said));
+    };
     // The port an app's `ChannelsService.query` reads, and a new session's
     // read of the chat's latest messages through it (index.ts).
     const history = ports!.messages!;
@@ -347,7 +366,7 @@ describe("history read on an own account", () => {
       channelSurface: () => ({ interactiveCards: false, promptContext: true }),
       latest: (place, read) => history.query({ chatId: place.threadId as ChatId, ...read }),
     });
-    return { codes, identity, deliver, history, facts };
+    return { codes, identity, deliver, heard, history, facts };
   }
 
   it("leaves out a code refused because the account was taken, which is still usable", async () => {
@@ -368,7 +387,7 @@ describe("history read on an own account", () => {
     expect(earlier?.map((m) => m.text)).toEqual(["lunch at noon?"]);
 
     // The code was neither redeemed nor voided by the reads.
-    await deliver(code, "T1:U8");
+    await deliver(code, { senderId: "T1:U8" });
     expect((await identity.personOf({ platform: "slack", accountId: "T1:U8" }))?.id).toBe(ann.id);
   });
 
@@ -380,11 +399,42 @@ describe("history read on an own account", () => {
     const read = await history.query({ chatId: "D1" as ChatId });
     expect(read.map((m) => m.text)).toEqual(["my code is ROME-222222-222222"]);
   });
-  it("keeps a code in the read where Rome has no own account", () => {
+
+  it("hands on a code and a quote of one untouched where Rome has no own account", () => {
     const code = message("ROME-222222-222222");
+    const quote = message("did that work?", {
+      replyTo: { messageId: "m0", content: "ROME-222222-222222" },
+    });
     for (const link of ["delegate", null] as const) {
-      expect(accountCodesLeftOut({ linkOf: () => link })("telegram_user", code)).toBe(true);
+      const handedOn = withoutAccountCodes({ linkOf: () => link });
+      expect(handedOn("telegram_user", code)).toBe(code);
+      expect(handedOn("telegram_user", quote)).toBe(quote);
     }
-    expect(accountCodesLeftOut({ linkOf: () => "own_account" })("slack_app", code)).toBe(false);
+    expect(withoutAccountCodes({ linkOf: () => "own_account" })("slack_app", code)).toBeNull();
+  });
+
+  it("hands on a reply that quotes a code without the quote, live and in a read", async () => {
+    const { deliver, heard, history } = setup();
+
+    await deliver("ROME-222222-222222");
+    await deliver("did that work?", { quoting: "rome-222222-222222 " });
+
+    expect(heard.map((m) => [m.text, m.replyTo])).toEqual([
+      ["did that work?", { messageId: "m1" }],
+    ]);
+    const read = await history.query({ chatId: "D1" as ChatId });
+    expect(read.map((m) => [m.text, m.replyTo])).toEqual([["did that work?", { messageId: "m1" }]]);
+  });
+
+  it("hands on an ordinary quote untouched", async () => {
+    const { deliver, heard, history } = setup();
+
+    await deliver("lunch at noon?");
+    await deliver("yes", { quoting: "lunch at noon?" });
+
+    const quote = { messageId: "m1", content: "lunch at noon?" };
+    expect(heard.at(-1)?.replyTo).toEqual(quote);
+    const read = await history.query({ chatId: "D1" as ChatId });
+    expect(read[0].replyTo).toEqual(quote);
   });
 });

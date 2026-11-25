@@ -19,10 +19,12 @@ export type Admission = (
   message: ChannelMessage,
 ) => Promise<boolean>;
 
-/** Whether a message read from a platform's own history, on a Connection of
- *  `connectionKind`, may reach the reader. Admission's sibling for reads: a
- *  message admission keeps from the chat is one a read leaves out too. */
-export type HistoryFilter = (connectionKind: string, message: ChannelMessage) => boolean;
+/** The message as a subscriber or a reader of the platform's own history is
+ *  handed it, on a Connection of `connectionKind`, or null to leave it out.
+ *  Admission's sibling for what a message carries: it runs on every admitted
+ *  message and on every message a history read answers, so a message
+ *  admission keeps from the chat is one a read leaves out too. */
+export type HandedOn = (connectionKind: string, message: ChannelMessage) => ChannelMessage | null;
 
 /** How long one admission may hold its conversation. Admission is a few
  *  database reads, so fifteen seconds means the database is stuck. */

@@ -7,7 +7,8 @@
  * answers there. Anywhere else every code in the text is voided in silence,
  * since everyone in that chat has seen it, and a longer message is then heard
  * as an ordinary one. A history read from the platform leaves out every
- * message whose whole text is a code. On the guardian's own account a message
+ * message whose whole text is a code, and a message that quotes one is handed
+ * on without the quote, live or read. On the guardian's own account a message
  * is to the guardian, not to Rome, so a code there is an ordinary message.
  */
 
@@ -27,7 +28,7 @@ import { AccountTakenError } from "../../identity/identity.js";
 import { accountCodesIn } from "../../lib/account-code-shape.js";
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
-import type { Admission, HistoryFilter } from "./admission.js";
+import type { Admission, HandedOn } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
 
 const log = createLogger("account-code-admission");
@@ -93,15 +94,24 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
 }
 
 /**
- * Whether a message read from a platform's history may reach the reader: not
- * one whose whole text is shaped like a code, on a connection to an own
- * account. Live delivery never handed it on, so a read must not either, and
- * a code refused there may still be usable. Nothing is redeemed, voided or
- * read from the database.
+ * A message on a connection to an own account as a subscriber or a history
+ * reader is handed it. One whose whole text is shaped like a code is left
+ * out: live delivery never handed it on, so a read must not either, and a
+ * code refused there may still be usable. One that quotes such a message
+ * keeps its reply reference without the quoted text. Nothing is redeemed,
+ * voided or read from the database: the code was handled when it was sent.
  */
-export function accountCodesLeftOut(deps: Pick<AccountCodeAdmissionDeps, "linkOf">): HistoryFilter {
-  return (connectionKind, message) =>
-    !looksLikeAccountCode(message.text) || deps.linkOf(connectionKind) !== "own_account";
+export function withoutAccountCodes(deps: Pick<AccountCodeAdmissionDeps, "linkOf">): HandedOn {
+  return (connectionKind, message) => {
+    const isCode = looksLikeAccountCode(message.text);
+    const quoted = message.replyTo?.content;
+    const quotesCode = quoted !== undefined && looksLikeAccountCode(quoted);
+    if (!isCode && !quotesCode) return message;
+    if (deps.linkOf(connectionKind) !== "own_account") return message;
+    if (isCode) return null;
+    const { content: _code, ...replyTo } = message.replyTo!;
+    return { ...message, replyTo };
+  };
 }
 
 async function redeemed(
