@@ -1,10 +1,12 @@
 /**
  * The step that hears an [account code](docs/domains/identity.md#account-code)
- * sent to one of Rome's accounts. A code in a direct message adds the
- * sender's account to the person the code belongs to. A code anywhere else is
- * voided, since everyone in that chat has seen it. Either way the message is
+ * sent to an [own account](docs/domains/chats.md#own-account) of Rome's. A
+ * code in a direct message adds the sender's account to the person the code
+ * belongs to, and Rome answers there. A code anywhere else is voided in
+ * silence, since everyone in that chat has seen it. Either way the message is
  * kept from the chat, so no subscriber, agent or app hears it and it is not
- * recorded.
+ * recorded. On the guardian's own account a message is to the guardian, not
+ * to Rome, so a code there is an ordinary message.
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -21,6 +23,7 @@ import {
 } from "../../identity/application/account-codes.js";
 import { AccountTakenError } from "../../identity/identity.js";
 import { createLogger } from "../../logger.js";
+import type { AccountLinkOf } from "./account-links.js";
 import type { Admission } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
 
@@ -34,12 +37,12 @@ export const ACCOUNT_CODE_ANSWERS = {
   unknown: "This code does not work. Check it, or get a new one.",
   taken: "This account is already connected to someone else, so it was not added.",
   signIn: "A code cannot connect an email address.",
-  shared:
-    "A code only works in a direct message to Rome. This one no longer works, so get a new one.",
 } as const;
 
 export interface AccountCodeAdmissionDeps {
   codes: AccountCodeContext;
+  /** Whether Rome speaks as its own account on each kind of connection. */
+  linkOf: AccountLinkOf;
   /** The connection each answer goes out on. */
   registry: Pick<ConnectionRegistry, "get">;
   /** The platform of the account that sent `message` on Connection
@@ -48,13 +51,20 @@ export interface AccountCodeAdmissionDeps {
 }
 
 /**
- * Keeps every message whose whole text is shaped like a code from the chat,
- * redeeming the code for the sender's account in a direct message and voiding
- * it anywhere else. Admits every other message without a database read.
+ * Keeps every message whose whole text is shaped like a code from the chat on
+ * a connection to an own account, redeeming the code for the sender's account
+ * in a direct message and voiding it anywhere else. Admits every other
+ * message without a database read.
  */
 export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission {
   return async (connectionId, connectionKind, message) => {
     if (!looksLikeAccountCode(message.text)) return true;
+    if (deps.linkOf(connectionKind) !== "own_account") return true;
+    if (message.thread?.kind !== "dm") {
+      await accountCodeVoided(deps.codes, message.text);
+      log.info("account code voided in a shared chat", { connectionId });
+      return false;
+    }
     // Answers go out in the background: admission holds the chat's next
     // message until it returns, and a send that hangs must not.
     const answer = (text: string): void => {
@@ -63,19 +73,9 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
         log.error("account code answer failed", { connectionId });
       });
     };
-    if (message.thread?.kind !== "dm") {
-      await accountCodeVoided(deps.codes, message.text);
-      log.info("account code voided in a shared chat", { connectionId });
-      answer(ACCOUNT_CODE_ANSWERS.shared);
-      return false;
-    }
     // A Telegram channel posts under the channel's own negative id, which is no
     // person's account.
     if (connectionKind === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
-    // The email adapter namespaces mail that failed SPF, DKIM or DMARC, whose
-    // From anyone can forge. It proves no account, so the code stays unused and
-    // no answer goes to an address the sender may not own.
-    if (message.senderId.startsWith("unauthenticated:")) return false;
     const account = {
       platform: deps.platformOf(connectionId, message),
       accountId: message.senderId,
@@ -91,7 +91,7 @@ async function redeemed(
   codes: AccountCodeContext,
   code: string,
   account: { platform: string; accountId: string },
-): Promise<Exclude<keyof typeof ACCOUNT_CODE_ANSWERS, "shared">> {
+): Promise<keyof typeof ACCOUNT_CODE_ANSWERS> {
   try {
     await accountCodeRedeemed(codes, code, account);
     return "added";

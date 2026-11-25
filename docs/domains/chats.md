@@ -296,7 +296,7 @@ One thing a participant said or did in a chat.
 
 - Every message goes one way: to Rome or from Rome.
 - A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
-- A message whose whole text is an [account code](identity.md#account-code) is not recorded, and no agent or app hears it. In a direct message to one of Rome's accounts, the code adds the sender's account to the code's person. In a shared chat, the code is voided. Rome answers in the same chat, and the answer never repeats the code.
+- A message whose whole text is an [account code](identity.md#account-code), sent to an [own account](#own-account) of Rome's, is not recorded, and no agent or app hears it. In a direct message, the code adds the sender's account to the code's person, and Rome answers there without repeating the code. In a shared chat, the code is voided and Rome says nothing. On the guardian's own account a message is to the guardian, not to Rome, so a code there is an ordinary message.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget that asks something is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.

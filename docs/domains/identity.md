@@ -43,7 +43,7 @@ How an account nobody holds becomes a person's. A signed-in guardian or member g
 - The whole message must be the code. Case and surrounding spaces do not matter. A code inside a longer text is not a code.
 - Sending the code adds the account and uses the code up, together. An account that belongs to another person is refused, nothing changes, and the code can still be used. An account the person already holds uses the code up and changes nothing else.
 - A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused.
-- The code is sent in a direct message. A code shown in a shared chat is voided. Chats applies that rule when it [hears the message](chats.md#message), not Identity.
+- The code is sent in a direct message to an account Rome speaks as, a bot or an app. A code shown in a shared chat there is voided. A code sent to the guardian's own account is an ordinary message. Chats applies these rules when it [hears the message](chats.md#message), not Identity.
 - Deleting a person deletes their open code.
 - A code proves that whoever sent it had the code. A person who gives their code to someone else gives that account their role, so the page that shows a code tells the person to send it only from their own account and to share it with nobody (accepted cost, Ouou, 2026-11-25).
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
@@ -41,6 +42,12 @@ describe("account code admission", () => {
     const clock = { now: new Date("2026-11-25T10:00:00Z") };
     const ctx = codes ?? accountCodeContext(testDb.db, () => clock.now);
     const identity = createIdentity(testDb.db);
+    // How Rome speaks on the connection: a Slack app is Rome's own account, a
+    // signed-in Telegram is the guardian's, and WhatsApp takes no agent.
+    let link: AccountLink | null = "own_account";
+    const speakAs = (next: AccountLink | null) => {
+      link = next;
+    };
     const sent: Array<{ chatId: ChatId; text: string }> = [];
     const send = rs.fn(async (chatId: ChatId, out: { text?: string }) => {
       sent.push({ chatId, text: out.text ?? "" });
@@ -51,6 +58,7 @@ describe("account code admission", () => {
     } as unknown as Pick<ConnectionRegistry, "get">;
     const admit = accountCodeAdmission({
       codes: ctx,
+      linkOf: () => link,
       registry,
       platformOf: () => ANN_SLACK.platform,
     });
@@ -68,7 +76,7 @@ describe("account code admission", () => {
       await rs.waitFor(() => expect(sent).toHaveLength(count));
       return sent.map((s) => s.text);
     };
-    return { ctx, identity, deliver, heard, sent, answers, later };
+    return { ctx, identity, deliver, heard, sent, answers, later, speakAs };
   }
 
   it("adds the sender's account to the code's person in a direct message, and answers there", async () => {
@@ -133,7 +141,7 @@ describe("account code admission", () => {
     expect(heard).toEqual([]);
   });
 
-  it("voids a code said in a shared chat, adds nothing, and the code then fails in a direct message", async () => {
+  it("voids a code said in a shared chat without answering, and the code then fails in a direct message", async () => {
     const { ctx, identity, deliver, heard, sent, answers } = setup();
     const ann = await identity.createPerson({ accounts: [] });
     const { code } = await accountCodeIssued(ctx, ann.id);
@@ -143,10 +151,37 @@ describe("account code admission", () => {
 
     await deliver(message(code, { messageId: "m2" }));
     expect(await identity.personOf(ANN_SLACK)).toBeNull();
-    expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.shared, ACCOUNT_CODE_ANSWERS.used]);
-    expect(sent[0].chatId).toBe("C1");
+    expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+    expect(sent[0].chatId).toBe("D1");
     expect(heard).toEqual([]);
   });
+
+  for (const link of ["delegate", null] as const) {
+    it(`admits a code untouched on a connection where Rome has no own account (${link ?? "no agent"})`, async () => {
+      const { ctx, identity, deliver, heard, sent, answers, speakAs } = setup();
+      speakAs(link);
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
+      const direct = message(code);
+      const shared = message(code, {
+        messageId: "m2",
+        chatId: "C1" as ChatId,
+        thread: { kind: "group" },
+      });
+
+      await deliver(direct);
+      await deliver(shared);
+
+      expect(heard).toEqual([direct, shared]);
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
+      expect(sent).toEqual([]);
+      // The code was neither redeemed nor voided, so it still works where Rome
+      // has its own account.
+      speakAs("own_account");
+      await deliver(message(code, { messageId: "m3" }));
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.added]);
+    });
+  }
 
   it("admits an ordinary message untouched, without a database read", async () => {
     const untouchable = new Proxy({} as AccountCodeContext, {

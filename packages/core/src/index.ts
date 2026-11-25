@@ -773,6 +773,7 @@ async function main() {
     accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
   const heardAccountCode = accountCodeAdmission({
     codes: accountCodeContext(db),
+    linkOf: accountLinkOf(connectionRegistry),
     registry: connectionRegistry,
     platformOf: senderPlatformOf,
   });
