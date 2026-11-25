@@ -1672,7 +1672,10 @@ async function main() {
             limit,
             before: before as MessagePageCursor | undefined,
           });
-          const actors = await webchatRepo.getUserMessageActors(chatId);
+          const actors = await webchatRepo.getUserMessageActors(
+            chatId,
+            page.rows.flatMap((row) => (row.role === "user" ? [row.id] : [])),
+          );
           const rows = page.rows.map((row) => ({ ...row, actor: actors.get(row.id) }));
           return { rows, next: page.nextCursor };
         },

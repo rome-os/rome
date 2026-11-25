@@ -118,7 +118,11 @@ const SENDER: Record<string, string> = {
 export function recentMessagesOf(rows: readonly ChatRow[], exceptTurnId?: string): RecentMessage[] {
   return rows.flatMap((row) => {
     const senderName =
-      row.actor?.kind === "visitor" ? `Visitor (${row.actor.email})` : SENDER[row.role];
+      row.actor?.kind === "visitor"
+        ? row.actor.email
+          ? `Visitor (${row.actor.email})`
+          : "Visitor"
+        : SENDER[row.role];
     if (!senderName || (exceptTurnId && row.turnId === exceptTurnId)) return [];
     const text = messageContentText(row.content);
     return text
