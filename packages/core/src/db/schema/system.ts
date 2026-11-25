@@ -190,12 +190,12 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
- * Open codes for adding an account to a person (docs/domains/identity.md#claim).
+ * Open codes for adding an account to a person (docs/domains/identity.md#account-code).
  * Keyed by a hash of the code, never the code. One row per person: a new code
  * replaces the earlier one, and deleting the person deletes their row.
  */
-export const accountClaims = sqliteTable(
-  "account_claims",
+export const accountCodes = sqliteTable(
+  "account_codes",
   {
     codeHash: text("code_hash").primaryKey(),
     personId: text("person_id")
@@ -205,7 +205,7 @@ export const accountClaims = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     usedAt: integer("used_at", { mode: "timestamp" }),
   },
-  (table) => [uniqueIndex("idx_account_claims_person").on(table.personId)],
+  (table) => [uniqueIndex("idx_account_codes_person").on(table.personId)],
 );
 
 /**

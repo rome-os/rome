@@ -1,6 +1,6 @@
 // The steps of a code: a signed-in person gets a code of their own, and
 // sending it to Rome from an account adds that account to them. Vocabulary:
-// docs/domains/identity.md#claim.
+// docs/domains/identity.md#account-code.
 
 import { createHash, randomInt } from "node:crypto";
 import type { DrizzleDb } from "../../db/index.js";

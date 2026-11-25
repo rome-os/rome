@@ -1,11 +1,11 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "322e65c9-68d2-4203-9968-f0cd1420263e",
+  "id": "ce57545c-53f3-48fe-83e7-748ed306945e",
   "prevId": "03e2565c-ed3e-4d57-85eb-bf0da754d9a0",
   "tables": {
-    "account_claims": {
-      "name": "account_claims",
+    "account_codes": {
+      "name": "account_codes",
       "columns": {
         "code_hash": {
           "name": "code_hash",
@@ -44,8 +44,8 @@
         }
       },
       "indexes": {
-        "idx_account_claims_person": {
-          "name": "idx_account_claims_person",
+        "idx_account_codes_person": {
+          "name": "idx_account_codes_person",
           "columns": [
             "person_id"
           ],
@@ -53,9 +53,9 @@
         }
       },
       "foreignKeys": {
-        "account_claims_person_id_identities_id_fk": {
-          "name": "account_claims_person_id_identities_id_fk",
-          "tableFrom": "account_claims",
+        "account_codes_person_id_identities_id_fk": {
+          "name": "account_codes_person_id_identities_id_fk",
+          "tableFrom": "account_codes",
           "tableTo": "identities",
           "columnsFrom": [
             "person_id"

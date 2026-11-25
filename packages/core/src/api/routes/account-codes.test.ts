@@ -8,7 +8,7 @@ import {
   seatAccounts,
 } from "../../access/application/members.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
-import { accountClaims } from "../../db/schema.js";
+import { accountCodes } from "../../db/schema.js";
 import {
   accountCodeContext,
   accountCodeRedeemed,
@@ -49,7 +49,7 @@ describe("account codes API", () => {
         ANN_SLACK,
       )
     ).personId;
-  const stored = () => testDb.db.select().from(accountClaims).all();
+  const stored = () => testDb.db.select().from(accountCodes).all();
 
   it("gives a member a code of their own", async () => {
     const ann = await inviteMember(ctx, "ann@example.com");

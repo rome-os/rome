@@ -1,6 +1,6 @@
 // A signed-in person asks for a code, which they then send to Rome in a direct
 // message from the account they want added. Vocabulary:
-// docs/domains/identity.md#claim.
+// docs/domains/identity.md#account-code.
 
 import { Hono } from "hono";
 import { createAccess } from "../../access/access.js";

@@ -33,13 +33,13 @@ An account belongs to at most one person.
 - A person made with an account that belongs to someone is not made at all.
 - An account is free again once the person who held it is deleted or the account is removed from them.
 
-## Claim
+## Account code
 
 How an account nobody holds becomes a person's. A signed-in guardian or member gets a code of their own. Sending that code to Rome in a direct message from an account adds the account to their person. In code, the steps are in [`packages/core/src/identity/application/account-codes.ts`](../../packages/core/src/identity/application/account-codes.ts).
 
 - A code belongs to one person. A new code replaces the person's earlier one, and the earlier one then adds nothing.
 - A code can be used for ten minutes after it is given, and once.
-- Rome never stores the code, only a hash of it. The stored claim cannot be turned back into a code.
+- Rome never stores the code, only a hash of it. The stored hash cannot be turned back into a code.
 - The whole message must be the code. Case and surrounding spaces do not matter. A code inside a longer text is not a code.
 - Sending the code adds the account and uses the code up, together. An account that belongs to another person is refused, nothing changes, and the code can still be used. An account the person already holds uses the code up and changes nothing else.
 - A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused.

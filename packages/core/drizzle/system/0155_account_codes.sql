@@ -1,4 +1,4 @@
-CREATE TABLE `account_claims` (
+CREATE TABLE `account_codes` (
 	`code_hash` text PRIMARY KEY NOT NULL,
 	`person_id` text NOT NULL,
 	`created_at` integer NOT NULL,
@@ -7,4 +7,4 @@ CREATE TABLE `account_claims` (
 	FOREIGN KEY (`person_id`) REFERENCES `identities`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `idx_account_claims_person` ON `account_claims` (`person_id`);
+CREATE UNIQUE INDEX `idx_account_codes_person` ON `account_codes` (`person_id`);

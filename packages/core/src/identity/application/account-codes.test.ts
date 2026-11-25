@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { accountClaims } from "../../db/schema.js";
+import { accountCodes } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { AccountTakenError, createIdentity, UnknownPersonError } from "../identity.js";
 import {
@@ -34,7 +34,7 @@ describe("account codes", () => {
       clock.now = new Date(clock.now.getTime() + ms);
     };
     const ann = await identity.createPerson({ accounts: [] });
-    const rows = () => testDb?.db.select().from(accountClaims).all() ?? [];
+    const rows = () => testDb?.db.select().from(accountCodes).all() ?? [];
     return { ctx, identity, later, ann, rows };
   }
 
