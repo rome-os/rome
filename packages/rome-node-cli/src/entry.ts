@@ -99,8 +99,6 @@ async function main(): Promise<void> {
       output: { type: "string" },
       server: { type: "boolean" },
       "device-code": { type: "boolean" },
-      "computer-use": { type: "boolean" },
-      "computer-use-helper": { type: "string" },
       db: { type: "string" },
       json: { type: "boolean" },
       follow: { type: "boolean", short: "f" },
@@ -128,17 +126,6 @@ async function main(): Promise<void> {
     throw new Error("--server is only supported by rome-node auth.");
   if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
     throw new Error("--device-code is only supported by rome-node connect.");
-  if (
-    (values["computer-use"] || values["computer-use-helper"] !== undefined) &&
-    !(positionals.length === 1 && (positionals[0] === "connect" || positionals[0] === "web"))
-  )
-    throw new Error(
-      "--computer-use and --computer-use-helper are only supported by rome-node connect and web.",
-    );
-  const computerUse = {
-    enabled: values["computer-use"] === true || process.env.ROME_NODE_COMPUTER_USE === "1",
-    appPath: values["computer-use-helper"],
-  };
   const webOptions = ["host", "port", "assets-dir"] as const;
   if (positionals[0] !== "web" && webOptions.some((option) => values[option] !== undefined))
     throw new Error(
@@ -186,7 +173,6 @@ async function main(): Promise<void> {
         explicitName: values.name !== undefined || process.env.ROME_NODE_NAME !== undefined,
         assetsDir: values["assets-dir"] ?? process.env.ROME_NODE_WEB_ASSETS_DIR,
         password: process.env.ROME_NODE_UI_PASSWORD,
-        computerUse,
         version: version(),
       });
       try {
@@ -386,7 +372,7 @@ async function main(): Promise<void> {
         },
       };
       return executionEnabled
-        ? connectHost({ ...hostOptions, audit, computerUse })
+        ? connectHost({ ...hostOptions, audit })
         : connectLimitedHost(hostOptions);
     }).finally(() => {
       ui?.stop();

@@ -158,7 +158,7 @@ describe("computer actions over binary frames", () => {
       ok: true,
       result: {
         name: "Test computer",
-        actions: ["system.info", "exec", "fs.list"],
+        actions: expect.arrayContaining(["system.info", "exec", "fs.list"]),
         frameVersion: 1,
         transferVersion: 1,
       },
@@ -347,7 +347,10 @@ describe("computer actions", () => {
   it("reports actual platform and rejects unsupported actions", async () => {
     expect((await execute("system.info")).payload).toMatchObject({
       ok: true,
-      result: { name: "Test computer", actions: ["system.info", "exec", "fs.list"] },
+      result: {
+        name: "Test computer",
+        actions: expect.arrayContaining(["system.info", "exec", "fs.list"]),
+      },
     });
     expect((await execute("fs.read")).payload).toMatchObject({
       ok: false,

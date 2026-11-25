@@ -1040,45 +1040,35 @@ replacement connection.
 
 ## Screen control on macOS
 
-`rome-node connect --computer-use` and `rome-node web --computer-use` offer
-window-scoped Computer Use on macOS. `ROME_NODE_COMPUTER_USE=1` also enables it.
-Remote execution must be on. The host looks for a signed `Rome Computer Use.app`
-in `/Applications` and `~/Applications`, in that order. Set
-`--computer-use-helper <absolute-app-path>` or `ROME_NODE_COMPUTER_USE_HELPER` to
-use an explicit location that takes precedence over the standard paths.
-The helper asks for local session approval and may need Accessibility and Screen
-Recording permissions in System Settings → Privacy & Security.
+Full Rome Node hosts register the `computer.*` actions for window control.
+A limited host refuses remote actions with `computer_use_off`.
 
-`rome-node device describe <device-id>` lists Window Control in
-`system.info.capabilities` with `id: "computer_use"`, `prefix: "computer"`, and
-`personal: true`. The CLI refuses its actions in shared chats, including AX
-observations and screenshots. Its state is `off` when window control is disabled,
-unavailable, or stopped for the caller. A discovered bundle reports
-`needs_permission` until the caller has an approved helper session, which reports
-`on`. The describe probe checks the bundle path. The host verifies the signature
-at launch before requesting approval. The flat `actions` list includes window
-control actions when the host can request approval or already has it. It lists
-only `computer.cancel` for a stopped window control session, alongside any
-regular host actions.
+On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
+`~/Applications`, in that order. The host can override those paths through
+`ComputerUseOptions.appPath` or the `ROME_NODE_COMPUTER_USE_HELPER` environment
+variable. It verifies the bundle signature at launch before asking for local
+session approval. The helper may also need Accessibility and Screen Recording
+permissions in System Settings → Privacy & Security.
 
-A full host with window control disabled returns `window_control_off` for its
-`computer.*` actions. A limited host returns `computer_use_off` for remote
-actions. Other errors include `computer_use_unsupported_platform`,
-`computer_use_helper_missing`, and `invalid_helper_bundle`.
+`system.info.capabilities` reports Window Control with `id: "computer_use"`,
+`prefix: "computer"`, and `personal: true`. The shared-chat audience guard
+refuses access to its observations, including AX content and screenshots.
+A discovered macOS bundle reports `ready` before approval. A missing bundle
+reports `not_installed`, and window requests return `computer_use_helper_missing`.
+Other platforms report `unsupported_platform` and return
+`computer_use_unsupported_platform`. An invalid bundle can return
+`invalid_helper_bundle`. The flat `actions` list advertises these operations
+when the capability is ready. A stopped peer sees only `computer.cancel` from
+this capability until its session ends.
 
 | Action | Arguments and result |
 | --- | --- |
 | `computer.windows` | `{application?}` lists windows, optionally filtered by application. |
 | `computer.bind` | `{window}` returns a binding ID and `bindingTTLms`. |
-| `computer.observe` | `{binding, element?}` returns the Accessibility tree as JSON. Set `screenshot: true` and pass `--output` to save PNG bytes, up to 8 MiB. |
+| `computer.observe` | `{binding, element?}` returns the Accessibility tree as JSON. Set `screenshot: true` on a binary request to receive raw PNG bytes, up to 8 MiB. |
 | `computer.act` | `{binding, actionId, action, ...}` sends an input to the bound window. Use a UUID for `actionId` and the same ID when checking a timed-out action. |
 | `computer.unbind` | `{binding}` releases the window. |
 | `computer.cancel` | Closes input admission for the calling peer's session and returns the stop status. |
-
-```bash
-rome-node device run <device-id> computer.observe \
-  --args '{"binding":"<binding-id>","screenshot":true}' --output window.png
-```
 
 Each peer needs its own helper approval. Bindings expire when the helper's
 five-minute session ends and on host disconnect. The host remembers each action

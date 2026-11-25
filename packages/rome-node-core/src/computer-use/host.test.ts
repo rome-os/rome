@@ -43,15 +43,11 @@ const window = {
 } as const;
 const canceled = { stop: "cancel_requested", reason: "session_stopped" } as const;
 const confirmed = { ...canceled, stop: "stop_confirmed" } as const;
-const enabled = { enabled: true };
 const cleanups: (() => unknown)[] = [];
 
 beforeEach(() => {
   mock.discover.mockReset();
-  mock.discover.mockImplementation(async (options) => {
-    if (!options?.enabled) throw new ComputerUseError("window_control_off");
-    return "/fake/Rome Computer Use.app";
-  });
+  mock.discover.mockResolvedValue("/fake/Rome Computer Use.app");
   mock.launch.mockReset();
 });
 afterEach(async () => {
@@ -116,7 +112,7 @@ const noAudit: HostAudit = {
 };
 const error = (code: string) => ({ ok: false, error: { code } });
 
-function executor(audit: HostAudit = noAudit, computerUse: { enabled: boolean } = enabled) {
+function executor(audit: HostAudit = noAudit) {
   const replies = new Map<string, OutboundEnvelope>();
   const frames = new Map<string, Frame>();
   const exec = createExecutor(
@@ -131,7 +127,6 @@ function executor(audit: HostAudit = noAudit, computerUse: { enabled: boolean } 
       frames.set(frame.id, frame);
       return true;
     },
-    computerUse,
   );
   cleanups.push(exec.disconnect);
   const json = async (action: string, args: unknown = {}, from = peer) => {
@@ -172,33 +167,26 @@ it("discovers paths without signature verification and stops at an invalid expli
     applications: [join(root, "preferred"), root],
     envPath: app,
   };
-  await expect(discovery.discoverHelper({ enabled: false }, env)).rejects.toMatchObject({
-    code: "window_control_off",
-  });
   await expect(
-    discovery.discoverHelper(enabled, { ...env, platform: "linux" }),
+    discovery.discoverHelper(undefined, { ...env, platform: "linux" }),
   ).rejects.toMatchObject({
     code: "computer_use_unsupported_platform",
   });
-  await expect(
-    discovery.discoverHelper({ ...enabled, appPath: "./helper" }, env),
-  ).rejects.toMatchObject({
+  await expect(discovery.discoverHelper({ appPath: "./helper" }, env)).rejects.toMatchObject({
     code: "invalid_helper_bundle",
   });
   await expect(
-    discovery.discoverHelper({ ...enabled, appPath: join(root, "missing") }, env),
+    discovery.discoverHelper({ appPath: join(root, "missing") }, env),
   ).rejects.toMatchObject({
     code: "computer_use_helper_missing",
   });
-  await expect(discovery.discoverHelper(enabled, env)).resolves.toBe(app);
-  await expect(discovery.discoverHelper({ ...enabled, appPath: preferred }, env)).resolves.toBe(
-    preferred,
-  );
-  await expect(discovery.discoverHelper(enabled, { ...env, envPath: undefined })).resolves.toBe(
+  await expect(discovery.discoverHelper(undefined, env)).resolves.toBe(app);
+  await expect(discovery.discoverHelper({ appPath: preferred }, env)).resolves.toBe(preferred);
+  await expect(discovery.discoverHelper(undefined, { ...env, envPath: undefined })).resolves.toBe(
     preferred,
   );
   await expect(
-    discovery.discoverHelper(enabled, {
+    discovery.discoverHelper(undefined, {
       ...env,
       envPath: undefined,
       applications: [join(root, "missing"), root],
@@ -207,13 +195,12 @@ it("discovers paths without signature verification and stops at an invalid expli
 });
 
 it.each([
-  "window_control_off",
-  "computer_use_unsupported_platform",
-  "computer_use_helper_missing",
-  "invalid_helper_bundle",
-] as const)("advertises and returns %s without launching", async (code) => {
+  ["computer_use_unsupported_platform", "unsupported_platform"],
+  ["computer_use_helper_missing", "not_installed"],
+  ["invalid_helper_bundle", "not_installed"],
+] as const)("advertises %s and returns the discovery error without launching", async (code, state) => {
   mock.discover.mockRejectedValue(new ComputerUseError(code));
-  const f = executor(noAudit, { enabled: code !== "window_control_off" });
+  const f = executor();
   const info = await f.json("system.info");
   expect(info).toMatchObject({
     result: {
@@ -222,7 +209,7 @@ it.each([
         {
           id: "computer_use",
           prefix: "computer",
-          state: "off",
+          state,
           personal: true,
           actions: expect.arrayContaining(["computer.observe"]),
         },
@@ -233,6 +220,8 @@ it.each([
   expect(info?.result).not.toHaveProperty("computerUseStatus");
   expect(await f.json("computer.windows")).toMatchObject(error(code));
   expect((await f.binary("computer.bind", { window: 1 })).response).toMatchObject(error(code));
+  expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await f.json("computer.windows")).toMatchObject(error(code));
   expect(mock.launch).not.toHaveBeenCalled();
 });
 
@@ -268,7 +257,7 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
           id: "computer_use",
           prefix: "computer",
           title: "Window Control",
-          state: "needs_permission",
+          state: "ready",
           personal: true,
           actions: expect.arrayContaining(["computer.windows", "computer.observe"]),
         },
@@ -281,7 +270,7 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
   });
   const binding = await f.bind();
   expect(await f.json("system.info")).toMatchObject({
-    result: { capabilities: [{ state: "on" }] },
+    result: { capabilities: [{ state: "ready" }] },
   });
   expect(binding).not.toBe(nativeId);
   expect(await f.json("computer.bind", { window: 1 }, other)).toMatchObject(
@@ -396,9 +385,8 @@ it("seals input immediately on cancel during an audit wait and confirms only aft
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
 });
 
-it("confirms cancel without waiting for discovery and preserves the off code", async () => {
-  const disabled = executor(noAudit, { enabled: false });
-  expect(await disabled.json("computer.cancel")).toMatchObject(error("window_control_off"));
+it("confirms cancel without waiting for discovery", async () => {
+  expect(await executor().json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(mock.discover).not.toHaveBeenCalled();
 
   const f = executor();
@@ -442,7 +430,7 @@ it("aborts consent before confirming that no input was admitted", async () => {
   expect(await f.json("system.info")).toMatchObject({
     result: {
       actions: ["system.info", "exec", "fs.list", "computer.cancel"],
-      capabilities: [{ state: "off" }],
+      capabilities: [{ state: "ready" }],
     },
   });
 });
@@ -495,7 +483,7 @@ it("aborts launch and closes active bridges immediately on disconnect", async ()
 it("expires a binding and closes its helper within a bounded session lease", async () => {
   const helper = fakeHelper();
   mock.launch.mockResolvedValue(helper);
-  const host = new ComputerUseHost(enabled, { discover: discoverHelper, sessionTtlMs: 20 });
+  const host = new ComputerUseHost(undefined, { discover: discoverHelper, sessionTtlMs: 20 });
   cleanups.push(() => host.disconnect());
   const bind = host.prepare("computer.bind", peer, { window: 1 })!;
   const bound = await bind.run();

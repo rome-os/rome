@@ -32,7 +32,6 @@ function errorCode(cause: unknown): ComputerUseError["code"] {
 }
 
 const errorMessages: Partial<Record<ComputerUseError["code"], string>> = {
-  window_control_off: "Window control is turned off on this host.",
   computer_use_unsupported_platform: "The Computer Use Helper requires macOS.",
   computer_use_helper_missing: "The Computer Use Helper is missing from this Mac.",
   action_outcome_unknown:
@@ -201,10 +200,16 @@ export class ComputerUseHost {
   async info(peer: string) {
     if (isUuid(peer)) peer = peer.toLowerCase();
     const session = this.sessions.get(peer);
-    let state: "off" | "needs_permission" | "on" = "off";
-    if (this.options?.enabled && !session?.stop) {
-      if (session?.bridge && !session.bridge.closed) state = "on";
-      else if (await this.findHelper().catch(() => undefined)) state = "needs_permission";
+    let state: "ready" | "not_installed" | "unsupported_platform" = "ready";
+    if (!session?.bridge || session.bridge.closed) {
+      try {
+        await this.findHelper();
+      } catch (cause) {
+        state =
+          errorCode(cause) === "computer_use_unsupported_platform"
+            ? "unsupported_platform"
+            : "not_installed";
+      }
     }
     const stopped = Boolean(this.sessions.get(peer)?.stop);
     const actions = Object.keys(this.operations);
@@ -213,11 +218,11 @@ export class ComputerUseHost {
         id: "computer_use",
         prefix: "computer",
         title: "Window Control",
-        state: stopped ? "off" : state,
+        state,
         personal: true,
         actions,
       },
-      actions: stopped ? ["computer.cancel"] : state === "off" ? [] : actions,
+      actions: state === "ready" ? (stopped ? ["computer.cancel"] : actions) : [],
     };
   }
 
@@ -234,7 +239,6 @@ export class ComputerUseHost {
     if (
       !session &&
       (operation.opensSession || operation.urgent) &&
-      this.options?.enabled &&
       this.sessions.size < MAX_PEERS
     ) {
       session = {
@@ -249,17 +253,12 @@ export class ComputerUseHost {
     }
     if (session) session.pending++;
     // Stop bypasses both audit I/O and ordinary request validation.
-    const stopping =
-      operation.urgent && (session || this.options?.enabled)
-        ? operation.run(session, args, body !== undefined)
-        : undefined;
+    const stopping = operation.urgent
+      ? operation.run(session, args, body !== undefined)
+      : undefined;
     const run = async (refusal?: ActionResponse) => {
       try {
-        if (operation.urgent)
-          return stopping
-            ? await stopping
-            : failure("window_control_off", errorMessages.window_control_off);
-        if (session) this.check(session);
+        if (stopping) return await stopping;
         const appPath = session?.bridge ? undefined : await this.findHelper();
         if (session) this.check(session);
         if (refusal) return { response: refusal, body: empty };

@@ -5,7 +5,6 @@ import { APP_NAME } from "./launch.js";
 import { ComputerUseError } from "./protocol.js";
 
 export interface ComputerUseOptions {
-  enabled: boolean;
   appPath?: string;
 }
 
@@ -23,7 +22,6 @@ export async function discoverHelper(
     envPath = process.env.ROME_NODE_COMPUTER_USE_HELPER,
   }: Partial<DiscoveryOptions> = {},
 ): Promise<string> {
-  if (!options?.enabled) throw new ComputerUseError("window_control_off");
   if (platform !== "darwin") throw new ComputerUseError("computer_use_unsupported_platform");
 
   async function installed(path: string): Promise<string | undefined> {
@@ -39,7 +37,7 @@ export async function discoverHelper(
     throw new ComputerUseError("invalid_helper_bundle");
   }
 
-  const explicit = options.appPath ?? envPath;
+  const explicit = options?.appPath ?? envPath;
   if (explicit !== undefined) {
     const app = await installed(explicit);
     if (app) return app;

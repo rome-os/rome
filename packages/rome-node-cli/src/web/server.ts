@@ -25,7 +25,6 @@ import {
   HostController,
   type HostControllerDeps,
   type HostControllerEvent,
-  type HostControllerOptions,
 } from "./host-controller.js";
 
 const MAX_JSON_BYTES = 16 * 1024;
@@ -70,7 +69,6 @@ export interface WebServerOptions {
   signal?: AbortSignal;
   log?: (line: string) => void;
   deps?: HostControllerDeps;
-  computerUse?: HostControllerOptions["computerUse"];
 }
 
 export interface RunningWebServer {
@@ -155,7 +153,6 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     explicitName: options.explicitName,
     version: options.version,
     deps: options.deps,
-    computerUse: options.computerUse,
   });
   await controller.start();
 

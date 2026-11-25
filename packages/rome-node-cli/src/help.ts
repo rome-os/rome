@@ -44,7 +44,7 @@ A watcher does not restart an explicitly stopped daemon. Another command can sta
 Ctrl+C exits the watcher without stopping the daemon or remote operations.
 These events do not indicate whether individual remote devices are online.
 `,
-  connect: `Usage: rome-node connect [--device-code] [--cloud <origin>] [--name <name>] [--computer-use]
+  connect: `Usage: rome-node connect [--device-code] [--cloud <origin>] [--name <name>]
 
 Run this on the computer that will execute programs.
 Open the printed browser URL and approve access when authorization is needed.
@@ -58,15 +58,12 @@ The process stays in the foreground. Ctrl+C disconnects and preserves authorizat
 On a terminal it shows the connection, request counts, and the latest requests. Otherwise
 it prints plain status lines to stderr, as a service or a redirect needs.
 Programs run as the OS user who starts connect. Every request is recorded in the
-local audit log first (rome-node help audit). Computer Use cancel can run if the log fails.
+local audit log first (rome-node help audit); if it cannot be, the request is refused.
 
 Options:
   --cloud <origin>  Cloud origin (default: https://romeos.cc).
   --name <name>     Name for browser authorization (default: computer hostname).
   --device-code     Authorize from another device without a callback or SSH tunnel.
-  --computer-use    Enable window-scoped Computer Use on macOS (or ROME_NODE_COMPUTER_USE=1).
-  --computer-use-helper <path>  Absolute signed helper bundle path (or ROME_NODE_COMPUTER_USE_HELPER).
-                               This option still requires --computer-use or its environment switch.
 
 Example:
   rome-node connect --name "My computer"
@@ -96,8 +93,6 @@ Options:
   --cloud <origin>    Default Cloud origin (default: ROME_NODE_CLOUD_URL or https://romeos.cc).
   --name <name>       Default device name (default: ROME_NODE_NAME or computer hostname).
   --assets-dir <dir>  Path to built Web UI static files (or ROME_NODE_WEB_ASSETS_DIR).
-  --computer-use    Enable macOS Computer Use when remote execution is on (see help connect).
-  --computer-use-helper <path>  Absolute signed helper bundle path (see help connect).
 
 Environment:
   ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
@@ -210,18 +205,6 @@ Computer actions:
   exec         Run a program on the target computer.
   fs.list      List one folder. Read-only. Older targets return unsupported_action.
 
-macOS Computer Use actions, when advertised by device describe:
-  computer.windows  List windows. Optionally pass {application} to filter by app.
-  computer.bind     Bind {window} and return a binding ID and remaining TTL.
-  computer.observe  Read AX JSON for {binding, element?}. Pass screenshot: true with --output for PNG.
-  computer.act      Send {binding, actionId, action, ...}. Use a new UUID for each intended action.
-  computer.unbind   Release {binding}.
-  computer.cancel   Stop this caller's Computer Use session. Check again briefly for stop_confirmed.
-                    The helper connection closes if confirmation does not arrive.
-
-Example screenshot:
-  rome-node device run <device-id> computer.observe --args '{"binding":"<binding-id>","screenshot":true}' --output shot.png
-
 exec arguments:
   command      Required nonempty executable name or path.
   args         Optional array of string arguments (default: []).
@@ -325,9 +308,8 @@ While rome-node connect runs, it records every remote request in a local,
 append-only log before running it: argv, cwd, environment
 variable names (not values), stdin, stdout and stderr (first 32 MiB each, with
 the full size and SHA-256), exit code, duration, and pushed files up to 10 MiB.
-Computer Use records request metadata, action IDs, outcomes, and durations.
-It stores no input text, AX output, or screenshot bytes. system.info reports audit health.
-If the log cannot be written, computer.cancel can still stop input. The log is kept for 30 days or
+system.info is not recorded. If the log cannot be written, connect refuses every
+request except system.info, which reports why. The log is kept for 30 days or
 1 GiB, whichever comes first, and never leaves this computer.
 
   status  Path, state and reason, size, record counts, oldest and newest record.

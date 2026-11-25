@@ -195,16 +195,14 @@ async function fixture(computerUse = false) {
     });
     const testHelper = letter === "a" ? helper : undefined;
     const host = spawnCli(
-      [
-        "connect",
-        "--cloud",
-        cloudUrl,
-        ...(testHelper ? ["--computer-use", "--computer-use-helper", testHelper.appPath] : []),
-      ],
+      ["connect", "--cloud", cloudUrl],
       directory,
       join(directory, "files"),
       undefined,
       testHelper?.preload,
+      helper
+        ? { ROME_NODE_COMPUTER_USE_HELPER: testHelper?.appPath ?? join(root, "missing.app") }
+        : undefined,
     );
     if (letter === "a") firstHost = host;
     cleanup.push(async () => {
@@ -268,14 +266,15 @@ import { join } from "node:path";
 import { ComputerUseBridge } from ${JSON.stringify(bridgeModule)};
 import { FrameDecoder, encodeFrame } from ${JSON.stringify(new URL("frames.js", bridgeModule).href)};
 import { ComputerUseError, createProof, verifyProof } from ${JSON.stringify(new URL("protocol.js", bridgeModule).href)};
-const path = ${JSON.stringify(appPath)};
 const discovery = new URL("discovery.js", ${JSON.stringify(bridgeModule)}).href;
 registerHooks({ load(url, context, next) {
   if (url !== discovery) return next(url, context);
-  return { format: "module", shortCircuit: true, source: \`export async function discoverHelper(options) {
-    if (options?.enabled !== true || options.appPath !== \${JSON.stringify(path)}) throw new Error("Missing host flags");
-    return options.appPath;
-  }\` };
+  return { format: "module", shortCircuit: true, source: \`
+    import { discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
+    export function discoverHelper(options) {
+      return discover(options, { platform: "darwin" });
+    }
+  \` };
 }});
 const launch = ComputerUseBridge.launch.bind(ComputerUseBridge);
 ComputerUseBridge.launch = (options) => launch({
@@ -332,7 +331,7 @@ ComputerUseBridge.launch = (options) => launch({
 }
 
 it.skipIf(process.platform === "win32")(
-  "runs Computer Use through connect, describe, JSON and --output without desktop access",
+  "serves Computer Use by default and transfers PNG over Gateway frames without desktop access",
   async () => {
     const f = await fixture(true);
     const describe = await f.cli(["device", "describe", f.deviceA]);
@@ -344,7 +343,7 @@ it.skipIf(process.platform === "win32")(
           {
             id: "computer_use",
             prefix: "computer",
-            state: "needs_permission",
+            state: "ready",
             personal: true,
             actions: expect.arrayContaining(["computer.observe"]),
           },
@@ -406,10 +405,15 @@ it.skipIf(process.platform === "win32")(
     expect(await run("cancel")).toMatchObject({ result: { stop: "cancel_requested" } });
     expect(await run("cancel")).toMatchObject({ result: { stop: "stop_confirmed" } });
     expect(await run("act", act, [], 1)).toMatchObject({ error: { code: "session_stopped" } });
-    const disabled = await f.cli(["device", "run", f.deviceB, "computer.windows"]);
-    expect(disabled.code).toBe(1);
-    expect(JSON.parse(disabled.stdout.toString())).toMatchObject({
-      error: { code: "window_control_off" },
+    const unavailable = await f.cli(["device", "run", f.deviceB, "computer.windows"]);
+    expect(unavailable.code).toBe(1);
+    expect(JSON.parse(unavailable.stdout.toString())).toMatchObject({
+      error: {
+        code:
+          process.platform === "darwin"
+            ? "computer_use_helper_missing"
+            : "computer_use_unsupported_platform",
+      },
     });
     const audit = new DatabaseSync(join(f.root, "host-a", "audit", "audit.db"), { readOnly: true });
     const activity = new DatabaseSync(join(f.caller, "observe.db"), { readOnly: true });
