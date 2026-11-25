@@ -9,6 +9,7 @@ let native = package.appendingPathComponent("native", isDirectory: true)
 let appName = "Rome Computer Use.app"
 let executableName = "RomeComputerUse"
 let bundleID = "com.rome.computer-use"
+let releaseSigningRequirement = #"anchor apple generic and identifier "com.rome.computer-use" and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "4YWXB26F39""#
 let testKey = "RomeComputerUseSelfTest"
 
 struct BuildError: Error, CustomStringConvertible {
@@ -78,8 +79,7 @@ func validate(_ app: URL, signed: Bool = false, release: Bool = false) throws {
     try validateIcon(bundleIcon(app))
     if signed || release {
         guard info[testKey] as? Bool == false else { throw BuildError("A compile-only helper cannot be released or installed.") }
-        let developerID = " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
-        let expression = "anchor apple generic and identifier \"\(bundleID)\"" + (release ? developerID : "")
+        let expression = release ? releaseSigningRequirement : "anchor apple generic and identifier \"\(bundleID)\""
         var requirement: SecRequirement?
         var code: SecStaticCode?
         guard SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
