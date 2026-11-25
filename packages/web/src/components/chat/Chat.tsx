@@ -125,6 +125,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { VoiceHeardBubble } from "@/components/chat/VoiceHeardBubble";
 import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
@@ -2211,6 +2212,34 @@ export function Chat({
     ],
   );
 
+  // A voice conversation's words not sent yet, which grow at the end of the
+  // transcript. Once Rome sends the turn, it shows as the message it was sent
+  // as, so the stored message takes its place when the chat loads it.
+  const [voiceHeard, setVoiceHeard] = useState("");
+  const showVoiceTurn = useCallback((text: string, inputId: string) => {
+    const sessionId = mainSessionIdRef.current;
+    setVoiceHeard("");
+    if (!sessionId) return;
+    const localIds = localOptimisticMessageIdsRef.current.get(sessionId) ?? new Set<string>();
+    localIds.add(inputId);
+    localOptimisticMessageIdsRef.current.set(sessionId, localIds);
+    const message: ChatMessage = {
+      id: inputId,
+      sessionId,
+      turnId: null,
+      inputState: "submitted",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: text }]),
+      createdAt: new Date().toISOString(),
+      sender: viewerSenderRef.current,
+    };
+    setMessages((prev) => {
+      const next = new Map(prev);
+      next.set(sessionId, mergeChatMessage(next.get(sessionId) ?? [], message));
+      return next;
+    });
+  }, []);
+
   // Send a turn into the active session. The composer owns the input state
   // (text/uploads/options); this handler builds the POST and delegates the
   // turn lifecycle to runTurnLifecycle.
@@ -2522,7 +2551,8 @@ export function Chat({
   const conciergeEmpty =
     concierge &&
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
-    !displayedStreaming;
+    !displayedStreaming &&
+    !voiceHeard;
   // A pinned chat always says so in its last row, with one way back, an empty
   // one too. The default is the guardian's: a visitor never sees it.
   const pinnedHint =
@@ -3174,7 +3204,12 @@ export function Chat({
                               fork={forkable}
                               variant={variant}
                               unreadFrom={unread?.firstId ?? null}
-                              tail={pinnedHint}
+                              tail={
+                                <>
+                                  {voiceHeard ? <VoiceHeardBubble text={voiceHeard} /> : null}
+                                  {pinnedHint}
+                                </>
+                              }
                             />
                           </div>
                         )
@@ -3354,6 +3389,8 @@ export function Chat({
                       <ConciergeComposer
                         ref={composerRef}
                         chatId={mainSessionId}
+                        onVoiceHeard={setVoiceHeard}
+                        onVoiceTurn={showVoiceTurn}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}

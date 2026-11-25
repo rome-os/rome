@@ -75,6 +75,7 @@ function setup(refuse?: string) {
   const ended: Array<ConversationStopReason | null> = [];
   const heard: string[] = [];
   const captions: string[] = [];
+  const turns: Array<[string, string]> = [];
   const conversation = startVoiceConversation(
     "concierge",
     {
@@ -82,6 +83,7 @@ function setup(refuse?: string) {
       onEnded: (r) => ended.push(r),
       onHeard: (text) => heard.push(text),
       onCaption: (text) => captions.push(text),
+      onTurn: (text, inputId) => turns.push([text, inputId]),
     },
     deps,
   );
@@ -92,6 +94,7 @@ function setup(refuse?: string) {
     ended,
     heard,
     captions,
+    turns,
     setAhead: (seconds: number) => {
       ahead = seconds;
     },
@@ -136,8 +139,9 @@ describe("a voice conversation in the browser", () => {
       c.socket.say({ type: "ready", sampleRate: 24000 });
       const audio = () => c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       c.socket.say({ type: "heard", settled: "Book a ", pending: "table" });
-      c.socket.say({ type: "turn", text: "Book a table" });
+      c.socket.say({ type: "turn", text: "Book a table", inputId: "spoken-1" });
       expect(c.heard).toEqual(["Book a table", ""]);
+      expect(c.turns).toEqual([["Book a table", "spoken-1"]]);
       expect(c.captions).toEqual([""]);
 
       // A caption waits for its sentence's audio, still being made.
@@ -211,7 +215,7 @@ describe("a voice conversation in the browser", () => {
       c.socket.say({ type: "caption", text: "Bye." });
       c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       c.socket.say({ type: "caption", text: "See you." });
-      c.socket.say({ type: "turn", text: "Wait" });
+      c.socket.say({ type: "turn", text: "Wait", inputId: "spoken-2" });
       c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       rs.advanceTimersByTime(1_000);
       expect(c.captions).toEqual([""]);

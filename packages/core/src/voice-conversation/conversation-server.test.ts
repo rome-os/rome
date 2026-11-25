@@ -150,6 +150,7 @@ describe("voice conversation socket", () => {
     const ear = standInTranscriber();
     const mouth = standInSpeaker();
     const sent: { chatId: string; text: string; actor?: SessionActor }[] = [];
+    const inputIds: string[] = [];
     const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
     const usage: { status: string; seconds: number }[] = [];
     const { client, messages, audio, closed } = await connect(
@@ -162,7 +163,8 @@ describe("voice conversation socket", () => {
         },
         speaker: mouth.source,
         canTalkIn: async () => true,
-        send: async (chatId, text) => {
+        send: async (chatId, text, inputId) => {
+          inputIds.push(inputId);
           sent.push({ chatId, text, actor: await currentSessionActor() });
           return replyOf("好的，已经合并了。");
         },
@@ -189,7 +191,8 @@ describe("voice conversation socket", () => {
     expect(sent).toEqual([{ chatId: "chat-1", text: "合并了吗？", actor: guardian }]);
     expect(mouth.said).toEqual(["好的，已经合并了。"]);
     expect(audio).toEqual([4800]);
-    expect(messages).toContainEqual({ type: "turn", text: "合并了吗？" });
+    // The turn names the message it was sent as.
+    expect(messages).toContainEqual({ type: "turn", text: "合并了吗？", inputId: inputIds[0] });
     expect(messages).toContainEqual({ type: "caption", text: "好的，已经合并了。" });
 
     client.send(JSON.stringify({ type: "stop" }));

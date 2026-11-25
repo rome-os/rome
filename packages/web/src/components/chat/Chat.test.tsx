@@ -65,6 +65,11 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+// What the mocked Concierge composer was handed for a voice conversation's words.
+const conciergeVoice = rs.hoisted(() => ({
+  heard: null as null | ((text: string) => void),
+  turn: null as null | ((text: string, inputId: string) => void),
+}));
 import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
@@ -250,7 +255,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace,
     unreadFrom,
     contentRef,
+    tail,
   }: {
+    tail?: ReactNode;
     unreadFrom?: string | null;
     contentRef: (node: HTMLElement | null) => void;
     onOpenStoredTrace: (target: unknown) => void;
@@ -327,6 +334,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
+      {tail}
       {rows
         .filter((row) => row.kind === "trace")
         .map((row) => (
@@ -467,10 +475,14 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onStop?: () => void;
       chatName?: string | null;
       placeholder?: string;
+      onVoiceHeard?: (text: string) => void;
+      onVoiceTurn?: (text: string, inputId: string) => void;
     },
     ref,
   ) {
     const draft = useReplyDraft();
+    conciergeVoice.heard = props.onVoiceHeard ?? null;
+    conciergeVoice.turn = props.onVoiceTurn ?? null;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
@@ -3259,6 +3271,26 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat voice conversation words", () => {
+  it("grows the guardian's unsent words at the end, then shows the sent message in their place", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.heard).not.toBeNull());
+    const growing = () => document.querySelector("[data-voice-heard]");
+
+    act(() => conciergeVoice.heard?.("Book a"));
+    expect(growing()?.textContent).toBe("Book a");
+    act(() => conciergeVoice.heard?.("Book a table for four"));
+    expect(growing()?.textContent).toBe("Book a table for four");
+
+    // Sent: the bubble becomes the message it was sent as, once, with no gap between.
+    act(() => conciergeVoice.turn?.("Book a table for four", "spoken-1"));
+    expect(growing()).toBeNull();
+    const rows = screen.getAllByTestId("user-row");
+    expect(rows.map((row) => row.getAttribute("data-timeline-anchor"))).toEqual(["spoken-1"]);
+    expect(screen.getByTestId("user-text").textContent).toContain("Book a table for four");
   });
 });
 

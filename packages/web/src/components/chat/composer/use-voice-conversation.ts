@@ -11,8 +11,17 @@ import {
 /**
  * A voice conversation in `chatId`, run from the composer. The composer offers
  * it only where `available` holds; Rome checks the chat again when it starts.
+ * `onTurn` hears of each turn Rome sends to the chat, and the message it is.
  */
-export function useVoiceConversation({ chatId }: { chatId: string | null | undefined }) {
+export function useVoiceConversation({
+  chatId,
+  onTurn,
+}: {
+  chatId: string | null | undefined;
+  onTurn?: (text: string, inputId: string) => void;
+}) {
+  const onTurnRef = useRef(onTurn);
+  onTurnRef.current = onTurn;
   const info = useVoiceConversationInfo();
   const conversationRef = useRef<VoiceConversation | null>(null);
   const [active, setActive] = useState(false);
@@ -38,6 +47,7 @@ export function useVoiceConversation({ chatId }: { chatId: string | null | undef
       onAsking: setAsking,
       onHeard: setHeard,
       onCaption: setCaption,
+      onTurn: (text, inputId) => onTurnRef.current?.(text, inputId),
       onEnded: (reason) => {
         conversationRef.current = null;
         setActive(false);

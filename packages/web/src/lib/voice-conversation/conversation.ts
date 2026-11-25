@@ -35,6 +35,8 @@ export interface ConversationHandlers {
   onAsking?(asking: boolean): void;
   /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
   onHeard?(text: string): void;
+  /** Rome sent the guardian's turn to the chat as the message `inputId`. */
+  onTurn?(text: string, inputId: string): void;
   /**
    * The reply's sentence playing now, as its audio starts. Empty once the
    * reply's audio has played here, or the guardian speaks over it.
@@ -153,10 +155,11 @@ export function startVoiceConversation(
     }, player.ahead() * 1000);
   };
   // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
-  const turnSent = () => {
+  const turnSent = (text: string, inputId: string) => {
     clearCaptions();
     handlers.onHeard?.("");
     handlers.onCaption?.("");
+    handlers.onTurn?.(text, inputId);
   };
   // The guardian spoke over the reply: what has not played goes, and its words with it.
   const dropUnplayed = () => {
@@ -238,7 +241,7 @@ export function startVoiceConversation(
         if (data.type === "ready") sampleRate = data.sampleRate;
         else if (data.type === "state") stateChanged(data.state);
         else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
-        else if (data.type === "turn") turnSent();
+        else if (data.type === "turn") turnSent(data.text, data.inputId);
         else if (data.type === "caption") captionNext(data.text);
         else if (data.type === "clear") dropUnplayed();
         else if (data.type === "ended") finish(null);

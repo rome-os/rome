@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -100,6 +101,10 @@ export interface ConciergeComposerProps {
   placeholder?: string;
   /** The chat whose draft the field keeps. */
   chatId?: string | null;
+  /** What a voice conversation has heard of the guardian and not sent yet, empty once sent. */
+  onVoiceHeard?: (text: string) => void;
+  /** A voice conversation sent the guardian's turn as the message `inputId`. */
+  onVoiceTurn?: (text: string, inputId: string) => void;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -124,6 +129,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       chatName,
       placeholder,
       chatId,
+      onVoiceHeard,
+      onVoiceTurn,
       modelSelection,
       onSend,
     },
@@ -195,7 +202,13 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const runSendRef = useRef<() => Promise<void>>(async () => {});
     // A voice conversation with the Concierge, in this chat. Its capsule sits
     // above the box, and its mute and end take the place of send.
-    const conversation = useVoiceConversation({ chatId });
+    const conversation = useVoiceConversation({ chatId, onTurn: onVoiceTurn });
+    // The guardian's words not sent yet, for the chat to show as they grow.
+    // Hidden while Rome's sentence shows: what is heard then may be its own voice.
+    const voiceHeard = conversation.active && !conversation.caption ? conversation.heard : "";
+    useEffect(() => {
+      onVoiceHeard?.(voiceHeard);
+    }, [voiceHeard, onVoiceHeard]);
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -405,12 +418,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               muted={conversation.muted}
               level={conversation.level}
             />
-            {/* Rome's sentence while its audio plays here; otherwise the guardian's words not sent yet. */}
-            {conversation.caption ? (
-              <VoiceConversationText text={conversation.caption} />
-            ) : (
-              <VoiceConversationText text={conversation.heard} unsent />
-            )}
+            {/* Rome's sentence while its audio plays here. The guardian's words grow in the chat. */}
+            <VoiceConversationText text={conversation.caption} />
           </>
         ) : null}
         {conversation.asking || conversation.stopped ? (
