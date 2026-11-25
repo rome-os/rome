@@ -152,11 +152,19 @@ struct WindowInput {
             guard let bounds = ConsentOcclusion.bounds(row) else { throw Failure("window_occluded") }
             guard !bounds.isEmpty,
                   point.map({ bounds.contains($0) }) ?? target.bounds.intersects(bounds) else { continue }
-            if (row[kCGWindowLayer as String] as? NSNumber)?.int32Value == CGWindowLevelForKey(.cursorWindow),
+            let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value
+            if pid == target.pid, point == nil || (layer ?? 0) > 0 { continue }
+            if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server",
-               let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, isWindowServer(pid) { continue }
+               let pid, isWindowServer(pid) { continue }
             throw Failure("window_occluded")
         }
+    }
+
+    static func releaseDrag(_ event: CGEvent, identity: ProcessIdentity, post: (CGEvent) -> Void) throws {
+        try identity.verify()
+        post(event)
     }
 
     static func unicodeChunks(_ text: String) -> [[UniChar]] {
@@ -170,10 +178,10 @@ struct WindowInput {
         return chunks
     }
 
-    // The caller verifies the target at each step and dispatches each batch to its PID.
+    // send validates before dispatching a batch. release can run after send rejects the drag.
     func execute(window: CGWindowID, locate: (CGPoint) throws -> CGPoint,
                  lookupKey: (String, CGEventFlags) -> (CGKeyCode, CGEventFlags)?,
-                 send: (CGPoint?, [CGEvent]) throws -> Void) throws {
+                 send: (CGPoint?, [CGEvent]) throws -> Void, release: (CGEvent) throws -> Void) throws {
         guard let source = CGEventSource(stateID: .privateState) else { throw Failure("action_rejected") }
         func mouse(_ type: CGEventType, at point: CGPoint, button: Button = .left, count: Int = 0) throws -> CGEvent {
             guard let event = CGEvent(mouseEventSource: source, mouseType: type,
@@ -220,6 +228,7 @@ struct WindowInput {
         case .drag(let from, let to, let button, let steps):
             let start = try locate(from), end = try locate(to)
             try send(end, [])
+            let up = try mouse(button.events.up, at: end, button: button, count: 1)
             try send(start, [mouse(button.events.down, at: start, button: button, count: 1)])
             var last = start
             do {
@@ -231,9 +240,10 @@ struct WindowInput {
                     try send(point, [mouse(button.events.drag, at: point, button: button, count: 1)])
                     last = point
                 }
-                try send(end, [mouse(button.events.up, at: end, button: button, count: 1)])
+                try send(end, [up])
             } catch {
-                try? send(last, [mouse(button.events.up, at: last, button: button, count: 1)])
+                up.location = last
+                try? release(up)
                 throw error
             }
         case .scroll(let local, let x, let y):

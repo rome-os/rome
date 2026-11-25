@@ -266,13 +266,19 @@ final class Windows: @unchecked Sendable {
         }
     }
 
+    static func metadata(_ row: WindowRow, appName: String, bundleId: String, bundleName: String,
+                         title: String) -> [String: Any] {
+        let bounds = row.bounds
+        return ["window": row.id, "appName": String(appName.unicodeScalars.prefix(128)),
+                "bundleId": String(bundleId.unicodeScalars.prefix(128)),
+                "bundleName": String(bundleName.unicodeScalars.prefix(128)), "title": title,
+                "bounds": [bounds.minX, bounds.minY, bounds.width, bounds.height]]
+    }
+
     private func metadata(_ match: Match) -> [String: Any] {
-        let bounds = match.row.bounds
-        return ["window": match.row.id, "appName": String((match.app.localizedName ?? "").unicodeScalars.prefix(128)),
-                "bundleId": String((match.app.bundleIdentifier ?? "").unicodeScalars.prefix(128)),
-                "bundleName": String((match.app.bundleURL?.deletingPathExtension().lastPathComponent ?? "").unicodeScalars.prefix(128)),
-                "title": text(match.root, kAXTitleAttribute) ?? "",
-                "bounds": [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, bounds.width, bounds.height]]
+        Self.metadata(match.row, appName: match.app.localizedName ?? "", bundleId: match.app.bundleIdentifier ?? "",
+                      bundleName: match.app.bundleURL?.deletingPathExtension().lastPathComponent ?? "",
+                      title: text(match.root, kAXTitleAttribute) ?? "")
     }
 
     func list(application: String?) throws -> [String: Any] {
@@ -497,6 +503,24 @@ final class Windows: @unchecked Sendable {
         return ["binding": id, "dispatched": true]
     }
 
+    static func focus(frontmost: () -> Bool, focused: () -> Bool, activate: () throws -> Void,
+                      setFrontmost: () throws -> Void, raise: () throws -> Void, check: () throws -> Void,
+                      timeout: DispatchTimeInterval = .milliseconds(750)) throws {
+        guard !focused() else { return }
+        let deadline = DispatchTime.now() + timeout
+        if !frontmost() {
+            try activate()
+            // Cooperative activation can leave an accessory app's request pending or ignored.
+            if !frontmost() { try setFrontmost() }
+        }
+        if !focused() { try raise() }
+        while !focused() {
+            try check()
+            guard DispatchTime.now() < deadline else { throw Failure("window_focus_unavailable") }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+    }
+
     func input(_ id: String, _ action: WindowInput) throws -> [String: Any] {
         let value = try bindings.current(id)
         let match = try revalidate(value)
@@ -529,37 +553,24 @@ final class Windows: @unchecked Sendable {
             }
         }
 
-        func focus() throws {
-            guard !focused() else { return }
-            let deadline = DispatchTime.now() + .milliseconds(750)
-            func waitFor(_ ready: () -> Bool) throws {
-                while !ready() {
-                    try checkTarget()
-                    try access.check()
-                    guard DispatchTime.now() < deadline else { throw Failure("window_focus_unavailable") }
-                    Thread.sleep(forTimeInterval: 0.025)
-                }
-            }
-
-            if !frontmost() {
-                try changeFocus { _ = match.app.activate() }
-                try waitFor(frontmost)
-            }
-            if !focused() {
-                try changeFocus { _ = AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue) }
-                try changeFocus { _ = AXUIElementPerformAction(match.root, kAXRaiseAction as CFString) }
-                try waitFor(focused)
-            }
-        }
-
         var shouldFocus = true
         try action.execute(window: row.id, locate: { try WindowInput.global($0, in: row.bounds) },
                            lookupKey: { name, flags in
             DispatchQueue.main.sync { WindowInput.physicalKey(name, flags: flags) }
-        }) { point, events in
+        }, send: { point, events in
             try checkTarget()
             if shouldFocus {
-                try focus()
+                try Self.focus(frontmost: frontmost, focused: focused, activate: {
+                    try changeFocus { _ = match.app.activate() }
+                }, setFrontmost: {
+                    try changeFocus { _ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) }
+                }, raise: {
+                    try changeFocus { _ = AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue) }
+                    try changeFocus { _ = AXUIElementPerformAction(match.root, kAXRaiseAction as CFString) }
+                }, check: {
+                    try checkTarget()
+                    try access.check()
+                })
                 shouldFocus = false
             }
             guard let rows = Self.onScreen() else { throw Failure("console_unavailable") }
@@ -578,7 +589,10 @@ final class Windows: @unchecked Sendable {
                 try live()
                 for event in events { event.postToPid(row.pid) }
             }
-        }
+        }, release: { event in
+            // Drag cleanup runs before the input slot drains, even after admission closes.
+            try WindowInput.releaseDrag(event, identity: match.identity) { $0.postToPid(row.pid) }
+        })
         return ["binding": id, "dispatched": true]
     }
 

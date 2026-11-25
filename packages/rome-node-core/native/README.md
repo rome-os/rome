@@ -221,14 +221,28 @@ Unmapped characters can use Unicode input when no modifiers are supplied.
 without splitting surrogate pairs.
 
 Before dispatch, the helper checks the host, console, capture, and target
-process identity. It activates the target app when needed and verifies that
-the bound window has focus. Pointer input checks the topmost window at the
-event coordinates. Keyboard input checks the full window for overlap.
-A window that obscures the target can block input even if both share a PID.
-The helper sends the events to the verified PID. Each stage of a drag and
-each text chunk receives a fresh check. A failure can leave earlier events
-dispatched. A successful `dispatched:true` confirms event submission. The
-target application decides how to handle those events.
+process identity. If the target app needs activation, the helper asks AppKit
+to activate it. If the app stays in the background, the helper uses
+Accessibility to bring it to the front. The helper checks that the bound
+window has focus.
+
+Pointer input checks for overlap at the event coordinates. Keyboard input
+checks for overlap across the bound window. An overlapping window from
+another process above the bound window blocks either kind of input. The
+system cursor is exempt.
+
+For pointer input, menus and other windows from the target process with a
+positive layer can overlap the bound window.
+Windows from that process at layer zero or lower block pointer input at the
+event coordinates. Keyboard input allows overlap with any window from the
+target process.
+
+The helper sends the events to the verified PID. It checks each stage of a
+drag and each text chunk before dispatch. If a drag stops after mouse-down,
+the helper sends mouse-up at the last dispatched point if the process
+identity still matches. A failure can leave earlier events dispatched. A
+successful `dispatched:true` confirms event submission. The target
+application decides how to handle those events.
 
 ### Capture
 

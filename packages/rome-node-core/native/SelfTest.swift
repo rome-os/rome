@@ -14,6 +14,7 @@ final class SelfTest {
         let test = SelfTest()
         try test.identity()
         try test.windows()
+        try test.windowFocus()
         try test.bindings()
         try test.input()
         try test.consent()
@@ -59,7 +60,12 @@ final class SelfTest {
     }
 
     private func windows() throws {
-        let first = WindowRow(id: 1, pid: 42, bounds: CGRect(x: 1, y: 3, width: 400, height: 300))
+        let first = WindowRow(id: 1, pid: 42, bounds: CGRect(x: 120, y: 80, width: 400, height: 300))
+        let metadata = Windows.metadata(first, appName: "App", bundleId: "com.example.app", bundleName: "App", title: "Window")
+        let frame = try Wire.frame(metadata)
+        let record = try JSONSerialization.jsonObject(with: frame.dropFirst(8)) as? [String: Any]
+        try expect(record?["bounds"] as? [Double] == [120.0, 80.0, 400.0, 300.0], "wire bounds use the origin and size")
+
         let second = WindowRow(id: 2, pid: 42, bounds: first.bounds.offsetBy(dx: 300, dy: 0))
         let ghost = WindowRow(id: 3, pid: 42, bounds: first.bounds.offsetBy(dx: 700, dy: 0))
         let differentPID = WindowRow(id: 4, pid: 43, bounds: first.bounds)
@@ -90,6 +96,31 @@ final class SelfTest {
         try rejects("screen_recording_permission_required") { try access.recording(granted: false, required: true) }
         try access.recording(granted: true, required: true)
         try rejects("screen_recording_permission_required") { try access.recording(granted: false, required: false) }
+    }
+
+    private func windowFocus() throws {
+        var requests: [String] = []
+        func focus(activateSucceeds: Bool, fallbackSucceeds: Bool) throws {
+            requests.removeAll()
+            var frontmost = false
+            var raised = false
+            try Windows.focus(frontmost: { frontmost }, focused: { frontmost && raised }, activate: {
+                requests.append("activate")
+                frontmost = activateSucceeds
+            }, setFrontmost: {
+                requests.append("AXFrontmost")
+                frontmost = fallbackSucceeds
+            }, raise: {
+                requests.append("raise")
+                raised = true
+            }, check: {}, timeout: .milliseconds(0))
+        }
+        try focus(activateSucceeds: true, fallbackSucceeds: false)
+        try expect(requests == ["activate", "raise"], "activation skips the fallback when the app is frontmost")
+        try focus(activateSucceeds: false, fallbackSucceeds: true)
+        try expect(requests == ["activate", "AXFrontmost", "raise"], "Accessibility activates the app before the window is raised")
+        try rejects("window_focus_unavailable") { try focus(activateSucceeds: false, fallbackSucceeds: false) }
+        try expect(requests == ["activate", "AXFrontmost", "raise"], "focus fails after trying both ways to activate the app")
     }
 
     private final class EndedBindings: @unchecked Sendable {
@@ -241,14 +272,22 @@ final class SelfTest {
         let helper = row(8, getpid(), bounds)
         let adjacent = row(9, pid, CGRect(x: -140, y: 50, width: 50, height: 100))
         let cursor = row(10, 99, bounds, layer: CGWindowLevelForKey(.cursorWindow), owner: "Window Server")
+        let document = row(11, pid, bounds)
+        let popup = row(12, pid, bounds, layer: 1)
+        let foreignPopup = row(13, getpid(), bounds, layer: 1)
         func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target) throws {
             try WindowInput.verifyStack(rows, target: target, point: point) { $0 == 99 }
         }
         try verify([cursor, adjacent, expected, helper], at: point)
         try verify([expected, adjacent, helper])
         try rejects("window_coordinate_out_of_bounds") { try verify([expected], at: CGPoint(x: -70, y: 70)) }
-        try rejects("window_occluded") { try verify([helper, expected], at: point) }
-        try rejects("window_occluded") { try verify([adjacent, expected]) }
+        for blocker in [helper, foreignPopup] {
+            try rejects("window_occluded") { try verify([blocker, expected], at: point) }
+            try rejects("window_occluded") { try verify([blocker, expected]) }
+        }
+        try rejects("window_occluded") { try verify([document, expected], at: point) }
+        try verify([popup, expected], at: point)
+        try verify([document, popup, expected])
         try rejects("window_unavailable") { try verify([adjacent], at: point) }
         try rejects("window_unavailable") { try verify([expected, expected], at: point) }
         try rejects("window_unavailable") { try verify([row(7, getpid(), bounds)], at: point) }
@@ -268,16 +307,25 @@ final class SelfTest {
 
         var events: [CGEvent] = []
         var checks: [CGPoint?] = []
+        var releases = 0
         var lookup: (String, CGEventFlags) -> (CGKeyCode, CGEventFlags)? = { _, _ in nil }
-        func run(_ action: WindowInput, limit: Int = .max) throws {
+        let identity = try ProcessIdentity.read(getpid())
+        let staleIdentity = ProcessIdentity(pid: identity.pid, uid: identity.uid, seconds: identity.seconds + 1,
+                                            microseconds: identity.microseconds, executable: identity.executable,
+                                            generation: identity.generation)
+        func run(_ action: WindowInput, limit: Int = .max, releaseIdentity: ProcessIdentity = identity) throws {
             events.removeAll()
             checks.removeAll()
+            releases = 0
             try action.execute(window: target.id, locate: { try WindowInput.global($0, in: bounds) },
-                               lookupKey: lookup) { point, batch in
+                               lookupKey: lookup, send: { point, batch in
                 guard checks.count < limit else { throw Failure("session_stopped") }
                 checks.append(point)
                 events += batch
-            }
+            }, release: { event in
+                releases += 1
+                try WindowInput.releaseDrag(event, identity: releaseIdentity) { events.append($0) }
+            })
         }
         try run(action("click", ["x": 10, "y": 20, "button": "middle", "clickCount": 3, "modifiers": ["command", "shift"]]))
         try expect(events.map(\.type) == Array(repeating: [.otherMouseDown, .otherMouseUp], count: 3).flatMap { $0 },
@@ -292,10 +340,17 @@ final class SelfTest {
         try run(drag)
         try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged, .rightMouseDragged, .rightMouseUp],
                    "drag emits a down, interpolated steps and an up")
-        try expect(events[1].location == CGPoint(x: -185, y: 80) && events[3].location == CGPoint(x: -180, y: 90),
+        let midpoint = CGPoint(x: -185, y: 80)
+        try expect(events[1].location == midpoint && events[3].location == CGPoint(x: -180, y: 90) && releases == 0,
                    "drag hits midpoint and exact endpoint")
         try rejects("session_stopped") { try run(drag, limit: 3) }
-        try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged], "stopped drag emits no further events")
+        try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged, .rightMouseUp] && releases == 1 &&
+                   events.last?.location == midpoint, "interrupted drag releases once at the last point and skips further moves")
+        try rejects("session_stopped") { try run(drag, limit: 3, releaseIdentity: staleIdentity) }
+        try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged] && releases == 1,
+                   "a changed process identity blocks the cleanup mouse-up")
+        try rejects("session_stopped") { try run(drag, limit: 1) }
+        try expect(events.isEmpty && releases == 0, "a rejected mouse-down needs no cleanup")
         try rejects("window_coordinate_out_of_bounds") {
             try run(action("drag", ["x": 10, "y": 20, "toX": 120, "toY": 40]))
         }
