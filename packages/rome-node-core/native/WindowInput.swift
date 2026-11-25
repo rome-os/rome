@@ -136,7 +136,9 @@ struct WindowInput {
     }
 
     static func verifyStack(_ rows: [[String: Any]], target: WindowRow, point: CGPoint?,
-                            isWindowServer: (pid_t) -> Bool) throws {
+                            isWindowServer: (pid_t) -> Bool,
+                            isThirdPartyOverlay: ([String: Any]) -> Bool = { DesktopAccess.isThirdPartyOverlay($0) },
+                            hitsTarget: (CGPoint) -> Bool = { _ in false }) throws {
         guard target.pid > 0, target.pid != getpid(), target.id != 0, target.visible else {
             throw Failure("window_unavailable")
         }
@@ -159,6 +161,11 @@ struct WindowInput {
             if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server",
                let pid, isWindowServer(pid) { continue }
+            if isThirdPartyOverlay(row) {
+                let overlap = target.bounds.intersection(bounds)
+                // Keyboard ownership is checked separately against the focused AX root.
+                if hitsTarget(point ?? CGPoint(x: overlap.midX, y: overlap.midY)) { continue }
+            }
             throw Failure("window_occluded")
         }
     }

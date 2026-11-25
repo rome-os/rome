@@ -27,18 +27,41 @@ enum ConsentOcclusion {
         return bounds
     }
 
+    static func isHiddenParent(_ id: CGWindowID, surfaces: [CGWindowID], info: [String: Any]?,
+                               onScreen: [[String: Any]]) -> Bool {
+        surfaces.count > 1 && surfaces.first == id && info?[kCGWindowIsOnscreen as String] as? Bool != true &&
+            !onScreen.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
+    }
+
+    static func ownsAlertSurface(_ row: [String: Any], id: CGWindowID, pid: pid_t) -> Bool {
+        (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id &&
+            (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid &&
+            (row[kCGWindowLayer as String] as? NSNumber)?.intValue == alertLevel
+    }
+
     static func clear(alertBounds: CGRect?, above: ArraySlice<[String: Any]>?, helperPID: pid_t,
-                      isWindowServer: (pid_t) -> Bool) -> Bool {
+                      isWindowServer: (pid_t) -> Bool,
+                      allowsOverlay: ([String: Any]) -> Bool = { _ in false }) -> Bool {
         guard let alertBounds, !alertBounds.isEmpty, let above else { return false }
         return above.allSatisfy { row in
             guard let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
             if pid == helperPID { return true }
             if (row[kCGWindowLayer as String] as? NSNumber)?.int32Value == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server", isWindowServer(pid) { return true }
-            // Core Graphics can report windows that let clicks through, regardless of alpha.
             guard let bounds = bounds(row) else { return false }
-            return bounds.isEmpty || !alertBounds.intersects(bounds)
+            return bounds.isEmpty || !alertBounds.intersects(bounds) || allowsOverlay(row)
         }
+    }
+}
+
+struct ConsentVisibility: Sendable {
+    let surfaces: [CGWindowID]
+    let backingWindow: CGWindowID?
+    let needsHitTest: Bool
+
+    func acceptsHit(_ id: CGWindowID?, backingIsCurrent: Bool) -> Bool {
+        guard let id, !surfaces.isEmpty else { return false }
+        return surfaces.contains(id) || (id == backingWindow && backingIsCurrent)
     }
 }
 
@@ -80,13 +103,13 @@ struct ConsentUnlock {
         return focused ? .checking : .needsFocus
     }
 
-    mutating func mouseDown(at timestamp: TimeInterval, clickCount: Int, enabled: Bool) {
-        let interval = lastMouseDown.map { timestamp - $0 }
-        lastMouseDown = timestamp
-        guard enabled else {
+    mutating func mouseDown(at uptime: TimeInterval, clickCount: Int, enabled: Bool) {
+        guard enabled, uptime.isFinite, uptime > (lastMouseDown ?? 0) else {
             reset()
             return
         }
+        let interval = lastMouseDown.map { uptime - $0 }
+        lastMouseDown = uptime
         pendingClick = (clickCount, interval)
         pendingKey = false
     }
@@ -102,9 +125,9 @@ struct ConsentUnlock {
 
     mutating func accept(currentClickCount: Int?, doubleClickInterval: TimeInterval) -> Bool {
         let singleClick = pendingClick.map { click in
-            click.count == 1 && (click.interval ?? .infinity) > doubleClickInterval
+            (0...1).contains(click.count) && (click.interval ?? .infinity) > doubleClickInterval
         } ?? (pendingKey && currentClickCount == nil)
-        guard singleClick, (currentClickCount ?? 1) == 1 else {
+        guard singleClick, (0...1).contains(currentClickCount ?? 1) else {
             reset()
             return false
         }
@@ -513,8 +536,6 @@ func revokeTrustedKeys(admission: Admission, persistent: Bool, remove: () throws
 
 @MainActor
 final class DesktopSession: NSObject, NSMenuDelegate {
-    private enum ConsentVisibility: Sendable { case untrusted, clear, raised }
-
     private let admission: Admission
     private let store: any TrustedKeyStore
     private let consentQueue = DispatchQueue(label: "com.rome.computer-use.consent-visibility", qos: .userInteractive)
@@ -597,13 +618,33 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         window.makeFirstResponder(deny)
 
         let app = NSApplication.shared
-        let sample: @Sendable ([CGWindowID]?) -> Bool = { ids in
-            guard let ids, DesktopAccess.consoleAvailable(Windows.onScreen()) else { return false }
-            return Self.visibility(ids) == .raised
+        let focus: @MainActor @Sendable () -> Void = {
+            window.makeKeyAndOrderFront(nil)
+            if !app.isActive { _ = NSRunningApplication.current.activate(options: []) }
+        }
+        let sample: @Sendable ([CGWindowID]?) -> ConsentVisibility? = { ids in
+            guard let ids, let onScreen = Windows.onScreen(), DesktopAccess.consoleAvailable(onScreen) else { return nil }
+            return Self.visibility(ids, onScreen: onScreen)
+        }
+        let clear: @MainActor @Sendable (ConsentVisibility?) -> Bool = { visibility in
+            guard let visibility else { return false }
+            guard visibility.needsHitTest else { return true }
+            let dialogCenter = CGPoint(x: window.frame.midX, y: window.frame.midY)
+            let buttonCenters = buttons.compactMap { button -> CGPoint? in
+                guard let host = button.window else { return nil }
+                let rect = host.convertToScreen(button.convert(button.bounds, to: nil))
+                return CGPoint(x: rect.midX, y: rect.midY)
+            }
+            guard buttonCenters.count == buttons.count else { return false }
+            return ([dialogCenter] + buttonCenters).allSatisfy { point in
+                let number = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+                let backingIsCurrent = app.window(withWindowNumber: number) === window && window.level == level
+                return visibility.acceptsHit(CGWindowID(exactly: number), backingIsCurrent: backingIsCurrent)
+            }
         }
         let revalidate: @MainActor () -> Bool = {
-            let clear = !accessory.resizing && sample(Self.surfaceIDs(window))
-            return self.unlock.revalidate(clear: clear,
+            let visible = !accessory.resizing && clear(sample(Self.surfaceIDs(window)))
+            return self.unlock.revalidate(clear: visible,
                                    focused: window.isKeyWindow && app.isActive, eligible: eligible(),
                                    at: ProcessInfo.processInfo.systemUptime)
         }
@@ -632,9 +673,16 @@ final class DesktopSession: NSObject, NSMenuDelegate {
 
         guard let inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown], handler: { event in
             MainActor.assumeIsolated {
-                let enabled = protected.allSatisfy(\.isEnabled)
+                guard event.windowNumber == window.windowNumber ||
+                        window.childWindows?.contains(where: { $0.isVisible && $0.windowNumber == event.windowNumber }) == true else { return }
+                let focused = app.isActive && window.isKeyWindow
+                let enabled = focused && protected.allSatisfy(\.isEnabled)
                 if event.type == .leftMouseDown {
-                    self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: enabled)
+                    self.unlock.mouseDown(at: ProcessInfo.processInfo.systemUptime, clickCount: event.clickCount, enabled: enabled)
+                    if !focused {
+                        reset()
+                        focus()
+                    }
                 } else {
                     self.unlock.keyDown(enabled: enabled, isRepeat: event.isARepeat)
                     if event.isARepeat { setEnabled(false) }
@@ -656,11 +704,18 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         let windowChanges = [NSWindow.didResignKeyNotification, NSWindow.didMoveNotification, NSWindow.didResizeNotification].map {
             notifications.addObserver(forName: $0, object: window, queue: nil, using: onChange)
         }
+        let becomeActive = notifications.addObserver(forName: NSApplication.didBecomeActiveNotification, object: app,
+                                                      queue: nil) { _ in MainActor.assumeIsolated {
+            reset()
+            window.makeKeyAndOrderFront(nil)
+            raise()
+        } }
         let resignActive = notifications.addObserver(forName: NSApplication.willResignActiveNotification, object: app,
                                                       queue: nil, using: onChange)
         defer {
             notifications.removeObserver(becomeKey)
             windowChanges.forEach(notifications.removeObserver)
+            notifications.removeObserver(becomeActive)
             notifications.removeObserver(resignActive)
         }
 
@@ -669,7 +724,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             let ids = Self.surfaceIDs(window)
             self.consentQueue.async {
                 let live = eligible()
-                let raised = live && sample(ids)
+                let visibility = live ? sample(ids) : nil
                 // The modal runs inside a main-queue block, so deliver through its run loop.
                 let runLoop = CFRunLoopGetMain()
                 let modes = [RunLoop.Mode.default.rawValue, RunLoop.Mode.modalPanel.rawValue, RunLoop.Mode.eventTracking.rawValue]
@@ -681,8 +736,9 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                             app.abortModal()
                             return
                         }
-                        let state = self.unlock.state(focused: window.isKeyWindow && app.isActive,
-                                                      raised: raised && ids == Self.surfaceIDs(window),
+                        let focused = window.isKeyWindow && app.isActive
+                        let state = self.unlock.state(focused: focused,
+                                                      raised: focused && ids == Self.surfaceIDs(window) && clear(visibility),
                                                       at: ProcessInfo.processInfo.systemUptime)
                         setEnabled(state == .ready)
                     }
@@ -690,6 +746,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                 CFRunLoopWakeUp(runLoop)
             }
         }
+        var firstTick = true
         let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
             MainActor.assumeIsolated {
                 let seconds = ConsentCountdown.seconds(until: prompt.deadline)
@@ -703,12 +760,19 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                     return
                 }
                 raise()
+                // A background launch can require LaunchServices to foreground the running app.
+                if firstTick {
+                    firstTick = false
+                    if !app.isActive { Self.foregroundRunningBundle() }
+                    else if !window.isKeyWindow { focus() }
+                }
                 requestSample()
             }
         }
         RunLoop.main.add(timer, forMode: .modalPanel)
         RunLoop.main.add(timer, forMode: .eventTracking)
-        app.activate()
+        window.center()
+        focus()
         // Keep the alert ordered on screen until the acceptance checks finish.
         return withExtendedLifetime(alert) {
             defer {
@@ -730,6 +794,21 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         answer?(sender)
     }
 
+    private static func foregroundRunningBundle() {
+        let url = Bundle.main.bundleURL.standardizedFileURL
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+        guard running.allSatisfy({ app in
+            app.processIdentifier == getpid() || (app.bundleURL.map { $0.standardizedFileURL.path != url.path } ?? false)
+        }) else { return }
+        let options = NSWorkspace.OpenConfiguration()
+        options.activates = true
+        options.createsNewApplicationInstance = false
+        options.allowsRunningApplicationSubstitution = false
+        options.addsToRecentItems = false
+        options.promptsUserIfNeeded = false
+        NSWorkspace.shared.openApplication(at: url, configuration: options, completionHandler: nil)
+    }
+
     private static func surfaceIDs(_ window: NSWindow) -> [CGWindowID]? {
         // AppKit can draw the alert in a child window with its own Core Graphics ID.
         var ids: [CGWindowID] = []
@@ -740,30 +819,38 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         return ids
     }
 
-    nonisolated private static func visibility(_ ids: [CGWindowID]) -> ConsentVisibility {
+    nonisolated private static func visibility(_ ids: [CGWindowID], onScreen: [[String: Any]]) -> ConsentVisibility? {
         let helperPID = getpid()
-        var checked = false
-        var raised = true
-        for (index, id) in ids.enumerated() {
+        var surfaces: [CGWindowID] = []
+        var backingWindow: CGWindowID?
+        var needsHitTest = false
+        for id in ids {
             guard let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]]
-            else { return .untrusted }
-            if index == 0, rows.isEmpty { continue }
+            else { return nil }
+            if ConsentOcclusion.isHiddenParent(id, surfaces: ids, info: rows.first, onScreen: onScreen) {
+                // The visible child can be the only Core Graphics record under LaunchServices activation.
+                if rows.first.map({ ConsentOcclusion.ownsAlertSurface($0, id: id, pid: helperPID) }) ?? true {
+                    backingWindow = id
+                }
+                continue
+            }
             guard let row = rows.first, row[kCGWindowIsOnscreen as String] as? Bool == true,
                   let bounds = ConsentOcclusion.bounds(row),
                   let ordered = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .optionIncludingWindow], id) as? [[String: Any]],
                   let reference = ordered.last,
-                  (reference[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id,
-                  (reference[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == helperPID,
+                  ConsentOcclusion.ownsAlertSurface(reference, id: id, pid: helperPID),
                   reference[kCGWindowIsOnscreen as String] as? Bool == true,
-                  let layer = (reference[kCGWindowLayer as String] as? NSNumber)?.intValue,
                   ConsentOcclusion.bounds(reference) == bounds,
                   ConsentOcclusion.clear(alertBounds: bounds, above: ordered.dropLast(), helperPID: helperPID,
-                                         isWindowServer: ConsentOcclusion.isWindowServer) else { return .untrusted }
-            checked = true
-            raised = raised && layer == ConsentOcclusion.alertLevel
+                                         isWindowServer: ConsentOcclusion.isWindowServer, allowsOverlay: { row in
+                guard DesktopAccess.isThirdPartyOverlay(row) else { return false }
+                needsHitTest = true
+                return true
+            }) else { return nil }
+            surfaces.append(id)
         }
-        guard checked else { return .untrusted }
-        return raised ? .raised : .clear
+        guard !surfaces.isEmpty else { return nil }
+        return ConsentVisibility(surfaces: surfaces, backingWindow: backingWindow, needsHitTest: needsHitTest)
     }
 
     func showStatus(_ authorization: SessionAuthorization) -> Bool {

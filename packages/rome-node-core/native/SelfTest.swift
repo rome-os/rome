@@ -175,13 +175,18 @@ final class SelfTest {
         try expect(available([[layer: 0], cursor]), "authenticated system cursor leaves the console available")
         var impostor = cursor
         impostor[pid] = 13
-        try expect(!available([impostor]), "a third party cannot claim the system cursor exception")
+        try expect(available([impostor]), "a verified third-party owner can use the cursor level without locking the console")
         try expect(available([[layer: saver + 100, pid: 13]]), "an ordinary high overlay leaves the console available")
         try expect(!available([[layer: saver, pid: 14]]), "the screen saver makes the console unavailable")
         try expect(!available([[layer: saver, pid: 15]]), "the system login window makes the console unavailable")
         try expect(!available([[layer: saver, pid: 16]]), "a protected system executable can own a private surface")
         try expect(!available([[layer: saver, pid: 17]]), "an unverifiable high-layer owner fails closed")
-        try expect(!available([[layer: CGShieldingWindowLevel(), pid: 13]]), "the shield level makes the console unavailable")
+        try expect(available([[layer: CGShieldingWindowLevel(), pid: 13]]), "a third-party shield level does not lock the console")
+        let maximumLayer = CGWindowLevelForKey(.maximumWindow)
+        try expect(available([[layer: maximumLayer, pid: 13, kCGWindowSharingState as String: 0]]),
+                   "a verified private remote overlay at the maximum level leaves the console available")
+        try expect(!available([[layer: maximumLayer, pid: 15]]) && !available([[layer: maximumLayer, pid: 17]]),
+                   "system shields and unverifiable owners still lock the console at the maximum level")
         try expect(!DesktopAccess.visibleLayersClear(nil), "missing window list fails closed")
         let access = DesktopAccess()
         try access.recording(granted: false, required: false)
@@ -385,8 +390,14 @@ final class SelfTest {
         let highLayer = CGWindowLevelForKey(.screenSaverWindow) + 100
         let highOverlay = row(14, 97, bounds, layer: highLayer)
         let highOverlayAway = row(15, 97, bounds.offsetBy(dx: 400, dy: 0), layer: highLayer)
-        func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target) throws {
-            try WindowInput.verifyStack(rows, target: target, point: point) { $0 == 99 }
+        var remoteOverlay = row(16, 97, bounds.insetBy(dx: -200, dy: -200), layer: CGWindowLevelForKey(.maximumWindow))
+        remoteOverlay[kCGWindowSharingState as String] = 0
+        func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target,
+                    hit: (CGPoint) -> Bool = { _ in false }) throws {
+            try WindowInput.verifyStack(rows, target: target, point: point, isWindowServer: { $0 == 99 },
+                                        isThirdPartyOverlay: {
+                DesktopAccess.isThirdPartyOverlay($0, executablePath: { pid in pid == 97 ? "/Applications/Remote.app/Server" : nil })
+            }, hitsTarget: hit)
         }
         try verify([cursor, adjacent, expected, helper], at: point)
         try verify([expected, adjacent, helper])
@@ -397,6 +408,12 @@ final class SelfTest {
         }
         try expect((try? verify([highOverlayAway, expected], at: point)) != nil,
                    "a high overlay outside the target does not block input")
+        try expect((try? verify([remoteOverlay, expected], at: point, hit: { $0 == point })) != nil,
+                   "a private full-screen remote overlay allows a pointer hit on the bound window")
+        try expect((try? verify([remoteOverlay, expected], hit: { $0 == CGPoint(x: bounds.midX, y: bounds.midY) })) != nil,
+                   "keyboard input can use a verified pass-through point in the overlap")
+        try rejects("window_occluded") { try verify([remoteOverlay, expected], at: point) }
+        try rejects("window_occluded") { try verify([remoteOverlay, helper, expected], at: point, hit: { _ in true }) }
         for blocker in [document, popup] {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
         }
@@ -589,8 +606,13 @@ final class SelfTest {
             [kCGWindowOwnerPID as String: pid, kCGWindowBounds as String: bounds.dictionaryRepresentation,
              layerKey: layer, kCGWindowOwnerName as String: owner, kCGWindowAlpha as String: alpha]
         }
-        func clear(_ above: ArraySlice<[String: Any]>?, bounds: CGRect? = prompt) -> Bool {
-            ConsentOcclusion.clear(alertBounds: bounds, above: above, helperPID: helper) { $0 == server }
+        func clear(_ above: ArraySlice<[String: Any]>?, bounds: CGRect? = prompt, verifiedOverlay: Bool = false) -> Bool {
+            ConsentOcclusion.clear(alertBounds: bounds, above: above, helperPID: helper, isWindowServer: { $0 == server },
+                                   allowsOverlay: { row in
+                verifiedOverlay && DesktopAccess.isThirdPartyOverlay(row, executablePath: {
+                    $0 == other ? "/Applications/Remote.app/Server" : nil
+                })
+            })
         }
         try expect(ConsentOcclusion.alertLevel > Int(CGWindowLevelForKey(.statusWindow)) &&
                    ConsentOcclusion.alertLevel > Int(CGWindowLevelForKey(.popUpMenuWindow)) &&
@@ -599,6 +621,12 @@ final class SelfTest {
         try expect(!clear([row(other, prompt)]), "overlapping window from another process blocks consent")
         try expect(!clear([row(other, prompt, layer: CGWindowLevelForKey(.screenSaverWindow) + 100)]),
                    "a high third-party overlay blocks consent at overlapping bounds")
+        var remoteCover = row(other, prompt.insetBy(dx: -100, dy: -100), layer: CGWindowLevelForKey(.maximumWindow))
+        remoteCover[kCGWindowSharingState as String] = 0
+        try expect(!clear([remoteCover]) && clear([remoteCover], verifiedOverlay: true),
+                   "a private remote overlay at the maximum level requires a verified input path")
+        try expect(!clear([remoteCover, row(other, prompt)], verifiedOverlay: true),
+                   "a verified remote overlay never overrides an ordinary foreground cover")
         try expect(!clear([row(other, prompt, alpha: 0)]), "transparent click-through window blocks consent")
         try expect(clear([row(other, prompt.offsetBy(dx: 400, dy: 0))]), "nonoverlapping window leaves consent clear")
         try expect(clear([row(other, .zero), row(helper, prompt)]), "empty and helper-owned windows leave consent clear")
@@ -607,6 +635,45 @@ final class SelfTest {
         try expect(!clear([row(other, prompt, layer: cursor, owner: "Window Server")]), "cursor exemption requires the Window Server PID")
         try expect(!clear(nil) && !clear([], bounds: nil) && !clear([[kCGWindowOwnerPID as String: other]]),
                    "missing window data fails closed")
+        let numberKey = kCGWindowNumber as String
+        let onScreenKey = kCGWindowIsOnscreen as String
+        let realSurface: [[String: Any]] = [[numberKey: 22, onScreenKey: true]]
+        try expect(ConsentOcclusion.isHiddenParent(21, surfaces: [21, 22], info: [numberKey: 21], onScreen: realSurface),
+                   "the offscreen AppKit backing window does not block checks of its visible child")
+        try expect(!ConsentOcclusion.isHiddenParent(21, surfaces: [21], info: nil, onScreen: []),
+                   "an offscreen root alone does not qualify for consent")
+        try expect(!ConsentOcclusion.isHiddenParent(22, surfaces: [21, 22], info: nil, onScreen: []),
+                   "a reported child must always pass visibility checks")
+        try expect(!ConsentOcclusion.isHiddenParent(21, surfaces: [21, 22], info: [onScreenKey: true], onScreen: realSurface) &&
+                   !ConsentOcclusion.isHiddenParent(21, surfaces: [21, 22], info: nil, onScreen: [[numberKey: 21]]),
+                   "a parent reported on screen by either snapshot must be checked")
+        let ownerKey = kCGWindowOwnerPID as String
+        let backingRow: [String: Any] = [numberKey: 21, ownerKey: helper, layerKey: ConsentOcclusion.alertLevel]
+        try expect(ConsentOcclusion.ownsAlertSurface(backingRow, id: 21, pid: helper) &&
+                   !ConsentOcclusion.ownsAlertSurface(backingRow, id: 21, pid: other) &&
+                   !ConsentOcclusion.ownsAlertSurface(backingRow, id: 23, pid: helper),
+                   "a backing window must match both the known AppKit ID and the helper owner")
+        try expect(!ConsentOcclusion.ownsAlertSurface([numberKey: 21, ownerKey: helper, layerKey: 0], id: 21, pid: helper),
+                   "an alert backing window must remain at the alert level")
+        let visibleWithBacking = ConsentVisibility(surfaces: [22], backingWindow: 21, needsHitTest: true)
+        try expect(visibleWithBacking.acceptsHit(21, backingIsCurrent: true) &&
+                   visibleWithBacking.acceptsHit(22, backingIsCurrent: false),
+                   "AppKit mouse hits can land on the verified parent or the rendered child")
+        try expect(!visibleWithBacking.acceptsHit(21, backingIsCurrent: false),
+                   "the reported backing ID still has to resolve to the current alert in AppKit")
+        try expect(!visibleWithBacking.acceptsHit(23, backingIsCurrent: true) &&
+                   !visibleWithBacking.acceptsHit(nil, backingIsCurrent: true) &&
+                   !ConsentVisibility(surfaces: [], backingWindow: 21, needsHitTest: true).acceptsHit(21, backingIsCurrent: true),
+                   "an unrelated surface, missing hit or backing window alone cannot unlock the alert")
+        var remote = ConsentUnlock()
+        let clearRemoteHit = clear([remoteCover], verifiedOverlay: visibleWithBacking.acceptsHit(21, backingIsCurrent: true))
+        try expect(remote.state(focused: true, raised: clearRemoteHit, at: 1) == .checking &&
+                   remote.state(focused: true, raised: clearRemoteHit, at: 1.5) == .ready,
+                   "a verified backing-window hit under a remote overlay still requires a full dwell")
+        remote.mouseDown(at: 1.625, clickCount: 0, enabled: true)
+        try expect(remote.revalidate(clear: clearRemoteHit, focused: true, eligible: true, at: 1.625) &&
+                   remote.accept(currentClickCount: 0, doubleClickInterval: 0.5),
+                   "a zero-count click can approve through the verified backing window")
 
         var unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "consent starts locked")
@@ -631,11 +698,10 @@ final class SelfTest {
         try expect(!unlock.update(focused: true, at: 1.12), "consent needs a full quiet half-second")
         try expect(unlock.update(focused: true, at: 1.125), "one focused half-second without clicks unlocks consent")
 
-        unlock.mouseDown(at: 1.125, clickCount: 1, enabled: true)
-        try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
-                   "a click exactly one double-click interval after a locked click is rejected")
-        try expect(!unlock.update(focused: true, at: 1.125), "rejecting a close click relocks consent")
-        try expect(unlock.update(focused: true, at: 1.625), "consent unlocks after the restarted delay")
+        unlock.mouseDown(at: 1.125, clickCount: 0, enabled: true)
+        try expect(unlock.accept(currentClickCount: 0, doubleClickInterval: 0.5),
+                   "a remote single click can approve after a full dwell following a disabled focus click")
+        try expect(unlock.update(focused: true, at: 1.625), "approval consumes the gesture without changing the dwell")
 
         unlock.mouseDown(at: 1.625, clickCount: 2, enabled: true)
         try expect(!unlock.accept(currentClickCount: nil, doubleClickInterval: 0.5),
@@ -652,6 +718,24 @@ final class SelfTest {
         unlock.mouseDown(at: 2.875, clickCount: 1, enabled: true)
         try expect(unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
                    "a single click past the double-click interval approves consent")
+
+        unlock = ConsentUnlock()
+        unlock.mouseDown(at: 0, clickCount: 0, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 0, doubleClickInterval: 0.5),
+                   "invalid clock samples cannot record a gesture")
+        unlock.mouseDown(at: 1, clickCount: 0, enabled: true)
+        unlock.mouseDown(at: 0.75, clickCount: 0, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 0, doubleClickInterval: 0.5),
+                   "a backward clock sample clears any pending gesture")
+        unlock.mouseDown(at: 1.5, clickCount: 0, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 0, doubleClickInterval: 0.5),
+                   "a backward sample cannot shorten a prior enabled click interval")
+        unlock.mouseDown(at: 2.125, clickCount: 0, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 2, doubleClickInterval: 0.5),
+                   "an AppKit double-click on release cannot approve a recorded single click")
+        unlock.mouseDown(at: 2.75, clickCount: 0, enabled: true)
+        try expect(unlock.accept(currentClickCount: nil, doubleClickInterval: 0.5),
+                   "a recorded remote single click survives an AppKit change of current event")
 
         unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "consent starts locked before typing")

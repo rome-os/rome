@@ -68,8 +68,8 @@ installing or releasing the bundle.
    use `NSWorkspace.openApplication` to launch the app and get its PID.
    For unattended launches that already have a trusted key, add `-g` or
    set the native launch configuration's `activates` property to false.
-   When macOS keeps another app active, click the consent window if prompted
-   and wait for its status to say the buttons are ready.
+   If macOS keeps another app active, click the consent window and wait for the
+   approval buttons to become enabled before selecting one.
 4. Connect to `STATE_DIR/helper.sock` from the declared host process. The
    helper exposes the socket with mode `0600`. It checks the peer UID and PID
    with `getpeereid` and `LOCAL_PEERPID`, then validates the code associated
@@ -274,9 +274,12 @@ control the Mac unattended until the grant is revoked.
 **Deny** is the default and shows the remaining seconds until the 60-second
 authorization deadline. The approval buttons unlock when the dialog stays
 focused and clear for 0.5 seconds. Approval requires a fresh gesture. A left mouse press or key press
-during that delay restarts it. An overlapping window from another process
-above the dialog pauses confirmation, except for the system cursor.
-System overlays such as screenshot selection also pause confirmation.
+during that delay restarts it. Overlapping ordinary windows and system
+overlays such as screenshot selection pause confirmation. The system cursor
+and third-party high-layer overlays that pass the platform's mouse-down
+hit test leave the dialog available. The helper checks the dialog and button
+centers under those overlays. AppKit may route input to the dialog's verified
+backing window while rendering the alert in its child window.
 Once clear, the dialog waits for a full 0.5 seconds of focus again. The helper
 checks focus, visibility and eligibility again before approving. Periodic
 window visibility checks run in the background.
@@ -444,11 +447,13 @@ socket reader and can reply out of order while a window operation is busy.
 `kill -USR1 HELPER_PID` provides a local stop, and `SIGTERM` seals admission
 and exits. **Stop Computer Use** also seals admission and exits. Locking the
 screen, session switching, sleep and the console guard seal admission. The
-console guard checks public session fields, display state, shielding levels,
-and the executable owners of high-layer system windows. High-layer
-third-party windows remain subject to the same geometric occlusion checks
-for input and consent. The guard runs during window operations and once per
-second while a slot or binding is active.
+console guard checks public session fields, display state, and the executable
+owners of high-layer system windows. For overlapping high-layer third-party
+windows, the helper uses the platform's mouse-down hit test to verify the
+bound window at the pointer location or, for keyboard input, in the overlap.
+Keyboard dispatch still verifies the focused Accessibility root. Ordinary
+windows remain subject to geometric occlusion checks. The guard runs during
+window operations and once per second while a slot or binding is active.
 
 `stop` and `cancel` permanently seal admission and stop every binding's
 stream. `cancel_requested` means an admitted operation or binding cleanup

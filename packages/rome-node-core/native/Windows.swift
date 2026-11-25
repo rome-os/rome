@@ -136,19 +136,31 @@ final class DesktopAccess: @unchecked Sendable {
                                    executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
         guard let rows, !rows.isEmpty else { return false }
         let screenSaver = CGWindowLevelForKey(.screenSaverWindow)
-        let shield = CGShieldingWindowLevel()
-        let systemPaths = ["/System/", "/usr/libexec/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/"]
         return rows.allSatisfy { row in
             guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value else { return false }
             if layer < screenSaver { return true }
             guard let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0 else { return false }
-            if layer == CGWindowLevelForKey(.cursorWindow) {
-                return row[kCGWindowOwnerName as String] as? String == "Window Server" && isWindowServer(pid)
-            }
-            guard layer < shield, let path = executablePath(pid), path.hasPrefix("/") else { return false }
-            // Third-party overlays still participate in the per-window occlusion checks.
-            return !systemPaths.contains { path.hasPrefix($0) }
+            if layer == CGWindowLevelForKey(.cursorWindow),
+               row[kCGWindowOwnerName as String] as? String == "Window Server", isWindowServer(pid) { return true }
+            return isThirdPartyOverlay(row, executablePath: executablePath)
         }
+    }
+
+    static func isThirdPartyOverlay(_ row: [String: Any],
+                                    executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
+        guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value,
+              layer >= CGWindowLevelForKey(.screenSaverWindow),
+              let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0,
+              let path = executablePath(pid), path.hasPrefix("/") else { return false }
+        let systemPaths = ["/System/", "/usr/libexec/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/"]
+        return !systemPaths.contains { path.hasPrefix($0) }
+    }
+
+    @MainActor
+    static func windowHit(at point: CGPoint) -> CGWindowID? {
+        guard let primary = NSScreen.screens.first else { return nil }
+        let appKitPoint = CGPoint(x: point.x, y: primary.frame.maxY - point.y)
+        return CGWindowID(exactly: NSWindow.windowNumber(at: appKitPoint, belowWindowWithWindowNumber: 0))
     }
 }
 
@@ -730,7 +742,10 @@ final class Windows: @unchecked Sendable {
                     throw Failure("window_coordinate_out_of_bounds")
                 }
             }
-            try WindowInput.verifyStack(rows, target: row, point: point, isWindowServer: ConsentOcclusion.isWindowServer)
+            try WindowInput.verifyStack(rows, target: row, point: point, isWindowServer: ConsentOcclusion.isWindowServer,
+                                        hitsTarget: { point in
+                DispatchQueue.main.sync { DesktopAccess.windowHit(at: point) == row.id }
+            })
             guard focused() else { throw Failure("window_focus_unavailable") }
             try match.identity.verify()
             try requireRecording()

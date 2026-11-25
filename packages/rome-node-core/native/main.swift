@@ -41,7 +41,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
     signal(SIGINT, SIG_IGN)
     let signals = [SIGUSR1, SIGTERM, SIGINT].map { name in
         let source = DispatchSource.makeSignalSource(signal: name, queue: DispatchQueue.global(qos: .userInitiated))
-        source.setEventHandler {
+        source.setEventHandler { @Sendable in
             if name == SIGUSR1 { _ = admission.stop() }
             else { admission.terminate() }
         }
