@@ -1,4 +1,3 @@
-export type { ComputerUseOptions } from "./computer-use/discovery.js";
 export {
   connectHost,
   defaultDeviceName,

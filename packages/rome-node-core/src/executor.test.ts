@@ -163,6 +163,14 @@ describe("computer actions over binary frames", () => {
         transferVersion: 1,
       },
     });
+    const { actions, usage } = (
+      info.response as {
+        result: { actions: string[]; usage?: Record<string, string> };
+      }
+    ).result;
+    expect(Object.keys(usage ?? {})).toEqual(
+      actions.filter((action) => action.startsWith("computer.")),
+    );
     expect(info.body.byteLength).toBe(0);
     expect((await executeFrame("fs.read", {})).response).toMatchObject({
       ok: false,

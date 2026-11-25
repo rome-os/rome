@@ -271,8 +271,8 @@ registerHooks({ load(url, context, next) {
   if (url !== discovery) return next(url, context);
   return { format: "module", shortCircuit: true, source: \`
     import { discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
-    export function discoverHelper(options) {
-      return discover(options, { platform: "darwin" });
+    export function discoverHelper() {
+      return discover({ platform: "darwin" });
     }
   \` };
 }});
@@ -343,11 +343,15 @@ it.skipIf(process.platform === "win32")(
           {
             id: "computer_use",
             prefix: "computer",
-            state: "ready",
+            state: "needs_permission",
             personal: true,
             actions: expect.arrayContaining(["computer.observe"]),
           },
         ],
+        usage: {
+          "computer.observe": expect.stringContaining("requires a binary request frame"),
+          "computer.act": expect.stringContaining("actionId"),
+        },
         actions: expect.arrayContaining([
           "computer.windows",
           "computer.bind",
@@ -375,6 +379,10 @@ it.skipIf(process.platform === "win32")(
     const {
       result: { binding },
     } = await run("bind", { window: 9 });
+    const approved = await f.cli(["device", "describe", f.deviceA]);
+    expect(JSON.parse(approved.stdout.toString())).toMatchObject({
+      result: { capabilities: [{ id: "computer_use", state: "on" }] },
+    });
     expect(await run("observe", { binding })).toMatchObject({
       result: { binding, tree: { title: "private-ax-text" } },
     });

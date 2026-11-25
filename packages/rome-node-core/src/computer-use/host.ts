@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { actionError, isRecord, type ActionResponse, type BinaryActionResult } from "../actions.js";
 import { isUuid } from "../frame.js";
 import { ComputerUseBridge } from "./bridge.js";
-import { discoverHelper, type ComputerUseOptions } from "./discovery.js";
+import { discoverHelper } from "./discovery.js";
 import {
   ComputerUseError,
   JSON_LIMIT,
@@ -84,6 +84,7 @@ interface Session {
 }
 
 interface Operation {
+  usage: string;
   opensSession?: true;
   urgent?: true;
   run: (
@@ -105,10 +106,7 @@ export class ComputerUseHost {
   private readonly deps: HostDeps;
   private discovering?: Promise<string>;
 
-  constructor(
-    private readonly options?: ComputerUseOptions,
-    deps: Partial<HostDeps> = {},
-  ) {
+  constructor(deps: Partial<HostDeps> = {}) {
     this.deps = {
       discover: discoverHelper,
       launch: (options) => ComputerUseBridge.launch(options),
@@ -119,6 +117,7 @@ export class ComputerUseHost {
 
   private readonly operations = {
     "computer.windows": {
+      usage: "{application?}. List windows, optionally filtered by application.",
       opensSession: true,
       run: async (session, input, _binary, appPath) => {
         const args = requestParams("windows", input);
@@ -133,6 +132,7 @@ export class ComputerUseHost {
       },
     },
     "computer.bind": {
+      usage: "{window}. Bind a window by its numeric ID.",
       opensSession: true,
       run: async (session, input, _binary, appPath) => {
         const { window } = requestParams("bind", input);
@@ -140,6 +140,7 @@ export class ComputerUseHost {
       },
     },
     "computer.unbind": {
+      usage: "{binding}. Release the binding.",
       run: async (session, input) => {
         const { binding: id } = requestParams("unbind", input);
         const { active, binding, bridge } = this.bound(session, id);
@@ -152,6 +153,8 @@ export class ComputerUseHost {
       },
     },
     "computer.observe": {
+      usage:
+        "{binding, element?, screenshot?}. Read the AX tree. screenshot: true requires a binary request frame and returns PNG bytes.",
       run: async (session, input, binary) => {
         const { binding: id, element, screenshot } = requestParams("observe", input);
         if (screenshot && !binary)
@@ -171,6 +174,10 @@ export class ComputerUseHost {
       },
     },
     "computer.act": {
+      usage:
+        "{binding, actionId, action, ...}. Use a UUID for actionId. " +
+        "AX actions are press, set_value, increment, and decrement. " +
+        "Input actions are click, move, drag, scroll, key_press, and type_text.",
       run: async (session, input) => {
         if (!isRecord(input)) throw new ComputerUseError("invalid_request");
         const { actionId, ...args } = input;
@@ -192,6 +199,7 @@ export class ComputerUseHost {
       },
     },
     "computer.cancel": {
+      usage: "No arguments. Stop input for this peer and return the stop status.",
       urgent: true,
       run: async (session) => success(await this.cancel(session)),
     },
@@ -199,20 +207,20 @@ export class ComputerUseHost {
 
   async info(peer: string) {
     if (isUuid(peer)) peer = peer.toLowerCase();
+    const bridge = this.sessions.get(peer)?.bridge;
+    const installed =
+      (bridge && !bridge.closed) ||
+      (await this.findHelper().then(
+        () => true,
+        () => false,
+      ));
     const session = this.sessions.get(peer);
-    let state: "ready" | "not_installed" | "unsupported_platform" = "ready";
-    if (!session?.bridge || session.bridge.closed) {
-      try {
-        await this.findHelper();
-      } catch (cause) {
-        state =
-          errorCode(cause) === "computer_use_unsupported_platform"
-            ? "unsupported_platform"
-            : "not_installed";
-      }
-    }
-    const stopped = Boolean(this.sessions.get(peer)?.stop);
-    const actions = Object.keys(this.operations);
+    const stopped = Boolean(session?.stop);
+    const live = session?.bridge && !session.bridge.closed;
+    const state = stopped ? "off" : live ? "on" : installed ? "needs_permission" : "off";
+    const operations = Object.entries<Operation>(this.operations);
+    const advertised =
+      installed || live ? operations.filter(([, operation]) => !stopped || operation.urgent) : [];
     return {
       capability: {
         id: "computer_use",
@@ -220,9 +228,10 @@ export class ComputerUseHost {
         title: "Window Control",
         state,
         personal: true,
-        actions,
+        actions: Object.keys(this.operations),
       },
-      actions: state === "ready" ? (stopped ? ["computer.cancel"] : actions) : [],
+      actions: advertised.map(([action]) => action),
+      usage: Object.fromEntries(advertised.map(([action, { usage }]) => [action, usage])),
     };
   }
 
@@ -299,7 +308,7 @@ export class ComputerUseHost {
   }
 
   private findHelper(): Promise<string> {
-    this.discovering ??= this.deps.discover(this.options).finally(() => {
+    this.discovering ??= this.deps.discover().finally(() => {
       this.discovering = undefined;
     });
     return this.discovering;

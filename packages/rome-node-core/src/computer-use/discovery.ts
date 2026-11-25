@@ -4,24 +4,17 @@ import { isAbsolute, join } from "node:path";
 import { APP_NAME } from "./launch.js";
 import { ComputerUseError } from "./protocol.js";
 
-export interface ComputerUseOptions {
-  appPath?: string;
-}
-
 interface DiscoveryOptions {
   platform: NodeJS.Platform;
   applications: string[];
   envPath?: string;
 }
 
-export async function discoverHelper(
-  options: ComputerUseOptions | undefined,
-  {
-    platform = process.platform,
-    applications = ["/Applications", join(homedir(), "Applications")],
-    envPath = process.env.ROME_NODE_COMPUTER_USE_HELPER,
-  }: Partial<DiscoveryOptions> = {},
-): Promise<string> {
+export async function discoverHelper({
+  platform = process.platform,
+  applications = ["/Applications", join(homedir(), "Applications")],
+  envPath = process.env.ROME_NODE_COMPUTER_USE_HELPER,
+}: Partial<DiscoveryOptions> = {}): Promise<string> {
   if (platform !== "darwin") throw new ComputerUseError("computer_use_unsupported_platform");
 
   async function installed(path: string): Promise<string | undefined> {
@@ -37,9 +30,8 @@ export async function discoverHelper(
     throw new ComputerUseError("invalid_helper_bundle");
   }
 
-  const explicit = options?.appPath ?? envPath;
-  if (explicit !== undefined) {
-    const app = await installed(explicit);
+  if (envPath !== undefined) {
+    const app = await installed(envPath);
     if (app) return app;
     throw new ComputerUseError("computer_use_helper_missing");
   }

@@ -5,7 +5,6 @@ import { dirname, resolve } from "node:path";
 import { actionError, isRecord, type ActionResponse, type BinaryActionResult } from "./actions.js";
 import { AUDIT_PUSH_BYTES, type AuditOutcome, type AuditStore } from "./audit.js";
 import { computerUseAuditFields } from "./computer-use/audit-fields.js";
-import type { ComputerUseOptions } from "./computer-use/discovery.js";
 import { ComputerUseHost } from "./computer-use/host.js";
 import {
   decodeMeta,
@@ -157,14 +156,13 @@ export function createExecutor(
   send: (message: OutboundEnvelope) => boolean,
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
-  computerUse?: ComputerUseOptions,
 ) {
-  const computer = new ComputerUseHost(computerUse);
+  const computer = new ComputerUseHost();
   const children = new Set<ChildProcess>();
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
   const info = async (peer: string): Promise<ActionResponse> => {
-    const { capability, actions } = await computer.info(peer);
+    const { capability, actions, usage } = await computer.info(peer);
     return {
       type: "response",
       ok: true,
@@ -174,6 +172,7 @@ export function createExecutor(
           platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
         // transfer.open belongs to the transfer protocol, advertised by transferVersion.
         actions: [...Object.keys(handlers), ...actions],
+        ...(actions.length ? { usage } : {}),
         frameVersion: 1,
         transferVersion: TRANSFER_VERSION,
         capabilities: [capability],

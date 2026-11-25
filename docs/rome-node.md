@@ -1044,22 +1044,25 @@ Full Rome Node hosts register the `computer.*` actions for window control.
 A limited host refuses remote actions with `computer_use_off`.
 
 On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
-`~/Applications`, in that order. The host can override those paths through
-`ComputerUseOptions.appPath` or the `ROME_NODE_COMPUTER_USE_HELPER` environment
-variable. It verifies the bundle signature at launch before asking for local
+`~/Applications`, in that order. `ROME_NODE_COMPUTER_USE_HELPER` overrides the
+bundle path. The host verifies the signature at launch before asking for local
 session approval. The helper may also need Accessibility and Screen Recording
 permissions in System Settings → Privacy & Security.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,
 `prefix: "computer"`, and `personal: true`. The shared-chat audience guard
 refuses access to its observations, including AX content and screenshots.
-A discovered macOS bundle reports `ready` before approval. A missing bundle
-reports `not_installed`, and window requests return `computer_use_helper_missing`.
-Other platforms report `unsupported_platform` and return
-`computer_use_unsupported_platform`. An invalid bundle can return
-`invalid_helper_bundle`. The flat `actions` list advertises these operations
-when the capability is ready. A stopped peer sees only `computer.cancel` from
-this capability until its session ends.
+The capability reports `needs_permission` when a helper bundle is present and
+the peer has yet to establish an approved session. It reports `on` while that
+peer has a live approved helper bridge. It reports `off` on other platforms,
+when discovery fails, or after the peer stops its session. Request errors such
+as `computer_use_unsupported_platform`, `computer_use_helper_missing`,
+`invalid_helper_bundle`, and `session_stopped` give the reason.
+
+The flat `actions` list advertises the operations a peer can request.
+`system.info.usage` maps each advertised `computer.*` action to its argument
+summary. A stopped peer can still check `computer.cancel` until its session
+ends.
 
 | Action | Arguments and result |
 | --- | --- |
