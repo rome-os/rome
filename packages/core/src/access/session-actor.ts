@@ -42,10 +42,11 @@ export type SessionActor =
       via: "cookie" | "loopback";
     }
   | { kind: "visitor"; accountId: string; email: string }
-  /** A sessionless entry on a session-capable surface (public /api routes,
-   * the app WS server). Distinct from an absent actor, which means no
-   * accountable session could exist anywhere in the chain — agent-autonomous
-   * work, routines, startup, and machine-credential surfaces (/webhooks). */
+  /** An entry on a session-capable surface (/api routes, the app WS server)
+   * whose session names no one, or could not be read. Distinct from an absent
+   * actor, which means no accountable session could exist anywhere in the
+   * chain — agent-autonomous work, routines, startup, and machine-credential
+   * surfaces (/webhooks). */
   | { kind: "anonymous" };
 
 /** Raw request material actor resolution needs; extends the guardian material
@@ -141,37 +142,36 @@ export function sessionOwnerKey(actor: SessionActor | undefined): string | null 
 }
 
 /**
- * Whose chats the current request may open: the signed-in person's. No actor
- * at all is in-process work, never a request from outside, and acts as the
- * guardian.
+ * Whose chats the current request may open: the signed-in person's, and no
+ * one's when no person can be told. Work Rome does on its own opens chats
+ * without asking.
  */
 export async function currentChatOwner(): Promise<string | null> {
-  const actor = await currentSessionActor();
-  return actor ? sessionOwnerKey(actor) : "guardian";
+  return sessionOwnerKey(await currentSessionActor());
 }
 
 interface SessionActorHandle {
-  get(): Promise<SessionActor | undefined>;
+  get(): Promise<SessionActor>;
 }
 
 const sessionActorContext = new AsyncLocalStorage<SessionActorHandle>();
 
 function toHandle(source: SessionActor | (() => Promise<SessionActor>)): SessionActorHandle {
   if (typeof source !== "function") {
-    const resolved = Promise.resolve<SessionActor | undefined>(source);
+    const resolved = Promise.resolve(source);
     return { get: () => resolved };
   }
   // Lazy + memoized: requests that never run an action pay nothing, and every
-  // action in one request shares a single resolution. Fail-open — a resolution
-  // error must not fail the action, it just leaves the actor unrecorded.
-  let pending: Promise<SessionActor | undefined> | undefined;
+  // action in one request shares a single resolution. A resolution error does
+  // not fail the work, which then runs for a person no one can tell.
+  let pending: Promise<SessionActor> | undefined;
   return {
     get: () => {
       pending ??= source().catch((err: unknown) => {
         log.warn("session actor resolution failed", {
           error: err instanceof Error ? err.message : String(err),
         });
-        return undefined;
+        return { kind: "anonymous" as const };
       });
       return pending;
     },
