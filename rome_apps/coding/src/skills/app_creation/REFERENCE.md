@@ -129,7 +129,7 @@ Use these fixed ids instead of guessing the owner of a platform artifact:
 | Send a message / read channel history | `system:send_message`, `system:fetch_channel_history` |
 | Publish/search event types | `system:publish_event`, `system:search_event_catalog` |
 | Call a connected provider API | `connector:connector_proxy` |
-| Core agents | `core:main`, `core:envoy` |
+| Core agents | `core:main` |
 | General-purpose agents | `assistant:assistant`, `assistant:explore` |
 | Coding agent | `coding:coding` |
 | App authoring skills | `coding:app_creation`, `coding:workflow_creation`, `coding:app_remix`, `coding:app_verification` |

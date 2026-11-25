@@ -107,8 +107,7 @@ export const CONCIERGE_CHAT_ACTIONS = [
 
 /**
  * The Concierge's setup on a connection: its own instructions, no action
- * needs a Concierge chat, and it schedules no later wake-up, since a reply a
- * wake-up sends skips the checks the message that asked for it passed. A
+ * needs a Concierge chat, and it schedules no later wake-up. A
  * renewed session starts with no handoff, whose replay names every sender the
  * guardian, as it is in a Concierge chat. Its text stays private, as
  * everywhere: what it says goes through `say`.

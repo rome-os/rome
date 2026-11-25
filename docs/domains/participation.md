@@ -75,14 +75,6 @@ What the agent says back after a wake, through the account it was woken on.
 - A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it. A message from one of the guardian's dashboard chats into another needs no card: the guardian is the only other participant in both, so nothing leaves their sight. Concierge hands work to its task chats this way.
 - A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
 
-## Send gate
-
-The check that decides whether a message an agent wrote may go out. It looks at where the message goes, who sent the message it answers and which agent wrote it, never at the text, and answers *send*, *check*, *ask the guardian* or *refuse*. On *check*, a checking agent reads the message and sends it, refuses it, or holds it for the guardian in Approvals.
-
-- A reply to the guardian goes out unchecked, even in a group where others read it, and a reply to anyone else is checked first.
-- The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
-- An agent whose own app runs its turns has no send gate: its app decides what goes out.
-
 ## Audience
 
 Who can read what a turn says: *private* (only the guardian) or *shared* (anyone else may). It is read off the turn's place and the sender when the turn starts, and it does not change during the turn.

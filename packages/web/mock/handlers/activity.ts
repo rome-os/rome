@@ -17,8 +17,8 @@ const GUARDIAN = { kind: "guardian" as const, userId: "mock-guardian", via: "coo
 
 // `type` is a closed set of lifecycles (see @rome/api-types/approvals): the
 // action engine writes `action_execution` — the only kind the resolve route
-// queues and the only kind offering a retry — and the inbox app writes
-// `outgoing_message` for a sent-message audit record. What is being approved lives
+// queues and the only kind offering a retry — and
+// `outgoing_message` is an earlier release's record of a sent message. What is being approved lives
 // in the payload and the description, exactly as it does on the server;
 // `sensitive_message` is a *preview* kind, a different contract, and belongs on
 // the chat card rather than here.
@@ -104,8 +104,8 @@ const approvals: Approval[] = [
     id: "approval-4",
     type: "outgoing_message",
     status: "rejected",
-    requestedBy: "envoy",
-    description: "Envoy reply to an unknown sender",
+    requestedBy: "main",
+    description: "Reply to an unknown sender",
     payload: {
       response: "Sure, what time works for you?",
       channel: "whatsapp",
