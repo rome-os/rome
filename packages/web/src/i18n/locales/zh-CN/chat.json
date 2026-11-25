@@ -568,7 +568,7 @@
   "addDeviceCard": {
     "waiting": "等待新设备",
     "added": "已添加 {{name}}",
-    "addedSummary": "已添加设备 {{name}}",
+    "notNow": "暂不",
     "dismissed": "未添加设备"
   },
   "modelSwitch": {

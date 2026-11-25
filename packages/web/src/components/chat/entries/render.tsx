@@ -236,10 +236,9 @@ export function renderSingleEntry(
         return (
           <AddDeviceCard
             key={`add-device-card-${block.toolUseId}`}
-            toolUseId={block.toolUseId}
+            widgetId={widgetId}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onSubmit={submit}
           />
         );
       }

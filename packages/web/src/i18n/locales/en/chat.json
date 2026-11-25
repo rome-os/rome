@@ -568,7 +568,7 @@
   "addDeviceCard": {
     "waiting": "Waiting for a new device",
     "added": "Added {{name}}",
-    "addedSummary": "Added the device {{name}}",
+    "notNow": "Not now",
     "dismissed": "No device added"
   },
   "modelSwitch": {

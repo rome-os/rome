@@ -38,7 +38,7 @@ describe("AddDeviceCard", () => {
     mockDevices([{ id: "mac", name: "MacBook Pro" }]);
     const user = userEvent.setup();
 
-    render(<AddDeviceCard toolUseId="t-1" props={{ deviceIds: ["mac"] }} onSubmit={rs.fn()} />);
+    render(<AddDeviceCard widgetId="w-1" props={{ deviceIds: ["mac"] }} sendEvent={rs.fn()} />);
 
     expect(screen.getByText("Connect a device")).toBeTruthy();
     expect(screen.getByText("Waiting for a new device")).toBeTruthy();
@@ -55,62 +55,62 @@ describe("AddDeviceCard", () => {
     expect(screen.getByText("Coming soon")).toBeTruthy();
   });
 
-  it("answers once a device it did not know is linked", async () => {
+  it("asks core to answer once a device it did not know is linked", async () => {
     mockDevices([
       { id: "mac", name: "MacBook Pro" },
       { id: "new", name: "New laptop" },
     ]);
-    const onSubmit = rs.fn();
+    const sendEvent = rs.fn(async () => ({ ok: true, status: 200, answered: true }));
 
-    render(<AddDeviceCard toolUseId="t-2" props={{ deviceIds: ["mac"] }} onSubmit={onSubmit} />);
+    render(<AddDeviceCard widgetId="w-2" props={{ deviceIds: ["mac"] }} sendEvent={sendEvent} />);
 
-    await waitFor(() =>
-      expect(onSubmit).toHaveBeenCalledWith(
-        "t-2",
-        { added: true, deviceId: "new", name: "New laptop" },
-        "Added the device New laptop",
-      ),
-    );
-    expect(onSubmit).toHaveBeenCalledOnce();
-    expect(screen.getByText("Added New laptop")).toBeTruthy();
+    await waitFor(() => expect(sendEvent).toHaveBeenCalledWith("w-2", { name: "check", turn: {} }));
+    expect(sendEvent).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Added New laptop")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "App" })).toBeNull();
   });
 
-  it("never answers on its own without the devices it was sent with", async () => {
+  it("never asks on its own without the devices it was sent with", async () => {
     const fetchSpy = mockDevices([{ id: "new", name: "New laptop" }]);
+    const sendEvent = rs.fn();
 
-    render(<AddDeviceCard toolUseId="t-3" props={{}} onSubmit={rs.fn()} />);
+    render(<AddDeviceCard widgetId="w-3" props={{}} sendEvent={sendEvent} />);
 
     expect(screen.getByRole("button", { name: "App" })).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sendEvent).not.toHaveBeenCalled();
   });
 
-  it("brings back a way to send an answer that did not go through", async () => {
+  it("brings back a way to ask again when core has not answered", async () => {
     mockDevices([{ id: "new", name: "New laptop" }]);
-    const onSubmit = rs
+    const sendEvent = rs
       .fn()
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValue(undefined);
+      .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValue({ ok: true, status: 200, answered: true });
 
-    render(<AddDeviceCard toolUseId="t-4" props={{ deviceIds: [] }} onSubmit={onSubmit} />);
+    render(<AddDeviceCard widgetId="w-4" props={{ deviceIds: [] }} sendEvent={sendEvent} />);
 
     await userEvent.setup().click(await screen.findByRole("button", { name: "Try again" }));
-    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(sendEvent).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Added New laptop")).toBeTruthy();
+  });
+
+  it("is dismissed by Not now", async () => {
+    mockDevices([{ id: "mac", name: "MacBook Pro" }]);
+    const sendEvent = rs.fn(async () => ({ ok: true, status: 200, answered: true }));
+
+    render(<AddDeviceCard widgetId="w-6" props={{ deviceIds: ["mac"] }} sendEvent={sendEvent} />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Not now" }));
+    expect(sendEvent).toHaveBeenCalledWith("w-6", { name: "dismiss", turn: {} });
+    expect(await screen.findByText("No device added")).toBeTruthy();
   });
 
   it("renders a dismissed card read-only without reading the devices", () => {
     const fetchSpy = rs.spyOn(globalThis, "fetch");
 
-    render(
-      <AddDeviceCard
-        toolUseId="t-5"
-        props={{ deviceIds: [] }}
-        result={{ dismissed: true }}
-        onSubmit={rs.fn()}
-      />,
-    );
+    render(<AddDeviceCard widgetId="w-5" props={{ deviceIds: [] }} result={{ dismissed: true }} />);
 
     expect(screen.getByText("No device added")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "App" })).toBeNull();

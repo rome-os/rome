@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { addDeviceCardPropsSchema } from "@rome/api-types/add-device-card";
+import {
+  CHECK_DEVICES_EVENT,
+  DISMISS_ADD_DEVICE_EVENT,
+  addDeviceCardPropsSchema,
+} from "@rome/api-types/add-device-card";
 import {
   DeviceConnectionContent,
   type SetupMethod,
@@ -9,64 +13,72 @@ import {
 } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
 import { useDevicesQuery } from "@/hooks/use-devices-query";
+import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
+import { WidgetHostContext } from "./widget-ui/turn-fields";
 
 // `system:add_device`'s card: the ways to add a device and their instructions,
 // as the Devices page's Link device menu and dialog show them, from the same
-// components. It answers `{ added: true, deviceId, name }` once a device the
-// props do not list is linked, and is dismissed by a typed reply like core's
-// other cards (chat-view.ts).
+// components. Core answers it (api/routes/widget-events.ts): the card sends
+// `check` once it sees a device the props do not list, and Not now sends
+// `dismiss`. A typed reply dismisses it like core's other cards (chat-view.ts).
 
 export interface AddDeviceCardProps {
-  toolUseId: string;
+  /** The widget's id: the id of the message that holds the card. */
+  widgetId: string;
   /** The card's props as core sent them. */
   props: unknown;
-  /** Prior submitted output when this instance already resolved. */
+  /** The stored answer once the card is answered or dismissed. */
   result?: Record<string, unknown>;
-  onSubmit: (
-    toolUseId: string,
-    output: Record<string, unknown>,
-    summary?: string,
-  ) => void | Promise<void>;
+  /** Sends one of the card's events to core. */
+  sendEvent?: (
+    widgetId: string,
+    body: { name: string; turn?: Record<string, unknown> },
+  ) => Promise<WidgetEventOutcome>;
 }
 
-interface Submission {
-  output: Record<string, unknown>;
-  summary: string;
-}
+type Sent = { added: true; name: string } | { dismissed: true };
 
-export function AddDeviceCard({ toolUseId, props, result, onSubmit }: AddDeviceCardProps) {
+export function AddDeviceCard({
+  widgetId,
+  props,
+  result,
+  sendEvent = postWidgetEvent,
+}: AddDeviceCardProps) {
   const { t } = useTranslation("chat");
   const { t: tSettings } = useTranslation("settings", { keyPrefix: "devices.setup" });
+  const host = useContext(WidgetHostContext);
   const [method, setMethod] = useState<SetupMethod | null>(null);
-  const [sent, setSent] = useState<Submission | null>(null);
-  const [failed, setFailed] = useState<Submission | null>(null);
+  const [sent, setSent] = useState<Sent | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const resolved = result !== undefined || sent !== null;
   const parsed = addDeviceCardPropsSchema.safeParse(props);
   const known = parsed.success ? parsed.data.deviceIds : undefined;
-  const devices = useDevicesQuery({ enabled: !resolved && !failed && known !== undefined });
+  const live = !resolved && !host.readOnly;
+  const devices = useDevicesQuery({ enabled: live && !failed && known !== undefined });
   const added = known && devices.data?.devices.find((device) => !known.includes(device.id));
 
-  const submit = useCallback(
-    (submission: Submission) => {
-      setSent(submission);
+  const send = useCallback(
+    async (name: string, answered: Sent) => {
+      setBusy(true);
       setFailed(null);
-      Promise.resolve(onSubmit(toolUseId, submission.output, submission.summary)).catch(() => {
-        setSent(null);
-        setFailed(submission);
-      });
+      const outcome = await sendEvent(widgetId, { name, turn: host.turnFields() }).catch(
+        (): WidgetEventOutcome => ({ ok: false, status: 0 }),
+      );
+      setBusy(false);
+      host.onSettled?.(outcome);
+      if (outcome.ok && outcome.answered) setSent(answered);
+      else setFailed(name);
     },
-    [onSubmit, toolUseId],
+    [host, sendEvent, widgetId],
   );
 
   useEffect(() => {
-    if (!added || resolved || failed) return;
-    submit({
-      output: { added: true, deviceId: added.id, name: added.name },
-      summary: t("addDeviceCard.addedSummary", { name: added.name }),
-    });
-  }, [added, resolved, failed, submit, t]);
+    if (!added || !live || failed || busy) return;
+    void send(CHECK_DEVICES_EVENT, { added: true, name: added.name });
+  }, [added, live, failed, busy, send]);
 
-  const answer = result ?? sent?.output;
+  const answer: Record<string, unknown> | undefined = result ?? sent ?? undefined;
   const addedName = answer?.added === true && typeof answer.name === "string" ? answer.name : null;
 
   return (
@@ -114,10 +126,28 @@ export function AddDeviceCard({ toolUseId, props, result, onSubmit }: AddDeviceC
                   ? t("addDeviceCard.waiting")
                   : null}
         </span>
-        {failed && !resolved && (
-          <Button type="button" size="sm" onClick={() => submit(failed)}>
-            {t("aiToolsCard.retry")}
-          </Button>
+        {live && (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void send(DISMISS_ADD_DEVICE_EVENT, { dismissed: true })}
+            >
+              {t("addDeviceCard.notNow")}
+            </Button>
+            {failed === CHECK_DEVICES_EVENT && added && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => void send(CHECK_DEVICES_EVENT, { added: true, name: added.name })}
+              >
+                {t("aiToolsCard.retry")}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </div>

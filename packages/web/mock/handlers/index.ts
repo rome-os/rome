@@ -65,7 +65,7 @@ import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
-import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
+import { ADD_DEVICE_CARD_ID, addDeviceCardUi } from "@rome/api-types/add-device-card";
 import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
 /** The questions of the mock `ask_question` card: one per layout the card takes. */
@@ -1269,6 +1269,7 @@ transcripts[ADD_DEVICE_CARD_CHAT_ID] = [
         componentId: ADD_DEVICE_CARD_ID,
         builtin: true,
         props: { deviceIds: pickerDevices.map((device) => device.id) },
+        ui: addDeviceCardUi(),
       },
     } as TranscriptPart,
   ]),
