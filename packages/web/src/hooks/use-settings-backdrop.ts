@@ -19,11 +19,10 @@ const REDIRECT_ONLY = [
   "/callback",
   "/chat/concierge",
   "/activity",
-  "/people",
-  "/people/latest",
+  "/people/*",
   "/events",
   "/guide",
-  "/apps/inbox/:rest/*",
+  "/apps/inbox/*",
   "/full/apps/inbox/*",
 ];
 

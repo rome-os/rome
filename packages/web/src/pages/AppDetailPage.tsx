@@ -31,7 +31,6 @@ import { List, ListRow, ListRowContent } from "@/components/ui/list-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { getHostAppRoute } from "@/lib/auth-routing";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAppsList, useStoreListingVersion } from "@/hooks/use-apps";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -317,8 +316,7 @@ export default function AppDetailPage() {
   };
 
   const renderHeaderActions = (app: InstalledAppCard) => {
-    const embeddedHref = app.hasFrontend && app.href ? app.href : null;
-    const targetHref = embeddedHref ?? getHostAppRoute(app.id);
+    const targetHref = app.hasFrontend && app.href ? app.href : null;
     const remixable = canRemixApp(app);
     if (!targetHref && !app.fullHref && !remixable) return null;
     return (

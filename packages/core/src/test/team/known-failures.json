@@ -2,7 +2,12 @@
   "about": "The dashboard operations where a teammate does not reach what the guardian reaches today. team.e2e.test.ts fails when this list and the product disagree: remove a route here in the change that opens it to teammates; a route that needs adding is a new failure of rule 2.",
   "routes": [
     "DELETE /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",
+    "DELETE /api/personal-data/sources/:source/origins/:origin",
     "GET /api/chat/sessions/:id/computer-use in the caller's own Concierge chat",
-    "PUT /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat"
+    "POST /api/personal-data/ingest",
+    "POST /api/settings/guardian-timezone/detected",
+    "PUT /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",
+    "PUT /api/device-connections",
+    "PUT /api/personal-data/sources/:source/origins/:origin/state"
   ]
 }

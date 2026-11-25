@@ -1,5 +1,4 @@
 import type { ComponentType, LazyExoticComponent } from "react";
-import { lazy } from "@/lib/lazy-with-reload";
 import type { MDXProps } from "mdx/types";
 
 // The MDX design docs, and the only place a new one is registered.
@@ -13,7 +12,7 @@ import type { MDXProps } from "mdx/types";
 // DEV_ROUTES, which is the empty array in production builds.
 
 export type MdxDoc = {
-  /** URL slug, e.g. `?doc=people-page`. */
+  /** URL slug, e.g. `?doc=layout-notes`. */
   slug: string;
   title: string;
   /** One line shown in the doc list. */
@@ -21,12 +20,4 @@ export type MdxDoc = {
   Doc: LazyExoticComponent<ComponentType<MDXProps>>;
 };
 
-export const MDX_DOCS: MdxDoc[] = [
-  {
-    slug: "people-page",
-    title: "People page",
-    summary:
-      "The stream / directory / person-page rebuild: row shapes, the bond ladder, and channels as glyphs.",
-    Doc: lazy(() => import("./docs/people-page.mdx")),
-  },
-];
+export const MDX_DOCS: MdxDoc[] = [];

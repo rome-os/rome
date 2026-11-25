@@ -13,7 +13,7 @@ import { loadConfig, mergeRslibConfig, type LibConfig, type RslibConfig } from "
 import { pluginReact } from "@rsbuild/plugin-react";
 import tailwindPostcss from "@tailwindcss/postcss";
 import { generateEntry } from "./generateEntry.js";
-import { loadAppYaml, type LoadedAppYaml } from "./loadAppYaml.js";
+import { loadAppYaml, type AppYamlWeb, type LoadedAppYaml } from "./loadAppYaml.js";
 import { RomeAppManifestPlugin } from "./manifestPlugin.js";
 
 const require = createRequire(import.meta.url);
@@ -105,18 +105,6 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
   }
 
   const webSrcDir = join(srcDir, "web");
-  const webOutDir = join(outDir, "web");
-
-  const userEntryRelative = yaml.web.entry ?? "App.tsx";
-  const userEntryPath = resolve(webSrcDir, userEntryRelative);
-  if (!existsSync(userEntryPath)) {
-    throw new Error(
-      `rome: web entry not found at ${userEntryPath} (set web.entry in app.yaml or create src/web/App.tsx)`,
-    );
-  }
-
-  const generatedEntry = join(appDir, "node_modules", ".rome", "main.tsx");
-  generateEntry({ outFile: generatedEntry, userEntryPath });
 
   const tsconfigPath = existsSync(join(webSrcDir, "tsconfig.json"))
     ? join(webSrcDir, "tsconfig.json")
@@ -132,50 +120,10 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 
-  const webLib: LibConfig = {
-    format: "esm",
-    bundle: true,
-    source: {
-      entry: { index: generatedEntry },
-    },
-    output: {
-      autoExternal: false,
-      minify: true,
-      externals: "",
-      emitCss: true,
-      target: "web",
-      distPath: {
-        root: webOutDir,
-      },
-      cleanDistPath: true,
-      sourceMap: {
-        js: "source-map",
-        css: true,
-      },
-    },
-    plugins: [pluginReact()],
-    // Apps render through the SDK-owned React/React DOM pair. Resolving both
-    // packages from the same dependency tree prevents pnpm consumers from
-    // bundling an app React alongside a different SDK renderer version.
-    resolve: {
-      alias: resolveSdkReactAliases(),
-    },
-    tools: {
-      postcss: (_config: unknown, utils: { addPlugins: (plugins: unknown[]) => void }) => {
-        utils.addPlugins([tailwindPostcss()]);
-      },
-      rspack: {
-        plugins: [
-          new RomeAppManifestPlugin({
-            displayName: yaml.web.displayName,
-            navLabel: yaml.web.navLabel,
-          }),
-        ],
-      },
-    },
-  };
-
-  const lib: LibConfig[] = [webLib];
+  // An app.yaml with no `web:` section builds no web bundle and no manifest.json.
+  const lib: LibConfig[] = yaml.web
+    ? [createWebLib({ appDir, webSrcDir, outDir, web: yaml.web })]
+    : [];
 
   // Only compile a backend lib when there are actual TS sources outside
   // `web/`. An app whose backend artifacts are pure assets (e.g. only agent
@@ -207,6 +155,69 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
     : baseConfig;
 
   return { appDir, srcDir, outDir, backendDirs, loaded, rslibConfig };
+}
+
+function createWebLib(args: {
+  appDir: string;
+  webSrcDir: string;
+  outDir: string;
+  web: AppYamlWeb;
+}): LibConfig {
+  const { appDir, webSrcDir, outDir, web } = args;
+
+  const userEntryRelative = web.entry ?? "App.tsx";
+  const userEntryPath = resolve(webSrcDir, userEntryRelative);
+  if (!existsSync(userEntryPath)) {
+    throw new Error(
+      `rome: web entry not found at ${userEntryPath} (set web.entry in app.yaml or create src/web/App.tsx)`,
+    );
+  }
+
+  const generatedEntry = join(appDir, "node_modules", ".rome", "main.tsx");
+  generateEntry({ outFile: generatedEntry, userEntryPath });
+
+  return {
+    format: "esm",
+    bundle: true,
+    source: {
+      entry: { index: generatedEntry },
+    },
+    output: {
+      autoExternal: false,
+      minify: true,
+      externals: "",
+      emitCss: true,
+      target: "web",
+      distPath: {
+        root: join(outDir, WEB_DIR),
+      },
+      cleanDistPath: true,
+      sourceMap: {
+        js: "source-map",
+        css: true,
+      },
+    },
+    plugins: [pluginReact()],
+    // Apps render through the SDK-owned React/React DOM pair. Resolving both
+    // packages from the same dependency tree prevents pnpm consumers from
+    // bundling an app React alongside a different SDK renderer version.
+    resolve: {
+      alias: resolveSdkReactAliases(),
+    },
+    tools: {
+      postcss: (_config: unknown, utils: { addPlugins: (plugins: unknown[]) => void }) => {
+        utils.addPlugins([tailwindPostcss()]);
+      },
+      rspack: {
+        plugins: [
+          new RomeAppManifestPlugin({
+            displayName: web.displayName,
+            navLabel: web.navLabel,
+          }),
+        ],
+      },
+    },
+  };
 }
 
 function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
@@ -263,10 +274,14 @@ export function copyBackendAssets(args: { srcDir: string; outDir: string }): voi
   }
 }
 
-/** Remove the backend output trees the next build re-emits. */
+/** Remove the backend output trees the next build re-emits, and the web
+ *  output of an app that declares no web bundle. */
 export function cleanBackendOutput(ctx: BuildContext): void {
   for (const dir of ctx.backendDirs) {
     rmSync(join(ctx.outDir, dir), { recursive: true, force: true });
+  }
+  if (!ctx.loaded.yaml.web) {
+    rmSync(join(ctx.outDir, WEB_DIR), { recursive: true, force: true });
   }
 }
 

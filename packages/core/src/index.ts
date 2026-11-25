@@ -17,11 +17,6 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import {
-  createGuardianLinkAdmission,
-  GuardianLinkCodes,
-  linkCode,
-} from "./people/link-code/index.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -64,11 +59,7 @@ import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import {
-  isGuardianSession,
-  type SessionActor,
-  withoutSessionActor,
-} from "./access/session-actor.js";
+import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./instance/runtime.js";
@@ -253,7 +244,6 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
-import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
@@ -769,22 +759,14 @@ async function main() {
     platform: AGENTS_KIND,
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
-  const guardianLinkCodes = new GuardianLinkCodes();
-  const linkCodeAdmission = createGuardianLinkAdmission({
-    codes: guardianLinkCodes,
-    peopleRepo,
-    registry: connectionRegistry,
-    accountOf: (connectionId) => accounts.accountOf(connectionId),
-  });
   // Read at each message, once the chat settings below exist.
   const heardInChat = heardUnlessSwitchedOff({
     settings: { get: (ref) => chatSettings.get(ref) },
     rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
   });
   // Every sender is admitted: Rome never asks a sender to pair
-  // (docs/domains/people.md#stranger). Only the guardian's link code is taken
-  // out of the chat, and every message said in a chat switched off but a stop
-  // said to Rome.
+  // (docs/domains/people.md#stranger). Only a message said in a chat switched
+  // off is taken out, unless it is a stop said to Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
@@ -793,8 +775,6 @@ async function main() {
     const platform =
       accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
     await readBotsOfPeople(platform, message);
-    // A link code said in a chat switched off still voids the code.
-    if (!(await linkCodeAdmission(connectionId, connectionKind, message))) return false;
     return heardInChat(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
@@ -816,7 +796,7 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
-  // The agents this Rome can message, one read for the People page and for
+  // The agents this Rome can message, one read for the people listing and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
@@ -2917,7 +2897,6 @@ async function main() {
       actionEngine,
       actionLoader,
       peopleRepo,
-      guardianLinkCodes,
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
@@ -3005,9 +2984,7 @@ async function main() {
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
     apiDeps.features = [
-      linkCode({ ...apiDeps, isGuardian: isGuardianSession }),
       phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
-      personHistory(apiDeps),
     ];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);

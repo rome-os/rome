@@ -162,7 +162,7 @@ test("phone fields prevent focus zoom without disabling pinch zoom", async ({ pa
 
   // The dashboard scale applies the same 16px floor to standard fields, not
   // just the chat composer. Use a production route rather than a dev specimen.
-  await page.goto("/people/directory");
+  await page.goto("/apps");
   const search = page.locator('input[data-slot="input"]').first();
   await expect(search).toHaveCSS("font-size", "17px");
   await expectFocusKeepsScale(page, search);

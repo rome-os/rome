@@ -63,6 +63,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { Permissions } from "../access/permissions.js";
 import { loadAppPermissions } from "../apps/app-permissions.js";
+import { COOKIE_NAME, createSession } from "../access/auth.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
@@ -84,7 +85,6 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import type { PeopleRepository } from "../people/model/people-repository.js";
-import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -347,7 +347,7 @@ export const noAccounts: Accounts = {
 
 /** The harness's channel list over `connections`, built by the production
  *  `channelList`. A test that fakes a talker rebuilds the list with it. */
-export function testChannels(
+function testChannels(
   deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
   connections: TestConnections,
 ): Channels {
@@ -790,7 +790,6 @@ export async function buildTestDeps(
     appConnectionAccessRepo,
     sessionRepository,
     peopleRepo,
-    guardianLinkCodes: new GuardianLinkCodes(),
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,
@@ -1252,7 +1251,9 @@ export async function createAppLifecycleHarness(
 
   async function honoFetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = new URL(`http://app-e2e.test${path.startsWith("/") ? path : `/${path}`}`);
-    return runtime.router.fetch(new Request(url, init));
+    const request = new Request(url, init);
+    request.headers.set("cookie", `${COOKIE_NAME}=${createSession("guardian")}`);
+    return runtime.router.fetch(request);
   }
 
   function hasAction(name: string): boolean {
@@ -1314,9 +1315,8 @@ export async function createAppLifecycleHarness(
 /**
  * Make each named channel one of the guardian's own connected accounts: a
  * channel record that knows its account, a live grant reaching that account,
- * and a link from it to the guardian. A person's page reads and sends only
- * over the guardian's own accounts, so a test of that page names the channels
- * it reads through here. `guardianId` is the seeded guardian's.
+ * and a link from it to the guardian. People reads and sends only over the
+ * guardian's own accounts, so a test of those reads names the channels here. `guardianId` is the seeded guardian's.
  */
 export function ownedByGuardian(
   db: DrizzleDb,

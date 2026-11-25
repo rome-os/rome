@@ -260,11 +260,6 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     why: "The wiring hands the People repository to the kinds, until they get a port.",
   },
   {
-    from: "connections/kinds/discord/discord.ts",
-    to: ["people/link-code/index.ts"],
-    why: "Discord still reads link codes, until that moves up.",
-  },
-  {
     from: "connections/kinds/email/email.ts",
     to: ["people/model/people-repository.ts", "people/guardian-mapping.ts"],
     why: "Email reads the guardian's address from People, until it gets a port.",

@@ -42,7 +42,7 @@ const list = (args: Record<string, unknown>, context: ActionRunContext = { actor
   engine.run(LIST_PEOPLE_ACTION, args, context);
 
 describe("core:list_people", () => {
-  it("lists the phone book the People page reads, filtered by query and level", async () => {
+  it("lists the phone book, filtered by query and level", async () => {
     await people.create({
       displayName: "Ana Lopez",
       bondLevel: "inner-circle",

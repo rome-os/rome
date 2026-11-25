@@ -17,19 +17,12 @@ import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
 // the shell stay eager. Every other route is split into its own chunk so the
-// initial bundle for /chat doesn't ship Settings, People, Memory, Apps, etc.
+// initial bundle for /chat doesn't ship Settings, Memory, Apps, etc.
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 const OnboardPage = lazy(() => import("./pages/OnboardPage"));
 const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
-const PeoplePage = lazy(() => import("./pages/PeoplePage"));
-// The /people redirect lives with the views it forwards to, so the paths are
-// written once; it rides their chunk, which is the one about to render anyway.
-const PeopleIndexRedirect = lazy(() =>
-  import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
-);
-const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
 const AssistantsPage = lazy(() => import("./pages/AssistantsPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
@@ -38,7 +31,6 @@ const RoutineDetailPage = lazy(() => import("./pages/RoutineDetailPage"));
 const SessionsPage = lazy(() => import("./pages/SessionsPage"));
 const AppsIndexPage = lazy(() => import("./pages/AppsIndexPage"));
 const AppDetailPage = lazy(() => import("./pages/AppDetailPage"));
-const InboxPage = lazy(() => import("./pages/InboxPage"));
 const AppInstallConfirmPage = lazy(() => import("./pages/AppInstallConfirmPage"));
 const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
 const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
@@ -123,10 +115,10 @@ export default function App() {
               <Route key={path} path={path} element={<Component />} />
             ))}
 
-          {/* Inbox is a host page, not an embedded app (see HOST_APP_ROUTES in
-              lib/auth-routing.ts) — a full-mode link to it must not reach
-              AppFullPage, which would 404 probing the nonexistent manifest. */}
-          <Route path="/full/apps/inbox/*" element={<Navigate to="/apps/inbox" replace />} />
+          {/* The Inbox app has no page; old links to the one it had land on
+              the home page. */}
+          <Route path="/apps/inbox/*" element={<Navigate to="/" replace />} />
+          <Route path="/full/apps/inbox/*" element={<Navigate to="/" replace />} />
           {/* Sessions is a host-owned app. show_app addresses it through the
               same /full/apps/:appId/:route shape as installed apps so it can
               be mounted as a workspace tile for background fork processing. */}
@@ -165,14 +157,9 @@ export default function App() {
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
             <Route path="/assistants" element={<AssistantsPage />} />
-            {/* The person page takes its own segment rather than sharing the
-                roster's: a person id is a slug of the display name the guardian
-                gave them, so `directory` is an id they can mint, and a static
-                route beside it would leave such a person unreachable. */}
-            <Route path="/people" element={<PeopleIndexRedirect />} />
-            <Route path="/people/latest" element={<PeopleIndexRedirect />} />
-            <Route path="/people/directory" element={<PeoplePage />} />
-            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+            {/* The dashboard has no People pages; old links land on the home
+                page. */}
+            <Route path="/people/*" element={<Navigate to="/" replace />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
@@ -183,12 +170,6 @@ export default function App() {
             <Route path="/install-app/:handle" element={<AppInstallConfirmPage />} />
             <Route path="/install-app/:handle/:slug" element={<AppInstallConfirmPage />} />
             <Route path="/remix-app" element={<AppRemixConfirmPage />} />
-            {/* Static routes win over the dynamic /apps/:appId embed route in
-                react-router's ranking, so inbox links open this host page
-                instead of the (non-existent) embedded app frontend. Deep links
-                under /apps/inbox/* collapse onto the dashboard. */}
-            <Route path="/apps/inbox" element={<InboxPage />} />
-            <Route path="/apps/inbox/*" element={<Navigate to="/apps/inbox" replace />} />
             {/* Deliberately OUTSIDE /apps/:appId/* — AuthGate classifies
                 /apps/<segment> via getRoutedAppId, so a details route in that
                 namespace would be treated as embedded app "detail" (public-app

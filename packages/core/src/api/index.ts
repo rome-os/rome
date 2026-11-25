@@ -54,7 +54,6 @@ import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { assistantsRoutes } from "./routes/assistants.js";
-import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
@@ -214,7 +213,6 @@ export function buildApp(
   api.route("/", eventCatalogRoutes(deps));
   for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
@@ -437,6 +435,9 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
             send: (chatId, text, inputId, signal) =>
               webchatRuntime.sendSpoken(chatId, text, signal, inputId),
+            ...(deps.phoneWatching
+              ? { follow: deps.phoneWatching.watch.bind(deps.phoneWatching) }
+              : {}),
             usage: deps.transcriptionUsage ?? null,
           })
         : null;

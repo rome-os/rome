@@ -263,7 +263,7 @@ describe("pinned built-in page context menu", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
-        { type: "builtin", id: "people" },
+        { type: "builtin", id: "routines" },
         { type: "app", id: "recipe-box" },
       ]),
     );
@@ -281,7 +281,7 @@ describe("pinned built-in page context menu", () => {
   it("offers new-tab and unpin, like an app tile", async () => {
     renderSidebar();
 
-    fireEvent.contextMenu(await findBuiltinLink("/people"));
+    fireEvent.contextMenu(await findBuiltinLink("/routines"));
 
     const menu = await screen.findByRole("menu");
     expect(
@@ -291,19 +291,19 @@ describe("pinned built-in page context menu", () => {
     ).toEqual(["Open in new tab", "Unpin from sidebar"]);
     expect(
       within(menu).getByRole("menuitem", { name: "Open in new tab" }).getAttribute("href"),
-    ).toBe("/people");
+    ).toBe("/routines");
   });
 
   it("unpins the page from its context menu and keeps the app pin", async () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    fireEvent.contextMenu(await findBuiltinLink("/people"));
+    fireEvent.contextMenu(await findBuiltinLink("/routines"));
     await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
 
-    expect(document.querySelector('nav a[href="/people"]')).toBeNull();
+    expect(document.querySelector('nav a[href="/routines"]')).toBeNull();
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "people" });
+    expect(stored).not.toContainEqual({ type: "builtin", id: "routines" });
     expect(stored).toContainEqual({ type: "app", id: "recipe-box" });
   });
 

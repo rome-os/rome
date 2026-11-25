@@ -35,9 +35,8 @@ export function isResolvedWebApp(
 /**
  * The social card for an app document request, or null when the request is
  * not for an installed app with a frontend (the shell then keeps its static
- * card). Mirrors the SPA's own `getRoutedAppId` in packages/web, minus its
- * reserved-id guard (`store`, `inbox`, …), which only affects client
- * routing — an unmatched id here just keeps the static card. imageUrl
+ * card). Mirrors the SPA's own `getRoutedAppId` in packages/web; an
+ * unmatched id here just keeps the static card. imageUrl
  * points at the generated card when one exists; otherwise it is left
  * unset so the render keeps the shell's own og:image.
  */

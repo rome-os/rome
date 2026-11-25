@@ -2,7 +2,7 @@
 
 `pnpm --filter rome-web dev:mock` (from the root, `pnpm start:web:mock`) serves the full dashboard SPA with no backend at http://localhost:3200. An MSW service worker answers `/api` calls from fixtures in `packages/web/mock/handlers/`, and accepts the `/ws/events` live-events socket (`live-events.ts`), acknowledging each subscription without sending events. The `/ws/node` rome-node console socket (`node-console.ts`) answers status and history queries from fixtures and sends only the subscription snapshot.
 
-`index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `sessions.ts`, `settings.ts`. The two file browsers go through `file-browser.ts`, an in-memory filesystem the projects tree and the memory dir (`memory-files.ts`) are each served from — `/api/projects` and `/api/memory` are the same routes over a different root, so one factory answers both. The connection ledger itself lives in `connections-store.ts`, because the People page's send routes have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
+`index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `sessions.ts`, `settings.ts`. The two file browsers go through `file-browser.ts`, an in-memory filesystem the projects tree and the memory dir (`memory-files.ts`) are each served from — `/api/projects` and `/api/memory` are the same routes over a different root, so one factory answers both. The connection ledger itself lives in `connections-store.ts`, because the people listing's send states have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
 
 `pnpm start:web:mock:e2e` starts a strict mode for Midscene tests. It disables the backend proxy, returns 503 for unmocked `/api` requests, and blocks external HTTP in the service worker. Ordinary `dev:mock` and static mock builds keep external assets available. The Midscene browser also blocks external HTTP and WebSocket traffic.
 
@@ -78,7 +78,7 @@ The September 15, 2026 sample contains:
 - Settings: Claude Max connected, ChatGPT disconnected, and sample GitHub, Email, WeChat, Feishu, and Composio connections. Account identifiers are synthetic.
 
 The data was selected from an authenticated Edge session on `ray.romeos.cc`. It is a subset, with review counts recalculated from the selected records.
-The fixtures retain the existing channel samples used by the People page. Quota reset times remain relative to page load.
+The fixtures retain the existing channel samples used by the people and account reads. Quota reset times remain relative to page load.
 
 Recorded app writes return a local error. Generating videos or reports, rerunning reviews or triage, logging workouts, deleting records, and changing settings require a real instance.
 Unrecorded reads also stop locally, including when the dev proxy has a backend. Agent-session links are omitted because those sessions were not recorded.
