@@ -271,9 +271,14 @@ describe("Webchat API", () => {
       for (const id of ["concierge", "visitor-main", "guardian-task", "task-branch", "shared"]) {
         expect(await status(actor, `/chat/sessions/${id}`)).toBe(200);
         expect(await status(actor, `/chat/sessions/${id}/messages`)).toBe(200);
-        expect(await status(actor, `/chat/sessions/${id}/turns`, post)).not.toBe(404);
       }
     }
+
+    // Sending stays the owner's.
+    for (const id of ["concierge", "guardian-task"]) {
+      expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
+    }
+    expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
 
     const listed = async (actor: typeof guardian | typeof visitor) =>
       (
@@ -3124,7 +3129,26 @@ describe("Webchat API", () => {
     expect(await runtime.canSendSpoken(task)).toBe(false);
     await expect(runtime.sendSpoken(task, "你好")).rejects.toThrow("only for a Concierge chat");
 
+    await deps.webchatRepo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await deps.webchatRepo.setSessionTrigger("visitor-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    expect(await runtime.canSendSpoken("visitor-task")).toBe(false);
+    await expect(runtime.sendSpoken("visitor-task", "你好")).rejects.toThrow("Session not found");
     await expect(runtime.sendSpoken("no-such-chat", "你好")).rejects.toThrow("Session not found");
+    expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
   });
 
   it("lets go of the messages gathered for a spoken input the conversation no longer waits for", async () => {

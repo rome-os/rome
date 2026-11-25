@@ -2784,6 +2784,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, chatGate);
   }
+  // Only its owner sends into a Concierge or task chat, since a turn there
+  // speaks to the owner.
+  const maySend = async (chatId: string) =>
+    canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await currentChatOwner());
   // A turn answers for the chat it runs in: its dashboard stream's, its
   // registered stream's (every one names the chat it is recorded in), else
   // its stored messages'. A turn whose chat is gone, or that names none, is
@@ -2927,8 +2931,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    // Chats the caller may not open are left out before the limit, so all 20
-    // are ones they may open.
+    // Other people's Concierge and task chats are left out before the limit,
+    // so all 20 are ones a list shows the caller.
     const matches = await deps.webchatRepo.searchSessionMessages(query, {
       sessionLimit: 20,
       visibleTo: await currentChatOwner(),
@@ -5513,6 +5517,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   app.post("/chat/sessions/:id/turns", async (c) => {
+    if (!(await maySend(c.req.param("id")))) return c.json({ error: "Session not found" }, 404);
     let body: SendBody;
     try {
       body = await parseChatSendBody(c);
@@ -5792,9 +5797,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Why a spoken turn may not go into `chatId`, or null when it may.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    const chat = await deps.webchatRepo.getSession(chatId);
-    if (!chat) return "Session not found";
-    return isConciergeChat(chat) ? null : "A voice conversation is only for a Concierge chat";
+    if (!(await maySend(chatId))) return "Session not found";
+    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
+      ? null
+      : "A voice conversation is only for a Concierge chat";
   };
 
   const runtime: WebchatRuntime = {

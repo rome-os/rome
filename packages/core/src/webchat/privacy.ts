@@ -72,8 +72,9 @@ export interface ChatPrivacyRow {
 }
 
 /**
- * The one privacy policy for dashboard chats, read off the chat's own row:
- * a private chat opens only for its owner, and any other chat for everyone.
+ * Whether a list shows `owner` a chat, and whether they and their agents send
+ * into it, read off the chat's own row: a Concierge's chat for its owner, and
+ * any other chat for everyone. Opening a chat on the dashboard asks nothing.
  * A child session inherits its parent's privacy when it is made, so no path
  * needs to look past the row.
  */
