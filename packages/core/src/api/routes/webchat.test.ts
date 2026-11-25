@@ -7084,6 +7084,37 @@ describe("Webchat API", () => {
       );
     });
 
+    it("stores written feedback without forking an unknown saved model choice", async () => {
+      const runForked = rs.fn();
+      deps.agentRunner = { run: deps.agentRunner.run.bind(deps.agentRunner), runForked };
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        SESSION_ID,
+        "unknown-old-choice",
+        "owner",
+      );
+      await deps.webchatRepo.addMessage(
+        "unknown-feedback-user",
+        SESSION_ID,
+        "user",
+        JSON.stringify([{ type: "text", content: "Rated exchange" }]),
+        TURN_ID,
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const response = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: "negative", comment: "Please keep this feedback" }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        feedback: { comment: "Please keep this feedback" },
+      });
+      expect(runForked).not.toHaveBeenCalled();
+      expect((await deps.webchatRepo.getSession(SESSION_ID))?.largeModelSelection).toBe(
+        "unknown-old-choice",
+      );
+    });
+
     it("stores feedback but skips processing when the rated exchange has no chat text", async () => {
       // TURN_ID is anchored by a trace row only (see anchorTurn). Without a
       // persisted user/assistant exchange the fork prompt cannot quote the

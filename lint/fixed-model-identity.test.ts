@@ -4,7 +4,6 @@ import {
   LEGACY_MODEL_SELECTIONS,
   canonicalModelSelection,
   modelDisplayName,
-  modelIdentityKey,
   readModelSelectionInput,
 } from "../packages/api-types/src/models.js";
 
@@ -17,11 +16,9 @@ describe("fixed model identity", () => {
     expect(canonicalModelSelection("claude-opus")).toBe("anthropic/claude-opus-4-8[1m]");
     expect(canonicalModelSelection("gpt-6-1-sol")).toBe("openai/gpt-6.1-sol");
     expect(canonicalModelSelection("anthropic/claude-opus-4-8")).toBeNull();
-    expect(modelIdentityKey({ providerId: "vendor", modelId: "org/model-20250929[1m]" })).toBe(
-      "vendor/org/model-20250929[1m]",
-    );
-    for (const entry of MODEL_CATALOG) expect(modelIdentityKey(entry)).toBe(entry.id);
-    expect(new Set(MODEL_CATALOG.map(modelIdentityKey)).size).toBe(MODEL_CATALOG.length);
+    for (const entry of MODEL_CATALOG)
+      expect(`${entry.providerId}/${entry.modelId}`).toBe(entry.id);
+    expect(new Set(MODEL_CATALOG.map((entry) => entry.id)).size).toBe(MODEL_CATALOG.length);
   });
   it.each([
     "opus",

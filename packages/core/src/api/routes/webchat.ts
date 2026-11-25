@@ -2057,7 +2057,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const agentName = input.session.agentName ?? "main";
-    const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
     const channelThreadKey = webchatSessionKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
@@ -2070,6 +2069,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       heldSource = undefined;
     };
     try {
+      const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)

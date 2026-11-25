@@ -1,17 +1,4 @@
 // Fixed execution identities shared by clients and core. Display names never route requests.
-export interface ModelIdentity {
-  providerId: string;
-  modelId: string;
-}
-
-/** An opaque native ID qualified by its provider; only the first slash is structural. */
-export function modelIdentityKey(identity: ModelIdentity): string {
-  if (!identity.providerId || /[\s/]/u.test(identity.providerId) || !identity.modelId) {
-    throw new Error("A model identity needs a provider and complete native ID");
-  }
-  return `${identity.providerId}/${identity.modelId}`;
-}
-
 export const MODEL_CATALOG = [
   {
     id: "anthropic/claude-opus-4-8[1m]",
