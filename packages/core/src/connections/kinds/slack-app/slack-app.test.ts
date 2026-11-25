@@ -19,13 +19,16 @@ import { RecordingStopped } from "../../types.js";
 function fakeChats() {
   const recorded = new Set<string>();
   const delivered: ChannelMessage[] = [];
+  const senders: Message["sender"][] = [];
   const chats = {
     delivered,
+    senders,
     refusing: false,
     accept: async (message: Message): Promise<void> => {
       if (chats.refusing) throw new Error("not recorded within 120000ms");
       if (recorded.has(message.id)) return;
       recorded.add(message.id);
+      senders.push(message.sender);
       // What apps receive, so the tests read the fields an app reads.
       delivered.push(channelMessageOf(message, "slack_app"));
     },
@@ -490,13 +493,18 @@ describe("Slack app events for its own posts", () => {
 
   it("drops its own post in a group, and still hears another bot that mentions it", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, delivered } = adapter(mailbox);
+    const { adapter: a, chats } = adapter(mailbox);
     await a.start();
     await mailbox.deposit(
       frame(mentionEvent(7, { user: BOT, bot_id: "B_ROME" })),
       frame(mentionEvent(8, { user: "U_OTHER_BOT", bot_id: "B_OTHER" })),
+      frame(mentionEvent(9)),
     );
-    expect(delivered.map((m) => m.senderId)).toEqual(["T_A/U_OTHER_BOT"]);
+    expect(chats.senders).toMatchObject([
+      { accountId: "T_A/U_OTHER_BOT", viaApp: true },
+      { accountId: expect.not.stringContaining("BOT") },
+    ]);
+    expect(chats.senders[1]).not.toHaveProperty("viaApp");
   });
 
   it("hears a workflow's mention, which Slack sends as a bot_message with no user", async () => {

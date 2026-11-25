@@ -519,8 +519,10 @@ export const guardianAuth = sqliteTable("guardian_auth", {
 
 // The last Rome Cloud profile each visitor signed in with, kept so other
 // dashboard people see who sent a chat message. A visitor's own session holds
-// the same fields, but only in their cookie. Display only, never used for
-// authentication; a sign-in overwrites the row.
+// the same fields, but only in their cookie. Never used to sign anyone in. A
+// member's message on a platform is theirs as the account their email last
+// signed in with here (access/application/account-entry.ts). A sign-in
+// overwrites the row.
 export const visitorProfiles = sqliteTable("visitor_profiles", {
   accountId: text("account_id").primaryKey(),
   email: text("email").notNull(),
