@@ -33,8 +33,23 @@ An account belongs to at most one person.
 - A person made with an account that belongs to someone is not made at all.
 - An account is free again once the person who held it is deleted or the account is removed from them.
 
+## Account code
+
+How an account nobody holds becomes a person's. A signed-in guardian or member gets a code of their own. Sending that code to Rome in a direct message from an account adds the account to their person. In code, the steps are in [`packages/core/src/identity/application/account-codes.ts`](../../packages/core/src/identity/application/account-codes.ts).
+
+- A code belongs to one person. A new code replaces the person's earlier one, and the earlier one then adds nothing.
+- A code can be used for ten minutes after it is given, and once.
+- Rome never stores the code, only a hash of it. The stored hash cannot be turned back into a code.
+- The whole message must be the code. Case and surrounding spaces do not matter. A code inside a longer text is not a code.
+- Sending the code adds the account and uses the code up, together. An account that belongs to another person is refused, nothing changes, and the code can still be used. An account the person already holds uses the code up and changes nothing else.
+- A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused.
+- The code is sent in a direct message. A code shown in a shared chat is voided. Whoever hears the message applies that rule, not Identity.
+- Deleting a person deletes their open code.
+- A code proves that whoever sent it had the code. A person who gives their code to someone else gives that account their role, so the page that shows a code tells the person to send it only from their own account and to share it with nobody (accepted cost, Ouou, 2026-11-25).
+
 ## Decided against
 
 - **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is a member.
 - **Roles in Identity.** Identity would then answer two questions, and every part that only asks who a sender is would depend on roles.
+- **A link that carries the secret.** It proved only that the person confirming held the link, and a link can be passed on.
 - **The Rome Cloud id as the account.** It needed a step where an invited email is claimed by the Rome Cloud account that signs in with it, and an exception for the guardian. The costs accepted instead: an address that passes to someone else carries its access until that person is removed, and a member who changes their Rome Cloud email must be invited again (Ouou, 2026-11-25).
