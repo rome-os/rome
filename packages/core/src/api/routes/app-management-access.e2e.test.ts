@@ -3,7 +3,7 @@
  * while the app is shared. Each request goes through the `forward_auth` probe
  * and then the route, as Caddy sends it.
  */
-import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,7 @@ import {
   createSession,
   createVisitorSession,
 } from "../../access/auth.js";
+import { ENTRY_RECHECK_MS } from "../../access/held-entry.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import type { AppCatalog } from "../../apps/catalog.js";
@@ -60,7 +61,11 @@ beforeAll(async () => {
   await fs.writeFile(
     path.join(tmp, "api.mjs"),
     `export function createApiHandler() {
-      return { async handle(request) { return Response.json({ app: request.path.join("/") }); } };
+      return { async handle(request) {
+        if (request.path[0] !== "stream") return Response.json({ app: request.path.join("/") });
+        const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("data: first\\n\\n")); } });
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+      } };
     }`,
   );
   await testDb.db.insert(guardianAuth).values({
@@ -150,7 +155,11 @@ async function buildInstance() {
     },
   } as unknown as AppManager;
   const deps = { ...(await buildTestDeps(testDb.db)), appCatalog, appManager, appsRoot: tmp };
-  return { app: buildApp(deps, { port: 0, host: "127.0.0.1" }).app, apps };
+  return {
+    app: buildApp(deps, { port: 0, host: "127.0.0.1" }).app,
+    apps,
+    members: deps.dashboardAccessState,
+  };
 }
 
 type Instance = Awaited<ReturnType<typeof buildInstance>>;
@@ -298,5 +307,35 @@ describe("app management routes of a shared app", () => {
     expect((await call("PATCH")).status).toBe(200);
     expect((await call("DELETE")).status).toBe(200);
     expect(instance.apps.has(PRIVATE_APP)).toBe(false);
+  });
+});
+
+describe("the event streams a member reads", () => {
+  beforeEach(() => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  });
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  it.each([
+    ["end with their entry on the dashboard", "/api/apps/events", "ended"],
+    ["follow app access under the app's dashboard path", `/api/apps/${LINK_APP}/stream`, "open"],
+    ["follow app access under its public path", `/api/app-api/${LINK_APP}/stream`, "open"],
+  ])("%s", async (_what, streamPath, after) => {
+    const { app, members } = await buildInstance();
+    members.setCloudEmailAccess([TEAMMATE_EMAIL]);
+    const res = await app.request(streamPath, { headers: { cookie: TEAMMATE } });
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const reader = res.body!.getReader();
+    const untilEnd = (async () => {
+      while (!(await reader.read()).done);
+      return "ended";
+    })();
+    members.setCloudEmailAccess([]);
+    rs.advanceTimersByTime(ENTRY_RECHECK_MS);
+    const open = new Promise((resolve) => setTimeout(() => resolve("open"), 50));
+    expect(await Promise.race([untilEnd, open])).toBe(after);
+    await reader.cancel();
   });
 });

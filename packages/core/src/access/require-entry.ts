@@ -4,6 +4,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { mayEnter } from "./entry.js";
+import { holdEntry } from "./held-entry.js";
 import { currentSessionActor, type SessionActor } from "./session-actor.js";
 import type { TeamActor } from "./team.js";
 
@@ -12,8 +13,9 @@ type AllowList = Pick<DashboardAccessState, "isCloudEmailAllowed" | "hasCloudEma
 const ENTERED = "enteredPerson";
 
 /**
- * Lets the guardian and members through to the routes after it, and answers
- * anyone else {@link entryRefusal}. A path `needsNoEntry` names passes
+ * Lets the guardian and members through to the routes after it, answers anyone
+ * else {@link entryRefusal}, and ends an event stream a route answers with once
+ * its person may no longer enter. A path `needsNoEntry` names passes
  * unasked. Mount it after the session actor middleware.
  */
 export function requireEntry(
@@ -30,7 +32,47 @@ export function requireEntry(
     }
     c.set(ENTERED, person);
     await next();
+    const body = c.res.body;
+    if (!body || !c.res.headers.get("Content-Type")?.startsWith("text/event-stream")) return;
+    c.res = new Response(whileEntryHolds(body, person, allowList), c.res);
   };
+}
+
+/** `source`, ended once `person` may no longer enter. */
+function whileEntryHolds(
+  source: ReadableStream<Uint8Array>,
+  person: TeamActor,
+  allowList: AllowList,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let ended = false;
+  let release = () => {};
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      release = holdEntry(person, allowList, () => {
+        ended = true;
+        controller.close();
+        void reader.cancel().catch(() => {});
+      });
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (ended) return;
+        if (!done) return controller.enqueue(value);
+        release();
+        controller.close();
+      } catch (err) {
+        if (ended) return;
+        release();
+        controller.error(err);
+      }
+    },
+    async cancel(reason) {
+      release();
+      await reader.cancel(reason);
+    },
+  });
 }
 
 /** The person {@link requireEntry} let in. Throws on a path that needs no entry. */

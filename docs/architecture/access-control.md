@@ -30,7 +30,7 @@ Entry is the one question asked before anything from outside Rome runs: may this
 - Every WebSocket upgrade but an app's passes `gateUpgrade`. Onboarding and visitor sign-in, on public paths, read the allow-list themselves.
 - The answer holds for the moment of the call. Nothing keeps it.
 - A person Rome cannot tell never enters.
-- A live connection holds its entry. `gateUpgrade` closes a dashboard WebSocket within 25 seconds of its person being removed, so what serves the connection only cleans up when it closes. App WebSockets follow [app access](#policies) instead.
+- An open connection holds its entry. `gateUpgrade` closes a dashboard WebSocket, and the entry step ends an event stream, within 25 seconds of its person being removed, so what serves the connection only cleans up when it closes. App WebSockets and app API streams follow [app access](#policies) instead.
 
 ## Request flow
 
