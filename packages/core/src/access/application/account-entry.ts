@@ -10,7 +10,8 @@ import { memberContext, ROME_CLOUD_EMAIL_PLATFORM } from "./members.js";
 
 const log = createLogger("entry");
 
-/** How an email connection names a sender whose address it could not verify. */
+/** How an email connection names a sender whose address it could not verify.
+ *  Compared as Identity compares accounts: trimmed and in lower case. */
 const UNVERIFIED_EMAIL = "unauthenticated:";
 
 export interface AccountEntryDeps {
@@ -61,7 +62,8 @@ export function accountEntry(deps: AccountEntryDeps) {
   return async (account: { platform: string; id: string }): Promise<AccountEntry> => {
     const { platform, id } = account;
     if (!platform || !id.trim()) return REFUSED;
-    if (platform === "email" && id.startsWith(UNVERIFIED_EMAIL)) return REFUSED;
+    if (platform === "email" && id.trim().toLowerCase().startsWith(UNVERIFIED_EMAIL))
+      return REFUSED;
     try {
       const person = await members.identity.personOf({ platform, accountId: id });
       const role = person ? await members.access.roleOf(person.id) : null;
