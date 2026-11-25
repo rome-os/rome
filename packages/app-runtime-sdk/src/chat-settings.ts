@@ -8,6 +8,7 @@ export const CONVERSATION_SETTING_FIELDS = [
   "replies.placement",
   "routing.agentName",
   "session.reset",
+  "session.scope",
 ] as const;
 
 export type ChatSettingField = (typeof CONVERSATION_SETTING_FIELDS)[number];
@@ -26,15 +27,22 @@ export interface ChatSettings {
   };
   replies: { placement: "thread" | "inline" };
   routing: { agentName: string | null };
-  session: { reset: ProviderSessionResetPolicy };
+  session: {
+    reset: ProviderSessionResetPolicy;
+    /** Whether the chat has its own session (`chat`), or shares the one
+     *  session of the connected account it is on (`account`). */
+    scope: ChatSessionScope;
+  };
 }
+
+export type ChatSessionScope = "chat" | "account";
 
 export interface ChatSettingsOverrides {
   enabled?: boolean;
   activation?: Partial<ChatSettings["activation"]>;
   replies?: Partial<ChatSettings["replies"]>;
   routing?: Partial<ChatSettings["routing"]>;
-  session?: { reset?: ProviderSessionResetPolicy };
+  session?: { reset?: ProviderSessionResetPolicy; scope?: ChatSessionScope };
 }
 
 export type PartialChatSettings = ChatSettingsOverrides;

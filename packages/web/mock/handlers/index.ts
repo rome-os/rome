@@ -1643,7 +1643,7 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
         supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
-          session: { reset: { mode: "daily", atHour: 4 } },
+          session: { reset: { mode: "daily", atHour: 4 }, scope: "chat" },
         },
         overrides: {},
       },

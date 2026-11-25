@@ -16,7 +16,12 @@ import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.
 import type { AgentSession, Sessions } from "../agent/index.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
-import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import {
+  type ChatResetPolicy,
+  type ChatSessionScopeOf,
+  resetPolicyOfMessage,
+  sessionOfMessage,
+} from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -189,6 +194,9 @@ export class AgentRunner {
     private openingFor: SessionOpeningFor = sessionOpeningFor({
       channelSurface: () => null,
     }),
+    /** The session scope of a connected account's chat. Absent, every chat
+     *  has its own session. */
+    private sessionScopeOf?: ChatSessionScopeOf,
   ) {}
 
   /**
@@ -219,8 +227,19 @@ export class AgentRunner {
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
     // runs). Real conversations always pass a `channelThreadKey`.
-    const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
+    const askedKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
+    const threadContext = await this.withChatId(params.threadContext);
+    // A message's chat may share its account's session, which reads as
+    // shared whichever chat opened it.
+    const chatSession = explicitSessionId
+      ? { continuityKey: askedKey }
+      : await sessionOfMessage(
+          this.sessionScopeOf,
+          { platformMessageId: params.platformMessageId, threadContext },
+          askedKey,
+        );
+    const requestedChannelThreadKey = chatSession.continuityKey;
 
     log.info("agent run started", {
       agent: params.agentName,
@@ -229,12 +248,18 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
-    const threadContext = await this.withChatId(params.threadContext);
     const openedKey = explicitSessionId
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
+    const stated = await this.openingFor(openedKey ?? "", threadContext);
     const opening = {
-      ...(await this.openingFor(openedKey ?? "", threadContext)),
+      ...stated,
+      ...(chatSession.audience
+        ? {
+            audience: chatSession.audience,
+            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: chatSession.audience },
+          }
+        : {}),
       kind: threadContext ? ("conversation" as const) : ("action" as const),
       workingDir: params.workingDir,
       threadContext,

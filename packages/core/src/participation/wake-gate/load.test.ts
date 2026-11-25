@@ -14,7 +14,7 @@ describe("chatRules", () => {
         activation: { mode: "all", botMessages: "mentions", whenOthersMentioned: "respond" },
         replies: { placement: "thread" },
         routing: { agentName: null },
-        session: { reset: { mode: "none" } },
+        session: { reset: { mode: "none" }, scope: "chat" },
       },
       overrides: {},
     } satisfies ChatSettingsSnapshot;

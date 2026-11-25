@@ -26,7 +26,12 @@ import type {
   AgentTurnInput,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
-import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import {
+  type ChatResetPolicy,
+  type ChatSessionScopeOf,
+  resetPolicyOfMessage,
+  sessionOfMessage,
+} from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { narrowerAudience } from "../agent/index.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
@@ -141,6 +146,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
      *  does: its words reach a chat only through `say`, so a turn's result
      *  reaches the worker that asked for it without them. Absent, none is. */
     private isTextPrivate?: (agentName: string, channel: string) => boolean,
+    /** The session scope of a connected account's chat. Absent, every chat
+     *  has its own session. */
+    private sessionScopeOf?: ChatSessionScopeOf,
   ) {}
 
   /**
@@ -223,16 +231,28 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // that lets it go (docs/concepts/sessions.md#session-in-use).
         let acquired: AgentSession | undefined;
         try {
+          // A message's chat may share its account's session, which reads
+          // as shared whichever chat opened it.
+          const chatSession = req.sessionId
+            ? { continuityKey: req.key.channelThreadKey }
+            : await sessionOfMessage(
+                this.sessionScopeOf,
+                {
+                  platformMessageId: req.platformMessageId,
+                  threadContext: sessionInit.threadContext,
+                },
+                req.key.channelThreadKey,
+              );
           const openedKey = req.sessionId
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
-            : req.key.channelThreadKey;
+            : chatSession.continuityKey;
           const stated = await this.openingFor(openedKey ?? "", sessionInit.threadContext);
           // The session reads no more privately than the caller main read.
           // A session with no chat opens shared, so its shell stays shared
           // even when its turns take a private caller's audience. A session
           // already live keeps the reading it opened with.
           const audience = narrowerAudience(
-            stated.audience,
+            chatSession.audience ?? stated.audience,
             ctx.callerActionContext?.audience ?? "shared",
           );
           const opening = {
@@ -249,7 +269,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             ? await this.manager.resume({ id: req.sessionId, agent: req.key.agentName }, opening)
             : await this.manager.open(
                 // Only the key's own fields, never the rest of the worker's request.
-                { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },
+                { agentName: req.key.agentName, channelThreadKey: chatSession.continuityKey },
                 {
                   ...opening,
                   // Read here, never taken from the worker's request.

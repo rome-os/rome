@@ -276,6 +276,7 @@ const VALUES: { [R in ChatRuleName]: readonly ChatRules[R][] } = {
   "replies.placement": ["thread", "inline"],
   "routing.agentName": [null, "helper"],
   "session.reset": [{ mode: "none" }, { mode: "idle", idleMinutes: 30 }],
+  "session.scope": ["chat", "account"],
 };
 
 /** `values` as the overrides a guardian's choices store. */
@@ -320,10 +321,14 @@ describe("chat rules", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("offers no chat rules for the official Slack and Discord apps, so their chats run at the defaults", () => {
+  it("offers no chat rules for the official Slack and Discord apps, and only Slack's chats share a session that resets after an hour", () => {
+    expect(everyKind().get("slack_app")?.chatRules).toEqual({
+      offers: [],
+      fixed: { "session.scope": "account", "session.reset": { mode: "idle", idleMinutes: 60 } },
+    });
+    expect(everyKind().get("discord_app")?.chatRules).toEqual({ offers: [] });
     for (const kind of ["slack_app", "discord_app"]) {
       const rules = everyKind().get(kind)?.chatRules;
-      expect(rules).toEqual({ offers: [] });
       for (const place of ["direct", "group"] as const) {
         expect(chatRulesOf(rules!, place).offers).toEqual([]);
       }
@@ -410,6 +415,7 @@ const RULE_CASES: { [R in ChatRuleName]: readonly RuleCase<R>[] } = {
   "replies.placement": [{ value: "inline" }, { value: "thread" }],
   "routing.agentName": [{ value: "helper" }, { value: null }],
   "session.reset": [{ value: { mode: "none" } }, { value: { mode: "daily", atHour: 4 } }],
+  "session.scope": [{ value: "chat" }, { value: "account" }],
 };
 
 describe("chat rule conformance", () => {

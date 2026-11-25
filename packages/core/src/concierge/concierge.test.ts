@@ -1099,6 +1099,21 @@ describe("Concierge tools", () => {
       expect(s.service.runsSystemTurnIn(chatId)).toBe(false);
     });
 
+    it("runs a report in the session the chat's messages run in", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const asked: string[] = [];
+      s.deps.sessionRepository.current = rs.fn(async (key: string) => {
+        asked.push(key);
+        return { id: "runtime-1" };
+      }) as never;
+      s.onBackendTurn(() => "completed");
+      expect(await s.service.runSystemTurn(chatId, "report")).toBe(true);
+      s.deps.chatSessionKey = async ({ channel }) => `${channel}:*`;
+      expect(await s.service.runSystemTurn(chatId, "report")).toBe(true);
+      expect(asked).toEqual(["discord_app:900", "discord_app:*"]);
+    });
+
     it("lets a task's report, which Rome runs, read the chat's tasks, and no other turn without a sender", async () => {
       const s = setup();
       const chatId = await connectionChat(s);

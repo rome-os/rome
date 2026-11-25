@@ -63,6 +63,9 @@ function setField(settings: ChatSettingsOverrides, field: ChatSettingField, valu
       return;
     case "session.reset":
       (settings.session ??= {}).reset = structuredClone(value as ChatSettings["session"]["reset"]);
+      return;
+    case "session.scope":
+      (settings.session ??= {}).scope = value as ChatSettings["session"]["scope"];
   }
 }
 
@@ -88,6 +91,9 @@ function clearField(settings: ChatSettingsOverrides, field: ChatSettingField): v
       break;
     case "session.reset":
       if (settings.session) delete settings.session.reset;
+      break;
+    case "session.scope":
+      if (settings.session) delete settings.session.scope;
       break;
   }
   if (settings.activation && Object.keys(settings.activation).length === 0)
@@ -142,7 +148,7 @@ function assertKnownSetShape(value: PartialChatSettings): void {
     activation: ["mode", "botMessages", "whenOthersMentioned"],
     replies: ["placement"],
     routing: ["agentName"],
-    session: ["reset"],
+    session: ["reset", "scope"],
   };
   for (const key of Object.keys(value)) {
     if (!Object.hasOwn(groups, key)) {
@@ -174,6 +180,7 @@ function assertValue(field: ChatSettingField, value: unknown): void {
     "activation.whenOthersMentioned": ["ignore", "respond"],
     "replies.placement": ["thread", "inline"],
     "routing.agentName": [null],
+    "session.scope": ["chat", "account"],
   };
   if (field === "routing.agentName") {
     if (value === null || (typeof value === "string" && value.trim().length > 0)) return;

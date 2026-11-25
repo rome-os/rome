@@ -267,6 +267,10 @@ export interface ConciergeDeps {
     messageId: string,
     emoji: string,
   ) => Promise<void>;
+  /** The key of the session a chat on a connected account runs in, by its
+   *  chat's session scope (participation/session-scope.ts). Absent, each chat
+   *  has its own. */
+  chatSessionKey?: (chat: { channel: string; threadId: string }) => Promise<string>;
   /** Says a message of turn `turnId` in a chat on a connection: past the
    *  account's send gate, to the platform, recorded in the chat. Answers the
    *  platform's key for it, or why it was not sent. Absent, nothing can be
@@ -1196,7 +1200,7 @@ export class ConciergeService {
     options: SystemTurnOptions,
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const stored = await this.deps.sessionRepository.current(
-      `${chat.channel}:${chat.threadId}`,
+      (await this.deps.chatSessionKey?.(chat)) ?? `${chat.channel}:${chat.threadId}`,
       CONCIERGE_AGENT_ID,
     );
     if (!stored) return "failed";

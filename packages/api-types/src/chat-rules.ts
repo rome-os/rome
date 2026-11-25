@@ -28,6 +28,8 @@ export interface ChatRules {
   "routing.agentName": string | null;
   /** When the chat's session starts afresh. */
   "session.reset": ProviderSessionResetPolicy;
+  /** Whether the chat has its own session, or shares its connected account's. */
+  "session.scope": ChatSettings["session"]["scope"];
 }
 
 export type ChatRuleName = keyof ChatRules;
@@ -58,7 +60,8 @@ export const SESSION_RESET_ONLY_CHAT_RULES: KindChatRules = {
   fixed: WAKES_ON_EVERY_MESSAGE,
 };
 
-/** A self-created Discord bot offers every chat rule. */
+/** A self-created Discord bot offers every chat rule but the session's
+ *  scope, which stays at its default. */
 export const DISCORD_CHAT_RULES: KindChatRules = {
   offers: [
     "enabled",
@@ -106,6 +109,7 @@ export function chatRuleDefaults(): ChatRules {
     "replies.placement": "thread",
     "routing.agentName": null,
     "session.reset": structuredClone(DEFAULT_SESSION_RESET),
+    "session.scope": "chat",
   };
 }
 
@@ -122,6 +126,7 @@ export function storedRuleValue<R extends ChatRuleName>(
     "replies.placement": stored.replies?.placement,
     "routing.agentName": stored.routing?.agentName,
     "session.reset": stored.session?.reset,
+    "session.scope": stored.session?.scope,
   };
   return values[rule];
 }
@@ -158,6 +163,6 @@ export function asChatSettings(rules: ChatRules): ChatSettings {
     },
     replies: { placement: rules["replies.placement"] },
     routing: { agentName: rules["routing.agentName"] },
-    session: { reset: rules["session.reset"] },
+    session: { reset: rules["session.reset"], scope: rules["session.scope"] },
   };
 }
