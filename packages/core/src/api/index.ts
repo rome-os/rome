@@ -26,7 +26,9 @@ import { voiceConversationRoutes } from "./routes/voice-conversation.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
+import { requireEntry } from "../access/require-entry.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
+import { needsNoEntry } from "./ways-in.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -141,13 +143,9 @@ export function buildApp(
   // Home-screen manifest and icon per installed app (public).
   app.route("/", appHomeScreenRoutes(deps));
 
-  // Internal dashboard/app routes — mounted under /api. No global auth gate
-  // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
-  // so the only callers are (1) internal Rome processes inside the container
-  // and (2) Caddy after `forward_auth` clears the request at the public edge.
-  // A Rome instance is single-tenant by design, so route handlers do not need
-  // to derive a userId — the instance itself is the user. See
-  // `scripts/generate-caddyfile.ts` for the edge-side enforcement.
+  // Internal dashboard/app routes — mounted under /api. The entry step below
+  // asks who may enter, once for every route here
+  // (docs/architecture/access-control.md#entry).
   const api = new Hono();
 
   // Dynamic API responses are mutable single-tenant state; default them to
@@ -159,6 +157,8 @@ export function buildApp(
   // so any action run during the request is stamped with who triggered it —
   // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
+
+  api.use("*", requireEntry(deps.dashboardAccessState, needsNoEntry));
 
   api.route("/", healthRoutes(deps));
   api.route("/", uptimeRoutes());
