@@ -211,6 +211,9 @@ sideEffects: read-only|write # IMPORTANT: write may trigger approval policies
 `public` actions enter an agent's catalog through `actions: ["*"]` or an exact
 canonical reference. `explicit` actions require the exact reference. This field
 does not restrict routines, hooks, app APIs, or calls from another action.
+`"*"` includes Rome's own read tools, such as the people, device and routine
+lists, so name each action of an agent that visitors can reach or that reads
+untrusted input.
 
 ### `agents/<name>.yaml`
 
@@ -266,7 +269,7 @@ description: Triages incoming support requests
 tier: small
 permissionMode: bypassPermissions
 tools: []
-actions: ["*"]
+actions: []
 outputSchema:
   type: object
   required: [decision, reason]

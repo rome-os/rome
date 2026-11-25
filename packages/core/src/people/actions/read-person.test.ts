@@ -24,12 +24,6 @@ beforeEach(async () => {
   registry = new ActionRegistryImpl();
   registerReadPersonAction(registry, {
     people,
-    ownerOfChat: async (chatId) =>
-      chatId === "visitor-chat"
-        ? "visitor:visitor"
-        : chatId === "guardian-chat"
-          ? "guardian"
-          : null,
     readNotes: async (path) => notes.get(path) ?? null,
   });
   engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
@@ -43,6 +37,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => testDb.close());
+
+const webchat = (threadId: string) => ({ channel: "webchat", threadId });
 
 const read = (name: unknown, context: ActionRunContext = {}) =>
   engine.run(READ_PERSON_ACTION, { name }, context);
@@ -86,26 +82,17 @@ describe("core:read_person", () => {
     });
   });
 
-  it("refuses a visitor, and a turn no one started in a chat a visitor owns", async () => {
+  it.each<[string, ActionRunContext]>([
+    ["a member's turn", { actor: visitor }],
+    ["a turn no one started in a member's chat", { channelContext: webchat("member-chat") }],
+    [
+      "a turn in a chat on a connection",
+      { channelContext: { channel: "discord", threadId: "g1" } },
+    ],
+    ["a turn with neither an actor nor a chat", {}],
+  ])("reads for %s", async (_name, context) => {
     await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
-    expect((await read("Ana Lopez", { actor: visitor })).status).toBe("error");
-    const visitorChat = { channel: "webchat", threadId: "visitor-chat" };
-    expect((await read("Ana Lopez", { channelContext: visitorChat })).status).toBe("error");
-    const goneChat = { channel: "webchat", threadId: "gone-chat" };
-    expect((await read("Ana Lopez", { channelContext: goneChat })).status).toBe("error");
-  });
-
-  it("refuses a turn with neither an actor nor a chat, such as an agent summoned from a visitor's task", async () => {
-    await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
-    expect((await read("Ana Lopez", {})).status).toBe("error");
-  });
-
-  it("reads for a turn no one started in the guardian's chat or a chat on a connection", async () => {
-    await people.create({ displayName: "Ana Lopez", bondLevel: "inner-circle" });
-    const guardianChat = { channel: "webchat", threadId: "guardian-chat" };
-    expect((await read("Ana Lopez", { channelContext: guardianChat })).status).toBe("ok");
-    const group = { channel: "discord", threadId: "group-1" };
-    expect((await read("Ana Lopez", { channelContext: group })).status).toBe("ok");
+    expect((await read("Ana Lopez", context)).status).toBe("ok");
   });
 
   it("is available through the main agent wildcard", () => {

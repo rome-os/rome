@@ -2,7 +2,6 @@
 // notes the guardian keeps on them. Vocabulary: docs/domains/people.md.
 
 import { readFile } from "node:fs/promises";
-import { runsForGuardian } from "./guardian-only.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
 import type { PeopleRepository } from "../model/people-repository.js";
 import type { Person } from "../model/person.js";
@@ -25,9 +24,6 @@ export function registerReadPersonAction(
   actions: Pick<ActionRegistry, "register">,
   deps: {
     people: Pick<PeopleRepository, "all">;
-    /** Whose chat it is ("guardian" or "visitor:<account>"), or null for a
-     *  chat that no longer exists. */
-    ownerOfChat(chatId: string): Promise<string | null>;
     /** The notes at `path` under the memory root, or null when there are none. */
     readNotes?: (path: string) => Promise<string | null>;
   },
@@ -53,10 +49,6 @@ export function registerReadPersonAction(
       additionalProperties: false,
     },
     execute: async (args) => {
-      // The notes are the guardian's own, so a visitor never reads them.
-      if (!(await runsForGuardian(deps.ownerOfChat))) {
-        return { status: "error", error: "Only the guardian's agents can read a person's notes." };
-      }
       const name = typeof args.name === "string" ? args.name.trim() : "";
       if (!name) return { status: "error", error: "Pass the person's name." };
       const wanted = name.toLowerCase();
