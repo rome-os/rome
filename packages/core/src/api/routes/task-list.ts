@@ -11,7 +11,8 @@ import { ChatTaskList } from "../../concierge/task-list.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import type { ApiDeps } from "../deps.js";
-import { callerOwner, streamEvents } from "./concierge.js";
+import { enteredOwnerKey } from "../../access/require-entry.js";
+import { streamEvents } from "./concierge.js";
 import { updateRoutine } from "../../routines/update.js";
 
 type TaskListApiDeps = Pick<
@@ -96,7 +97,7 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
   ): Promise<
     { concierge: ConciergeService; list: ChatTaskList; chatId: string; owner: string } | Response
   > => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     const list = chatTaskListOf(deps);
     if (!concierge || !list) return c.json({ error: "Concierge is not available" }, 404);
