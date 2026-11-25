@@ -201,7 +201,7 @@ import { AppTurnHooks, inOneHookChain } from "./app-host/app-turn-hooks.js";
 import { AppTurnMiddleware } from "./app-host/app-turn-middleware.js";
 import { TurnUsageReporter } from "./app-host/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
-import { ActionRegistryImpl, fullIdsByUniqueLocalName } from "./apps/actions/registry.js";
+import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
 import { readMemoryHeadroom } from "./instance/memory-headroom.js";
@@ -848,19 +848,12 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
-  const storedLegacyBindings = await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING);
   const artifactIdentity = {
-    legacyBindings: parseLegacyArtifactBindings(storedLegacyBindings),
+    legacyBindings: parseLegacyArtifactBindings(
+      await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
+    ),
   };
-  // Routines saved before action names carried their app fire by the full ID.
-  // Renamed before boot removal, which pauses a removed app's routines by it.
-  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
-    artifactIdentity.legacyBindings.action,
-  );
-  if (renamedRoutines > 0) {
-    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
-  }
-  // Boot removal matches routines' actions before actions register.
+  // Boot removal matches qualified names and legacy bindings before actions register.
   // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
   let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -870,6 +863,7 @@ async function main() {
     romeCloudListings,
     pauseRoutines: appRoutinePauser({
       repository: routinesRepo,
+      legacyBindings: artifactIdentity.legacyBindings,
       engine: {
         deactivate: async (id) => {
           await deactivateRoutine?.(id);
@@ -1032,6 +1026,13 @@ async function main() {
   };
   if (renamedAgents.sessions + renamedAgents.chats > 0) {
     appsLog.info("old agent names renamed", renamedAgents);
+  }
+  // Routines saved before action names carried their app fire by the full ID.
+  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
+    artifactIdentity.legacyBindings.action,
+  );
+  if (renamedRoutines > 0) {
+    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
   }
 
   // Set once the email adapter is created (further down). Lets the main-agent
@@ -2748,7 +2749,7 @@ async function main() {
       appStore,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
-      suggestAction: (name) => actionRegistry.suggest(name),
+      canonicalActionName: (name) => actionRegistry.getCanonicalName(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -3020,19 +3021,6 @@ async function main() {
     actionEngine,
     canSync: () => isInstanceLinked(),
   });
-
-  // A profile from before the old-name map was stored has routines with bare
-  // action names the map cannot rename; a name one registered action has is
-  // that action's. Only its first boot renames, since this boot stores the map,
-  // so a bare name no action had stays unmatched when an app adds one later.
-  if (storedLegacyBindings == null) {
-    const renamedByRegistry = await routinesRepo.deprecatedQualifyActionNames(
-      fullIdsByUniqueLocalName(actionRegistry.list()),
-    );
-    if (renamedByRegistry > 0) {
-      appsLog.info("old action names on routines renamed", { routines: renamedByRegistry });
-    }
-  }
 
   await routineEngine.start();
 

@@ -28,6 +28,8 @@ export function useVoiceConversation({
   const mutedRef = useRef(false);
   const [asking, setAsking] = useState(false);
   const [stopped, setStopped] = useState<ConversationStopReason | null>(null);
+  const [heard, setHeard] = useState("");
+  const [caption, setCaption] = useState("");
 
   const start = useCallback(() => {
     const chat = chatId || startChat;
@@ -36,10 +38,14 @@ export function useVoiceConversation({
     setState("listening");
     setMuted(false);
     mutedRef.current = false;
+    setHeard("");
+    setCaption("");
     setActive(true);
     conversationRef.current = startVoiceConversation(chat, {
       onState: setState,
       onAsking: setAsking,
+      onHeard: setHeard,
+      onCaption: setCaption,
       onEnded: (reason) => {
         conversationRef.current = null;
         setActive(false);
@@ -85,6 +91,10 @@ export function useVoiceConversation({
     muted,
     /** True while the browser asks the guardian for the microphone. */
     asking,
+    /** What Rome has heard of the guardian's turn, not sent yet. */
+    heard,
+    /** The reply's sentence playing now. */
+    caption,
     /** Why the last conversation ended on its own, or null. */
     stopped,
     dismissStopped: useCallback(() => setStopped(null), []),

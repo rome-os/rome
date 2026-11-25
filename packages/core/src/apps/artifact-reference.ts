@@ -7,14 +7,14 @@ export interface ArtifactReferenceInput {
 
 /**
  * Builds the one runtime boundary that turns external artifact references into
- * canonical IDs. An action is referenced by its full ID only; this function
+ * canonical IDs. Registries own legacy-name compatibility; this function only
  * selects the registry for the requested artifact kind.
  */
 export function createArtifactReferenceResolver(deps: {
   /** The agent's canonical id. Throws when no installed agent has the name. */
   canonicalAgentName: (name: string) => string;
   actionRegistry: {
-    has(name: string): boolean;
+    getCanonicalName(name: string): string | undefined;
   };
 }): (input: ArtifactReferenceInput) => string {
   return (input) => {
@@ -22,9 +22,10 @@ export function createArtifactReferenceResolver(deps: {
       return deps.canonicalAgentName(input.value);
     }
 
-    if (!deps.actionRegistry.has(input.value)) {
+    const actionName = deps.actionRegistry.getCanonicalName(input.value);
+    if (!actionName) {
       throw new Error(`Action "${input.value}" not found`);
     }
-    return input.value;
+    return actionName;
   };
 }

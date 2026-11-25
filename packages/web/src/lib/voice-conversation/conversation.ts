@@ -33,6 +33,13 @@ export interface ConversationHandlers {
   onEnded(reason: ConversationStopReason | null): void;
   /** True while the browser asks the guardian for the microphone, false once answered. */
   onAsking?(asking: boolean): void;
+  /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
+  onHeard?(text: string): void;
+  /**
+   * The reply's sentence playing now, as its audio starts. Empty once the
+   * reply's audio has played here, or the guardian speaks over it.
+   */
+  onCaption?(text: string): void;
 }
 
 export interface VoiceConversation {
@@ -103,11 +110,70 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  // Each caption waits for its sentence's first audio, then for the audio
+  // queued before it. The last one stays until the audio queued here has
+  // played: Rome's state follows the audio it sent, which can be well ahead
+  // after a network stall.
+  let waitingCaption: string | null = null;
+  const captionTimers = new Set<ReturnType<typeof setTimeout>>();
+  let captionEnd: ReturnType<typeof setTimeout> | null = null;
+  const stopCaptionEnd = () => {
+    if (captionEnd) clearTimeout(captionEnd);
+    captionEnd = null;
+  };
+  const clearCaptions = () => {
+    waitingCaption = null;
+    for (const timer of captionTimers) clearTimeout(timer);
+    captionTimers.clear();
+    stopCaptionEnd();
+  };
+  // A caption comes before its sentence's audio, which may still be in the making.
+  const captionNext = (text: string) => {
+    stopCaptionEnd();
+    waitingCaption = text;
+  };
+  // Audio after a caption is its sentence's, and plays after the audio queued so far.
+  const playReply = (chunk: ArrayBuffer) => {
+    const text = waitingCaption;
+    if (text !== null) {
+      waitingCaption = null;
+      const timer = setTimeout(() => {
+        captionTimers.delete(timer);
+        handlers.onCaption?.(text);
+      }, player.ahead() * 1000);
+      captionTimers.add(timer);
+    }
+    player.play(chunk, sampleRate);
+  };
+  // Rome thinks between sentences too; only once it listens has the reply ended.
+  const stateChanged = (state: VoiceConversationState) => {
+    handlers.onState(state);
+    if (state !== "listening") return;
+    waitingCaption = null;
+    stopCaptionEnd();
+    captionEnd = setTimeout(() => {
+      captionEnd = null;
+      handlers.onCaption?.("");
+    }, player.ahead() * 1000);
+  };
+  // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
+  const turnSent = () => {
+    clearCaptions();
+    handlers.onHeard?.("");
+    handlers.onCaption?.("");
+  };
+  // The guardian spoke over the reply: what has not played goes, and its words with it.
+  const dropUnplayed = () => {
+    player.clear();
+    clearCaptions();
+    handlers.onCaption?.("");
+  };
 
   const teardown = () => {
     done = true;
     microphone?.close();
     player.close();
+    clearCaptions();
     if (quietTimer) clearTimeout(quietTimer);
     window.removeEventListener("offline", lost);
     if (socket) {
@@ -170,7 +236,7 @@ export function startVoiceConversation(
       socket.onmessage = (event: MessageEvent) => {
         heardFromRome();
         if (typeof event.data !== "string") {
-          if (event.data instanceof ArrayBuffer && sampleRate) player.play(event.data, sampleRate);
+          if (event.data instanceof ArrayBuffer && sampleRate) playReply(event.data);
           return;
         }
         let parsed: unknown;
@@ -183,8 +249,11 @@ export function startVoiceConversation(
         if (!message.success) return;
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
-        else if (data.type === "state") handlers.onState(data.state);
-        else if (data.type === "clear") player.clear();
+        else if (data.type === "state") stateChanged(data.state);
+        else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
+        else if (data.type === "turn") turnSent();
+        else if (data.type === "caption") captionNext(data.text);
+        else if (data.type === "clear") dropUnplayed();
         else if (data.type === "ended") finish(null);
         else if (data.type === "error") finish(data.reason);
       };

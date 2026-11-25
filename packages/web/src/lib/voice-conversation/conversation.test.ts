@@ -42,12 +42,14 @@ function setup(refuse?: string, chat: string | (() => Promise<string>) = "concie
   const played: Array<[number, number]> = [];
   let cleared = 0;
   let closedPlayer = false;
+  let ahead = 0;
   const player: PcmPlayer = {
     play: (chunk, rate) => played.push([chunk.byteLength, rate]),
     clear: () => {
       cleared += 1;
     },
     level: () => 0.5,
+    ahead: () => ahead,
     close: () => {
       closedPlayer = true;
     },
@@ -71,9 +73,16 @@ function setup(refuse?: string, chat: string | (() => Promise<string>) = "concie
   };
   const states: string[] = [];
   const ended: Array<ConversationStopReason | null> = [];
+  const heard: string[] = [];
+  const captions: string[] = [];
   const conversation = startVoiceConversation(
     chat,
-    { onState: (s) => states.push(s), onEnded: (r) => ended.push(r) },
+    {
+      onState: (s) => states.push(s),
+      onEnded: (r) => ended.push(r),
+      onHeard: (text) => heard.push(text),
+      onCaption: (text) => captions.push(text),
+    },
     deps,
   );
   return {
@@ -81,6 +90,11 @@ function setup(refuse?: string, chat: string | (() => Promise<string>) = "concie
     conversation,
     states,
     ended,
+    heard,
+    captions,
+    setAhead: (seconds: number) => {
+      ahead = seconds;
+    },
     played,
     cleared: () => cleared,
     closedPlayer: () => closedPlayer,
@@ -111,6 +125,99 @@ describe("a voice conversation in the browser", () => {
 
     c.socket.say({ type: "clear" });
     expect(c.cleared()).toBe(1);
+  });
+
+  it("shows what Rome hears until the turn is sent, and each caption as its audio starts", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
+      const audio = () => c.socket.onmessage?.({ data: new ArrayBuffer(480) });
+      c.socket.say({ type: "heard", settled: "Book a ", pending: "table" });
+      c.socket.say({ type: "turn", text: "Book a table" });
+      expect(c.heard).toEqual(["Book a table", ""]);
+      expect(c.captions).toEqual([""]);
+
+      // A caption waits for its sentence's audio, still being made.
+      c.socket.say({ type: "caption", text: "Sure." });
+      rs.advanceTimersByTime(500);
+      expect(c.captions).toEqual([""]);
+      audio();
+      rs.advanceTimersByTime(0);
+      expect(c.captions).toEqual(["", "Sure."]);
+
+      // The second sentence's audio plays after the first's.
+      c.setAhead(1.5);
+      c.socket.say({ type: "caption", text: "For how many?" });
+      audio();
+      rs.advanceTimersByTime(1_400);
+      expect(c.captions).toEqual(["", "Sure."]);
+      rs.advanceTimersByTime(100);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?"]);
+
+      // Rome thinks between sentences: the next caption still shows with its audio.
+      c.setAhead(0);
+      c.socket.say({ type: "caption", text: "Indoors?" });
+      c.socket.say({ type: "state", state: "thinking" });
+      audio();
+      c.socket.say({ type: "state", state: "speaking" });
+      rs.advanceTimersByTime(1_000);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?", "Indoors?"]);
+
+      // Speaking over the reply drops the captions not shown yet.
+      c.setAhead(1);
+      c.socket.say({ type: "caption", text: "Or outside?" });
+      audio();
+      c.socket.say({ type: "clear" });
+      rs.advanceTimersByTime(2_000);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?", "Indoors?", ""]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("keeps the last caption until its audio has played here, though Rome already says listening", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
+      c.socket.say({ type: "caption", text: "Done." });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
+      rs.advanceTimersByTime(0);
+      // Delivered late, all at once: the audio still has 2 s to play when Rome says listening.
+      c.setAhead(2);
+      c.socket.say({ type: "state", state: "listening" });
+      rs.advanceTimersByTime(1_900);
+      expect(c.captions).toEqual(["Done."]);
+      rs.advanceTimersByTime(100);
+      expect(c.captions).toEqual(["Done.", ""]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops a caption still waiting when the turn is sent", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.socket.say({ type: "ready", sampleRate: 24000 });
+      c.setAhead(0.5);
+      c.socket.say({ type: "caption", text: "Bye." });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
+      c.socket.say({ type: "caption", text: "See you." });
+      c.socket.say({ type: "turn", text: "Wait" });
+      c.socket.onmessage?.({ data: new ArrayBuffer(480) });
+      rs.advanceTimersByTime(1_000);
+      expect(c.captions).toEqual([""]);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("creates a draft's chat once the microphone is on, then starts in it", async () => {
