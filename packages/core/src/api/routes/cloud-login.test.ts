@@ -628,17 +628,14 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
   });
 
-  it("makes the guardian with the seat's Rome Cloud account and email", async () => {
+  it("makes the guardian with the seat's email as their only account", async () => {
     await signInFresh({ name: "Alex Doe", email: "Alex@Example.com" });
 
     expect(await listMembers(memberContext(testDb.db))).toEqual([
       {
         person: expect.objectContaining({ name: "Alex Doe" }),
         role: "guardian",
-        accounts: [
-          { platform: "email", accountId: "alex@example.com" },
-          { platform: "rome-cloud", accountId: "A" },
-        ],
+        accounts: [{ platform: "rome-cloud-email", accountId: "alex@example.com" }],
       },
     ]);
   });

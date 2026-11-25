@@ -6,8 +6,14 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { type DrizzleDb, inTransaction } from "../../db/index.js";
-import { guardianAuth, links, persons, settings, visitorProfiles } from "../../db/schema.js";
-import { AccountTakenError } from "../../identity/identity.js";
+import {
+  guardianAuth,
+  identityAccounts,
+  links,
+  persons,
+  settings,
+  visitorProfiles,
+} from "../../db/schema.js";
 import { createLogger } from "../../logger.js";
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
@@ -16,35 +22,53 @@ import {
 import {
   guardianSeatCreated,
   invitedEmailsSaved,
+  type MemberContext,
   memberContext,
   memberSignedIn,
-  ROME_CLOUD_PLATFORM,
+  ROME_CLOUD_EMAIL_PLATFORM,
   seatAccounts,
 } from "./members.js";
 
 const log = createLogger("members-backfill");
 
+// The platform an earlier build stored Rome Cloud ids under. A Rome Cloud
+// sign-in is now known by its email, so no account is kept on it.
+const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
+
 /**
  * Brings the members in line with the guardian's seat and the dashboard
- * allow-list, in one transaction. The guardian gets the seat's Rome Cloud
- * account and email and every account People links to its guardian person,
- * as an agent's own account excepted. Its only Rome Cloud account is the
- * seat's: Rome Cloud accounts come only from a seat or a sign-in, never from
- * People, so any other one on the guardian is taken away. It takes no account
- * on another platform: Identity cannot tell an earlier seat's email from the
- * same address carried from People, so only the step beside a seat's rebind,
- * which knows the old values, takes them away. Each listed email becomes a
- * member, and each member but the guardian gets each Rome Cloud account a
- * visitor signed in with under their email. A member off the list is removed. An
+ * allow-list, in one transaction. A Rome Cloud sign-in is known by its email
+ * on the `rome-cloud-email` platform, so the accounts an earlier build stored
+ * move there: every Rome Cloud id stored as an account is taken away, from any
+ * person, and each `email` account of a member, which only an invitation
+ * gave, becomes the same address on `rome-cloud-email`. The guardian gets the
+ * seat's email as a sign-in's and every account People links to its guardian
+ * person, as an agent's own account excepted, and loses the seat's address as
+ * an `email` account unless People links it too, as an email connection's
+ * address. It takes no other email away: Identity cannot tell an earlier
+ * seat's email from the same address carried from People, so only the step
+ * beside a seat's rebind, which knows the old values, takes them away. Each
+ * listed email becomes a member,
+ * and a member off the list is removed. Each person with a role gets the
+ * avatar a visitor last signed in with under a listed email of theirs. An
  * account that would land on two persons stays with or moves to the guardian,
  * and the run logs it.
  */
 export async function backfillMembers(db: DrizzleDb): Promise<void> {
   await inOneTransaction(db, async () => {
     const ctx = memberContext(db);
+    const cloudIds = db
+      .select({ platform: identityAccounts.platform, accountId: identityAccounts.accountId })
+      .from(identityAccounts)
+      .where(eq(identityAccounts.platform, ROME_CLOUD_ID_PLATFORM))
+      .all();
+    for (const account of cloudIds) await ctx.identity.removeAccount(account);
+    if (cloudIds.length > 0) {
+      log.info("Rome Cloud ids taken from Identity", { accounts: cloudIds.length });
+    }
+    await moveMemberEmailsToSignIns(ctx);
     const seat = db
       .select({
-        accountId: guardianAuth.accountId,
         email: guardianAuth.email,
         avatarUrl: guardianAuth.avatarUrl,
       })
@@ -65,20 +89,26 @@ export async function backfillMembers(db: DrizzleDb): Promise<void> {
             .where(and(eq(links.personId, peopleGuardian.id), eq(links.delegate, false)))
             .orderBy(links.platform, links.accountId)
             .all()
+            .filter((link) => link.platform !== ROME_CLOUD_ID_PLATFORM)
         : [];
       const guardian = await guardianSeatCreated(ctx, {
         accounts: [...seatAccounts(seat), ...linked],
         name: peopleGuardian?.name,
         avatarUrl: seat.avatarUrl ?? undefined,
       });
-      for (const account of await ctx.identity.accountsOf(guardian.id)) {
-        if (account.platform !== ROME_CLOUD_PLATFORM || account.accountId === seat.accountId) {
-          continue;
-        }
-        await ctx.identity.removeAccount(account);
-        log.warn("a Rome Cloud account the seat does not name taken from the guardian", {
-          accountId: account.accountId,
-        });
+      const [seatSignIn] = seatAccounts(seat);
+      const seatAddress = seatSignIn && { platform: "email", accountId: seatSignIn.accountId };
+      const linkedAddress = linked.some(
+        (link) =>
+          link.platform === "email" &&
+          link.accountId.trim().toLowerCase() === seatAddress?.accountId,
+      );
+      if (
+        seatAddress &&
+        !linkedAddress &&
+        (await ctx.identity.personOf(seatAddress))?.id === guardian.id
+      ) {
+        await ctx.identity.removeAccount(seatAddress);
       }
     }
 
@@ -93,7 +123,6 @@ export async function backfillMembers(db: DrizzleDb): Promise<void> {
     const signedIn = emails.length
       ? db
           .select({
-            accountId: visitorProfiles.accountId,
             email: sql<string>`lower(trim(${visitorProfiles.email}))`,
             avatarUrl: visitorProfiles.avatarUrl,
           })
@@ -103,18 +132,7 @@ export async function backfillMembers(db: DrizzleDb): Promise<void> {
           .filter((profile) => emails.includes(profile.email))
       : [];
     for (const profile of signedIn) {
-      const account = { platform: ROME_CLOUD_PLATFORM, accountId: profile.accountId };
-      try {
-        await memberSignedIn(ctx, { email: profile.email, account, avatarUrl: profile.avatarUrl });
-      } catch (err) {
-        if (!(err instanceof AccountTakenError)) throw err;
-        log.warn(
-          "a listed visitor's Rome Cloud account belongs to another person and stays there",
-          {
-            accountId: profile.accountId,
-          },
-        );
-      }
+      await memberSignedIn(ctx, { email: profile.email, avatarUrl: profile.avatarUrl });
     }
 
     log.info("members brought in line with the guardian's seat and the allow-list", {
@@ -137,5 +155,22 @@ async function inOneTransaction(db: DrizzleDb, work: () => Promise<void>): Promi
   } catch (err) {
     db.run(sql`ROLLBACK`);
     throw err;
+  }
+}
+
+// Each `email` account of a person with role member came from an invitation,
+// so it becomes the same address on the sign-in platform. One whose sign-in
+// account another person holds is only taken away, and the run logs it.
+async function moveMemberEmailsToSignIns(ctx: MemberContext): Promise<void> {
+  for (const { personId, role } of await ctx.access.members()) {
+    if (role !== "member") continue;
+    for (const account of await ctx.identity.accountsOf(personId)) {
+      if (account.platform !== "email") continue;
+      await ctx.identity.removeAccount(account);
+      const signIn = { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: account.accountId };
+      const holder = await ctx.identity.personOf(signIn);
+      if (!holder) await ctx.identity.addAccount(personId, signIn);
+      else if (holder.id !== personId) log.warn("a member's email is another person's sign-in");
+    }
   }
 }

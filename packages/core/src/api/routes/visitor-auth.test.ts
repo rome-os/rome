@@ -142,7 +142,7 @@ describe("/api/auth/visitor dashboard access", () => {
     expect(profiles.size).toBe(0);
   });
 
-  it("gives a member the Rome Cloud account and avatar they signed in with", async () => {
+  it("gives a member the avatar they signed in with and no Rome Cloud account", async () => {
     const ctx = memberContext(testDb.db);
     const ada = await inviteMember(ctx, "ada@example.com");
     const state = new DashboardAccessState();
@@ -152,25 +152,20 @@ describe("/api/auth/visitor dashboard access", () => {
 
     await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
 
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-1" })).toBe(
-      "member",
-    );
-    expect((await listMembers(ctx))[0]).toMatchObject({
-      person: { id: ada.id, avatarUrl: "https://example.com/avatar.png" },
-      accounts: [
-        { platform: "email", accountId: "ada@example.com" },
-        { platform: "rome-cloud", accountId: "acct-1" },
-      ],
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "ada@example.com" }),
+    ).toBe("member");
+    expect((await listMembers(ctx))[0]).toEqual({
+      person: { id: ada.id, name: null, avatarUrl: "https://example.com/avatar.png" },
+      role: "member",
+      accounts: [{ platform: "rome-cloud-email", accountId: "ada@example.com" }],
     });
   });
 
-  it("gives the guardian nothing when a visitor signs in with the guardian's email", async () => {
+  it("knows a visitor who signs in with the guardian's email as the guardian's person", async () => {
     const ctx = memberContext(testDb.db);
-    await guardianSeatCreated(ctx, {
-      accounts: [
-        { platform: "rome-cloud", accountId: "acct-owner" },
-        { platform: "email", accountId: "owner@example.com" },
-      ],
+    const owner = await guardianSeatCreated(ctx, {
+      accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
     });
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["owner@example.com"]);
@@ -179,15 +174,13 @@ describe("/api/auth/visitor dashboard access", () => {
 
     await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
 
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-1" })).toBeNull();
-    expect((await listMembers(ctx))[0]).toMatchObject({
-      person: { avatarUrl: null },
-      role: "guardian",
-      accounts: [
-        { platform: "email", accountId: "owner@example.com" },
-        { platform: "rome-cloud", accountId: "acct-owner" },
-      ],
-    });
+    expect(await listMembers(ctx)).toEqual([
+      {
+        person: { id: owner.id, name: null, avatarUrl: "https://example.com/avatar.png" },
+        role: "guardian",
+        accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
+      },
+    ]);
   });
 
   it("makes no person for a visitor who is not a member", async () => {

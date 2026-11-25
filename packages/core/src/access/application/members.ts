@@ -8,12 +8,14 @@ import {
   createIdentity,
   type Identity,
   type Person,
+  ROME_CLOUD_EMAIL_PLATFORM,
 } from "../../identity/identity.js";
 import { createLogger } from "../../logger.js";
 import { type Access, createAccess, type Role } from "../access.js";
 import { normalizeVisitorEmail } from "../visitor-email.js";
 
 export type { Account, Person };
+export { ROME_CLOUD_EMAIL_PLATFORM };
 
 const log = createLogger("access-members");
 
@@ -35,20 +37,13 @@ export interface MemberDetails {
   accounts: Account[];
 }
 
-/** The platform of a Rome Cloud account. */
-export const ROME_CLOUD_PLATFORM = "rome-cloud";
-
-/** The accounts a guardian's seat names: its Rome Cloud account and its
- *  email, each when the seat has one. A local password seat names none. */
-export function seatAccounts(seat: {
-  accountId?: string | null;
-  email?: string | null;
-}): Account[] {
-  const accounts: Account[] = [];
-  if (seat.accountId) accounts.push({ platform: ROME_CLOUD_PLATFORM, accountId: seat.accountId });
+/** The accounts a guardian's seat names: its email as a Rome Cloud sign-in's,
+ *  when it has one. A Rome Cloud sign-in is known by the email Rome Cloud
+ *  reports, so the seat's Rome Cloud id is no account. A local password seat
+ *  names none. */
+export function seatAccounts(seat: { email?: string | null }): Account[] {
   const email = normalizeVisitorEmail(seat.email);
-  if (email) accounts.push({ platform: "email", accountId: email });
-  return accounts;
+  return email ? [{ platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: email }] : [];
 }
 
 /** The role of the person `account` belongs to, or null when it belongs to
@@ -132,7 +127,7 @@ export async function inviteMember(
   { identity, access }: MemberContext,
   email: string,
 ): Promise<Person> {
-  const account = emailAccount(email);
+  const account = signInAccount(email);
   const person =
     (await identity.personOf(account)) ?? (await identity.createPerson({ accounts: [account] }));
   await access.grant(person.id, "member");
@@ -149,7 +144,7 @@ export async function removeMember(
   { identity, access }: MemberContext,
   email: string,
 ): Promise<void> {
-  const person = await identity.personOf(emailAccount(email));
+  const person = await identity.personOf(signInAccount(email));
   if (!person || (await access.roleOf(person.id)) === null) return;
   await access.revoke(person.id);
   await identity.deletePerson(person.id);
@@ -165,11 +160,11 @@ export async function invitedEmailsSaved(
   emails: readonly string[],
 ): Promise<void> {
   const { identity, access } = ctx;
-  const listed = new Set(emails.map((email) => emailAccount(email).accountId));
+  const listed = new Set(emails.map((email) => signInAccount(email).accountId));
   for (const { personId, role } of await access.members()) {
     if (role !== "member") continue;
     const held = (await identity.accountsOf(personId)).some(
-      (account) => account.platform === "email" && listed.has(account.accountId),
+      (account) => account.platform === ROME_CLOUD_EMAIL_PLATFORM && listed.has(account.accountId),
     );
     if (held) continue;
     await access.revoke(personId);
@@ -179,20 +174,18 @@ export async function invitedEmailsSaved(
 }
 
 /**
- * Records a sign-in by the member behind `email`: gives them `account` and,
- * when known, their avatar. Does nothing when no member holds the email, so a
- * visitor who is not a member gets no person, and nothing when the email is
- * the guardian's, since only the guardian's seat gives the guardian a Rome
- * Cloud account. Rejects with Identity's `AccountTakenError` when another person
- * holds the account.
+ * Records a Rome Cloud sign-in with `email`: gives the person behind the
+ * email, the guardian or a member, the avatar Rome Cloud reports, when it
+ * reports one. Adds no account, since the email is the account. Does nothing
+ * when the person behind the email has no role, so a visitor who is not a
+ * member gets no person.
  */
 export async function memberSignedIn(
   { identity, access }: MemberContext,
-  signIn: { email: string; account: Account; avatarUrl?: string | null },
+  signIn: { email: string; avatarUrl?: string | null },
 ): Promise<void> {
-  const person = await identity.personOf(emailAccount(signIn.email));
-  if (!person || (await access.roleOf(person.id)) !== "member") return;
-  await identity.addAccount(person.id, signIn.account);
+  const person = await identity.personOf(signInAccount(signIn.email));
+  if (!person || (await access.roleOf(person.id)) === null) return;
   if (signIn.avatarUrl) await identity.updatePerson(person.id, { avatarUrl: signIn.avatarUrl });
 }
 
@@ -220,12 +213,14 @@ async function giveGuardian(identity: Identity, guardianId: string, account: Acc
 
 function accountKey(account: Account): string {
   const id =
-    account.platform === "email" ? account.accountId.trim().toLowerCase() : account.accountId;
+    account.platform === "email" || account.platform === ROME_CLOUD_EMAIL_PLATFORM
+      ? account.accountId.trim().toLowerCase()
+      : account.accountId;
   return `${account.platform}:${id}`;
 }
 
-function emailAccount(email: string): Account {
+function signInAccount(email: string): Account {
   const normalized = normalizeVisitorEmail(email);
   if (!normalized) throw new Error("Not an email address");
-  return { platform: "email", accountId: normalized };
+  return { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: normalized };
 }
