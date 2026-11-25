@@ -3629,7 +3629,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // A reply chain around a message, or before or after one of its messages
   // (docs/domains/chats.md#chat-thread). Under /chat/sessions/:id, so
-  // privateChatGate applies.
+  // chatGate applies.
   app.get("/chat/sessions/:id/messages/:messageId/thread", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
