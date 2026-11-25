@@ -236,3 +236,30 @@ describe("a save in Settings", () => {
     expect(voice().textContent).toBe("Grace");
   });
 });
+
+describe("a save in Settings, read meanwhile", () => {
+  it("is not undone by a read that began while it was on its way", async () => {
+    let answerSave: () => void = () => {};
+    const reads: Array<() => void> = [];
+    const { client } = serve(true, {
+      save: () => new Promise<void>((resolve) => (answerSave = resolve)),
+      read: () => new Promise<void>((resolve) => reads.push(resolve)),
+    });
+    const user = userEvent.setup();
+    const voice = () => screen.getByRole("combobox", { name: "Conversation voice" });
+    await waitFor(() => expect(voice().textContent).toBe("Iris"));
+    await user.click(voice());
+    await user.click(screen.getByRole("option", { name: /Grace/ }));
+    // While the save is on its way, the window regains focus and a read begins: it asks before Grace is saved.
+    void client.refetchQueries({ queryKey: ["voice-conversation", "settings"] });
+    await waitFor(() => expect(reads).toHaveLength(1));
+    answerSave();
+    await waitFor(() => expect(voice().hasAttribute("disabled")).toBe(false));
+    // The old read answers Iris, and every read after it is answered too.
+    for (let i = 0; i < 5; i++) {
+      for (const answer of reads.splice(0)) answer();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(voice().textContent).toBe("Grace");
+  });
+});

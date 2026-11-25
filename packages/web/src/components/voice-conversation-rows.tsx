@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { useVoiceConversationInfo } from "@/hooks/use-voice-conversation-info";
 import { fetchJson } from "@/lib/fetch-json";
+import { patchQueries } from "@/lib/query-client";
 import { createPcmPlayer, type PcmPlayer } from "@/lib/voice-conversation/player";
 
 const SETTINGS_URL = "/api/voice-conversation/settings";
@@ -58,7 +59,10 @@ export function VoiceConversationRows() {
       ),
     // A read still on its way began before the save, so it would bring the old choice back.
     onMutate: () => client.cancelQueries({ queryKey: settingsKey }),
-    onSuccess: (settings) => client.setQueryData(settingsKey, settings),
+    // So does one that began while the save was on its way: it is cancelled
+    // before the saved choice goes in, then read again.
+    onSuccess: (settings) =>
+      patchQueries<VoiceConversationSettings>(client, settingsKey, () => settings),
   });
   const sample = useSample(i18n.language.startsWith("zh") ? "zh" : "en");
   if (!info.data?.available) return null;
