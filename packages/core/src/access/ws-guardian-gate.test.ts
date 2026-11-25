@@ -40,7 +40,7 @@ function captureSocket() {
 
 // Whether the gate, with no dashboard allow-list, admits the caller.
 const admitsGuardian = async (...args: [IncomingMessage, Duplex, typeof testDb.db]) =>
-  (await gateUpgrade(...args)) !== null;
+  (await gateUpgrade(...args, new DashboardAccessState())) !== null;
 
 describe("gateUpgrade without a dashboard allow-list", () => {
   it("rejects a proxied anonymous request before upgrading", async () => {
@@ -153,9 +153,14 @@ describe("gateUpgrade without a dashboard allow-list", () => {
     expect(allowed.response()).toBe("");
 
     const guardianOnly = captureSocket();
-    expect(await gateUpgrade(visitor("visitor@example.com"), guardianOnly.socket, testDb.db)).toBe(
-      null,
-    );
+    expect(
+      await gateUpgrade(
+        visitor("visitor@example.com"),
+        guardianOnly.socket,
+        testDb.db,
+        new DashboardAccessState(),
+      ),
+    ).toBe(null);
     expect(guardianOnly.response()).toContain("HTTP/1.1 401 Unauthorized");
 
     const stranger = captureSocket();

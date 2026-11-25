@@ -38,12 +38,12 @@ import {
 import { GUARDIAN_ONLY, type Permission } from "../../access/permissions.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
-import { resolveVisitorSession } from "../../access/visitor-session.js";
+import { resolveVisitorSession, visitorActor } from "../../access/visitor-session.js";
+import { mayEnter } from "../../access/entry.js";
 import {
   resolveSessionActorFromMaterial,
   sessionActorMaterial,
 } from "../../access/session-actor.js";
-import { isOnTeam } from "../../access/team.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
 import { getEmbeddedAppHref, getFullAppHref } from "../../apps/app-routes.js";
@@ -336,13 +336,11 @@ function assertAppIdIsNotSystem(c: Context, appId: string, verbMessage: string) 
 export function appsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const requireHostAccess = createMiddleware(async (c, next) => {
-    if (await resolveGuardianSession(c, deps.db)) return next();
-    const viewer = resolveVisitorSession(c);
-    if (!viewer) return c.json({ error: "Not authenticated" }, 401);
-    if (!deps.dashboardAccessState.isCloudEmailAllowed(viewer.email)) {
-      return c.json({ error: "Forbidden" }, 403);
-    }
-    return next();
+    const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
+    if (await mayEnter(actor, deps.dashboardAccessState)) return next();
+    return actor.kind === "visitor"
+      ? c.json({ error: "Forbidden" }, 403)
+      : c.json({ error: "Not authenticated" }, 401);
   });
 
   // Registered before the `:appId` GET so a human reader can see the static
@@ -367,7 +365,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // app visitors or anonymous callers, so the gate runs before the stream opens.
   app.get("/apps/events", async (c) => {
     const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
-    if (!isOnTeam(actor, deps.dashboardAccessState)) {
+    if (!(await mayEnter(actor, deps.dashboardAccessState))) {
       return c.json({ error: "Not authenticated" }, 401);
     }
     return streamSSE(c, async (sse) => {
@@ -513,7 +511,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const viewer = resolveVisitorSession(c);
     const guardianAccessAllowed = guardianSession !== null;
     const dashboardAccessAllowed =
-      viewer !== null && deps.dashboardAccessState.isCloudEmailAllowed(viewer.email);
+      (await mayEnter(visitorActor(viewer), deps.dashboardAccessState)) !== null;
     const callerAccessAllowed =
       accessMode !== "cloud-email" ||
       guardianAccessAllowed ||

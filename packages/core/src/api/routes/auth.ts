@@ -13,9 +13,15 @@ import {
   verifySession,
 } from "../../access/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
+import { mayEnter } from "../../access/entry.js";
+import type { SessionActor } from "../../access/session-actor.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
-import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
+import {
+  resolveVisitorSession,
+  type RomeAppViewer,
+  visitorActor,
+} from "../../access/visitor-session.js";
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
 import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
@@ -242,16 +248,7 @@ function appVisitorVerdict(appId: string, viewer: RomeAppViewer | null, deps: Ap
   return decide(deps.permissions.get(appId), principal);
 }
 
-function dashboardAccessResult(
-  viewer: RomeAppViewer | null,
-  deps: ApiDeps,
-): "allowed" | "unauthenticated" | "forbidden" | "not_configured" {
-  if (!deps.dashboardAccessState.hasCloudEmailAccess()) return "not_configured";
-  if (!viewer) return "unauthenticated";
-  return deps.dashboardAccessState.isCloudEmailAllowed(viewer.email) ? "allowed" : "forbidden";
-}
-
-function applyViewerHeaders(c: Context, viewer: RomeAppViewer): void {
+function applyViewerHeaders(c: Context, viewer: Pick<RomeAppViewer, "accountId" | "email">): void {
   c.header("X-Rome-Visitor-Account-Id", viewer.accountId);
   c.header("X-Rome-Visitor-Email", viewer.email);
 }
@@ -369,7 +366,7 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     const visitor = resolveVisitorSession(c);
-    if (visitor && deps.dashboardAccessState.isCloudEmailAllowed(visitor.email)) {
+    if (visitor && (await mayEnter(visitorActor(visitor), deps.dashboardAccessState))) {
       const identity: DashboardIdentity = {
         kind: "visitor",
         accountId: visitor.accountId,
@@ -417,27 +414,26 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
       return visitorSession;
     };
-    const allowGuardianSession = () => {
-      const session = getGuardianSession();
-      if (!session) return false;
-      applyGuardianHeaders(c, session);
+    // Whom the request's cookies name. The guardian wins over a visitor, as in
+    // every other reading of a request's session.
+    const cookieActor = (): SessionActor => {
+      const guardian = getGuardianSession();
+      return guardian
+        ? { kind: "guardian", userId: guardian.userId, via: "cookie" }
+        : visitorActor(getVisitorSession());
+    };
+    const allowFullDashboardSession = async () => {
+      const actor = await mayEnter(cookieActor(), deps.dashboardAccessState);
+      if (!actor) return false;
+      if (actor.kind === "guardian") applyGuardianHeaders(c, actor);
+      else applyViewerHeaders(c, actor);
       return true;
     };
-    const allowDashboardCloudEmailSession = () => {
-      const viewer = getVisitorSession();
-      if (dashboardAccessResult(viewer, deps) !== "allowed" || !viewer) {
-        return false;
-      }
-      applyViewerHeaders(c, viewer);
-      return true;
-    };
-    const allowFullDashboardSession = () =>
-      allowGuardianSession() || allowDashboardCloudEmailSession();
 
     if (forwardedUri) {
       const assetAppId = decodeAppAssetAppId(forwardedUri);
       if (assetAppId && !isLinkPublicApp(assetAppId, deps) && listsEmails(assetAppId, deps)) {
-        if (allowFullDashboardSession()) return c.body(null, 204);
+        if (await allowFullDashboardSession()) return c.body(null, 204);
         const viewer = getVisitorSession();
         const result = appVisitorVerdict(assetAppId, viewer, deps);
         if (result === "allowed" && viewer) {
@@ -471,7 +467,7 @@ export function authRoutes(deps: ApiDeps): Hono {
 
       const appId = dashboardAppId ?? decodePublicAppApiAppId(forwardedUri);
       if (appId && listsEmails(appId, deps)) {
-        if (allowFullDashboardSession()) return c.body(null, 204);
+        if (await allowFullDashboardSession()) return c.body(null, 204);
         const viewer = getVisitorSession();
         const result = appVisitorVerdict(appId, viewer, deps);
         if (result === "allowed" && viewer) {
@@ -488,17 +484,13 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     if (forwardedUri && deps.dashboardAccessState.hasCloudEmailAccess()) {
-      if (allowFullDashboardSession()) return c.body(null, 204);
-      const result = dashboardAccessResult(getVisitorSession(), deps);
-      if (result === "forbidden") {
-        return c.json({ error: "Forbidden" }, 403);
-      }
-      if (result === "unauthenticated") {
-        return c.json({ error: "Visitor authentication required" }, 401);
-      }
+      if (await allowFullDashboardSession()) return c.body(null, 204);
+      return getVisitorSession()
+        ? c.json({ error: "Forbidden" }, 403)
+        : c.json({ error: "Visitor authentication required" }, 401);
     }
 
-    if (allowFullDashboardSession()) return c.body(null, 204);
+    if (await allowFullDashboardSession()) return c.body(null, 204);
     return c.json({ error: "Unauthorized" }, 401);
   });
 

@@ -4,7 +4,7 @@
 
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { VisitorProfilesRepository } from "../access/visitor-profiles.js";
-import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { type DashboardAllowList, isOnTeam } from "../access/team.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const VISITOR_PREFIX = "visitor:";
@@ -36,7 +36,7 @@ export const ALL_OWNERS_SERVED: ConciergeOwners = {
 export function createConciergeOwners(deps: {
   settingsRepo: Pick<SettingsRepository, "get">;
   visitorProfiles: Pick<VisitorProfilesRepository, "getMany">;
-  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">;
+  dashboardAccess: DashboardAllowList;
 }): ConciergeOwners {
   const emailOf = async (owner: ConciergeOwner): Promise<string | undefined> => {
     if (!owner.startsWith(VISITOR_PREFIX)) return undefined;
@@ -54,8 +54,10 @@ export function createConciergeOwners(deps: {
     },
     async isServed(owner) {
       if (owner === GUARDIAN_OWNER) return true;
+      const accountId = recipientOf(owner);
       const email = await emailOf(owner);
-      return email !== undefined && deps.dashboardAccess.isCloudEmailAllowed(email);
+      if (accountId === undefined || email === undefined) return false;
+      return isOnTeam({ kind: "visitor", accountId, email }, deps.dashboardAccess);
     },
   };
 }
