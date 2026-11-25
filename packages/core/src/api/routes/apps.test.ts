@@ -23,11 +23,12 @@ import {
   createSession,
   createVisitorSession,
 } from "../../access/auth.js";
-import { runWithSessionActor, sessionActorMiddleware } from "../../access/session-actor.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
 import { settings } from "../../db/schema.js";
 import * as appPublishing from "../../apps/publish.js";
 import { appApiDashboardRoutes } from "./app-api.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
+import { entryStep } from "../../test/entry-step.js";
 
 function buildResolvedApp(
   appId: string,
@@ -180,7 +181,7 @@ describe("host app route authorization", () => {
       const setEnabled = rs.spyOn(deps.appManager, "setEnabled");
       const lookup = rs.spyOn(deps.appCatalog, "get");
       const app = new Hono()
-        .use("*", sessionActorMiddleware(deps.db))
+        .use("*", sessionActorMiddleware(deps.db), entryStep(["someone@example.com"]))
         .route("/api", appsRoutes(deps))
         .route("/api", appApiDashboardRoutes(deps));
       for (const [headers, status] of [
@@ -222,24 +223,6 @@ describe("host app route authorization", () => {
       expect(lookup).not.toHaveBeenCalled();
     } finally {
       publish.mockRestore();
-      testDb.close();
-    }
-  });
-
-  it("takes the person the request's session already names", async () => {
-    const testDb = createTestDb();
-    try {
-      const deps = {
-        ...(await buildTestDeps(testDb.db)),
-        appCatalog: catalogWith(buildResolvedApp("shared-app")),
-      };
-      const app = new Hono().route("/api", appsRoutes(deps));
-      const details = () => app.request("/api/apps/shared-app");
-      const guardian = { kind: "guardian", userId: "guardian-1", via: "cookie" } as const;
-      expect((await runWithSessionActor(guardian, details)).status).toBe(200);
-      expect((await runWithSessionActor({ kind: "anonymous" }, details)).status).toBe(401);
-      expect((await details()).status).toBe(401);
-    } finally {
       testDb.close();
     }
   });
@@ -851,23 +834,6 @@ describe("GET /apps/events", () => {
       expect(JSON.parse(frame.data)).toEqual({ appId: "weather", change: "changed" });
 
       await sse.cancel();
-    } finally {
-      testDb.close();
-    }
-  });
-
-  it("rejects a non-guardian request with 401 and never subscribes", async () => {
-    const testDb = createTestDb();
-    try {
-      const { catalog, subscriberCount } = eventCatalog();
-      const deps = { ...(await buildTestDeps(testDb.db)), appCatalog: catalog };
-      const app = new Hono().route("/", appsRoutes(deps));
-
-      const res = await app.request("/apps/events");
-
-      expect(res.status).toBe(401);
-      expect(await res.json()).toEqual({ error: "Not authenticated" });
-      expect(subscriberCount()).toBe(0);
     } finally {
       testDb.close();
     }

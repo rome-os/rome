@@ -18,6 +18,7 @@ import {
   roleOfAccount,
 } from "../../access/application/members.js";
 import { identities } from "../../db/schema.js";
+import { entryStep } from "../../test/entry-step.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());
@@ -493,7 +494,7 @@ describe("/api/auth/visitor/native", () => {
     expect(browser.headers.get("location")).toBe("/settings/advanced");
   });
 
-  it("gives approvals a native visitor session that they refuse", async () => {
+  it("gives a native visitor session that the dashboard refuses", async () => {
     const cloud = recordingAccountSession("ada@example.com");
     const app = await buildRoute(allowList("ada@example.com"), { fetchImpl: cloud.fetchImpl });
     const { visitor_authorization_request: request } = await nativeStart(app);
@@ -502,7 +503,7 @@ describe("/api/auth/visitor/native", () => {
     ).json()) as { session_token: string };
 
     const api = new Hono();
-    api.use("*", sessionActorMiddleware(testDb.db));
+    api.use("*", sessionActorMiddleware(testDb.db), entryStep(["someone@example.com"]));
     api.route("/", approvalsRoutes(await buildTestDeps(testDb.db)));
     const cookie = `${VISITOR_COOKIE_NAME}=${token}`;
 
