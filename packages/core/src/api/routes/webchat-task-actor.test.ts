@@ -174,6 +174,7 @@ describe("webchat task actor admission without a database or provider", () => {
 
   for (const [audience, actor, owner] of [
     ["private", guardian, "guardian"],
+    ["shared", guardian, "guardian"],
     ["shared", visitor, "visitor:v"],
   ] as const) {
     it(`keeps the ${audience} ${actor.kind} source audience as the task's parent boundary`, async () => {
@@ -185,12 +186,6 @@ describe("webchat task actor admission without a database or provider", () => {
       );
     });
   }
-
-  it("refuses a guardian handoff from a shared source audience", async () => {
-    const s = harness("guardian", "shared");
-    await expect(s.send()).rejects.toThrow("Task input attribution is unavailable");
-    expect(s.submit).not.toHaveBeenCalled();
-  });
 
   it("keeps the task's asking device while admitting its verified actor", async () => {
     const s = harness();
