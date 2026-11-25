@@ -1,5 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { devicesStatusSchema } from "@rome/api-types/devices";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
 import { Measure } from "@rome-os/ui/page";
@@ -11,6 +10,7 @@ import { SettingsGroup } from "@/components/settings-group";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDeviceManage } from "@/hooks/use-device-manage";
+import { useDevicesQuery } from "@/hooks/use-devices-query";
 import { useThisDevice } from "@/hooks/use-this-device";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
@@ -25,20 +25,6 @@ export function deviceHref(deviceId: string | null, commandId?: number): string 
   if (deviceId === null) return "/settings/devices";
   const path = `/settings/devices/${encodeURIComponent(deviceId)}`;
   return commandId === undefined ? path : `${path}?command=${commandId}`;
-}
-
-/** The linked devices and the service's connection, read every 15 seconds. */
-export function useDevicesQuery() {
-  const { t } = useTranslation("settings");
-  return useQuery({
-    queryKey: ["node-devices"],
-    refetchInterval: 15_000,
-    retry: false,
-    queryFn: async ({ signal }) =>
-      devicesStatusSchema.parse(
-        await fetchJson<unknown>("/api/devices", { signal, fallback: t("devices.loadFailed") }),
-      ),
-  });
 }
 
 export function DevicesSection() {

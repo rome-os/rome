@@ -565,6 +565,12 @@
       "ready": "Rome 额度可用"
     }
   },
+  "addDeviceCard": {
+    "waiting": "等待新设备",
+    "added": "已添加 {{name}}",
+    "addedSummary": "已添加设备 {{name}}",
+    "dismissed": "未添加设备"
+  },
   "modelSwitch": {
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",
     "login": "{{from}} 登录失败，已切换到 {{to}}",

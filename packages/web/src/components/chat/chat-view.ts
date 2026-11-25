@@ -1,4 +1,5 @@
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
@@ -46,7 +47,13 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 // itself once a provider signs in, so an earlier copy left open would submit a
 // second `{ connected: true }` and drive the script a step past where the
 // guardian is.
-const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card", LOCATION_CARD_ID]);
+// The add-device card answers itself the same way.
+const AUTO_DISMISSED_COMPONENT_IDS = new Set([
+  "question-card",
+  "ai-tools-card",
+  ADD_DEVICE_CARD_ID,
+  LOCATION_CARD_ID,
+]);
 
 function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
