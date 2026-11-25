@@ -37,7 +37,7 @@ function fromAllowedOrigin(req: IncomingMessage, actor: TeamActor): boolean {
  * not a browser page on a non-loopback host, and a member, from the dashboard's
  * own origin. A browser on another origin is refused whatever credential it
  * carries. Resolves the person, or null once it has written the 401, 403 or
- * 500.
+ * 500. It asks once: an open connection is not asked about again.
  */
 export async function gateUpgrade(
   req: IncomingMessage,
