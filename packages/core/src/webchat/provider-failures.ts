@@ -187,13 +187,14 @@ export interface ProviderFailuresDeps {
   selectModel?: (chatId: string, agentName: string, selection: string | null) => void;
   /** An agent's canonical id ("core:main") for the name a chat uses ("main"). */
   canonicalAgent?: (agentName: string) => string;
-  /** Pushes to the guardian's phone. Absent, nothing is pushed. */
+  /** Pushes to the phone of the person `owner` names. Absent, nothing is pushed. */
   notify?: {
     send(content: {
+      owner: ConciergeOwner;
       body: string;
       level?: "active" | "passive";
       chatId?: string;
-    }): Promise<unknown>;
+    }): Promise<{ kind: string }>;
   };
   delay?: (ms: number) => Promise<void>;
   now?: () => Date;
@@ -672,7 +673,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /**
    * Adds an unattended chat to its incident's notice, in its owner's main
-   * chat, opening one with a push to the guardian for the guardian's own.
+   * chat, opening one with a push to that owner.
    */
   const groupIn = (turn: ChatTurnFailure, part: ProviderFailurePart) =>
     serial(async () => {
@@ -714,9 +715,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       ]);
       outage.noticeMessageId = message.id;
       await writeOutages([...outages, outage]);
-      if (owner !== GUARDIAN_OWNER) return;
       await deps.notify
-        ?.send({ body: outagePushText(outage), level: "active", chatId: noticeChatId })
+        ?.send({ owner, body: outagePushText(outage), level: "active", chatId: noticeChatId })
+        // A refused push resolves with its reason instead of throwing.
+        .then(({ kind }) =>
+          log.info("provider outage push", { chatId: noticeChatId, outcome: kind }),
+        )
         .catch((error: unknown) =>
           log.warn("provider outage push failed", { error: String(error) }),
         );

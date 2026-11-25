@@ -68,6 +68,7 @@ function harness(
   const settings = options.settings ?? new Map<string, unknown>();
   const runs: Array<{ threadId: string; prompt: string; actor?: unknown }> = [];
   const pushes: string[] = [];
+  const pushedTo: string[] = [];
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
@@ -195,6 +196,7 @@ function harness(
     notify: {
       send: async (content) => {
         pushes.push(content.body ?? "");
+        pushedTo.push(content.owner);
         return { kind: "sent" } as never;
       },
     },
@@ -244,6 +246,7 @@ function harness(
     settings,
     runs,
     pushes,
+    pushedTo,
     swaps,
     kept,
     followed,
@@ -1097,7 +1100,7 @@ describe("unattended chats", () => {
     expect(h.settings.get(PROVIDER_OUTAGES_SETTING_KEY)).toEqual([]);
   });
 
-  it("groups a visitor's stopped task in that visitor's main chat, with no push to the guardian", async () => {
+  it("groups a visitor's stopped task in that visitor's main chat, with a push to the visitor", async () => {
     const h = harness(
       {
         mine: { triggerKind: "concierge" },
@@ -1118,7 +1121,7 @@ describe("unattended chats", () => {
     ]);
     expect(h.notice("main")?.chatIds).toEqual(["mine"]);
     expect(h.notice("main-visitor:acct-v")?.chatIds).toEqual(["theirs"]);
-    expect(h.pushes).toHaveLength(1);
+    expect(h.pushedTo).toEqual(["guardian", "visitor:acct-v"]);
   });
 
   it("words the push by reason and counts the tasks", () => {

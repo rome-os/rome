@@ -75,6 +75,8 @@ const REASONS: Record<string, string> = {
     "A connection names a sender by the platform's account id. People decides who that is, so no file in connections/ imports people/.",
   "connections-never-imports-participation":
     "A connection never decides whom a message addresses or whether Rome answers it. Participation does, for each of Rome's accounts, so no file in connections/ imports participation/.",
+  "connections-never-imports-identity":
+    "A connection hands on what the platform said and never knows an account code exists or whom an account belongs to, so no file in connections/ imports identity/, the account code's shape and its steps included.",
   "connections-never-imports-webchat":
     "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":

@@ -105,6 +105,31 @@ describe("RoutineEngine run records", () => {
 
   afterEach(() => testDb.close());
 
+  it("fires a routine that acts for no one with no actor, and a person's with that person", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const ran: unknown[] = [];
+    const actionEngine = {
+      run: async (_action: string, _args: unknown, context: object) => {
+        ran.push("actor" in context ? context.actor : "no actor");
+        return { status: "success", result: null };
+      },
+    } as unknown as ActionEngine;
+    const runs = new RoutineRunsRepository(testDb.db);
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const visitor = { kind: "visitor", accountId: "v", email: "v@example.test" } as const;
+    for (const createdBy of [{ kind: "anonymous" } as const, visitor]) {
+      const id = await routines.create({
+        name: createdBy.kind,
+        trigger: { type: "manual" },
+        actionName: "noop",
+        args: {},
+        createdBy,
+      });
+      await engine.runNow(id);
+    }
+    expect(ran).toEqual(["no actor", visitor]);
+  });
+
   it("records what fired each run: the trigger type, or run_now for a manual run", async () => {
     const routines = new RoutinesRepository(testDb.db);
     const runs = new RoutineRunsRepository(testDb.db);
