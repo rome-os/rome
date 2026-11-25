@@ -44,13 +44,13 @@ export function sameProviderTarget(
     return null;
   let selectionId: ModelSelectionId;
   if (from === "anthropic") {
-    if (/sonnet/.test(model)) selectionId = "claude-opus-5-5";
-    else if (/opus|fable|haiku/.test(model)) selectionId = "claude-sonnet";
+    if (/sonnet/.test(model)) selectionId = "anthropic/claude-opus-5-5[1m]";
+    else if (/opus|fable|haiku/.test(model)) selectionId = "anthropic/claude-sonnet-5-5";
     else return null;
-  } else if (/luna/.test(model)) selectionId = "gpt-5-6-terra";
+  } else if (/luna/.test(model)) selectionId = "openai/gpt-5.6-terra";
   else if (/terra/.test(model)) {
     if (!accountAllowsModel(source.account, CODEX_LUNA_MODEL)) return null;
-    selectionId = "gpt-6-luna";
+    selectionId = "openai/gpt-6-luna";
   } else if (/sol|astra/.test(model)) selectionId = codexSmallSelection(source);
   else return null;
   return { provider: from, selectionId };
