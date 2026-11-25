@@ -60,7 +60,11 @@ import {
   ActionWorkerCapacityError,
   ActionWorkerExitError,
 } from "./action-errors.js";
-import { currentSessionActor, type SessionActor } from "../../access/session-actor.js";
+import {
+  currentSessionActor,
+  type SessionActor,
+  withoutSessionActor,
+} from "../../access/session-actor.js";
 import {
   ActionWorkerCoordinator,
   DelegatedActionClient,
@@ -1807,12 +1811,15 @@ export class ActionEngine {
     // that fork happened while an action replay/execution context was active,
     // every later `message` callback on the reused worker re-enters that old
     // context. Worker IPC is an independent ingress boundary, so never let a
-    // creator action's ALS state leak into a main-process service call.
+    // creator action's ALS state, or the person whose request or message it
+    // served, leak into a main-process service call.
     // IpcRpc resets the OpenTelemetry context the same way and restores the
     // calling worker's span from the request's traceCarrier.
     const rpc = new IpcRpc(createChildProcessTransport(worker.child), "main", {
       runInbound: async (callback) =>
-        await replayContext.exit(() => actionExecutionContext.exit(callback)),
+        await replayContext.exit(() =>
+          actionExecutionContext.exit(() => withoutSessionActor(callback)),
+        ),
     });
     this.workerRpcServer?.register(rpc);
     this.agentSessionBridge?.attach(rpc, worker.child);

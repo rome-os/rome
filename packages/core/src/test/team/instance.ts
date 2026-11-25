@@ -88,7 +88,7 @@ export interface Instance {
    *  handler `startApi` attaches. */
   listen(): Promise<{ port: number; server: Server; close(): Promise<void> }>;
   /** Puts the dashboard email list back to the one the instance booted with,
-   *  in the database and in the live access state. */
+   *  in the database, in the live access state and in the members. */
   restoreDashboardList(): Promise<void>;
   close(): Promise<void>;
 }
