@@ -72,9 +72,9 @@ export interface ChatPrivacyRow {
 }
 
 /**
- * Whether a list shows `owner` a chat, and whether their agents send into it, read off the chat's own row: a Concierge's chat for its owner, and
- * any other chat for everyone. Opening a chat on the dashboard asks nothing.
- * A child session inherits its parent's privacy when it is made, so no path
+ * Whether a list shows `owner` a chat, and whether their agents send into it,
+ * read off the chat's own row: a Concierge's chat for its owner, and any other
+ * chat for everyone. The dashboard opens a chat and sends into it for anyone. A child session inherits its parent's privacy when it is made, so no path
  * needs to look past the row.
  */
 export function canOpen(chat: ChatPrivacyRow | null | undefined, owner: string | null): boolean {
