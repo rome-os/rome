@@ -181,11 +181,6 @@ describe("loadConfig()", () => {
     expect(config.internalApi.webhookApiKey).toBe("whk_test_123");
   });
 
-  it("treats empty ROME_COMPUTER_USE_LOCAL_DEVICE_ID as unset", () => {
-    rs.stubEnv("ROME_COMPUTER_USE_LOCAL_DEVICE_ID", "   ");
-    expect(loadConfig().computerUseLocalDeviceId).toBeUndefined();
-  });
-
   it("rejects ROME_COMPUTER_USE_LOCAL_DEVICE_ID when effective JWT_SECRET does not match a 32+ char ROME_JWT_SECRET", () => {
     rs.stubEnv("ROME_COMPUTER_USE_LOCAL_DEVICE_ID", "ee969ec6-1944-4e85-9fd3-31ec802f8e02");
     expect(() => loadConfig()).toThrow("ROME_JWT_SECRET");

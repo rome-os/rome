@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  ChatApiError,
   getChatComputerUseTarget,
   isUnreachableStatus,
   listSessionMessagePage,
@@ -33,61 +32,18 @@ it("validates computer-use target responses, accepts >4 targets, and rejects mal
     rs
       .fn()
       .mockResolvedValueOnce(
-        Response.json({
-          ...valid[0],
-          targets: fiveTargets,
-          persistentAccess: true,
-          discoveryDegraded: true,
-        }),
+        Response.json({ ...valid[0], targets: fiveTargets, persistentAccess: true }),
       )
       .mockResolvedValueOnce(Response.json({ deviceId: "not-a-uuid", name: "Bad" })),
   );
   const parsed = await getChatComputerUseTarget("session-1", new AbortController().signal);
   expect(parsed.name).toBe("This computer");
-  expect(parsed.discoveryDegraded).toBe(true);
   expect(parsed.targets).toHaveLength(5);
   expect(parsed.targets?.[0]?.name).toBe("This computer");
   expect(parsed.targets?.[1]?.name).toBe("992a6210-71d8-4233-858b-764acbbcfe30");
   await expect(
     getChatComputerUseTarget("session-1", new AbortController().signal),
   ).rejects.toThrow();
-});
-
-it("throws ChatApiError with HTTP status when getChatComputerUseTarget fails with non-2xx responses", async () => {
-  rs.stubGlobal(
-    "fetch",
-    rs
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: "Forbidden" }), {
-          status: 403,
-          headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: "Not available" }), {
-          status: 404,
-          headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: "Device discovery unavailable" }), {
-          status: 503,
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-  );
-
-  for (const status of [403, 404, 503]) {
-    let caught: unknown;
-    try {
-      await getChatComputerUseTarget("session-1", new AbortController().signal);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(ChatApiError);
-    expect((caught as ChatApiError).status).toBe(status);
-  }
 });
 
 it("grants and revokes remembered computer access outside the turn endpoint", async () => {

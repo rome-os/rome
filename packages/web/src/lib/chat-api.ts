@@ -104,33 +104,31 @@ export type SessionScope = "mine" | "all";
 const computerUseTargetSchema = z
   .object({
     deviceId: z.string().uuid(),
-    name: z.string().trim(),
+    name: z.string().trim().max(200),
     authorized: z.literal(true).optional(),
   })
   .transform(({ name, ...target }) => ({
     ...target,
-    name: name.slice(0, 200) || target.deviceId,
+    name: name || target.deviceId,
   }));
 
 export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;
 
 export async function getChatComputerUseTarget(sessionId: string, signal: AbortSignal) {
-  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
-    credentials: "include",
-    signal,
-  });
   return computerUseTargetSchema
     .and(
       z.object({
         targets: z.array(computerUseTargetSchema).optional(),
         persistentAccess: z.literal(true).optional(),
-        discoveryDegraded: z.literal(true).optional(),
       }),
     )
-    .parse(await jsonOrThrow<unknown>(res));
+    .parse(
+      await fetchJson<unknown>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
+        signal,
+        fallback: "Computer use is unavailable.",
+      }),
+    );
 }
-
-export type ChatComputerUseEligibility = Awaited<ReturnType<typeof getChatComputerUseTarget>>;
 
 export async function setChatComputerUseAccess(
   sessionId: string,

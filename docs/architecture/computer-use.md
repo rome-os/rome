@@ -42,9 +42,9 @@ local admission. A receipt without a verified stop leaves `stopConfirmed` false.
 
 ## Compatibility with an older instance
 
-Run `rome-node connect` on the Mac (optionally with `--cloud <url>`, `--name <name>`, or
-`--device-code`) to offer its background windows to paired instances in your account.
-The CLI reuses its device sign-in. Each instance can discover the
+Run `rome-node connect <instance-id>` on the Mac to offer its
+background windows to an instance. Use the instance's authenticated Gateway
+peer ID. The CLI reuses its device sign-in. The instance can discover the
 advertised actions with `rome-node device describe` and call them with
 `rome-node device run` on its existing connection. Web, Mac and iPhone
 clients use the instance's ordinary Node action permissions.

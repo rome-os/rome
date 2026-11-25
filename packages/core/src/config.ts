@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
 import { JWT_SECRET } from "./access/auth.js";
-import { isProtectedApprovalSecret } from "./core/computer-use-approvals.js";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
 
 /**
@@ -180,8 +179,8 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.ROME_HOST_EXECUTION_SOCKET) {
     raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;
   }
-  if (env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID?.trim()) {
-    raw.computerUseLocalDeviceId = env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID.trim();
+  if (env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID !== undefined) {
+    raw.computerUseLocalDeviceId = env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID;
   }
   if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
     raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
@@ -278,9 +277,13 @@ export function loadConfig(): Config {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
   }
+  const configuredSecret = process.env.ROME_JWT_SECRET;
   if (
     result.data.computerUseLocalDeviceId !== undefined &&
-    !isProtectedApprovalSecret(process.env.ROME_JWT_SECRET, JWT_SECRET)
+    (!configuredSecret ||
+      configuredSecret.length < 32 ||
+      JWT_SECRET !== configuredSecret ||
+      JWT_SECRET === "rome-dev-secret-change-me")
   )
     throw new Error(
       "Protected device use requires an explicit ROME_JWT_SECRET of at least 32 characters.",
