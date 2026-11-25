@@ -54,7 +54,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
 
 function ports(
   sessionTools = rs.fn(async () => []),
-  hasTask?: (taskId: string) => Promise<boolean>,
+  taskOwner?: (taskId: string) => Promise<string | null>,
   deviceKinds?: () => { kind: string; label: string }[],
 ) {
   const run = rs.fn(async () => ({ status: "ok" as const, data: { routineId: "r1" } }));
@@ -65,7 +65,7 @@ function ports(
     actionEngine: engine,
     webchatRepo: { getSession } as never,
     placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
-    ...(hasTask ? { hasTask } : {}),
+    ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
     ...(deviceKinds ? { deviceKinds } : {}),
   });
@@ -191,15 +191,19 @@ describe("romeToolPorts defer for a task chat", () => {
     chatId,
   });
 
-  it("schedules a check for a task", async () => {
-    const { defer, run } = ports(undefined, async (id) => id === "task");
-    await defer.schedule(turn(), wake("task"));
+  it("schedules a check for a task of the chat's own owner", async () => {
+    const { defer, run } = ports(undefined, async (id) => (id === "mine" ? "guardian" : null));
+    await defer.schedule(turn(), wake("mine"));
     expect(run).toHaveBeenCalledWith("system:create_routine", expect.anything(), expect.anything());
   });
 
-  it("refuses a task that is not there, and schedules nothing", async () => {
-    const { defer, run } = ports(undefined, async () => false);
-    await expect(defer.schedule(turn(), wake("nope"))).rejects.toThrow("No task chat nope");
+  it("refuses a task that is not there, or is another owner's, and schedules nothing", async () => {
+    const { defer, run } = ports(undefined, async (id) =>
+      id === "theirs" ? "visitor:acct-ann" : null,
+    );
+    for (const chatId of ["nope", "theirs"]) {
+      await expect(defer.schedule(turn(), wake(chatId))).rejects.toThrow(`No task chat ${chatId}`);
+    }
     expect(run).not.toHaveBeenCalled();
   });
 });
