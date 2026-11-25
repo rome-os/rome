@@ -132,14 +132,14 @@ describe("backfillMembers", () => {
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("reads the invited emails only on its first run", async () => {
+  it("reads the invited emails again only under a higher revision than it read", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
     await backfillMembers(db);
 
     db.update(settings)
-      .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 4 } })
+      .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 3 } })
       .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
       .run();
     await backfillMembers(db);
@@ -230,6 +230,38 @@ describe("backfillMembers", () => {
         await new SettingsRepository(db).get(DASHBOARD_ACCESS_SETTING_KEY),
       ).cloudEmailAccess,
     ).toEqual(["kim@example.com", "lin@example.com"]);
+  });
+
+  it("reads the list again when an older build saved it after a rollback", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    const { revision } = await store.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+    });
+
+    // Rolled back, the older build saves the list: it drops Ada, adds Kim and
+    // raises the revision, and knows nothing of the members.
+    db.update(settings)
+      .set({
+        value: { cloudEmailAccess: ["kim@example.com", "lin@example.com"], revision: revision + 1 },
+      })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+      .run();
+    await backfillMembers(db);
+
+    expect(await store.read()).toEqual({
+      emails: ["kim@example.com", "lin@example.com"],
+      revision: revision + 1,
+    });
+    expect(store.membersAreSource()).toBe(true);
+
+    // A later startup with no older-build save since leaves a save alone.
+    await store.save({ cloudEmailAccess: ["lin@example.com"] });
+    await backfillMembers(db);
+    expect((await store.read()).emails).toEqual(["lin@example.com"]);
   });
 
   it("keeps a member removed by a save made before its first run", async () => {

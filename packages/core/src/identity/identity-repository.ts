@@ -29,7 +29,7 @@ const PERSON_COLUMNS = {
 /** Reads and writes `identities` and `identity_accounts`. Each write that
  *  checks who holds an account runs in one transaction with its check. */
 export class IdentityRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(private readonly db: Exec) {}
 
   person(personId: string): Person | null {
     return (

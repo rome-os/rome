@@ -10,6 +10,7 @@ import {
   memberContext,
 } from "../../access/application/members.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createCloudGuardian } from "../../access/guardian-auth-state.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -177,6 +178,28 @@ describe("Dashboard-access API", () => {
       emails: ["ada@example.com"],
       revision: 1,
     });
+  });
+
+  it("keeps another request's write made while a failing save runs", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    testDb.db.run(
+      sql`CREATE TRIGGER members_down BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'members down'); END`,
+    );
+    const settingsRepo = new SettingsRepository(testDb.db);
+    // Each write starts a few turns later than the one before, so some land
+    // while the save is running whichever turn its transaction opens on.
+    const writes = Array.from({ length: 20 }, async (_, i) => {
+      for (let turn = 0; turn < i; turn++) await Promise.resolve();
+      await settingsRepo.set(`unrelated.${i}`, i);
+    });
+
+    const saving = deps.dashboardAccessStore.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+    });
+
+    await expect(saving).rejects.toThrow();
+    await Promise.all(writes);
+    for (let i = 0; i < 20; i++) expect(await settingsRepo.get(`unrelated.${i}`)).toBe(i);
   });
 
   it("refuses a list past the limits and keeps the saved one", async () => {

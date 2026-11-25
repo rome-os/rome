@@ -7,11 +7,22 @@ export interface DashboardAccessConfig {
 export const DASHBOARD_ACCESS_SETTING_KEY = "dashboardAccess";
 
 /**
- * Set in `settings` once the members are the source of the invited emails:
- * by the members backfill's first run, or by a save, whichever comes first.
- * From then on the list in the `dashboardAccess` setting is never read.
+ * Set in `settings` once the members are the source of the invited emails,
+ * by the members backfill's first run or by a save, whichever comes first.
+ * Its value is the revision of the `dashboardAccess` setting that this build
+ * last wrote, or last read the list from: read it with
+ * {@link readInvitedEmailsDoneRevision}. A record with a higher revision was
+ * saved by an older build after a rollback, and the next startup reads its
+ * list again.
  */
 export const INVITED_EMAILS_DONE_KEY = "backfill.membersFromInvitedEmails";
+
+/** The revision stored under {@link INVITED_EMAILS_DONE_KEY}. 0 for any value
+ *  that is not one, so a marker an earlier build of this one set to `true`
+ *  has its list read once more. */
+export function readInvitedEmailsDoneRevision(raw: unknown): number {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw > 0 ? raw : 0;
+}
 
 function normalizeEmailList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];

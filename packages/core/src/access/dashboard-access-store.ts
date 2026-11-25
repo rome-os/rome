@@ -1,13 +1,14 @@
 import { eq } from "drizzle-orm";
-import type { DrizzleDb } from "../db/index.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
-  inOneTransaction,
-  invitedEmailsSaved,
+  invitedEmailsSavedWithinTx,
   type MemberContext,
   memberContext,
+  memberContextWithinTx,
   memberEmails,
+  memberEmailsWithinTx,
   ROME_CLOUD_EMAIL_PLATFORM,
   roleOfAccount,
 } from "./application/members.js";
@@ -31,7 +32,8 @@ export interface VisitorAllowList {
  * last signed in as a visitor with. The members are the one source of which
  * emails are on the list. Each save also writes the members' emails into the
  * record's own copy of the list, so an older build after a rollback reads the
- * right list. This build never reads that copy. Every write runs one at a
+ * right list. This build reads that copy again only at startup, after an
+ * older build saved it (backfill-members.ts). Every write runs one at a
  * time, so each save gets its own revision and a raise or a sign-in never
  * loses a save.
  *
@@ -43,7 +45,7 @@ export class DashboardAccessStore {
   private chain: Promise<unknown> = Promise.resolve();
   private readonly members: MemberContext;
 
-  /** `settingsRepo` must write to `db`, so a save's settings writes share its transaction. */
+  /** `settingsRepo` must read and write `db`'s settings. */
   constructor(
     private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">,
     private readonly db: DrizzleDb,
@@ -62,7 +64,8 @@ export class DashboardAccessStore {
   /**
    * Whether the members are the source of the invited emails: the members
    * backfill imported the older list, or a save ran. Until then the members
-   * may lack invited emails the settings record still holds.
+   * may lack invited emails the settings record still holds. Stays true after
+   * a rollback and an upgrade again.
    */
   membersAreSource(): boolean {
     const marker = this.db
@@ -76,41 +79,46 @@ export class DashboardAccessStore {
   /**
    * Makes the members the persons behind the config's emails, stores the next
    * revision and the members' emails as the record's copy of the list, and
-   * records that the members are the source of the list, all in one
+   * stores that revision as the one this build last wrote, all in one
    * transaction, and answers the members' emails under that revision.
-   * Rejects, changing nothing, when any of it cannot be written.
+   * Rejects, changing nothing, when any of it cannot be written. The
+   * transaction holds this save's writes only.
    */
   save(config: DashboardAccessConfig): Promise<VisitorAllowList> {
-    return this.serialize(() =>
-      inOneTransaction(this.db, async () => {
-        const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-        const revision = readDashboardAccessRevision(stored) + 1;
-        await invitedEmailsSaved(this.members, config.cloudEmailAccess);
-        const emails = await memberEmails(this.members);
-        // An email taken off the list forgets its account, so adding it back
-        // counts its next sign-in as a new account.
-        const listed = new Set(emails);
-        const visitorAccounts = Object.fromEntries(
-          Object.entries(readVisitorAccounts(stored)).filter(([email]) => listed.has(email)),
-        );
-        // The list in the record is now stale, so the members backfill must
-        // never read it.
-        this.db
-          .insert(settings)
-          .values({ key: INVITED_EMAILS_DONE_KEY, value: true, updatedAt: new Date() })
-          .onConflictDoNothing()
-          .run();
-        await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-          ...asRecord(stored),
-          // Kept equal to the members so an older build reads the right list.
-          // Nothing in this build reads it.
-          cloudEmailAccess: emails,
-          revision,
-          visitorAccounts,
-        });
-        return { emails, revision };
-      }),
+    // The body is synchronous, so no other request's write on the shared
+    // connection can land between BEGIN and COMMIT, where a rollback of this
+    // save would undo it too.
+    return this.serialize(async () => this.db.transaction((tx) => this.saveWithinTx(tx, config)));
+  }
+
+  private saveWithinTx(tx: DrizzleTx, config: DashboardAccessConfig): VisitorAllowList {
+    const stored =
+      tx
+        .select({ value: settings.value })
+        .from(settings)
+        .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+        .get()?.value ?? null;
+    const revision = readDashboardAccessRevision(stored) + 1;
+    const members = memberContextWithinTx(tx);
+    invitedEmailsSavedWithinTx(members, config.cloudEmailAccess);
+    const emails = memberEmailsWithinTx(members);
+    // An email taken off the list forgets its account, so adding it back
+    // counts its next sign-in as a new account.
+    const listed = new Set(emails);
+    const visitorAccounts = Object.fromEntries(
+      Object.entries(readVisitorAccounts(stored)).filter(([email]) => listed.has(email)),
     );
+    // The backfill reads the record's list again only when an older build
+    // saved it past this revision.
+    putSetting(tx, INVITED_EMAILS_DONE_KEY, revision);
+    putSetting(tx, DASHBOARD_ACCESS_SETTING_KEY, {
+      ...asRecord(stored),
+      // Kept equal to the members so an older build reads the right list.
+      cloudEmailAccess: emails,
+      revision,
+      visitorAccounts,
+    });
+    return { emails, revision };
   }
 
   /**
@@ -163,6 +171,14 @@ export class DashboardAccessStore {
     this.chain = result.catch(() => {});
     return result;
   }
+}
+
+function putSetting(tx: DrizzleTx, key: string, value: unknown): void {
+  const updatedAt = new Date();
+  tx.insert(settings)
+    .values({ key, value, updatedAt })
+    .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } })
+    .run();
 }
 
 // The stored record, kept whole so the list an older build reads stays in it.
