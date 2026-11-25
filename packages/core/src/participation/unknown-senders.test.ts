@@ -38,6 +38,7 @@ function teller(tell = async (_message: UnknownSenderMessage) => {}) {
   const hear = unknownSenders({
     isRomes: (account) => account.id === "T1/UROME",
     isOwnAccount: (connectionId) => connectionId.startsWith("rome-app"),
+    heardForMs: 60_000,
     tell: async (message) => {
       told.push(message);
       await tell(message);
@@ -69,6 +70,13 @@ describe("unknownSenders", () => {
     hear(recorded, event({}, {}, "rome-app-2"));
     hear(recorded, event({}, {}, "rome-app-3"));
     expect(told.map((message) => message.connectionId)).toEqual(["rome-app-2"]);
+  });
+
+  it("tells of a message once, however many are told of before it is heard again", () => {
+    const { hear, told } = teller();
+    for (let id = 1; id <= 5_000; id += 1) hear({ ...recorded, id }, event());
+    hear({ ...recorded, id: 1 }, event({}, {}, "rome-app-2"));
+    expect(told).toHaveLength(5_000);
   });
 
   it.each<[string, InboundEvent]>([
