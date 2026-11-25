@@ -16,7 +16,12 @@ import { isInstanceLinked } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
 import { isOnTeam } from "../../access/team.js";
-import { putSeatOnTeam } from "../../access/access.js";
+import {
+  guardianSeatCreated,
+  logStepFailure,
+  memberContext,
+  seatAccounts,
+} from "../../access/application/members.js";
 import type { ApiDeps } from "../deps.js";
 
 export function onboardRoutes(deps: ApiDeps): Hono {
@@ -91,9 +96,11 @@ export function onboardRoutes(deps: ApiDeps): Hono {
       passwordHash,
       createdAt: new Date(),
     });
-    // A local password seat names no account, so its guardian joins the team
-    // with none.
-    await putSeatOnTeam(deps.db, { name: userId });
+    // A local password seat names no account, so its guardian has none.
+    await guardianSeatCreated(memberContext(deps.db), {
+      accounts: seatAccounts({}),
+      name: userId,
+    }).catch(logStepFailure("guardian not made from the new seat"));
 
     await applySetupDefaults(userId, {
       db: deps.db,

@@ -10,7 +10,12 @@ import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { Permissions } from "../../access/permissions.js";
 import { appPermissions } from "../../apps/app-permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
-import { createAccess } from "../../access/access.js";
+import {
+  inviteMember,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+} from "../../access/application/members.js";
 import { identities } from "../../db/schema.js";
 
 const testDb = createTestDb();
@@ -136,9 +141,9 @@ describe("/api/auth/visitor dashboard access", () => {
     expect(profiles.size).toBe(0);
   });
 
-  it("gives a teammate the Rome Cloud account and avatar they signed in with", async () => {
-    const access = createAccess(testDb.db);
-    const ada = await access.addTeammateByEmail("ada@example.com");
+  it("gives a member the Rome Cloud account and avatar they signed in with", async () => {
+    const ctx = memberContext(testDb.db);
+    const ada = await inviteMember(ctx, "ada@example.com");
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
     const app = await buildRoute(state, { fetchImpl: mockAccountSession("Ada@Example.com") });
@@ -146,9 +151,11 @@ describe("/api/auth/visitor dashboard access", () => {
 
     await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
 
-    expect(await access.roleOf({ platform: "rome-cloud", accountId: "acct-1" })).toBe("teammate");
-    expect((await access.members())[0]).toMatchObject({
-      identity: { id: ada.id, avatarUrl: "https://example.com/avatar.png" },
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-1" })).toBe(
+      "member",
+    );
+    expect((await listMembers(ctx))[0]).toMatchObject({
+      person: { id: ada.id, avatarUrl: "https://example.com/avatar.png" },
       accounts: [
         { platform: "email", accountId: "ada@example.com" },
         { platform: "rome-cloud", accountId: "acct-1" },
@@ -156,7 +163,7 @@ describe("/api/auth/visitor dashboard access", () => {
     });
   });
 
-  it("makes no person for a visitor who is not on the team", async () => {
+  it("makes no person for a visitor who is not a member", async () => {
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
     const app = await buildRoute(state, {

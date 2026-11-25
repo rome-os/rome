@@ -6,14 +6,14 @@ import {
   links,
   persons,
   settings,
-  teamMembers,
+  members,
   visitorProfiles,
-} from "../db/schema.js";
-import type { DrizzleDb } from "../db/index.js";
-import { createTestDb, type TestDb } from "../test/db.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
-import { backfillTeam } from "./team-backfill.js";
-import { createAccess } from "./access.js";
+} from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../dashboard-access-config.js";
+import { backfillMembers } from "./backfill-members.js";
+import { listMembers, memberContext, roleOfAccount } from "./members.js";
 
 const now = new Date("2026-11-25T00:00:00Z");
 
@@ -73,29 +73,29 @@ function snapshot(db: DrizzleDb) {
       .from(identityAccounts)
       .orderBy(identityAccounts.platform, identityAccounts.accountId)
       .all(),
-    team: db.select().from(teamMembers).orderBy(teamMembers.identityId).all(),
+    members: db.select().from(members).orderBy(members.identityId).all(),
   };
 }
 
-describe("backfillTeam", () => {
+describe("backfillMembers", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
     testDb?.close();
     testDb = undefined;
   });
 
-  it("puts the seat, People's guardian links and the allow-list on the team, and a second run changes nothing", async () => {
+  it("gives the seat's guardian People's guardian links and makes the allow-list members, and a second run changes nothing", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
 
-    await backfillTeam(db);
+    await backfillMembers(db);
 
-    const members = await createAccess(db).members();
+    const listed = await listMembers(memberContext(db));
     expect(
-      members.map((m) => ({
-        name: m.identity.name,
-        avatarUrl: m.identity.avatarUrl,
+      listed.map((m) => ({
+        name: m.person.name,
+        avatarUrl: m.person.avatarUrl,
         role: m.role,
         accounts: m.accounts.map((a) => `${a.platform}:${a.accountId}`),
       })),
@@ -114,39 +114,41 @@ describe("backfillTeam", () => {
       {
         name: null,
         avatarUrl: null,
-        role: "teammate",
+        role: "member",
         accounts: ["email:ada@example.com", "rome-cloud:acct-ada"],
       },
-      { name: null, avatarUrl: null, role: "teammate", accounts: ["email:lin@example.com"] },
+      { name: null, avatarUrl: null, role: "member", accounts: ["email:lin@example.com"] },
     ]);
 
     const first = snapshot(db);
-    await backfillTeam(db);
+    await backfillMembers(db);
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("takes a teammate off the list off the team on the next run", async () => {
+  it("removes a member off the list on the next run", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
-    await backfillTeam(db);
+    await backfillMembers(db);
 
     db.update(settings)
       .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 4 } })
       .run();
-    await backfillTeam(db);
+    await backfillMembers(db);
 
-    const access = createAccess(db);
-    expect(await access.roleOf({ platform: "email", accountId: "ada@example.com" })).toBeNull();
-    expect(await access.roleOf({ platform: "rome-cloud", accountId: "acct-ada" })).toBeNull();
-    expect(await access.roleOf({ platform: "email", accountId: "lin@example.com" })).toBe(
-      "teammate",
+    const ctx = memberContext(db);
+    expect(
+      await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" }),
+    ).toBeNull();
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-ada" })).toBeNull();
+    expect(await roleOfAccount(ctx, { platform: "email", accountId: "lin@example.com" })).toBe(
+      "member",
     );
   });
 
   it("writes nothing on an instance with no seat and no list", async () => {
     testDb = createTestDb();
-    await backfillTeam(testDb.db);
-    expect(snapshot(testDb.db)).toEqual({ identities: [], accounts: [], team: [] });
+    await backfillMembers(testDb.db);
+    expect(snapshot(testDb.db)).toEqual({ identities: [], accounts: [], members: [] });
   });
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "81a915cd-b4e6-4fe5-be99-87f9ac32460e",
+  "id": "03e2565c-ed3e-4d57-85eb-bf0da754d9a0",
   "prevId": "c80e5c1d-7bbc-4e18-b2d1-98f42a4ef5b1",
   "tables": {
     "account_profiles": {
@@ -2626,6 +2626,60 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "members": {
+      "name": "members",
+      "columns": {
+        "identity_id": {
+          "name": "identity_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_members_one_guardian": {
+          "name": "idx_members_one_guardian",
+          "columns": [
+            "role"
+          ],
+          "isUnique": true,
+          "where": "\"members\".\"role\" = 'guardian'"
+        }
+      },
+      "foreignKeys": {
+        "members_identity_id_identities_id_fk": {
+          "name": "members_identity_id_identities_id_fk",
+          "tableFrom": "members",
+          "tableTo": "identities",
+          "columnsFrom": [
+            "identity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "oauth_pending_attempts": {
       "name": "oauth_pending_attempts",
       "columns": {
@@ -4871,60 +4925,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "team_members": {
-      "name": "team_members",
-      "columns": {
-        "identity_id": {
-          "name": "identity_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_team_members_one_guardian": {
-          "name": "idx_team_members_one_guardian",
-          "columns": [
-            "role"
-          ],
-          "isUnique": true,
-          "where": "\"team_members\".\"role\" = 'guardian'"
-        }
-      },
-      "foreignKeys": {
-        "team_members_identity_id_identities_id_fk": {
-          "name": "team_members_identity_id_identities_id_fk",
-          "tableFrom": "team_members",
-          "tableTo": "identities",
-          "columnsFrom": [
-            "identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

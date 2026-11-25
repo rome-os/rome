@@ -160,7 +160,7 @@ export const dismissedAccounts = sqliteTable(
 /**
  * The people Rome knows, one row each (docs/domains/identity.md#person).
  * Separate from People's `persons`: nothing here grades a relationship or
- * knows who is on the team.
+ * knows who is a member.
  */
 export const identities = sqliteTable("identities", {
   id: text("id").primaryKey(),
@@ -190,23 +190,21 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
- * The team: each person on it and their role (docs/domains/access.md#team).
- * Deleting the person takes them off the team. The partial unique index holds
- * the team to one guardian.
+ * The members: each person with a role in this Rome (docs/domains/access.md#member).
+ * Deleting the person deletes their row. The partial unique index holds the
+ * Rome to one guardian.
  */
-export const teamMembers = sqliteTable(
-  "team_members",
+export const members = sqliteTable(
+  "members",
   {
     identityId: text("identity_id")
       .primaryKey()
       .references(() => identities.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["guardian", "teammate"] }).notNull(),
+    role: text("role", { enum: ["guardian", "member"] }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
-    uniqueIndex("idx_team_members_one_guardian")
-      .on(table.role)
-      .where(sql`${table.role} = 'guardian'`),
+    uniqueIndex("idx_members_one_guardian").on(table.role).where(sql`${table.role} = 'guardian'`),
   ],
 );
 

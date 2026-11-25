@@ -63,7 +63,7 @@ import {
 import type { ConciergeService } from "../../concierge/service.js";
 import type { CloudProfileService } from "../../instance/cloud-profile.js";
 import { guardianAuth, identities, persons, settings, visitorProfiles } from "../../db/schema.js";
-import { createAccess } from "../../access/access.js";
+import { listMembers, memberContext } from "../../access/application/members.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
@@ -628,12 +628,12 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
   });
 
-  it("puts the guardian on the team with the seat's Rome Cloud account and email", async () => {
+  it("makes the guardian with the seat's Rome Cloud account and email", async () => {
     await signInFresh({ name: "Alex Doe", email: "Alex@Example.com" });
 
-    expect(await createAccess(testDb.db).members()).toEqual([
+    expect(await listMembers(memberContext(testDb.db))).toEqual([
       {
-        identity: expect.objectContaining({ name: "Alex Doe" }),
+        person: expect.objectContaining({ name: "Alex Doe" }),
         role: "guardian",
         accounts: [
           { platform: "email", accountId: "alex@example.com" },

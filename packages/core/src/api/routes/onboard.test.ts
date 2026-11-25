@@ -13,7 +13,7 @@ import { onboardRoutes } from "./onboard.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { guardianAuth, identities, persons, settings } from "../../db/schema.js";
-import { createAccess } from "../../access/access.js";
+import { listMembers, memberContext } from "../../access/application/members.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -73,11 +73,11 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
     expect(stored.guardianName).toBe("alex");
   });
 
-  it("puts the guardian on the team with no accounts, since a local seat names none", async () => {
+  it("makes the guardian with no accounts, since a local seat names none", async () => {
     await createAccount(await buildLocalApp());
 
-    expect(await createAccess(testDb.db).members()).toEqual([
-      { identity: expect.objectContaining({ name: "alex" }), role: "guardian", accounts: [] },
+    expect(await listMembers(memberContext(testDb.db))).toEqual([
+      { person: expect.objectContaining({ name: "alex" }), role: "guardian", accounts: [] },
     ]);
   });
 });

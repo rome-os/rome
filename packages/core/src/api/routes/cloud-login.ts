@@ -15,7 +15,12 @@ import {
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../access/guardian-auth-state.js";
-import { putSeatOnTeam } from "../../access/access.js";
+import {
+  guardianSeatCreated,
+  logStepFailure,
+  memberContext,
+  seatAccounts,
+} from "../../access/application/members.js";
 import {
   backgroundNote,
   followRequest,
@@ -584,7 +589,11 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
     const survey = await readSurvey();
     const guardianName = survey?.guardianName ?? defaultGuardianName(identity);
-    await putSeatOnTeam(deps.db, { ...identity, name: guardianName });
+    await guardianSeatCreated(memberContext(deps.db), {
+      accounts: seatAccounts(identity),
+      name: guardianName,
+      avatarUrl: identity.avatarUrl ?? undefined,
+    }).catch(logStepFailure("guardian not made from the new seat"));
     await applySetupDefaults(
       guardianName,
       {

@@ -1,34 +1,41 @@
-// The team's starting data: the persons and roles the guardian's seat, People's
-// links to the guardian and the dashboard allow-list say today
-// (docs/domains/access.md#team). It runs at every startup, after migrations,
-// and a run on a team that already matches changes nothing, so it also repairs
-// a mirror write that failed beside its seat or list write.
+// The members' starting data: the persons and roles the guardian's seat,
+// People's links to the guardian and the dashboard allow-list say today
+// (docs/domains/access.md). It runs at every startup, after migrations, and a
+// run on members that already match changes nothing, so it also repairs a
+// step that failed beside its seat or list write.
 
 import { and, eq, sql } from "drizzle-orm";
-import { type DrizzleDb, inTransaction } from "../db/index.js";
-import { guardianAuth, links, persons, settings, visitorProfiles } from "../db/schema.js";
-import { AccountTakenError } from "../identity/identities.js";
-import { createLogger } from "../logger.js";
+import { type DrizzleDb, inTransaction } from "../../db/index.js";
+import { guardianAuth, links, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { AccountTakenError } from "../../identity/identity.js";
+import { createLogger } from "../../logger.js";
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
   normalizeDashboardAccessConfig,
-} from "./dashboard-access-config.js";
-import { createAccess, ROME_CLOUD_PLATFORM, seatAccounts } from "./access.js";
+} from "../dashboard-access-config.js";
+import {
+  guardianSeatCreated,
+  invitedEmailsSaved,
+  memberContext,
+  memberSignedIn,
+  ROME_CLOUD_PLATFORM,
+  seatAccounts,
+} from "./members.js";
 
-const log = createLogger("team-backfill");
+const log = createLogger("members-backfill");
 
 /**
- * Brings the team in line with the guardian's seat and the dashboard
+ * Brings the members in line with the guardian's seat and the dashboard
  * allow-list, in one transaction. The guardian gets the seat's Rome Cloud
  * account and email and every account People links to its guardian person,
- * as an agent's own account excepted. Each listed email becomes a teammate,
+ * as an agent's own account excepted. Each listed email becomes a member,
  * with each Rome Cloud account a visitor signed in with under that email. A
- * teammate off the list leaves the team. An account that would land on two
- * persons stays with or moves to the guardian, and the run logs it.
+ * member off the list is removed. An account that would land on two persons
+ * stays with or moves to the guardian, and the run logs it.
  */
-export async function backfillTeam(db: DrizzleDb): Promise<void> {
+export async function backfillMembers(db: DrizzleDb): Promise<void> {
   await inOneTransaction(db, async () => {
-    const access = createAccess(db);
+    const ctx = memberContext(db);
     const seat = db
       .select({
         accountId: guardianAuth.accountId,
@@ -53,7 +60,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
             .orderBy(links.platform, links.accountId)
             .all()
         : [];
-      await access.ensureGuardian({
+      await guardianSeatCreated(ctx, {
         accounts: [...seatAccounts(seat), ...linked],
         name: peopleGuardian?.name,
         avatarUrl: seat.avatarUrl ?? undefined,
@@ -66,7 +73,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
       .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
       .get();
     const emails = normalizeDashboardAccessConfig(stored?.value).cloudEmailAccess;
-    await access.setTeammateEmails(emails);
+    await invitedEmailsSaved(ctx, emails);
 
     const signedIn = emails.length
       ? db
@@ -83,7 +90,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
     for (const profile of signedIn) {
       const account = { platform: ROME_CLOUD_PLATFORM, accountId: profile.accountId };
       try {
-        await access.recordSignIn({ email: profile.email, account, avatarUrl: profile.avatarUrl });
+        await memberSignedIn(ctx, { email: profile.email, account, avatarUrl: profile.avatarUrl });
       } catch (err) {
         if (!(err instanceof AccountTakenError)) throw err;
         log.warn(
@@ -95,9 +102,9 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
       }
     }
 
-    log.info("team brought in line with the guardian's seat and the allow-list", {
+    log.info("members brought in line with the guardian's seat and the allow-list", {
       guardian: seat !== undefined,
-      teammates: emails.length,
+      members: emails.length,
     });
   });
 }
@@ -107,7 +114,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
 // inside settles without waiting on I/O, so no timer or I/O callback runs
 // before COMMIT or ROLLBACK, and Identity's own transactions nest as savepoints.
 async function inOneTransaction(db: DrizzleDb, work: () => Promise<void>): Promise<void> {
-  if (inTransaction(db)) throw new Error("The team backfill opens its own transaction");
+  if (inTransaction(db)) throw new Error("The members backfill opens its own transaction");
   db.run(sql`BEGIN IMMEDIATE`);
   try {
     await work();

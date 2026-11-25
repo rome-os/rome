@@ -3,7 +3,13 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { DashboardAccessStore } from "./dashboard-access-store.js";
-import { createAccess } from "./access.js";
+import {
+  guardianSeatCreated,
+  invitedEmailsSaved,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+} from "./application/members.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allowlist-sync.js";
 
 const ORIGIN = "https://cloud.test";
@@ -431,15 +437,17 @@ describe("DashboardAccessStore", () => {
     expect(await store.read()).toEqual({ emails: ["b@example.com"], revision: 6 });
   });
 
-  it("leaves the team's teammates equal to the list after every save, in save order", async () => {
-    const access = createAccess(testDb.db);
-    await access.ensureGuardian({
+  it("leaves the members equal to the list after every save, in save order", async () => {
+    const ctx = memberContext(testDb.db);
+    await guardianSeatCreated(ctx, {
       accounts: [{ platform: "email", accountId: "owner@example.com" }],
     });
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), access);
-    const teammates = async () =>
-      (await access.members())
-        .filter((member) => member.role === "teammate")
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), (emails) =>
+      invitedEmailsSaved(ctx, emails),
+    );
+    const listed = async () =>
+      (await listMembers(ctx))
+        .filter((member) => member.role === "member")
         .flatMap((member) => member.accounts.map((account) => account.accountId));
 
     await Promise.all([
@@ -447,19 +455,17 @@ describe("DashboardAccessStore", () => {
       store.save({ cloudEmailAccess: ["lin@example.com", "owner@example.com"] }),
     ]);
 
-    expect(await teammates()).toEqual(["lin@example.com"]);
-    expect(await access.roleOf({ platform: "email", accountId: "owner@example.com" })).toBe(
+    expect(await listed()).toEqual(["lin@example.com"]);
+    expect(await roleOfAccount(ctx, { platform: "email", accountId: "owner@example.com" })).toBe(
       "guardian",
     );
     await store.save({ cloudEmailAccess: [] });
-    expect(await teammates()).toEqual([]);
+    expect(await listed()).toEqual([]);
   });
 
-  it("keeps the saved list when the team cannot follow it", async () => {
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), {
-      setTeammateEmails: async () => {
-        throw new Error("team store down");
-      },
+  it("keeps the saved list when the members cannot follow it", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), async () => {
+      throw new Error("members store down");
     });
 
     const saved = await store.save({ cloudEmailAccess: ["ada@example.com"] });

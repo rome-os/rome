@@ -8,7 +8,7 @@ Someone Rome knows, with a name and an avatar when Rome has them. A person is no
 
 - Two persons are the same person when they are the same entry. Nothing on a platform makes two persons one.
 - Deleting a person deletes every account of theirs, and each then belongs to nobody.
-- Identity does not know who is on the team. Access does.
+- Identity does not know who has a role. Access does.
 
 ## Account
 
@@ -28,5 +28,5 @@ An account belongs to at most one person.
 
 ## Decided against
 
-- **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is on the team.
-- **Team membership in Identity.** Identity would then answer two questions, and every part that only asks who a sender is would depend on the team.
+- **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is a member.
+- **Roles in Identity.** Identity would then answer two questions, and every part that only asks who a sender is would depend on roles.
