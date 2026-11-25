@@ -1119,8 +1119,8 @@ function sessionSetupOf(
   isSubagent: boolean,
 ): SessionSetupSource {
   const config = agent.definition;
-  // The place can override the agent's policy and instructions and take
-  // actions away, never add them.
+  // The place can override the agent's policy, instructions and model tier,
+  // and take actions away, never add them.
   const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
   const promptAgent = {
     ...config,
@@ -1182,7 +1182,7 @@ function sessionSetupOf(
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
-    definition: config,
+    definition: place?.tier ? { ...config, tier: place.tier } : config,
     widgets,
     systemPrompt: () =>
       deps.systemPrompts.build(promptAgent, { contextSuffix: init.contextSuffix, widgets }),
@@ -2067,7 +2067,7 @@ async function openSession(
       modelResolutionRequest(
         selectionId,
         sessionPin,
-        config,
+        active.source.definition,
         credits,
         deps.heldProvider?.(key.channelThreadKey),
       ),

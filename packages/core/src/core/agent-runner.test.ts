@@ -2013,6 +2013,34 @@ describe("AgentRunner", () => {
       expect(onDashboard).not.toContain("You answer on a bot.");
     });
 
+    it("runs the agent on its place's model tier in place of its own, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) => (thread?.channel === "telegram" ? { tier: "small" } : null),
+      });
+      const run = (channel: string, threadId: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      await run("telegram", "bot-1");
+      // A second turn in the same session keeps the place's model.
+      await run("telegram", "bot-1");
+      await run("webchat", "chat-1");
+      const [onBot, onDashboard] = provider.sessions.map((session) => session.config.model);
+      expect(provider.sessions).toHaveLength(2);
+      expect(onBot).toBe("claude-haiku-5-5");
+      expect(onDashboard).not.toBe("claude-haiku-5-5");
+    });
+
     it("lets the session's tools read its place while the session first opens", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const places: Array<string | undefined> = [];

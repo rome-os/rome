@@ -1,3 +1,4 @@
+import type { ModelTier } from "./model-tier.js";
 import type { AgentName } from "./session.js";
 
 /**
@@ -76,6 +77,8 @@ export interface PlaceSetup {
    * `systemPromptPrefix`, for an agent whose instructions assume another place.
    */
   systemPromptPrefix?: string;
+  /** The agent's model tier in this place, in place of its own. */
+  tier?: ModelTier;
 }
 
 /** The agent's policy in a place: what the place sets wins over the agent's own. */
