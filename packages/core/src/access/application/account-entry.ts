@@ -58,7 +58,7 @@ export function accountEntry(deps: AccountEntryDeps) {
       log.warn("a member's sign-in could not be found", { personId });
       return REFUSED;
     }
-    return { kind: "entered", person: { kind: "visitor", accountId, email, via: "account" } };
+    return { kind: "entered", person: { kind: "visitor", accountId, email } };
   };
 
   return async (account: { platform: string; id: string }): Promise<AccountEntry> => {

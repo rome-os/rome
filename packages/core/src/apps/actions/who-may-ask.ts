@@ -41,20 +41,17 @@ export function whoMayAsk(ownerOfChat: OwnerOfChat): WhoMayAsk {
 }
 
 /** Whether the turn works for the guardian, who alone reads these on the
- * dashboard, or for a member who was let in on a connection, who uses it as the
- * guardian does. Any other visitor's turn, or a turn no one started in a
- * visitor's chat, is refused. A turn with neither an actor nor a chat cannot show it is the
- * guardian's and is refused too. A chat on a connection has no owner, and a
- * turn no one started there is Rome's own work. */
+ * dashboard. A visitor's turn, or a turn no one started in a visitor's chat, is
+ * refused. A turn with neither an actor nor a chat cannot show it is the
+ * guardian's and is refused too. A chat on a connection has no owner and is
+ * the guardian's agent's. */
 export async function turnWorksForGuardian(
   ownerOfChat: OwnerOfChat,
   turn: ToolTurn,
 ): Promise<boolean> {
-  const { actor } = turn;
-  const memberOnConnection = actor?.kind === "visitor" && actor.via === "account";
-  if (actor && actor.kind !== "guardian" && !memberOnConnection) return false;
+  if (turn.actor && turn.actor.kind !== "guardian") return false;
   const thread = turn.channelContext;
-  if (!actor && !thread) return false;
+  if (!turn.actor && !thread) return false;
   if (thread?.channel === "webchat") {
     const owner = thread.threadId ? await ownerOfChat(thread.threadId) : null;
     if (owner !== "guardian") return false;
