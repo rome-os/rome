@@ -18,6 +18,7 @@ import {
   shouldNavigateToDashboard,
 } from "./window";
 import {
+  desktopSettings,
   readDeviceEnabled,
   readNotificationsEnabled,
   readRuntimeTarget,
@@ -47,6 +48,8 @@ import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler }
 import { openAudit, registerAuditHandlers } from "./audit";
 import { createAuditWindow } from "./window";
 import { dashboardOrigin, installMicrophonePermission } from "./microphone-permission";
+import { appShimsSupported, setupAppShims } from "./app-shims";
+import { APP_SHIM_LAUNCH_ARG } from "./app-shims/bundle";
 
 const log = createLogger("main");
 
@@ -171,17 +174,23 @@ async function bootstrap() {
         : `Opening Rome Cloud${active.instance ? ` (${active.instance.origin})` : ""}`,
     );
 
+    const appShims = setupAppShims(desktopSettings);
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
       openAuditWindow: () => createAuditWindow(),
       cloudAccount,
       device,
+      apps: appShimsSupported() ? appShims : undefined,
     });
 
     installMicrophonePermission(session.defaultSession, () =>
       dashboardOrigin(devDashboardUrl, controller.activeTarget().instance?.origin),
     );
-    mainWindow = await createMainWindow(runtime);
+    // An app on the Desktop that finds Rome closed launches it with this
+    // argument, and only wants its own window.
+    mainWindow = await createMainWindow(runtime, {
+      show: !process.argv.includes(APP_SHIM_LAUNCH_ARG),
+    });
     log.info("Main window created");
 
     setupProtocolHandler({

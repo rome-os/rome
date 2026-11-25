@@ -10,8 +10,11 @@ rs.mock("electron", () => ({
   ipcRenderer: { invoke: rs.fn(), on: rs.fn(), removeListener: rs.fn(), send: rs.fn() },
 }));
 
-async function load(protocol: string) {
+const realPlatform = process.platform;
+
+async function load(protocol: string, platform: NodeJS.Platform = "linux") {
   rs.resetModules();
+  Object.defineProperty(process, "platform", { value: platform });
   Object.assign(globalThis, {
     location: { protocol },
     document: { readyState: "complete", documentElement: { classList: { add: () => {} } } },
@@ -21,6 +24,7 @@ async function load(protocol: string) {
 }
 
 afterEach(() => {
+  Object.defineProperty(process, "platform", { value: realPlatform });
   Reflect.deleteProperty(globalThis, "location");
   Reflect.deleteProperty(globalThis, "document");
 });
@@ -37,6 +41,12 @@ describe("preload bridge", () => {
     expect(Object.keys(remote.device as object).sort()).toEqual(
       ["get", "onStatus", "openAuditLog", "pickFolder", "setEnabled"].sort(),
     );
+  });
+
+  it("adds the Desktop apps bridge on macOS, which carries only adding an app", async () => {
+    const remote = await load("https:", "darwin");
+    expect(Object.keys(remote)).toEqual(["device", "microphone", "apps"]);
+    expect(Object.keys(remote.apps as object)).toEqual(["addToDesktop"]);
   });
 
   it("gives the app's own pages the audit log", async () => {

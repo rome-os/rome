@@ -69,6 +69,19 @@ export function desktopDevice(): DesktopDeviceBridge | null {
     : null;
 }
 
+/** The Mac app's way to put a Rome app on the Desktop as an app of its own. */
+export interface DesktopAppsBridge {
+  /** Resolves with where the app now is. The Mac app reads its name and icon from this Rome. */
+  addToDesktop(appId: string): Promise<{ path: string }>;
+}
+
+/** The Mac app's Desktop apps, or null in a browser or an app without them. */
+export function desktopApps(): DesktopAppsBridge | null {
+  if (!isElectronShell()) return null;
+  const apps = (window.rome as { apps?: Partial<DesktopAppsBridge> }).apps;
+  return typeof apps?.addToDesktop === "function" ? (apps as DesktopAppsBridge) : null;
+}
+
 /** A folder on this computer that the user picked in the system dialog. */
 export interface DesktopPickedFolder {
   path: string;
