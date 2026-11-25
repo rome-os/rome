@@ -83,21 +83,22 @@ describe("/personal-data routes", () => {
     expect((await as("cookie")).status).toBe(200);
   });
 
-  it("lets a dashboard admin read the guardian's personal data, never write it", async () => {
-    await ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
+  it("takes a member's data, and lets them pause an origin and delete it", async () => {
     dashboardAccess.setCloudEmailAccess(["ada@example.com"]);
     const base = `/personal-data/sources/apple_health/origins/${ORIGIN}`;
 
+    const pushed = batch("b-1", { upserts: [stepHour(NOV_10, 812)] });
+    expect(await (await ingest(pushed, ADMIN_COOKIE)).json()).toMatchObject({ inserted: 1 });
     expect((await send("/personal-data/sources", {}, ADMIN_COOKIE)).status).toBe(200);
-    expect((await ingest(batch("b-2"), ADMIN_COOKIE)).status).toBe(403);
     const pause = { method: "PUT", body: JSON.stringify({ state: "paused" }) };
-    expect((await send(`${base}/state`, pause, ADMIN_COOKIE)).status).toBe(403);
-    expect((await send(base, { method: "DELETE" }, ADMIN_COOKIE)).status).toBe(403);
+    expect((await send(`${base}/state`, pause, ADMIN_COOKIE)).status).toBe(200);
+    const deleted = await send(base, { method: "DELETE" }, ADMIN_COOKIE);
+    expect(await deleted.json()).toEqual({ deletedPoints: 1 });
 
     const log = await send("/personal-data/sources/apple_health/ingests", {}, ADMIN_COOKIE);
     expect(log.status).toBe(200);
     const { ingests } = (await log.json()) as { ingests: { status: string }[] };
-    expect(ingests.map((entry) => entry.status)).toEqual(["ok"]);
+    expect(ingests.map((entry) => entry.status)).toEqual(["deleted", "ok"]);
   });
 
   it("refuses a chunked body over 1 MB that names no length", async () => {

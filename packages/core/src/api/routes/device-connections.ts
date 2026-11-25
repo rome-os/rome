@@ -21,16 +21,10 @@ export function deviceConnectionRoutes(deps: DeviceConnectionRoutesDeps): Hono {
   const app = new Hono();
   const now = deps.now ?? Date.now;
 
-  // As for personal data: only the guardian reports a device, because agents
-  // reach every listed device as the guardian's. A loopback caller, which an
-  // agent's shell is, neither reads the list nor reports here.
+  // A loopback caller, which an agent's shell is, neither reads the list nor
+  // reports here.
   app.use("/device-connections", async (c, next) => {
-    const actor = enteredPerson(c);
-    if (!bySignedInSession(actor)) {
-      return c.json({ error: "Guardian session required" }, 403);
-    }
-    const reads = c.req.method === "GET" || c.req.method === "HEAD";
-    if (!reads && actor.kind !== "guardian") {
+    if (!bySignedInSession(enteredPerson(c))) {
       return c.json({ error: "Guardian session required" }, 403);
     }
     c.header("Cache-Control", "no-store");

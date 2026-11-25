@@ -8,7 +8,7 @@ It owns:
 - `sources/`: each source's type table. `apple-health.ts` is the only Health-specific file in core, and it is data, not logic.
 - `repository.ts`: the one way into the `personal_data_*` tables.
 - `read.ts`: a query answered from the repository, with freshness.
-- `routes.ts`: `/api/personal-data/*`, for the guardian's session only.
+- `routes.ts`: `/api/personal-data/*`, for a signed-in session of the guardian or a dashboard admin.
 - `actions.ts`: `core:personal_data_catalog` and `core:personal_data_query`.
 
 A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, gets its own design.

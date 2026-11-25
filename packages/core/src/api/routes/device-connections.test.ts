@@ -151,7 +151,7 @@ describe("/device-connections routes", () => {
     expect((await list()).map((row) => row.id)).toEqual(["dev-2:apple_health"]);
   });
 
-  it("refuses a caller without the guardian's cookie session", async () => {
+  it("refuses a caller without a signed-in session", async () => {
     expect((await send({}, null)).status).toBe(401);
     const actor: SessionActor = { kind: "guardian", userId: "guardian-seat", via: "loopback" };
     const loopback = new Hono()
@@ -163,18 +163,21 @@ describe("/device-connections routes", () => {
     expect((await loopback.request("/device-connections")).status).toBe(403);
   });
 
-  it("lets a dashboard admin read the guardian's devices, never report one", async () => {
+  it("lists the device a member reports beside the guardian's", async () => {
     await put(report("dev-1", [health]));
     dashboardAccess.setCloudEmailAccess(["ada@example.com"]);
 
-    const listed = await send({}, ADMIN_COOKIE);
-    expect(listed.status).toBe(200);
     const reported = await send(
       { method: "PUT", body: JSON.stringify(report("dev-ada", [health])) },
       ADMIN_COOKIE,
     );
-    expect(reported.status).toBe(403);
-    expect((await list()).map((row) => row.id)).toEqual(["dev-1:apple_health"]);
+    expect(reported.status).toBe(200);
+    const listed = await send({}, ADMIN_COOKIE);
+    const { connections } = (await listed.json()) as { connections: { id: string }[] };
+    expect(connections.map((row) => row.id)).toEqual([
+      "dev-1:apple_health",
+      "dev-ada:apple_health",
+    ]);
   });
 
   it("refuses a report that is not JSON, too large, or out of shape", async () => {

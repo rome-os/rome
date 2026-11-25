@@ -21,7 +21,7 @@ A new type or source needs a core release before a device sends it, because an i
 
 ## Routes
 
-The ingest takes only `Content-Type: application/json`, and answers 415 otherwise. The data is the guardian's own, so only the guardian's signed-in session, as the iOS app sends it, writes it: the ingest, a state change and a delete. The `GET` routes also answer a [dashboard admin](concepts/people.md#dashboard-admin)'s signed-in session ([decision](adrs/a-dashboard-admin-has-the-guardians-access.md)). Any other caller gets 403: an app visitor, an app key, an anonymous caller, and a loopback caller, which an agent's shell is. Each answer is `Cache-Control: no-store`.
+The ingest takes only `Content-Type: application/json`, and answers 415 otherwise. Every route answers the signed-in session of the guardian or of a [dashboard admin](concepts/people.md#dashboard-admin) ([decision](adrs/a-dashboard-admin-has-the-guardians-access.md)). Any other caller gets 403: an app visitor, an app key, an anonymous caller, and a loopback caller, which an agent's shell is. Each answer is `Cache-Control: no-store`.
 
 | Route | Does |
 | --- | --- |

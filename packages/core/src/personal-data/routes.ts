@@ -1,4 +1,4 @@
-// `/api/personal-data/*`: where the guardian's devices push personal data, and where
+// `/api/personal-data/*`: where people's devices push personal data, and where
 // they read what Rome holds. Contract: docs/personal-data.md#routes.
 
 import { Hono } from "hono";
@@ -28,16 +28,10 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   const now = deps.now ?? Date.now;
   const recentIngests = new Map<string, number[]>();
 
-  // Only the guardian writes personal data, because the store has no owner and
-  // agents read everything in it as the guardian's. A loopback caller, which an
-  // agent's shell is, neither reads nor writes it here.
+  // A loopback caller, which an agent's shell is, neither reads nor writes
+  // personal data here.
   app.use("/personal-data/*", async (c, next) => {
-    const actor = enteredPerson(c);
-    if (!bySignedInSession(actor)) {
-      return c.json({ error: "Guardian session required" }, 403);
-    }
-    const reads = c.req.method === "GET" || c.req.method === "HEAD";
-    if (!reads && actor.kind !== "guardian") {
+    if (!bySignedInSession(enteredPerson(c))) {
       return c.json({ error: "Guardian session required" }, 403);
     }
     c.header("Cache-Control", "no-store");

@@ -18,7 +18,7 @@ Four things stay the guardian's alone:
 - Billing for the instance.
 - Deleting the instance.
 - Removing or replacing the guardian's seat or its credentials. A dashboard admin uses the vault, but never resets it, because a reset deletes every secret and replaces the PIN.
-- What is the guardian's own person: their personal data, their device connections, their detected time zone, and making an account theirs. A dashboard admin reads the guardian's personal data and device connections. A dashboard admin never pushes personal data, pauses or deletes a personal-data origin, registers a device connection, reports the detected time zone, or links an outside account to the guardian.
+- What is the guardian's own person: their detected time zone, and making an account theirs. A dashboard admin never reports the detected time zone, or links an outside account to the guardian.
 
 Each person's Concierge chats stay private to that person.
 
