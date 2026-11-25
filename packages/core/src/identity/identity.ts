@@ -44,7 +44,7 @@ export class Identity {
 
   /** Which person `account` belongs to, or null when it belongs to nobody. */
   async personOf(account: Account): Promise<Person | null> {
-    return this.repository.personOf(normalized(account));
+    return this.repository.personOf(normalizedAccount(account));
   }
 
   /** The person's accounts, by platform. Empty for a person Rome does not know. */
@@ -65,7 +65,7 @@ export class Identity {
       name: input.name ?? null,
       avatarUrl: input.avatarUrl ?? null,
     };
-    const taken = this.repository.insert(person, input.accounts.map(normalized), new Date());
+    const taken = this.repository.insert(person, input.accounts.map(normalizedAccount), new Date());
     if (taken) throw new AccountTakenError(taken);
     return person;
   }
@@ -75,7 +75,7 @@ export class Identity {
    *  {@link AccountTakenError} when the account belongs to another person.
    *  Giving it again is a no-op. */
   async addAccount(personId: string, account: Account): Promise<void> {
-    const normal = normalized(account);
+    const normal = normalizedAccount(account);
     const refused = this.repository.insertAccount(personId, normal, new Date());
     if (refused === "unknown") throw new UnknownPersonError(personId);
     if (refused === "taken") throw new AccountTakenError(normal);
@@ -83,7 +83,7 @@ export class Identity {
 
   /** Makes `account` belong to nobody. */
   async removeAccount(account: Account): Promise<void> {
-    this.repository.deleteAccount(normalized(account));
+    this.repository.deleteAccount(normalizedAccount(account));
   }
 
   /** Changes the person's name or avatar. A field left out keeps its value, and
@@ -106,11 +106,11 @@ export function createIdentity(db: DrizzleDb): Identity {
   return new Identity(new IdentityRepository(db));
 }
 
-// An account on either email platform is stored trimmed and lowercased, the
-// way Access normalizes a visitor's email, so one address is one account
-// however it was typed. Identity imports no other context, so the rule is
-// repeated here.
-function normalized(account: Account): Account {
+/** `account` as Identity stores it: on either email platform, the address
+ *  trimmed and lowercased, so one address is one account however it was
+ *  typed. Access normalizes a visitor's email the same way; Identity imports
+ *  no other context, so the rule is repeated here. */
+export function normalizedAccount(account: Account): Account {
   if (account.platform !== "email" && account.platform !== ROME_CLOUD_EMAIL_PLATFORM) {
     return account;
   }

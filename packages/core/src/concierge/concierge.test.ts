@@ -4436,7 +4436,6 @@ describe("Concierge chat", () => {
   });
 
   it("opens every turn with the person the chat serves, who may be a visitor", async () => {
-    const allowed = new Set(["ann@example.com"]);
     const owners = createConciergeOwners({
       settingsRepo: {
         get: (async (key: string) => (key === "guardianName" ? "Eric" : null)) as never,
@@ -4449,7 +4448,6 @@ describe("Concierge chat", () => {
               : [],
           ),
       },
-      dashboardAccess: { isCloudEmailAllowed: (email: string) => allowed.has(email) },
     });
     const annMain = mainChatIdOf("visitor:acct-ann");
     const service = new ConciergeService({
@@ -4505,12 +4503,6 @@ describe("Concierge chat", () => {
     } finally {
       rs.useRealTimers();
     }
-    // A dashboard admin is served while on the allow-list, the guardian always.
-    expect(await service.isServed("visitor:acct-ann")).toBe(true);
-    expect(await service.isServed("visitor:acct-unknown")).toBe(false);
-    allowed.clear();
-    expect(await service.isServed("visitor:acct-ann")).toBe(false);
-    expect(await service.isServed("guardian")).toBe(true);
   });
 
   it("leaves an existing chat and its model alone", async () => {

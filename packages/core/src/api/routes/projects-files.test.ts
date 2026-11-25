@@ -23,6 +23,7 @@ import { createTestDb, type TestDb } from "../../test/db.js";
 import { eq } from "drizzle-orm";
 import { romeSessions } from "../../db/schema.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { GUARDIAN } from "../../test/signed-in.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
@@ -347,7 +348,7 @@ describe("Projects files API", () => {
         expect(JSON.stringify(asVisitor)).not.toContain("secret of guardian-task");
         // The guardian, the owner, sees them all.
         const asGuardian = (await (
-          await app.request(path)
+          await runWithSessionActor(GUARDIAN, () => app.request(path))
         ).json()) as ProjectDashboardChatsResponse;
         expect(asGuardian.chats.map((c) => c.id).sort()).toEqual([
           "concierge",

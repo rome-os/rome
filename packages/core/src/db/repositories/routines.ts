@@ -58,8 +58,7 @@ export interface RoutineOwner {
  * owner (as {@link RoutineOwner}), acts for them. An app's routine is the
  * guardian's. Otherwise the person of the action or request creating it; an
  * action that acts for no one (a turn with more than one person's input)
- * makes it act for no one. Core work outside any action, with no person, is
- * the guardian's.
+ * makes it act for no one, and so does a creator no person can be told for.
  */
 export async function routineCreator(
   db: DrizzleDb,
@@ -72,7 +71,7 @@ export async function routineCreator(
   if (given.managedBy) return (await guardianActor(db)) ?? null;
   const store = actionExecutionContext.getStore();
   if (store) return store.actor ?? { kind: "anonymous" };
-  return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
+  return (await currentSessionActor()) ?? { kind: "anonymous" };
 }
 
 /** The actions whose args name the chat they send into, and the arg that names it. */

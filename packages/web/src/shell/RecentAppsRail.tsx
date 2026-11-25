@@ -10,7 +10,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ACTIVE_CLASS,
@@ -24,10 +23,14 @@ interface RecentSidebarApp {
   id: string;
   displayName: string;
   iconUrl: string | null;
-  href: string | null;
+  href: string;
 }
 
-export function RailAppIcon({ app }: { app: RecentSidebarApp }) {
+export function RailAppIcon({
+  app,
+}: {
+  app: Pick<RecentSidebarApp, "id" | "displayName" | "iconUrl">;
+}) {
   const BuiltinIcon = getBuiltinAppIcon(app.id);
   if (BuiltinIcon) {
     return (
@@ -77,10 +80,8 @@ interface RecentAppsRailProps<T extends RecentSidebarApp> {
   wrapWithContextMenu: (app: T, trigger: ReactNode, onSelect?: () => void) => ReactNode;
 }
 
-// Apps the guardian built or opened lately and has not pinned, below the pins.
-// The rail has room for a few tiles only, so the rest go into a menu rather
-// than a nested scroll area. An empty list renders nothing, divider included.
-// Renders fragments into AppGrid's rail <nav>, inside its TooltipProvider.
+/** Renders up to three recent app tiles and puts the rest in a menu.
+ * Place inside AppGrid's TooltipProvider. AppGrid supplies the section divider. */
 export function RecentAppsRail<T extends RecentSidebarApp>({
   apps,
   unopenedIds,
@@ -99,11 +100,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
 
   return (
     <>
-      <Separator
-        className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
-      />
       {visible.map((app) => {
-        if (!app.href) return null;
         const active = isEntryActive(pathname, app.href);
         return (
           <Tooltip key={app.id}>
@@ -157,22 +154,20 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
             {/* Overflow rows answer a right-click like the tiles above them. The
                 context menu sits on top of this one, so a choice there closes
                 both. */}
-            {overflow.map((app) =>
-              app.href ? (
-                <Fragment key={app.id}>
-                  {wrapWithContextMenu(
-                    app,
-                    <DropdownMenuItem asChild>
-                      <Link to={app.href}>
-                        <RailAppIcon app={app} />
-                        {app.displayName}
-                      </Link>
-                    </DropdownMenuItem>,
-                    () => setMoreOpen(false),
-                  )}
-                </Fragment>
-              ) : null,
-            )}
+            {overflow.map((app) => (
+              <Fragment key={app.id}>
+                {wrapWithContextMenu(
+                  app,
+                  <DropdownMenuItem asChild>
+                    <Link to={app.href}>
+                      <RailAppIcon app={app} />
+                      {app.displayName}
+                    </Link>
+                  </DropdownMenuItem>,
+                  () => setMoreOpen(false),
+                )}
+              </Fragment>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}

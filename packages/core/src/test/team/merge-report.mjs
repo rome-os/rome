@@ -146,13 +146,17 @@ lines.push(
   "",
   `## Entry 3, dashboard half (phase 2, not scored here): ${verdict(rule3Dashboard.pass)}`,
   "",
-  "The guardian removes a teammate; their open dashboard stops working.",
+  "The guardian removes a member; the person's next request and each new connection are refused, and a connection already open stays open until it closes.",
 );
 if (rule3Dashboard.error) lines.push(rule3Dashboard.error);
 else {
   lines.push(
-    ...rule3Dashboard.sockets.map((s) => `- ${s.route}: ${s.verdict} (${s.detail})`),
-    `- the teammate's next GET /api/settings: ${rule3Dashboard.nextCall.status}`,
+    ...rule3Dashboard.sockets.map(
+      (s) =>
+        `- ${s.route}: open connection ${s.verdict} (${s.detail})` +
+        (s.newConnection ? `; new connection ${s.newConnection.status}` : ""),
+    ),
+    `- the person's next GET /api/settings: ${rule3Dashboard.nextCall.status}`,
   );
 }
 writeFileSync(join(out, "summary.md"), `${lines.join("\n")}\n`);
