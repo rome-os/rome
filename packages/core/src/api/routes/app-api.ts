@@ -5,6 +5,7 @@ import { AppApiDispatcher, type RomeAppCaller } from "../../app-host/api.js";
 import { InvalidAppApiPathError, decodeAppApiPath, decodeAppIdPathSegment } from "../helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { stripInternalHeaders } from "../../relay/protocol.js";
+import { leaveStreamToApp } from "../../access/entry-stream.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
 
@@ -42,6 +43,7 @@ async function dispatchRequest(
   c: Context<AppApiEnv>,
   parsed: ParsedAppApiRequest,
 ): Promise<Response> {
+  leaveStreamToApp(c);
   const rawHeaders: Record<string, string> = {};
   c.req.raw.headers.forEach((value, key) => {
     rawHeaders[key] = value;

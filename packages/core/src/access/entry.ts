@@ -59,7 +59,13 @@ export function holdEntry(mayStillEnter: () => Promise<boolean>, onLost: () => v
     // Another check may have ended the entry meanwhile.
     if (held && !may) {
       release();
-      onLost();
+      try {
+        onLost();
+      } catch (err) {
+        log.error("ending a lost entry failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     return held;
   };

@@ -88,6 +88,26 @@ describe("holdEntry", () => {
     expect(taken).toEqual(["lost"]);
   });
 
+  it("survives an onLost that throws, at the recheck too", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (err: unknown) => void rejections.push(err);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const entry = holdEntry(
+        async () => false,
+        () => {
+          throw new Error("cannot close");
+        },
+      );
+      rs.advanceTimersByTime(ENTRY_RECHECK_MS);
+      await settled();
+      expect(await entry.holds()).toBe(false);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
   it("keeps taking inputs after one fails", async () => {
     const { entry, input } = hold();
     entry.admit(() => {

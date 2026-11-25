@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { DashboardAccessState } from "./dashboard-access-state.js";
 import { ENTRY_RECHECK_MS } from "./entry.js";
-import { endStreamsOnLostEntry } from "./entry-stream.js";
+import { endStreamsOnLostEntry, leaveStreamToApp } from "./entry-stream.js";
 import { runWithSessionActor, type SessionActor } from "./session-actor.js";
 
 const member = { kind: "visitor", accountId: "ada", email: "ada@example.com" } as const;
@@ -14,22 +14,23 @@ let allowList: DashboardAccessState;
 let aborted: boolean;
 
 // Writes one event, then holds the stream open until it is aborted.
-async function open(actor: SessionActor) {
+async function open(actor: SessionActor, setUp: (c: Context) => Promise<void> | void = () => {}) {
   const app = new Hono();
   app.use("*", (_c, next) => runWithSessionActor(actor, next));
   app.use("*", endStreamsOnLostEntry(allowList));
-  app.get("/events", (c) =>
-    streamSSE(c, async (sse) => {
+  app.get("/events", async (c) => {
+    await setUp(c);
+    return streamSSE(c, async (sse) => {
+      const gone = new Promise<void>((resolve) => sse.onAbort(resolve));
       await sse.writeSSE({ data: "first" });
-      await new Promise<void>((resolve) => sse.onAbort(resolve));
+      await gone;
       aborted = true;
-    }),
-  );
+    });
+  });
   const res = await app.request("/events");
   const reader = res.body!.getReader();
   const first = await reader.read();
-  expect(new TextDecoder().decode(first.value)).toContain("first");
-  return { res, reader };
+  return { res, reader, first: first.done ? "ended" : new TextDecoder().decode(first.value) };
 }
 
 describe("endStreamsOnLostEntry", () => {
@@ -44,7 +45,8 @@ describe("endStreamsOnLostEntry", () => {
   });
 
   it("ends a member's stream, and its source, once they are no longer a member", async () => {
-    const { res, reader } = await open(member);
+    const { res, reader, first } = await open(member);
+    expect(first).toContain("first");
     expect(res.headers.get("Content-Type")).toContain("text/event-stream");
     allowList.setCloudEmailAccess([]);
     rs.advanceTimersByTime(ENTRY_RECHECK_MS);
@@ -58,11 +60,22 @@ describe("endStreamsOnLostEntry", () => {
     await rs.waitFor(() => expect(aborted).toBe(true));
   });
 
+  it("ends the stream of a member who left while the route set it up", async () => {
+    const { first } = await open(member, async () => {
+      await Promise.resolve();
+      allowList.setCloudEmailAccess([]);
+    });
+    expect(first).toBe("ended");
+    await rs.waitFor(() => expect(aborted).toBe(true));
+  });
+
   it.each([
-    guardian,
-    guest,
-  ])("leaves a $kind's stream open when the members change", async (actor) => {
-    const { reader } = await open(actor);
+    ["the guardian's stream", guardian, () => {}],
+    ["an app's stream to a member", member, leaveStreamToApp],
+    ["an app's stream to a guest", guest, leaveStreamToApp],
+  ] as const)("leaves %s open when the members change", async (_whose, actor, setUp) => {
+    const { reader, first } = await open(actor, setUp);
+    expect(first).toContain("first");
     allowList.setCloudEmailAccess([]);
     rs.advanceTimersByTime(ENTRY_RECHECK_MS * 2);
     const next = await Promise.race([

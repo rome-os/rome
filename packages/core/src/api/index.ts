@@ -161,6 +161,8 @@ export function buildApp(
   // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
 
+  api.use("*", endStreamsOnLostEntry(deps.dashboardAccessState));
+
   api.route("/", healthRoutes(deps));
   api.route("/", uptimeRoutes());
   api.route("/", buildInfoRoutes(deps));
@@ -179,10 +181,6 @@ export function buildApp(
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));
   api.route("/", appApiPublicRoutes(deps));
-
-  // After the app API, whose streams each app opens to whom it likes.
-  api.use("*", endStreamsOnLostEntry(deps.dashboardAccessState));
-
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
   api.route("/", appConnectionAccessRoutes(deps));
