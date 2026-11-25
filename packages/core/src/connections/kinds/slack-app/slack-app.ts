@@ -43,7 +43,7 @@ import { SlackMemberChannels } from "./channels.js";
 import { compareTs } from "./timeline-order.js";
 import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 import type { Message } from "../../message.js";
-import { RecordingStopped } from "../../types.js";
+import { PrivateMessageRefused, RecordingStopped } from "../../types.js";
 
 const log = createLogger("slack-app");
 
@@ -73,6 +73,10 @@ const HISTORY_PAGE = 15;
 const HISTORY_MAX_WAIT_MS = 60 * 1000;
 /** Slack's refusals that mean the app may not read a conversation. */
 const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
+
+/** Slack's refusals of a private message that are about the member, not the
+ *  app: one who is not in the chat cannot be shown it there. */
+const NOT_SHOWN_PRIVATELY = new Set(["user_not_in_channel"]);
 
 /** One frame drained from the instance's mailbox. */
 export interface MailboxFrame {
@@ -410,6 +414,31 @@ export class SlackAppAdapter {
       firstTs ??= sent.ts;
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
+  }
+
+  /** Posts `text` in `named` that only member `accountId` sees, in the
+   *  thread when the chat is one. Slack refuses it for a member who is not in
+   *  the chat, which reads as {@link PrivateMessageRefused}. */
+  async sendOnlyTo(named: ChatId, accountId: string, text: string): Promise<void> {
+    const chatId = named.startsWith("#")
+      ? await this.memberChannels.resolve(named, this.abort.signal, { fresh: true })
+      : named;
+    const { channelId, threadTs } = parseSlackChatId(chatId);
+    const user = slackUserIdOf(accountId.trim());
+    try {
+      for (const chunk of splitSlackText(text.trim())) {
+        await this.config.api.postEphemeral(
+          this.config.teamId,
+          { channel: channelId, user, markdown: chunk, threadTs },
+          this.abort.signal,
+        );
+      }
+    } catch (error) {
+      if (error instanceof SlackApiError && NOT_SHOWN_PRIVATELY.has(error.code)) {
+        throw new PrivateMessageRefused(accountId, error.code, { cause: error });
+      }
+      throw error;
+    }
   }
 
   /** Reacts to message `messageId` in `chatId` with `emoji`, as the app's

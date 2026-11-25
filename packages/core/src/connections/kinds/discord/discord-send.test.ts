@@ -217,3 +217,45 @@ describe("DiscordAdapter.send", () => {
     await expect(adapter.send(channel.id as ChatId, { text: "Hi" })).rejects.toBe(unknown);
   });
 });
+
+describe("DiscordAdapter.sendOnlyTo", () => {
+  /** The adapter over a shared chat and the member's direct message, noting
+   *  what is sent to each. */
+  function privately(dmSend = rs.fn().mockResolvedValue({ id: "dm-message-1" })) {
+    const shared = { id: "guild-chat-1", send: rs.fn() };
+    const createDM = rs.fn().mockResolvedValue({ id: "dm-alice", send: dmSend });
+    const fetch = rs.fn().mockResolvedValue(shared);
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, { client: { users: { createDM }, channels: { fetch } } });
+    return { adapter, createDM, dmSend, shared, fetch };
+  }
+
+  it("opens the direct message with that member and sends there, and nothing in the shared chat", async () => {
+    const { adapter, createDM, dmSend, shared, fetch } = privately();
+
+    await adapter.sendOnlyTo("alice", "Sign in here");
+
+    expect(createDM).toHaveBeenCalledWith("alice");
+    expect(dmSend).toHaveBeenCalledWith({ content: "Sign in here" });
+    expect(shared.send).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member whose direct messages are closed as a refused private message", async () => {
+    const closed = new DiscordAPIError(
+      { code: 50007, message: "Cannot send messages to this user" },
+      50007,
+      403,
+      "POST",
+      "/channels/dm-alice/messages",
+      {},
+    );
+    const { adapter, shared } = privately(rs.fn().mockRejectedValue(closed));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
+      name: "PrivateMessageRefused",
+      accountId: "alice",
+    });
+    expect(shared.send).not.toHaveBeenCalled();
+  });
+});
