@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { ActionRegistryImpl, fullIdsByUniqueLocalName } from "./registry.js";
+import { ActionRegistryImpl } from "./registry.js";
 import type { Action } from "./types.js";
 import {
   claimLegacyArtifactName,
@@ -44,7 +44,7 @@ function eventOnlyAction(name: string): Action {
 }
 
 describe("ActionRegistryImpl", () => {
-  it("finds an app action by its full ID only, and suggests it for its bare name", () => {
+  it("stores app actions by canonical ID and resolves a bound legacy bare name", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     claimLegacyArtifactName(
       identity.legacyBindings,
@@ -65,10 +65,8 @@ describe("ActionRegistryImpl", () => {
 
     expect(registry.list()).toEqual(["legacy-app:foo"]);
     expect(registry.get("legacy-app:foo")?.config.name).toBe("legacy-app:foo");
-    expect(registry.get("foo")).toBeUndefined();
+    expect(registry.get("foo")?.config.name).toBe("legacy-app:foo");
     expect(registry.get("self:foo")).toBeUndefined();
-    expect(registry.suggest("foo")).toBe("legacy-app:foo");
-    expect(registry.suggest("legacy-app:foo")).toBeUndefined();
   });
 
   it("allows v2 apps to reuse a local name without creating a bare binding", () => {
@@ -90,19 +88,6 @@ describe("ActionRegistryImpl", () => {
     expect(registry.get("review-one:review")?.config.name).toBe("review-one:review");
     expect(registry.get("review-two:review")?.config.name).toBe("review-two:review");
     expect(registry.get("review")).toBeUndefined();
-    // Two actions share the name, so neither is suggested.
-    expect(registry.suggest("review")).toBeUndefined();
-  });
-
-  it("maps a name without its app to the full ID only when one action has it", () => {
-    expect(
-      fullIdsByUniqueLocalName([
-        "system:system_upgrade",
-        "review-one:review",
-        "review-two:review",
-        "bare",
-      ]),
-    ).toEqual({ system_upgrade: "system:system_upgrade" });
   });
 
   it("returns all agent-callable actions when names includes '*'", () => {
@@ -160,8 +145,14 @@ describe("ActionRegistryImpl.validateArgs", () => {
     expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
   });
 
-  it("checks a full ID against the action's schema", () => {
+  it("checks a legacy bare name against the canonical action's schema", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    claimLegacyArtifactName(
+      identity.legacyBindings,
+      "action",
+      "coding_task",
+      formatArtifactId("coding", "coding_task"),
+    );
     const registry = new ActionRegistryImpl(identity);
     registry.register(promptAction("coding_task"), {
       kind: "action",
@@ -172,10 +163,10 @@ describe("ActionRegistryImpl.validateArgs", () => {
       sourcePath: "/coding/actions/coding_task",
     });
 
-    expect(registry.validateArgs("coding:coding_task", {})).toMatch(
+    expect(registry.validateArgs("coding_task", {})).toMatch(
       /input schema for action "coding:coding_task"/,
     );
-    expect(registry.validateArgs("coding:coding_task", { prompt: "fix the test" })).toBeNull();
+    expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
   });
 
   it("returns null for an unknown action, which has() reports", () => {

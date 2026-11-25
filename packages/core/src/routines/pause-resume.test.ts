@@ -30,6 +30,8 @@ beforeEach(() => {
     engine: routineEngine as unknown as RoutineToolDeps["engine"],
     routineRuns: new RoutineRunsRepository(testDb.db),
     actionExecutions: new ActionExecutionsRepository(testDb.db),
+    actionRegistry: { has: () => true, isExplicit: () => false, validateArgs: () => null },
+    resolveOneOffDate: async (trigger) => trigger,
   };
 });
 
@@ -91,14 +93,14 @@ describe("pausing and resuming a routine", () => {
   it("names the action to find the right id when the routine does not exist", async () => {
     expect(await pause("nope")).toMatchObject({
       status: "error",
-      error: expect.stringContaining("system:search_routine"),
+      error: expect.stringContaining("system:read_routines"),
     });
   });
 
   it("asks for the routine's id when none is given", async () => {
     expect(await callTool(pauseRoutine, deps, { routineId: "" })).toEqual({
       status: "error",
-      error: "Pass the routine's id as routineId. Find it with system:search_routine.",
+      error: "Pass the routine's id as routineId. Find it with system:read_routines.",
     });
   });
 });

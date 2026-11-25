@@ -29,6 +29,9 @@ describe("the Concierge on a connection", () => {
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:set_agent_name");
     // A shown file links to the dashboard's assets, which a bot chat cannot open.
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:show_file");
+    // Listing routines shows every routine and its arguments, for the guardian alone.
+    expect(CONCIERGE_CHAT_ACTIONS).toContain("system:search_routine");
+    expect(CONCIERGE_CHAT_ACTIONS).toContain("system:read_routines");
     expect(conciergePlaceSetup("core:concierge", { channel: "webchat" })).toBeNull();
     expect(conciergePlaceSetup("core:concierge", undefined)).toBeNull();
     expect(conciergePlaceSetup("core:main", { channel: "telegram" })).toBeNull();

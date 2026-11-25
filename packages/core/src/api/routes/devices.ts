@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { CallerConfigurationError, DaemonVersionError } from "@rome-os/node-core/client";
-import { z } from "zod";
-import type { DeviceFilesErrorCode, DeviceManageErrorCode } from "@rome/api-types/devices";
+import {
+  type DeviceFilesErrorCode,
+  type DeviceManageErrorCode,
+  deviceRenameSchema,
+} from "@rome/api-types/devices";
 import type { ApiDeps } from "../deps.js";
 
 const filesErrorStatus = {
@@ -18,8 +21,6 @@ const manageErrorStatus = {
   invalid_device_name: 400,
   unavailable: 503,
 } as const satisfies Record<DeviceManageErrorCode, number>;
-
-const renameSchema = z.object({ name: z.string() });
 
 export function devicesRoutes(deps: Pick<ApiDeps, "nodeDevices">): Hono {
   const app = new Hono();
@@ -48,7 +49,7 @@ export function devicesRoutes(deps: Pick<ApiDeps, "nodeDevices">): Hono {
   // device itself is not contacted, so it may be offline.
   app.patch("/devices/:deviceId", async (c) => {
     c.header("Cache-Control", "no-store");
-    const body = renameSchema.safeParse(await c.req.json().catch(() => null));
+    const body = deviceRenameSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: "invalid_device_name" }, 400);
     const result = await deps.nodeDevices.renameDevice(c.req.param("deviceId"), body.data.name);
     if (!result.ok) return c.json({ error: result.code }, manageErrorStatus[result.code]);
