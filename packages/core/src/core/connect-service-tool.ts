@@ -32,7 +32,7 @@ function kindDescription(devices: readonly DeviceKind[]): string {
 }
 
 /**
- * `connect_account`, served with the session's own tools. Where the place
+ * `connect_service`, served with the session's own tools. Where the place
  * draws cards the turn waits on the connect card; elsewhere the model asks the
  * guardian to connect in Settings. A session with no speaker (a fork) keeps the
  * tool, so its catalog matches its source, and the handler refuses.
@@ -40,7 +40,7 @@ function kindDescription(devices: readonly DeviceKind[]): string {
  * for the kinds Rome connects itself (the Concierge's `connect_card`); with
  * no device kind reported, there is then no tool.
  */
-export function connectAccountTools(input: {
+export function connectServiceTools(input: {
   widgets: WidgetDrawing;
   hasSpeaker: boolean;
   /** The device kinds devices reported, read when the session's tools are built. */
@@ -60,7 +60,8 @@ export function connectAccountTools(input: {
   const kinds = [...(input.devicesOnly ? [] : connectableKinds()), ...devices.map((d) => d.kind)];
   return [
     {
-      name: "connect_account",
+      name: "connect_service",
+      formerNames: ["connect_account"],
       endsTurn: widgetsShow,
       description: input.devicesOnly
         ? `Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that reads a device, when they ask to connect one, or when a reply or a device says \`not_connected\` or \`live_off\`. It answers at once that a kind already works, with no card, so call it instead of asking whether a device is connected. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. ${NOT_A_DEVICE}`
@@ -79,7 +80,7 @@ export function connectAccountTools(input: {
       handler: async (args) => {
         if (!input.hasSpeaker) {
           return {
-            content: [{ type: "text", text: "connect_account is unavailable in a forked turn." }],
+            content: [{ type: "text", text: "connect_service is unavailable in a forked turn." }],
             isError: true,
           };
         }
