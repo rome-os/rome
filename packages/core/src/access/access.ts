@@ -1,6 +1,7 @@
-// The team as persons with a role, stored beside the dashboard allow-list and
-// the guardian's seat while every reader still uses those. Vocabulary:
-// docs/domains/access.md#team. Who a person is comes from Identity.
+// Access's own service: who is on the team and in which role, stored beside
+// the dashboard allow-list and the guardian's seat while every reader still
+// uses those. Vocabulary: docs/domains/access.md. Who a person is comes from
+// Identity.
 
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
@@ -16,7 +17,8 @@ import { normalizeVisitorEmail } from "./visitor-email.js";
 
 export type { Identity, PlatformAccount };
 
-export type TeamRole = "guardian" | "teammate";
+/** What a member is on the team. */
+export type Role = "guardian" | "teammate";
 
 /** The platform of a Rome Cloud account. */
 export const ROME_CLOUD_PLATFORM = "rome-cloud";
@@ -34,10 +36,10 @@ export function seatAccounts(seat: {
   return accounts;
 }
 
-/** A person on the team, with their role and every account of theirs. */
-export interface TeamMember {
+/** A member: a person on the team, with their role and every account of theirs. */
+export interface Member {
   identity: Identity;
-  role: TeamRole;
+  role: Role;
   accounts: PlatformAccount[];
 }
 
@@ -60,12 +62,13 @@ export class NotOnTeamError extends Error {
 const log = createLogger("team");
 
 /**
- * The persons on the team and their role: exactly one guardian, and any
- * number of teammates. Removing a teammate deletes the person and their
- * accounts in Identity. Other parts ask {@link Team.roleOf} with an account
+ * Answers who is on the team and in which role: exactly one guardian, and any
+ * number of teammates. Sessions and app permissions are separate modules of
+ * the Access context, not part of this class. Removing a teammate deletes the person and their
+ * accounts in Identity. Other parts ask {@link Access.roleOf} with an account
  * and never ask Identity for the team themselves.
  */
-export class Team {
+export class Access {
   constructor(
     private readonly db: DrizzleDb,
     private readonly identities: Identities,
@@ -73,13 +76,13 @@ export class Team {
 
   /** The role on the team of the person `account` belongs to, or null when it
    *  belongs to nobody or its person is not on the team. */
-  async roleOf(account: PlatformAccount): Promise<TeamRole | null> {
+  async roleOf(account: PlatformAccount): Promise<Role | null> {
     const person = await this.identities.personOf(account);
     return person ? this.roleOfPerson(person.id) : null;
   }
 
   /** The person's role on the team, or null when they are not on it. */
-  async roleOfPerson(identityId: string): Promise<TeamRole | null> {
+  async roleOfPerson(identityId: string): Promise<Role | null> {
     return (
       this.db
         .select({ role: teamMembers.role })
@@ -91,8 +94,8 @@ export class Team {
 
   /** Every person on the team, the guardian first, then teammates in the
    *  order they joined. */
-  async members(): Promise<TeamMember[]> {
-    const members: TeamMember[] = [];
+  async members(): Promise<Member[]> {
+    const members: Member[] = [];
     for (const { role, ...identity } of this.memberRows()) {
       members.push({ identity, role, accounts: await this.identities.accountsOf(identity.id) });
     }
@@ -208,7 +211,7 @@ export class Team {
 
   // Read beside the person's row rather than through Identity, which finds a
   // person only by an account, and a team member may hold none.
-  private memberRows(): Array<Identity & { role: TeamRole }> {
+  private memberRows(): Array<Identity & { role: Role }> {
     return this.db
       .select({
         id: identityRows.id,
@@ -239,19 +242,19 @@ export class Team {
     await this.identities.addAccount(guardianId, account);
   }
 
-  private insertMember(identityId: string, role: TeamRole): void {
+  private insertMember(identityId: string, role: Role): void {
     this.db.insert(teamMembers).values({ identityId, role, createdAt: new Date() }).run();
   }
 }
 
-/** The team over `db`. */
-export function createTeam(db: DrizzleDb): Team {
-  return new Team(db, createIdentities(db));
+/** Access over `db`. */
+export function createAccess(db: DrizzleDb): Access {
+  return new Access(db, createIdentities(db));
 }
 
 /**
  * Puts the guardian of a seat just created on the team, as
- * {@link Team.ensureGuardian} does with the seat's accounts. Never rejects: the
+ * {@link Access.ensureGuardian} does with the seat's accounts. Never rejects: the
  * seat is what every reader uses, so a failure is logged, and the team backfill
  * at the next startup puts the guardian on the team.
  */
@@ -265,7 +268,7 @@ export async function putSeatOnTeam(
   },
 ): Promise<void> {
   try {
-    await createTeam(db).ensureGuardian({
+    await createAccess(db).ensureGuardian({
       accounts: seatAccounts(seat),
       name: seat.name,
       avatarUrl: seat.avatarUrl ?? undefined,
@@ -277,7 +280,7 @@ export async function putSeatOnTeam(
 
 /**
  * Records a visitor's Rome Cloud sign-in on the team, as
- * {@link Team.recordSignIn} does. Never rejects: a failure is logged, and the
+ * {@link Access.recordSignIn} does. Never rejects: a failure is logged, and the
  * team backfill at the next startup records the account from the visitor's
  * profile.
  */
@@ -286,7 +289,7 @@ export async function recordSignInOnTeam(
   visitor: { email: string; accountId: string; avatarUrl: string | null },
 ): Promise<void> {
   try {
-    await createTeam(db).recordSignIn({
+    await createAccess(db).recordSignIn({
       email: visitor.email,
       account: { platform: ROME_CLOUD_PLATFORM, accountId: visitor.accountId },
       avatarUrl: visitor.avatarUrl,

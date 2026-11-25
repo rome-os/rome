@@ -14,7 +14,7 @@ import { isValidAppId } from "../../apps/packaging/app-id.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
-import { recordSignInOnTeam } from "../../access/team-members.js";
+import { recordSignInOnTeam } from "../../access/access.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:visitor-auth");

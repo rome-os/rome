@@ -6,7 +6,7 @@ import {
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
 import { createLogger } from "../logger.js";
-import type { Team } from "./team-members.js";
+import type { Access } from "./access.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
 const log = createLogger("dashboard-access-store");
@@ -27,7 +27,7 @@ export interface VisitorAllowList {
  * signing in with a new account. That record is dropped on the next write, so
  * each listed visitor's next sign-in counts as a new account once.
  *
- * Each save also makes `team`'s teammates the listed emails, in the same turn
+ * Each save also makes `access`'s teammates the listed emails, in the same turn
  * of the queue, so the team follows saves in the order they were stored.
  */
 export class DashboardAccessStore {
@@ -35,7 +35,7 @@ export class DashboardAccessStore {
 
   constructor(
     private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">,
-    private readonly team?: Pick<Team, "setTeammateEmails">,
+    private readonly access?: Pick<Access, "setTeammateEmails">,
   ) {}
 
   async read(): Promise<VisitorAllowList> {
@@ -60,7 +60,7 @@ export class DashboardAccessStore {
         revision,
         visitorAccounts,
       });
-      await this.team?.setTeammateEmails(config.cloudEmailAccess).catch((err: unknown) => {
+      await this.access?.setTeammateEmails(config.cloudEmailAccess).catch((err: unknown) => {
         log.warn("team not brought in line with the saved allow-list", {
           revision,
           // The name only: a message can carry an email, and these logs carry none.

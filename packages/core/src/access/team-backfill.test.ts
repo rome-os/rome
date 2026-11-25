@@ -13,7 +13,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { backfillTeam } from "./team-backfill.js";
-import { createTeam } from "./team-members.js";
+import { createAccess } from "./access.js";
 
 const now = new Date("2026-11-25T00:00:00Z");
 
@@ -91,7 +91,7 @@ describe("backfillTeam", () => {
 
     await backfillTeam(db);
 
-    const members = await createTeam(db).members();
+    const members = await createAccess(db).members();
     expect(
       members.map((m) => ({
         name: m.identity.name,
@@ -136,10 +136,12 @@ describe("backfillTeam", () => {
       .run();
     await backfillTeam(db);
 
-    const team = createTeam(db);
-    expect(await team.roleOf({ platform: "email", accountId: "ada@example.com" })).toBeNull();
-    expect(await team.roleOf({ platform: "rome-cloud", accountId: "acct-ada" })).toBeNull();
-    expect(await team.roleOf({ platform: "email", accountId: "lin@example.com" })).toBe("teammate");
+    const access = createAccess(db);
+    expect(await access.roleOf({ platform: "email", accountId: "ada@example.com" })).toBeNull();
+    expect(await access.roleOf({ platform: "rome-cloud", accountId: "acct-ada" })).toBeNull();
+    expect(await access.roleOf({ platform: "email", accountId: "lin@example.com" })).toBe(
+      "teammate",
+    );
   });
 
   it("writes nothing on an instance with no seat and no list", async () => {

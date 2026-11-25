@@ -3,7 +3,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { DashboardAccessStore } from "./dashboard-access-store.js";
-import { createTeam } from "./team-members.js";
+import { createAccess } from "./access.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allowlist-sync.js";
 
 const ORIGIN = "https://cloud.test";
@@ -432,13 +432,13 @@ describe("DashboardAccessStore", () => {
   });
 
   it("leaves the team's teammates equal to the list after every save, in save order", async () => {
-    const team = createTeam(testDb.db);
-    await team.ensureGuardian({
+    const access = createAccess(testDb.db);
+    await access.ensureGuardian({
       accounts: [{ platform: "email", accountId: "owner@example.com" }],
     });
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), team);
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), access);
     const teammates = async () =>
-      (await team.members())
+      (await access.members())
         .filter((member) => member.role === "teammate")
         .flatMap((member) => member.accounts.map((account) => account.accountId));
 
@@ -448,7 +448,7 @@ describe("DashboardAccessStore", () => {
     ]);
 
     expect(await teammates()).toEqual(["lin@example.com"]);
-    expect(await team.roleOf({ platform: "email", accountId: "owner@example.com" })).toBe(
+    expect(await access.roleOf({ platform: "email", accountId: "owner@example.com" })).toBe(
       "guardian",
     );
     await store.save({ cloudEmailAccess: [] });

@@ -160,7 +160,7 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { createTeam } from "./access/team-members.js";
+import { createAccess } from "./access/access.js";
 import { backfillTeam } from "./access/team-backfill.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -522,7 +522,7 @@ async function main() {
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
   // The team as persons with a role (docs/domains/access.md#team), on top of
   // Identity. Kept beside the allow-list and the seat, and nothing reads it yet.
-  const team = createTeam(db);
+  const access = createAccess(db);
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -1342,8 +1342,8 @@ async function main() {
     outbox: usageOutboxRepo,
     attribution: usageAttribution,
     credential: () => {
-      const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.credentialId) : null;
+      const cloudAccess = romeCloudAccess();
+      return cloudAccess ? credentialFingerprint(cloudAccess.credentialId) : null;
     },
   });
   // Speech credentials for voice conversation mode. Only the speaker source
@@ -2820,7 +2820,7 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, team);
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, access);
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
   });

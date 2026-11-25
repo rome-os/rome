@@ -13,7 +13,7 @@ import {
   DASHBOARD_ACCESS_SETTING_KEY,
   normalizeDashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { createTeam, ROME_CLOUD_PLATFORM, seatAccounts } from "./team-members.js";
+import { createAccess, ROME_CLOUD_PLATFORM, seatAccounts } from "./access.js";
 
 const log = createLogger("team-backfill");
 
@@ -28,7 +28,7 @@ const log = createLogger("team-backfill");
  */
 export async function backfillTeam(db: DrizzleDb): Promise<void> {
   await inOneTransaction(db, async () => {
-    const team = createTeam(db);
+    const access = createAccess(db);
     const seat = db
       .select({
         accountId: guardianAuth.accountId,
@@ -53,7 +53,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
             .orderBy(links.platform, links.accountId)
             .all()
         : [];
-      await team.ensureGuardian({
+      await access.ensureGuardian({
         accounts: [...seatAccounts(seat), ...linked],
         name: peopleGuardian?.name,
         avatarUrl: seat.avatarUrl ?? undefined,
@@ -66,7 +66,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
       .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
       .get();
     const emails = normalizeDashboardAccessConfig(stored?.value).cloudEmailAccess;
-    await team.setTeammateEmails(emails);
+    await access.setTeammateEmails(emails);
 
     const signedIn = emails.length
       ? db
@@ -83,7 +83,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
     for (const profile of signedIn) {
       const account = { platform: ROME_CLOUD_PLATFORM, accountId: profile.accountId };
       try {
-        await team.recordSignIn({ email: profile.email, account, avatarUrl: profile.avatarUrl });
+        await access.recordSignIn({ email: profile.email, account, avatarUrl: profile.avatarUrl });
       } catch (err) {
         if (!(err instanceof AccountTakenError)) throw err;
         log.warn(
@@ -102,7 +102,7 @@ export async function backfillTeam(db: DrizzleDb): Promise<void> {
   });
 }
 
-// better-sqlite3 runs a transaction function synchronously, and the Team and
+// better-sqlite3 runs a transaction function synchronously, and the Access and
 // Identity calls are async, so the transaction is opened by hand. Every call
 // inside settles without waiting on I/O, so no timer or I/O callback runs
 // before COMMIT or ROLLBACK, and Identity's own transactions nest as savepoints.

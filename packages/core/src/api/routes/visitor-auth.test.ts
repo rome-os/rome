@@ -10,7 +10,7 @@ import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { Permissions } from "../../access/permissions.js";
 import { appPermissions } from "../../apps/app-permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
-import { createTeam } from "../../access/team-members.js";
+import { createAccess } from "../../access/access.js";
 import { identities } from "../../db/schema.js";
 
 const testDb = createTestDb();
@@ -137,8 +137,8 @@ describe("/api/auth/visitor dashboard access", () => {
   });
 
   it("gives a teammate the Rome Cloud account and avatar they signed in with", async () => {
-    const team = createTeam(testDb.db);
-    const ada = await team.addTeammateByEmail("ada@example.com");
+    const access = createAccess(testDb.db);
+    const ada = await access.addTeammateByEmail("ada@example.com");
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
     const app = await buildRoute(state, { fetchImpl: mockAccountSession("Ada@Example.com") });
@@ -146,8 +146,8 @@ describe("/api/auth/visitor dashboard access", () => {
 
     await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
 
-    expect(await team.roleOf({ platform: "rome-cloud", accountId: "acct-1" })).toBe("teammate");
-    expect((await team.members())[0]).toMatchObject({
+    expect(await access.roleOf({ platform: "rome-cloud", accountId: "acct-1" })).toBe("teammate");
+    expect((await access.members())[0]).toMatchObject({
       identity: { id: ada.id, avatarUrl: "https://example.com/avatar.png" },
       accounts: [
         { platform: "email", accountId: "ada@example.com" },

@@ -15,7 +15,7 @@ import {
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../access/guardian-auth-state.js";
-import { putSeatOnTeam } from "../../access/team-members.js";
+import { putSeatOnTeam } from "../../access/access.js";
 import {
   backgroundNote,
   followRequest,
