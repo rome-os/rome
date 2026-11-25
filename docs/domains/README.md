@@ -14,6 +14,7 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
 | **Identity** | Which person an account belongs to, and which accounts are a person's | [identity.md](identity.md) |
+| **Access** | Who is on the team, and with which role | [access.md](access.md) |
 
 ```mermaid
 flowchart LR
@@ -91,7 +92,8 @@ The language is the model. The code holds most of it and owes the rest. A reader
 
 Diffs still owed to the model, each a change of its own:
 
-- Nothing reads or writes [Identity](identity.md) yet. The parts that work with a person move onto it one at a time.
+- Only the [team](access.md#team) reads or writes [Identity](identity.md) yet. The parts that work with a person move onto it one at a time.
+- Every check of who is on the team still reads the guardian's seat and the dashboard allow-list. The [team](access.md#team) is kept in line with them, and nothing reads it yet.
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.

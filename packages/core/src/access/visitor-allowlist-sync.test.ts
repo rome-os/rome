@@ -3,6 +3,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { DashboardAccessStore } from "./dashboard-access-store.js";
+import { createTeam } from "./team-members.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allowlist-sync.js";
 
 const ORIGIN = "https://cloud.test";
@@ -428,6 +429,43 @@ describe("DashboardAccessStore", () => {
       { emails: ["b@example.com"], revision: 6 },
     ]);
     expect(await store.read()).toEqual({ emails: ["b@example.com"], revision: 6 });
+  });
+
+  it("leaves the team's teammates equal to the list after every save, in save order", async () => {
+    const team = createTeam(testDb.db);
+    await team.ensureGuardian({
+      accounts: [{ platform: "email", accountId: "owner@example.com" }],
+    });
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), team);
+    const teammates = async () =>
+      (await team.members())
+        .filter((member) => member.role === "teammate")
+        .flatMap((member) => member.accounts.map((account) => account.accountId));
+
+    await Promise.all([
+      store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }),
+      store.save({ cloudEmailAccess: ["lin@example.com", "owner@example.com"] }),
+    ]);
+
+    expect(await teammates()).toEqual(["lin@example.com"]);
+    expect(await team.roleOf({ platform: "email", accountId: "owner@example.com" })).toBe(
+      "guardian",
+    );
+    await store.save({ cloudEmailAccess: [] });
+    expect(await teammates()).toEqual([]);
+  });
+
+  it("keeps the saved list when the team cannot follow it", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), {
+      setTeammateEmails: async () => {
+        throw new Error("team store down");
+      },
+    });
+
+    const saved = await store.save({ cloudEmailAccess: ["ada@example.com"] });
+
+    expect(await store.read()).toEqual(saved);
+    expect(saved.emails).toEqual(["ada@example.com"]);
   });
 });
 

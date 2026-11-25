@@ -15,6 +15,7 @@ import {
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../access/guardian-auth-state.js";
+import { putSeatOnTeam } from "../../access/team-members.js";
 import {
   backgroundNote,
   followRequest,
@@ -583,6 +584,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
     const survey = await readSurvey();
     const guardianName = survey?.guardianName ?? defaultGuardianName(identity);
+    await putSeatOnTeam(deps.db, { ...identity, name: guardianName });
     await applySetupDefaults(
       guardianName,
       {

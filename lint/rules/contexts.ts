@@ -8,7 +8,7 @@
 import type { ImportRule, ListedCrossing } from "../import-rules.js";
 
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  access: ["instance"],
+  access: ["identity", "instance"],
   agent: ["instance"],
   "app-host": [
     "access",

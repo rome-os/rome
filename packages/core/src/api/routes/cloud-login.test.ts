@@ -62,7 +62,8 @@ import {
 } from "../../instance/instance-identity.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { CloudProfileService } from "../../instance/cloud-profile.js";
-import { guardianAuth, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { guardianAuth, identities, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { createTeam } from "../../access/team-members.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
@@ -82,6 +83,7 @@ beforeEach(() => {
   testDb.db.delete(persons).run();
   testDb.db.delete(settings).run();
   testDb.db.delete(visitorProfiles).run();
+  testDb.db.delete(identities).run();
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
@@ -624,6 +626,21 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
 
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Alex Doe");
     expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
+  });
+
+  it("puts the guardian on the team with the seat's Rome Cloud account and email", async () => {
+    await signInFresh({ name: "Alex Doe", email: "Alex@Example.com" });
+
+    expect(await createTeam(testDb.db).members()).toEqual([
+      {
+        identity: expect.objectContaining({ name: "Alex Doe" }),
+        role: "guardian",
+        accounts: [
+          { platform: "email", accountId: "alex@example.com" },
+          { platform: "rome-cloud", accountId: "A" },
+        ],
+      },
+    ]);
   });
 
   it("falls back to the email local part when the id_token has no name claim", async () => {

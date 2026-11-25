@@ -190,6 +190,27 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
+ * The team: each person on it and their role (docs/domains/access.md#team).
+ * Deleting the person takes them off the team. The partial unique index holds
+ * the team to one guardian.
+ */
+export const teamMembers = sqliteTable(
+  "team_members",
+  {
+    identityId: text("identity_id")
+      .primaryKey()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["guardian", "teammate"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_team_members_one_guardian")
+      .on(table.role)
+      .where(sql`${table.role} = 'guardian'`),
+  ],
+);
+
+/**
  * What a platform says about an account: its display name, handle and avatar
  * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
  * account itself, the platform and the platform's own id. It has no id of its

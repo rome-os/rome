@@ -5,7 +5,11 @@ import {
   readDashboardAccessRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
+import { createLogger } from "../logger.js";
+import type { Team } from "./team-members.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
+
+const log = createLogger("dashboard-access-store");
 
 /** The dashboard allow-list as Rome Cloud receives it, with the revision it was saved under. */
 export interface VisitorAllowList {
@@ -22,17 +26,25 @@ export interface VisitorAllowList {
  * The record replaces an older one keyed by email alone, which missed an email
  * signing in with a new account. That record is dropped on the next write, so
  * each listed visitor's next sign-in counts as a new account once.
+ *
+ * Each save also makes `team`'s teammates the listed emails, in the same turn
+ * of the queue, so the team follows saves in the order they were stored.
  */
 export class DashboardAccessStore {
   private chain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">) {}
+  constructor(
+    private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">,
+    private readonly team?: Pick<Team, "setTeammateEmails">,
+  ) {}
 
   async read(): Promise<VisitorAllowList> {
     return toAllowList(await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY));
   }
 
-  /** Stores the config under the next revision. */
+  /** Stores the config under the next revision. A failure to bring the team
+   *  in line is logged and fails nothing, since the list is what every reader
+   *  uses, and the next startup brings the team in line again. */
   save(config: DashboardAccessConfig): Promise<VisitorAllowList> {
     return this.serialize(async () => {
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
@@ -47,6 +59,13 @@ export class DashboardAccessStore {
         ...config,
         revision,
         visitorAccounts,
+      });
+      await this.team?.setTeammateEmails(config.cloudEmailAccess).catch((err: unknown) => {
+        log.warn("team not brought in line with the saved allow-list", {
+          revision,
+          // The name only: a message can carry an email, and these logs carry none.
+          error: err instanceof Error ? err.name : "unknown",
+        });
       });
       return { emails: config.cloudEmailAccess, revision };
     });

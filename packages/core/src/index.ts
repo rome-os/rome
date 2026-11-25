@@ -160,7 +160,8 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { createIdentities } from "./identity/identities.js";
+import { createTeam } from "./access/team-members.js";
+import { backfillTeam } from "./access/team-backfill.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -519,9 +520,9 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  // Which person an account belongs to (docs/domains/identity.md). Nothing
-  // reads it yet.
-  const _identities = createIdentities(db);
+  // The team as persons with a role (docs/domains/access.md#team), on top of
+  // Identity. Kept beside the allow-list and the seat, and nothing reads it yet.
+  const team = createTeam(db);
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -2675,6 +2676,11 @@ async function main() {
   // Question cards stored before cards were described as data get their
   // description (src/webchat/question-card-backfill.ts).
   backfillQuestionCards(db);
+  // The team learns the guardian's seat and the allow-list. Nothing reads it
+  // yet, so a failure is logged and Rome starts (src/access/team-backfill.ts).
+  await backfillTeam(db).catch((err: unknown) => {
+    log.warn("team backfill failed", { error: err instanceof Error ? err.name : "unknown" });
+  });
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.
@@ -2814,7 +2820,7 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, team);
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
   });
