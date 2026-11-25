@@ -107,6 +107,8 @@ import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
+import { accountCodesVoidedIn } from "../chats/connected-accounts/account-code-admission.js";
+import { accountCodeContext } from "../identity/application/account-codes.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import { AppKeyInjector } from "../apps/app-keys/injector.js";
@@ -819,6 +821,7 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
+    voidAccountCodesIn: accountCodesVoidedIn({ codes: accountCodeContext(db) }),
     chats: chatsWired.chats,
     messages: chatsWired.messages,
     recording: {

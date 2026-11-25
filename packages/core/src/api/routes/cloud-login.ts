@@ -403,7 +403,9 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           return c.redirect(errorRedirect("iss"));
         }
         if (deps.dashboardAccessState.hasCloudEmailAccess()) {
-          const authorizeUrl = beginDashboardVisitorFlow();
+          // Ends where the guardian's sign-in does, so the page the member
+          // was sent to sign in from opens next (useCloudLoginReturn).
+          const authorizeUrl = beginDashboardVisitorFlow(successRedirect());
           if (authorizeUrl) {
             log.info("cloud login not-owner; dispatching to dashboard admin flow");
             return c.redirect(authorizeUrl);

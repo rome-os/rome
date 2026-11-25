@@ -30,10 +30,17 @@ import type {
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
-import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import {
+  type Admission,
+  type MessageEntry,
+  OrderedAdmission,
+  type OrderedAdmissionOptions,
+} from "./admission.js";
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
+import { markArrival } from "../../participation/entrance.js";
+import type { Entry } from "../../participation/entry.js";
 import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
@@ -49,6 +56,10 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
+  /** Whether each admitted message is let in, asked once before any subscriber
+   *  hears it. The event is marked with the answer (participation/entrance.ts).
+   *  Absent, no event is marked. */
+  entry?: MessageEntry;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
@@ -343,7 +354,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // One talker subscription per Connection, fanned out to every handler. A new
   // epoch starts with no handlers, so each unlock subscribes again (R5).
   const attached = new Map<string, () => void>();
-  const admission = new OrderedAdmission(deps.admit, deps.admission);
+  const admission = new OrderedAdmission(deps.admit, deps.admission, deps.entry);
 
   // Each subscription's buffer hears one conversation's events one at a time,
   // in the order they are pushed here, which admission keeps as arrival
@@ -356,7 +367,11 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // stopping it.
   const dispatchFrom =
     (connectionId: string) =>
-    async (message: ChannelMessage): Promise<void> => {
+    async (
+      message: ChannelMessage,
+      entry: Entry | undefined,
+      automated: boolean,
+    ): Promise<void> => {
       // A talker delivers the channel's own record, inbound, named after its
       // connection kind. The event names the channel and the account it
       // arrived on.
@@ -365,11 +380,12 @@ function connectionInbound(backing: Backing): ChannelInbound {
       // A message with nothing to answer still says who sent it.
       deps.heard?.(named);
       if (!isAnswerable(message)) return;
-      const event: InboundEvent = {
+      const heard: InboundEvent = {
         kind: "message",
         message: named,
         ref: { connectionId, chatId: message.chatId },
       };
+      const event = entry ? markArrival(heard, { entry, automated }) : heard;
       // Waited on from before any subscriber can hear it, so its recording
       // cannot come first.
       const accepted = deps.accepted?.(channel, {
@@ -403,7 +419,9 @@ function connectionInbound(backing: Backing): ChannelInbound {
     if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
-      admission.deliver(connection, channelMessageOf(message, channel), dispatch),
+      admission.deliver(connection, channelMessageOf(message, channel), (heard, entry) =>
+        dispatch(heard, entry, message.sender.isBot === true || message.sender.viaApp === true),
+      ),
     );
     if (detach) attached.set(connection.id, detach);
   };

@@ -190,6 +190,25 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
+ * Open codes for adding an account to a person (docs/domains/identity.md#account-code).
+ * Keyed by a hash of the code, never the code. One row per person: a new code
+ * replaces the earlier one, and deleting the person deletes their row.
+ */
+export const accountCodes = sqliteTable(
+  "account_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("idx_account_codes_person").on(table.personId)],
+);
+
+/**
  * The members: each person with a role in this Rome (docs/domains/access.md#member).
  * Deleting the person deletes their row. The partial unique index holds the
  * Rome to one guardian.
@@ -500,8 +519,10 @@ export const guardianAuth = sqliteTable("guardian_auth", {
 
 // The last Rome Cloud profile each visitor signed in with, kept so other
 // dashboard people see who sent a chat message. A visitor's own session holds
-// the same fields, but only in their cookie. Display only, never used for
-// authentication; a sign-in overwrites the row.
+// the same fields, but only in their cookie. Never used to sign anyone in. A
+// member's message on a platform is theirs as the account their email last
+// signed in with here (access/application/account-entry.ts). A sign-in
+// overwrites the row.
 export const visitorProfiles = sqliteTable("visitor_profiles", {
   accountId: text("account_id").primaryKey(),
   email: text("email").notNull(),

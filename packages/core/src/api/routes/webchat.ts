@@ -115,6 +115,7 @@ import {
 import {
   currentChatOwner,
   currentSessionActor,
+  guardianActor,
   sessionOwnerKey,
   type SessionActor,
 } from "../../access/session-actor.js";
@@ -3796,6 +3797,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (prompt.length > TURN_BRANCH_PROMPT_MAX_LENGTH) {
       return c.json({ error: `prompt too long (max ${TURN_BRANCH_PROMPT_MAX_LENGTH} chars)` }, 400);
     }
+    await deps.voidAccountCodesIn(prompt);
 
     const started = await startForkedSession({
       session,
@@ -3896,6 +3898,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       comment = trimmed.length === 0 ? null : trimmed;
     }
+    if (comment) await deps.voidAccountCodesIn(comment);
 
     const stored = await deps.webchatRepo.insertTurnFeedback(
       sessionId,
@@ -4251,6 +4254,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return row ? ((await tasks?.getWithChat(row.id))?.conciergeChat.id ?? null) : null;
   };
 
+  // A code a person types into a dashboard chat is dead before the message is
+  // recorded or reaches an agent (docs/domains/identity.md#account-code):
+  // the text, the quote it replies with, a card's answer and each file's name.
+  const voidAccountCodesInSend = (body: SendBody): Promise<void> =>
+    deps.voidAccountCodesIn(
+      [
+        body.text,
+        body.replyQuote,
+        Array.isArray(body.parts) ? JSON.stringify(body.parts) : undefined,
+        ...(Array.isArray(body.files) ? body.files.map((file) => file?.name) : []),
+      ]
+        .filter((text): text is string => typeof text === "string")
+        .join("\n"),
+    );
+
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
@@ -4258,6 +4276,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       saidBy?: Account;
       fromWidgetEvent?: boolean;
       askingDeviceId?: string;
+      /** The person the message is from, when no request of theirs sends it. */
+      sender?: SessionActor;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
       /** Gets the turn this input starts or joins, once the input is submitted. */
@@ -4271,7 +4291,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // A Concierge turn's timing starts when the owner's send reaches Rome.
     const receivedAtMs = Date.now();
-    const actor = said.taskActor ?? (await currentSessionActor());
+    const actor = said.taskActor ?? said.sender ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -4337,6 +4357,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     ) {
       return answer({ error: "session id and text or files are required" }, 400);
     }
+
+    await voidAccountCodesInSend(body);
 
     const session = await findContinuableSession(sessionId);
     if (!session) return answer({ error: "Session not found" }, 404);
@@ -4680,8 +4702,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: sessionProjectName,
         projectPath: sessionProjectPath,
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-        // The web dashboard is guardian-only, so a webchat turn is always from
-        // the guardian.
+        // Only the guardian and members write on the dashboard, and the
+        // dashboard answers each of them as the guardian.
         senderBondLevel: "guardian",
       },
       // The guardian's own message names its device; a task chat's message
@@ -5978,8 +6000,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     async sendAsGuardian(chatId, text) {
+      const sender = await guardianActor(deps.db);
+      if (!sender) throw new Error("No guardian to send as");
       const inputId = randomUUID();
-      const sent = await handleChatSend(chatId, { inputId, text });
+      const sent = await handleChatSend(chatId, { inputId, text }, { sender });
       if (sent.status < 400) return;
       // Once the input is recorded it is said, even when the agent could not be woken on it.
       if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {

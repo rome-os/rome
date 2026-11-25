@@ -74,6 +74,7 @@ import { projectsFilesRoutes } from "./routes/projects-files.js";
 import { syncRoutes } from "./routes/sync.js";
 import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
+import { accountCodesRoutes } from "./routes/account-codes.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
 import { appHomeScreenRoutes } from "./routes/app-home-screen.js";
@@ -185,6 +186,7 @@ export function buildApp(
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
   api.route("/", dashboardAccessRoutes(deps));
+  api.route("/", accountCodesRoutes(deps));
   api.route("/", aiToolsRoutes(deps));
   api.route("/", actionsRoutes(deps));
   api.route("/", appsRoutes(deps));

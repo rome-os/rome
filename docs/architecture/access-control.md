@@ -14,6 +14,7 @@ Two policies decide reach, each held as its own setting:
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
 - Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
+- A failed lookup of a session is a person Rome cannot tell, who never acts as the guardian. Who may write is the entry check's.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/people.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
@@ -22,13 +23,14 @@ Two policies decide reach, each held as its own setting:
 
 ## Entry
 
-Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). It is asked once on each boundary, and what is inside asks nothing.
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)). It is asked once on each boundary, and what is inside asks nothing.
 
 ### Invariants
 
 - Every `/api` request passes the entry step, `requireEntry` in `packages/core/src/access/require-entry.ts`, before its route. The public paths and an app's, which follow the app's own access, need no entry. `packages/core/src/api/ways-in.ts` lists both, for the step and the verify probe alike, and any other path needs entry. A route may still ask for more than entry, such as the guardian.
 - Every WebSocket upgrade but an app's passes `gateUpgrade`. Onboarding and visitor sign-in, on public paths, read the allow-list themselves.
-- The answer holds for what was asked about: one request or one connection. Nothing else keeps it.
+- A message a connection delivers passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once, before anything else hears it. The answer stays on the message's event. Nothing acts on it yet.
+- The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.
 - A live connection is asked about once, when it opens. One a member has open when they are removed stays open until it closes, a known limitation. Their next request or connection is refused.
 
