@@ -30,7 +30,7 @@ import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";
 import { settings } from "../../db/schema.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import { invitedEmailsSaved, memberContext } from "../../access/application/members.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(
@@ -97,12 +97,11 @@ async function stubDeps(
     list: () => Array.from(map.values()),
     subscribe: () => () => {},
   } as unknown as AppCatalog;
-  // Drive the allow-lists through persisted settings: buildTestDeps snapshots
-  // them the way the daemon does at boot, so these tests exercise the real load
-  // path instead of patching access state by hand. The DB is shared
-  // module-wide — reset the rows so each test's deps see only their own policy.
+  // Drive the allow-lists through persisted settings and members: buildTestDeps
+  // snapshots them the way the daemon does at boot, so these tests exercise the
+  // real load path instead of patching access state by hand. The DB is shared
+  // module-wide — reset them so each test's deps see only their own policy.
   testDb.db.delete(settings).where(eq(settings.key, "publicAccess")).run();
-  testDb.db.delete(settings).where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY)).run();
   if (options.allowedApps || options.cloudEmailAccess) {
     testDb.db
       .insert(settings)
@@ -116,18 +115,7 @@ async function stubDeps(
       })
       .run();
   }
-  if (options.dashboardEmailAccess) {
-    testDb.db
-      .insert(settings)
-      .values({
-        key: DASHBOARD_ACCESS_SETTING_KEY,
-        value: {
-          cloudEmailAccess: options.dashboardEmailAccess,
-        },
-        updatedAt: new Date(),
-      })
-      .run();
-  }
+  await invitedEmailsSaved(memberContext(testDb.db), options.dashboardEmailAccess ?? []);
   return { ...(await buildTestDeps(testDb.db)), appCatalog: catalog };
 }
 

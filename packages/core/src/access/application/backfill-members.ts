@@ -1,11 +1,13 @@
 // The members' starting data: the persons and roles the guardian's seat,
-// People's links to the guardian and the dashboard allow-list say today
-// (docs/domains/access.md). It runs at every startup, after migrations, and a
-// run on members that already match changes nothing, so it also repairs a
-// step that failed beside its seat or list write.
+// People's links to the guardian and the invited emails an older build kept
+// in the `dashboardAccess` setting say (docs/domains/access.md). It runs at
+// every startup, after migrations, and a run on members that already match
+// changes nothing, so it also repairs a step that failed beside a seat write
+// or a sign-in. The invited emails are read only on the first run: from then
+// on the members are their source, and a `settings` key records that run.
 
 import { and, eq, sql } from "drizzle-orm";
-import { type DrizzleDb, inTransaction } from "../../db/index.js";
+import type { DrizzleDb } from "../../db/index.js";
 import { guardianAuth, links, persons, settings, visitorProfiles } from "../../db/schema.js";
 import { AccountTakenError } from "../../identity/identity.js";
 import { createLogger } from "../../logger.js";
@@ -15,8 +17,10 @@ import {
 } from "../dashboard-access-config.js";
 import {
   guardianSeatCreated,
+  inOneTransaction,
   invitedEmailsSaved,
   memberContext,
+  memberEmails,
   memberSignedIn,
   ROME_CLOUD_PLATFORM,
   seatAccounts,
@@ -24,20 +28,24 @@ import {
 
 const log = createLogger("members-backfill");
 
+/** Set in `settings` once the invited emails have become members. */
+const INVITED_EMAILS_DONE_KEY = "backfill.membersFromInvitedEmails";
+
 /**
- * Brings the members in line with the guardian's seat and the dashboard
- * allow-list, in one transaction. The guardian gets the seat's Rome Cloud
+ * Brings the members in line with the guardian's seat and, on its first run,
+ * the invited emails, in one transaction. The guardian gets the seat's Rome Cloud
  * account and email and every account People links to its guardian person,
  * as an agent's own account excepted. Its only Rome Cloud account is the
  * seat's: Rome Cloud accounts come only from a seat or a sign-in, never from
  * People, so any other one on the guardian is taken away. It takes no account
  * on another platform: Identity cannot tell an earlier seat's email from the
  * same address carried from People, so only the step beside a seat's rebind,
- * which knows the old values, takes them away. Each listed email becomes a
- * member, and each member but the guardian gets each Rome Cloud account a
- * visitor signed in with under their email. A member off the list is removed. An
- * account that would land on two persons stays with or moves to the guardian,
- * and the run logs it.
+ * which knows the old values, takes them away. On the first run, each invited
+ * email becomes a member and a member off the list is removed; later runs
+ * leave who is a member alone. Each member but the guardian gets each Rome
+ * Cloud account a visitor signed in with under their email. An account that
+ * would land on two persons stays with or moves to the guardian, and the run
+ * logs it.
  */
 export async function backfillMembers(db: DrizzleDb): Promise<void> {
   await inOneTransaction(db, async () => {
@@ -82,13 +90,23 @@ export async function backfillMembers(db: DrizzleDb): Promise<void> {
       }
     }
 
-    const stored = db
-      .select({ value: settings.value })
+    const done = db
+      .select({ key: settings.key })
       .from(settings)
-      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+      .where(eq(settings.key, INVITED_EMAILS_DONE_KEY))
       .get();
-    const emails = normalizeDashboardAccessConfig(stored?.value).cloudEmailAccess;
-    await invitedEmailsSaved(ctx, emails);
+    if (!done) {
+      const stored = db
+        .select({ value: settings.value })
+        .from(settings)
+        .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+        .get();
+      await invitedEmailsSaved(ctx, normalizeDashboardAccessConfig(stored?.value).cloudEmailAccess);
+      db.insert(settings)
+        .values({ key: INVITED_EMAILS_DONE_KEY, value: true, updatedAt: new Date() })
+        .run();
+    }
+    const emails = await memberEmails(ctx);
 
     const signedIn = emails.length
       ? db
@@ -117,25 +135,10 @@ export async function backfillMembers(db: DrizzleDb): Promise<void> {
       }
     }
 
-    log.info("members brought in line with the guardian's seat and the allow-list", {
+    log.info("members brought in line with the guardian's seat", {
       guardian: seat !== undefined,
+      invitedEmailsRead: !done,
       members: emails.length,
     });
   });
-}
-
-// better-sqlite3 runs a transaction function synchronously, and the Access and
-// Identity calls are async, so the transaction is opened by hand. Every call
-// inside settles without waiting on I/O, so no timer or I/O callback runs
-// before COMMIT or ROLLBACK, and Identity's own transactions nest as savepoints.
-async function inOneTransaction(db: DrizzleDb, work: () => Promise<void>): Promise<void> {
-  if (inTransaction(db)) throw new Error("The members backfill opens its own transaction");
-  db.run(sql`BEGIN IMMEDIATE`);
-  try {
-    await work();
-    db.run(sql`COMMIT`);
-  } catch (err) {
-    db.run(sql`ROLLBACK`);
-    throw err;
-  }
 }

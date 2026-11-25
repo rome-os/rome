@@ -6,10 +6,6 @@ export interface DashboardAccessConfig {
 
 export const DASHBOARD_ACCESS_SETTING_KEY = "dashboardAccess";
 
-export const DEFAULT_DASHBOARD_ACCESS_CONFIG: DashboardAccessConfig = {
-  cloudEmailAccess: [],
-};
-
 function normalizeEmailList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return Array.from(
@@ -25,9 +21,9 @@ export function normalizeDashboardAccessConfig(raw: unknown): DashboardAccessCon
 }
 
 /**
- * The save counter stored beside the allow-list in the same setting row. Every
- * save bumps it, and Rome Cloud drops a visitor list older than the one it holds.
- * The config API never exposes it.
+ * The save counter stored in the `dashboardAccess` setting row. Every save of
+ * the invited emails bumps it, and Rome Cloud drops a visitor list older than
+ * the one it holds. The config API never exposes it.
  */
 export function readDashboardAccessRevision(raw: unknown): number {
   const revision = (raw as { revision?: unknown } | null)?.revision;

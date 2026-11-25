@@ -2,7 +2,8 @@
 // says which person an account is, Access which role that person has.
 // Vocabulary: docs/domains/access.md.
 
-import type { DrizzleDb } from "../../db/index.js";
+import { sql } from "drizzle-orm";
+import { type DrizzleDb, inTransaction } from "../../db/index.js";
 import {
   type Account,
   createIdentity,
@@ -70,6 +71,19 @@ export async function listMembers({ identity, access }: MemberContext): Promise<
     listed.push({ person, role, accounts: await identity.accountsOf(personId) });
   }
   return listed;
+}
+
+/** The email of every account of every person with role member, sorted. The
+ *  guardian's are not among them: the guardian's seat says who the guardian is. */
+export async function memberEmails({ identity, access }: MemberContext): Promise<string[]> {
+  const emails: string[] = [];
+  for (const { personId, role } of await access.members()) {
+    if (role !== "member") continue;
+    for (const account of await identity.accountsOf(personId)) {
+      if (account.platform === "email") emails.push(account.accountId);
+    }
+  }
+  return emails.sort();
 }
 
 /**
@@ -203,6 +217,27 @@ export async function memberSignedIn(
  */
 export function logStepFailure(message: string): (err: unknown) => void {
   return (err) => log.warn(message, { error: err instanceof Error ? err.name : "unknown" });
+}
+
+/**
+ * Runs `work`, made of Access and Identity calls on `db`, in one transaction
+ * that it commits, or rolls back when `work` rejects. Rejects when `db` is
+ * already in a transaction.
+ */
+// better-sqlite3 runs a transaction function synchronously, and the Access and
+// Identity calls are async, so the transaction is opened by hand. Every call
+// inside settles without waiting on I/O, so no timer or I/O callback runs
+// before COMMIT or ROLLBACK, and Identity's own transactions nest as savepoints.
+export async function inOneTransaction(db: DrizzleDb, work: () => Promise<void>): Promise<void> {
+  if (inTransaction(db)) throw new Error("A members transaction cannot open inside another");
+  db.run(sql`BEGIN IMMEDIATE`);
+  try {
+    await work();
+    db.run(sql`COMMIT`);
+  } catch (err) {
+    db.run(sql`ROLLBACK`);
+    throw err;
+  }
 }
 
 async function giveGuardian(identity: Identity, guardianId: string, account: Account) {

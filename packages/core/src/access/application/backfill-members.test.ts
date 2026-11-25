@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import {
   guardianAuth,
   identities,
@@ -11,7 +12,10 @@ import {
 } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { SettingsRepository } from "../../db/repositories/settings.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../dashboard-access-config.js";
+import { DashboardAccessState } from "../dashboard-access-state.js";
+import { DashboardAccessStore } from "../dashboard-access-store.js";
 import { backfillMembers } from "./backfill-members.js";
 import { listMembers, memberContext, roleOfAccount } from "./members.js";
 
@@ -125,7 +129,7 @@ describe("backfillMembers", () => {
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("removes a member off the list on the next run", async () => {
+  it("reads the invited emails only on its first run", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -133,17 +137,71 @@ describe("backfillMembers", () => {
 
     db.update(settings)
       .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 4 } })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
       .run();
     await backfillMembers(db);
 
     const ctx = memberContext(db);
-    expect(
-      await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" }),
-    ).toBeNull();
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-ada" })).toBeNull();
-    expect(await roleOfAccount(ctx, { platform: "email", accountId: "lin@example.com" })).toBe(
+    expect(await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" })).toBe(
       "member",
     );
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-ada" })).toBe(
+      "member",
+    );
+  });
+
+  it("changes nothing on members an older build already brought in line with the list", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    // An older build kept the members in line with the list but recorded no run.
+    db.delete(settings).where(eq(settings.key, "backfill.membersFromInvitedEmails")).run();
+    const before = snapshot(db);
+
+    await backfillMembers(db);
+
+    expect(snapshot(db)).toEqual(before);
+  });
+
+  it("keeps an email invited after the first run a member across a restart, and a removed one removed", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    const restart = async () => {
+      await backfillMembers(db);
+      const state = new DashboardAccessState();
+      await state.load(db);
+      return state;
+    };
+
+    await store.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com", "kim@example.com"],
+    });
+    let state = await restart();
+    expect(state.isCloudEmailAllowed("kim@example.com")).toBe(true);
+    expect(
+      await roleOfAccount(memberContext(db), { platform: "email", accountId: "kim@example.com" }),
+    ).toBe("member");
+
+    await store.save({ cloudEmailAccess: ["lin@example.com", "kim@example.com"] });
+    state = await restart();
+    expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
+    expect(
+      await roleOfAccount(memberContext(db), { platform: "email", accountId: "ada@example.com" }),
+    ).toBeNull();
+    expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
+
+    // The list an older build wrote stays as it was.
+    expect(
+      (
+        await new SettingsRepository(db).get<{ cloudEmailAccess: string[] }>(
+          DASHBOARD_ACCESS_SETTING_KEY,
+        )
+      )?.cloudEmailAccess,
+    ).toEqual(["ada@example.com", "lin@example.com", "owner@example.com"]);
   });
 
   it("gives the guardian no Rome Cloud account a visitor signed in with under the guardian's email", async () => {

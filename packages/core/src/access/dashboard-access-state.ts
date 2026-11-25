@@ -1,20 +1,15 @@
-import { eq } from "drizzle-orm";
-import { settings } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import {
-  DASHBOARD_ACCESS_SETTING_KEY,
-  DEFAULT_DASHBOARD_ACCESS_CONFIG,
-  normalizeDashboardAccessConfig,
-  type DashboardAccessConfig,
-} from "./dashboard-access-config.js";
+import { memberContext, memberEmails } from "./application/members.js";
+import type { DashboardAccessConfig } from "./dashboard-access-config.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /**
- * In-memory cache of dashboard admin policy for the auth-edge probe.
+ * In-memory copy of the members' emails for the auth-edge probe.
  *
  * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request,
- * so the probe can't afford a DB round-trip to read settings. This state
- * is loaded once at startup and refreshed by `/api/dashboard-access`.
+ * so the probe can't afford a DB round-trip. This state is loaded from the
+ * members once at startup and refreshed by `/api/dashboard-access`. It holds
+ * no guardian's email: the guardian's seat says who the guardian is.
  */
 export class DashboardAccessState {
   private cloudEmailAccess: Set<string> = new Set();
@@ -43,15 +38,8 @@ export class DashboardAccessState {
     this.setCloudEmailAccess(config.cloudEmailAccess);
   }
 
+  /** Replaces the emails with those of every member in `db`. */
   async load(db: DrizzleDb): Promise<void> {
-    const rows = await db
-      .select()
-      .from(settings)
-      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY));
-    const config =
-      rows.length > 0 && rows[0].value
-        ? normalizeDashboardAccessConfig(rows[0].value)
-        : DEFAULT_DASHBOARD_ACCESS_CONFIG;
-    this.setConfig(config);
+    this.setCloudEmailAccess(await memberEmails(memberContext(db)));
   }
 }

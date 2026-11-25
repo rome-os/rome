@@ -1,14 +1,19 @@
+import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
+  inOneTransaction,
+  invitedEmailsSaved,
+  type MemberContext,
+  memberContext,
+  memberEmails,
+  roleOfAccount,
+} from "./application/members.js";
+import {
   DASHBOARD_ACCESS_SETTING_KEY,
-  normalizeDashboardAccessConfig,
   readDashboardAccessRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { createLogger } from "../logger.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
-
-const log = createLogger("dashboard-access-store");
 
 /** The dashboard allow-list as Rome Cloud receives it, with the revision it was saved under. */
 export interface VisitorAllowList {
@@ -17,94 +22,103 @@ export interface VisitorAllowList {
 }
 
 /**
- * Owns the stored dashboard allow-list, its revision, and the Rome Cloud
- * account each listed email last signed in as a visitor with. Every write runs
- * one at a time, so each save gets its own revision and a raise or a sign-in
- * never loses a save.
+ * Saves the invited emails to the members, and owns the settings record that
+ * keeps the list's revision and the Rome Cloud account each member's email
+ * last signed in as a visitor with. The members are the one source of which
+ * emails are on the list. The record's own copy of the list stays as an older
+ * build wrote it, for a rollback, and is never read. Every write runs one at a
+ * time, so each save gets its own revision and a raise or a sign-in never
+ * loses a save.
  *
  * The record replaces an older one keyed by email alone, which missed an email
  * signing in with a new account. That record is dropped on the next write, so
  * each listed visitor's next sign-in counts as a new account once.
- *
- * Each save also hands the listed emails to `invitedEmailsSaved`, in the same
- * turn of the queue, so the members follow saves in the order they were stored.
  */
 export class DashboardAccessStore {
   private chain: Promise<unknown> = Promise.resolve();
+  private readonly members: MemberContext;
 
   constructor(
     private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">,
-    private readonly invitedEmailsSaved?: (emails: readonly string[]) => Promise<void>,
-  ) {}
-
-  async read(): Promise<VisitorAllowList> {
-    return toAllowList(await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY));
+    private readonly db: DrizzleDb,
+  ) {
+    this.members = memberContext(db);
   }
 
-  /** Stores the config under the next revision. A failure to bring the
-   *  members in line is logged and fails nothing, since the list is what every
-   *  reader uses, and the next startup brings the members in line again. */
+  async read(): Promise<VisitorAllowList> {
+    const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
+    return {
+      emails: await memberEmails(this.members),
+      revision: readDashboardAccessRevision(stored),
+    };
+  }
+
+  /**
+   * Makes the members the persons behind the config's emails, then stores the
+   * next revision, and answers the members' emails under it. Rejects,
+   * changing no member and storing no revision, when the members cannot be
+   * written.
+   */
   save(config: DashboardAccessConfig): Promise<VisitorAllowList> {
     return this.serialize(async () => {
+      await inOneTransaction(this.db, () =>
+        invitedEmailsSaved(this.members, config.cloudEmailAccess),
+      );
+      const emails = await memberEmails(this.members);
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
       const revision = readDashboardAccessRevision(stored) + 1;
       // An email taken off the list forgets its account, so adding it back
       // counts its next sign-in as a new account.
-      const listed = new Set(config.cloudEmailAccess);
+      const listed = new Set(emails);
       const visitorAccounts = Object.fromEntries(
         Object.entries(readVisitorAccounts(stored)).filter(([email]) => listed.has(email)),
       );
       await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-        ...config,
+        ...asRecord(stored),
         revision,
         visitorAccounts,
       });
-      await this.invitedEmailsSaved?.(config.cloudEmailAccess).catch((err: unknown) => {
-        log.warn("members not brought in line with the saved allow-list", {
-          revision,
-          // The name only: a message can carry an email, and these logs carry none.
-          error: err instanceof Error ? err.name : "unknown",
-        });
-      });
-      return { emails: config.cloudEmailAccess, revision };
+      return { emails, revision };
     });
   }
 
   /**
    * Moves the stored revision past one Rome Cloud already holds, keeping the
-   * list. Rome Cloud can hold a higher one after this instance's database was
-   * reset or restored from an older backup.
+   * members. Rome Cloud can hold a higher one after this instance's database
+   * was reset or restored from an older backup.
    */
   raisePast(floor: number): Promise<VisitorAllowList> {
     return this.serialize(async () => {
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-      const list = toAllowList(stored);
-      if (list.revision > floor) return list;
+      const emails = await memberEmails(this.members);
+      const current = readDashboardAccessRevision(stored);
+      if (current > floor) return { emails, revision: current };
       const revision = floor + 1;
       await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-        cloudEmailAccess: [...list.emails],
+        ...asRecord(stored),
         revision,
         visitorAccounts: readVisitorAccounts(stored),
       });
-      return { emails: list.emails, revision };
+      return { emails, revision };
     });
   }
 
   /**
-   * Records that a listed email signed in as a visitor with a Rome Cloud
+   * Records that a member's email signed in as a visitor with a Rome Cloud
    * account. True when that email has not signed in with that account before
-   * while on the list: its first sign-in, or one from an account made again
-   * or moved to the email since.
+   * while a member's: its first sign-in, or one from an account made again or
+   * moved to the email since.
    */
   recordVisitorSignIn(email: string, accountId: string): Promise<boolean> {
     const normalized = normalizeVisitorEmail(email);
     if (!normalized || !accountId) return Promise.resolve(false);
     return this.serialize(async () => {
+      const account = { platform: "email", accountId: normalized };
+      if ((await roleOfAccount(this.members, account)) !== "member") return false;
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-      if (!toAllowList(stored).emails.includes(normalized)) return false;
       const visitorAccounts = readVisitorAccounts(stored);
       if (visitorAccounts[normalized] === accountId) return false;
-      const { signedIn: _dropped, ...rest } = (stored ?? {}) as Record<string, unknown>;
+      const { signedIn: _dropped, ...rest } = asRecord(stored);
       await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
         ...rest,
         visitorAccounts: { ...visitorAccounts, [normalized]: accountId },
@@ -120,14 +134,14 @@ export class DashboardAccessStore {
   }
 }
 
-function toAllowList(stored: unknown): VisitorAllowList {
-  return {
-    emails: normalizeDashboardAccessConfig(stored).cloudEmailAccess,
-    revision: readDashboardAccessRevision(stored),
-  };
+// The stored record, kept whole so the list an older build wrote stays in it.
+function asRecord(stored: unknown): Record<string, unknown> {
+  return stored && typeof stored === "object" && !Array.isArray(stored)
+    ? (stored as Record<string, unknown>)
+    : {};
 }
 
-// Each listed email maps to the account it last signed in with.
+// Each member's email maps to the account it last signed in with.
 function readVisitorAccounts(stored: unknown): Record<string, string> {
   const raw = (stored as { visitorAccounts?: unknown } | null)?.visitorAccounts;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};

@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { dashboardAccessRoutes } from "./dashboard-access.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import {
+  guardianSeatCreated,
+  inviteMember,
+  listMembers,
+  memberContext,
+} from "../../access/application/members.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -29,10 +36,8 @@ describe("Dashboard-access API", () => {
     expect(await res.json()).toEqual({ cloudEmailAccess: [] });
   });
 
-  it("returns the normalized config when a row exists", async () => {
-    await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-      cloudEmailAccess: ["Ada@Example.com", "bad email", "ada@example.com"],
-    });
+  it("returns the members' emails, normalized", async () => {
+    await inviteMember(memberContext(testDb.db), "Ada@Example.com");
 
     const res = await app.request("/dashboard-access");
     expect(res.status).toBe(200);
@@ -77,12 +82,63 @@ describe("Dashboard-access API", () => {
     expect(pushed.map((list) => list.revision)).toEqual([1, 2, 3]);
     expect(pushed[2]).toEqual({ emails: [], revision: 3 });
     expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
-      cloudEmailAccess: [],
       revision: 3,
       visitorAccounts: {},
     });
     const getRes = await app.request("/dashboard-access");
     expect(await getRes.json()).toEqual({ cloudEmailAccess: [] });
+  });
+
+  it("saves the members, then hands the snapshot and Rome Cloud the same emails, the guardian's left out", async () => {
+    const ctx = memberContext(testDb.db);
+    await guardianSeatCreated(ctx, {
+      accounts: [{ platform: "email", accountId: "owner@example.com" }],
+    });
+    const pushed: Array<{ emails: readonly string[]; revision: number }> = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com", "Owner@Example.com"] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(
+      (await listMembers(ctx)).map((m) => ({
+        role: m.role,
+        emails: m.accounts.map((a) => a.accountId),
+      })),
+    ).toEqual([
+      { role: "guardian", emails: ["owner@example.com"] },
+      { role: "member", emails: ["lin@example.com"] },
+    ]);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    expect(pushed).toEqual([{ emails: ["lin@example.com"], revision: 1 }]);
+  });
+
+  it("fails the save when the members cannot be written, and tells neither the snapshot nor Rome Cloud", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
+    const pushed: unknown[] = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+    testDb.db.run(
+      sql`CREATE TRIGGER members_down BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'members down'); END`,
+    );
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }),
+    });
+
+    expect(res.status).toBe(500);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);
+    expect(pushed).toEqual([]);
+    expect(await deps.dashboardAccessStore.read()).toEqual({
+      emails: ["ada@example.com"],
+      revision: 1,
+    });
   });
 
   it("refuses a list past the limits and keeps the saved one", async () => {

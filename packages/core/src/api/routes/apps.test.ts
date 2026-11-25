@@ -24,6 +24,7 @@ import {
   createVisitorSession,
 } from "../../access/auth.js";
 import { settings } from "../../db/schema.js";
+import { inviteMember, memberContext } from "../../access/application/members.js";
 import * as appPublishing from "../../apps/publish.js";
 import { appApiDashboardRoutes } from "./app-api.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
@@ -239,14 +240,7 @@ describe("host app route authorization", () => {
         claimed: false,
       });
       try {
-        testDb.db
-          .insert(settings)
-          .values({
-            key: "dashboardAccess",
-            value: { cloudEmailAccess: ["owner@example.com"] },
-            updatedAt: new Date(),
-          })
-          .run();
+        await inviteMember(memberContext(testDb.db), "owner@example.com");
         const deps = {
           ...(await buildTestDeps(testDb.db)),
           appCatalog: catalogWith(buildResolvedApp("shared-app")),

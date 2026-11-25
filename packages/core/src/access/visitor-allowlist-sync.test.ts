@@ -1,10 +1,12 @@
 import { afterAll, describe, expect, it } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/helpers.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { DashboardAccessStore } from "./dashboard-access-store.js";
 import {
   guardianSeatCreated,
+  inviteMember,
   invitedEmailsSaved,
   listMembers,
   memberContext,
@@ -359,13 +361,11 @@ describe("syncStoredVisitorAllowList", () => {
 
   it("queues the stored list with its stored revision", async () => {
     const settingsRepo = new SettingsRepository(testDb.db);
-    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-      cloudEmailAccess: ["Ada@Example.com"],
-      revision: 9,
-    });
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision: 9 });
+    await inviteMember(memberContext(testDb.db), "Ada@Example.com");
     const pushed: unknown[] = [];
 
-    await syncStoredVisitorAllowList(new DashboardAccessStore(settingsRepo), {
+    await syncStoredVisitorAllowList(new DashboardAccessStore(settingsRepo, testDb.db), {
       push: (list) => pushed.push(list),
     });
 
@@ -385,7 +385,8 @@ describe("VisitorAllowListSync — Rome Cloud ahead", () => {
       cloudEmailAccess: ["ada@example.com"],
       revision: 2,
     });
-    const store = new DashboardAccessStore(settingsRepo);
+    await inviteMember(memberContext(testDb.db), "ada@example.com");
+    const store = new DashboardAccessStore(settingsRepo, testDb.db);
     const cloud = fakeCloud([], { held: 7 });
     const sync = new VisitorAllowListSync({
       getEnrollmentId: () => "enrollment-1",
@@ -419,7 +420,7 @@ describe("DashboardAccessStore", () => {
   afterAll(() => testDb.close());
 
   it("gives concurrent saves and raises their own revisions in order", async () => {
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
 
     const results = await Promise.all([
       store.save({ cloudEmailAccess: ["a@example.com"] }),
@@ -442,9 +443,7 @@ describe("DashboardAccessStore", () => {
     await guardianSeatCreated(ctx, {
       accounts: [{ platform: "email", accountId: "owner@example.com" }],
     });
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), (emails) =>
-      invitedEmailsSaved(ctx, emails),
-    );
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
     const listed = async () =>
       (await listMembers(ctx))
         .filter((member) => member.role === "member")
@@ -463,15 +462,25 @@ describe("DashboardAccessStore", () => {
     expect(await listed()).toEqual([]);
   });
 
-  it("keeps the saved list when the members cannot follow it", async () => {
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), async () => {
-      throw new Error("members store down");
-    });
+  it("rejects a save the members cannot follow, changing no member and no revision", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
+    const before = await store.save({ cloudEmailAccess: ["ada@example.com"] });
+    testDb.db.run(
+      sql`CREATE TRIGGER members_down BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'members down'); END`,
+    );
+    try {
+      await expect(
+        store.save({ cloudEmailAccess: ["lin@example.com", "kim@example.com"] }),
+      ).rejects.toThrow();
+    } finally {
+      testDb.db.run(sql`DROP TRIGGER members_down`);
+    }
 
-    const saved = await store.save({ cloudEmailAccess: ["ada@example.com"] });
-
-    expect(await store.read()).toEqual(saved);
-    expect(saved.emails).toEqual(["ada@example.com"]);
+    expect(await store.read()).toEqual(before);
+    const ctx = memberContext(testDb.db);
+    expect(await ctx.identity.personOf({ platform: "email", accountId: "lin@example.com" })).toBe(
+      null,
+    );
   });
 });
 
@@ -537,8 +546,9 @@ describe("VisitorAllowListSync — applied contract", () => {
 
   async function storeAt(revision: number, emails: string[]): Promise<DashboardAccessStore> {
     const settingsRepo = new SettingsRepository(testDb.db);
-    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { cloudEmailAccess: emails, revision });
-    return new DashboardAccessStore(settingsRepo);
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision });
+    await invitedEmailsSaved(memberContext(testDb.db), emails);
+    return new DashboardAccessStore(settingsRepo, testDb.db);
   }
 
   it("ends with Rome Cloud holding the newest list when a save lands during a boot send after a reset", async () => {
@@ -697,7 +707,7 @@ describe("DashboardAccessStore — visitor sign-ins", () => {
 
   it("counts a listed email's sign-in with a new account, and forgets it when the email leaves the list", async () => {
     const settingsRepo = new SettingsRepository(testDb.db);
-    const store = new DashboardAccessStore(settingsRepo);
+    const store = new DashboardAccessStore(settingsRepo, testDb.db);
     await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
 
     expect(await store.recordVisitorSignIn("Ada@Example.com", "acct-1")).toBe(true);
@@ -718,7 +728,7 @@ describe("DashboardAccessStore — visitor sign-ins", () => {
   });
 
   it("counts a re-registered account once: same email, new account id", async () => {
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
     await store.save({ cloudEmailAccess: ["mo@example.com"] });
 
     expect(await store.recordVisitorSignIn("mo@example.com", "acct-old")).toBe(true);
@@ -728,7 +738,7 @@ describe("DashboardAccessStore — visitor sign-ins", () => {
   });
 
   it("counts each change of the account an email belongs to", async () => {
-    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
     await store.save({ cloudEmailAccess: ["kim@example.com"] });
 
     expect(await store.recordVisitorSignIn("kim@example.com", "acct-a")).toBe(true);
@@ -740,7 +750,8 @@ describe("DashboardAccessStore — visitor sign-ins", () => {
 
   it("drops the older email-only sign-in record, so a listed visitor's next sign-in counts once", async () => {
     const settingsRepo = new SettingsRepository(testDb.db);
-    const store = new DashboardAccessStore(settingsRepo);
+    const store = new DashboardAccessStore(settingsRepo, testDb.db);
+    await inviteMember(memberContext(testDb.db), "ada@example.com");
     await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
       cloudEmailAccess: ["ada@example.com"],
       revision: 3,

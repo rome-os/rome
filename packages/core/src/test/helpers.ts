@@ -66,7 +66,6 @@ import { loadAppPermissions } from "../apps/app-permissions.js";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
-import { invitedEmailsSaved, memberContext } from "../access/application/members.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
@@ -768,9 +767,7 @@ export async function buildTestDeps(
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, (emails) =>
-    invitedEmailsSaved(memberContext(db), emails),
-  );
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, db);
   const visitorAllowListSync = new VisitorAllowListSync({
     getEnrollmentId: () => null,
     onLinkChanged: () => () => {},
