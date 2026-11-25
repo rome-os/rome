@@ -24,13 +24,12 @@ final class VoiceConversationLiveActivityPresence: VoiceConversationPresence {
     func show() {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        // One left by an app that was closed mid-conversation goes.
-        let leftovers = Set(Activity<VoiceConversationActivityAttributes>.activities.map(\.id))
         activity = try? Activity.request(
             attributes: VoiceConversationActivityAttributes(),
             content: ActivityContent(state: VoiceConversationActivityAttributes.ContentState(), staleDate: nil)
         )
-        Self.end(leftovers)
+        // One left by an app that was closed mid-conversation goes.
+        Self.end(VoiceConversationLeftovers.toEnd(showing: Self.showing, keeping: activity?.id))
         #endif
     }
 
@@ -42,7 +41,21 @@ final class VoiceConversationLiveActivityPresence: VoiceConversationPresence {
         #endif
     }
 
+    /// At launch no conversation runs, so an activity still showing was left
+    /// by an app killed or crashed mid-conversation: it goes at once, rather
+    /// than saying a conversation runs until iOS ends it hours later.
+    static func endLeftovers() {
+        #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+        end(VoiceConversationLeftovers.toEnd(showing: showing, keeping: nil))
+        #endif
+    }
+
     #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+    /// The ids of the voice conversation activities showing now.
+    private static var showing: [String] {
+        Activity<VoiceConversationActivityAttributes>.activities.map(\.id)
+    }
+
     /// Ends the activities with these ids. They are looked up again off the
     /// main actor, by id, since an `Activity` cannot cross between actors.
     private static func end(_ ids: Set<String>) {
@@ -54,4 +67,12 @@ final class VoiceConversationLiveActivityPresence: VoiceConversationPresence {
         }
     }
     #endif
+}
+
+/// Which voice conversation activities go: every one showing but the
+/// conversation's own. At launch none is kept.
+enum VoiceConversationLeftovers {
+    static func toEnd(showing: [String], keeping current: String?) -> Set<String> {
+        Set(showing.filter { $0 != current })
+    }
 }

@@ -309,6 +309,15 @@ import Testing
         #expect(controller.notice == .connectionLost)
     }
 
+    @Test func leftoverActivitiesGoAtLaunchAndWhenAConversationStarts() {
+        let showing = ["crashed", "earlier", "now"]
+        // At launch no conversation runs: every one showing goes.
+        #expect(VoiceConversationLeftovers.toEnd(showing: showing, keeping: nil) == ["crashed", "earlier", "now"])
+        // A conversation that starts keeps its own and ends the rest.
+        #expect(VoiceConversationLeftovers.toEnd(showing: showing, keeping: "now") == ["crashed", "earlier"])
+        #expect(VoiceConversationLeftovers.toEnd(showing: [], keeping: nil).isEmpty)
+    }
+
     @Test func aRunningConversationShowsOnTheLockScreenUntilItEnds() async {
         let presence = FakePresence()
         let audio = FakeAudio(allowed: true)
