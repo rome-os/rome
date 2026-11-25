@@ -652,7 +652,6 @@ export function startConciergeFollowing(
 
   const delivery = new ImportantDelivery({
     now,
-    isServed: (owner) => service.isServed(owner),
     quietUntil,
     owed: () => deps.items.owedToConcierge(),
     // One turn per Concierge chat, each counted against the hourly cap.
@@ -706,15 +705,7 @@ export function startConciergeFollowing(
       const owner = event.owner ?? GUARDIAN_OWNER;
       byOwner.set(owner, [...(byOwner.get(owner) ?? []), event]);
     }
-    for (const [owner, ownerEvents] of byOwner) {
-      // A dashboard admin dropped from the allow-list keeps their follows,
-      // but their events are not triaged or kept until they are back.
-      if (!(await service.isServed(owner))) {
-        log.info("following skipped an owner no longer served", { events: ownerEvents.length });
-        continue;
-      }
-      await triageFor(owner, ownerEvents);
-    }
+    for (const [owner, ownerEvents] of byOwner) await triageFor(owner, ownerEvents);
     await delivery.deliver();
   };
 
@@ -828,7 +819,6 @@ export function startConciergeFollowing(
    * its end, so one chat's failure leaves only its own owed.
    */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
-    if (!(await service.isServed(owner))) return { items: 0 };
     const owed = await deps.items.owedToDigest(owner);
     const at = guardianNow(now(), await timezoneOf(owner));
     const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
