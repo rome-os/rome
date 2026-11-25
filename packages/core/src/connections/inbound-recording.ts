@@ -51,6 +51,10 @@ export interface InboundRecordingDeps {
    *  before its raise, so without it a turn could read one whose wake is not
    *  decided yet. */
   hold: (messageId: number) => () => void;
+  /** Hears each message on record, with the platform's event, once for each of
+   *  Rome's accounts that heard it. Recording does not wait for it, and it must
+   *  not throw. */
+  onRecord?: (message: RecordedMessage, event: InboundEvent) => void;
 }
 
 export interface InboundRecording {
@@ -187,7 +191,9 @@ export function inboundRecording(
       letGo = undefined;
     };
     const hearingAs = `${via.channel}\0${recorded.id}`;
-    hearing.set(hearingAs, subscription.adapter.heard(message.chat.externalId, message.key));
+    const event = subscription.adapter.heard(message.chat.externalId, message.key);
+    hearing.set(hearingAs, event);
+    if (event) deps.onRecord?.(recorded, event);
     const place = placeOf(message);
     const queued = raising.get(place) ?? [];
     if (queued.length === RAISES_BACKING_UP) {
