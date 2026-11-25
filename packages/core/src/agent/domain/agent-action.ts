@@ -193,10 +193,6 @@ function buildActionSearchText(action: AgentAction): string {
   return [
     action.name,
     action.description,
-    action.type,
-    action.complexity,
-    action.speed,
-    action.reliability,
     action.sideEffects,
     action.requiresApproval ? "requires approval" : "",
     action.cancellable ? "cancellable" : "",

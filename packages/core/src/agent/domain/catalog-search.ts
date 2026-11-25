@@ -38,7 +38,10 @@ function parseRegexQuery(queryText: string): RegExp | null {
     return new RegExp(trimmed.slice(1, lastSlash), flags);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}. ${SEARCH_QUERY_FORM}`);
+    throw new Error(
+      `Invalid regex query: ${message}. In the /pattern/flags form, case is ignored only ` +
+        "with the i flag, as in /disconnect|unlink/i.",
+    );
   }
 }
 

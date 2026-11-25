@@ -11,6 +11,8 @@ export interface PcmPlayer {
   clear(): void;
   /** How loud the audio playing right now is, from 0 to 1. */
   level(): number;
+  /** Seconds until the audio queued so far has played. */
+  ahead(): number;
   /** Stops and releases the audio output. */
   close(): void;
 }
@@ -59,6 +61,9 @@ export function createPcmPlayer(): PcmPlayer {
       if (playing.size === 0) return 0;
       analyser.getFloatTimeDomainData(samples);
       return loudness(samples);
+    },
+    ahead() {
+      return Math.max(0, until - context.currentTime);
     },
     close() {
       this.clear();

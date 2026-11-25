@@ -170,6 +170,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func voiceInputInfo() async throws -> VoiceInputInfo?
     /// The instance's dictation socket, signed in; nil without a real instance.
     func voiceInputSocket() -> URLRequest?
+    /// Whether the instance offers a voice conversation; nil when it cannot say.
+    func voiceConversationInfo() async throws -> VoiceConversationInfo?
+    /// The instance's voice conversation socket, signed in; nil without a real instance.
+    func voiceConversationSocket() -> URLRequest?
     func sendFeedback(_ text: String) async throws
     func upgradeCheck() async throws -> UpgradeCheck
     func startUpgrade(target: String) async throws -> UpgradeStarted
@@ -566,6 +570,14 @@ final class LiveBackend: RomeBackend {
         client.socketRequest(VoiceInputWire.socketPath)
     }
 
+    func voiceConversationInfo() async throws -> VoiceConversationInfo? {
+        try await client.get("/voice-conversation")
+    }
+
+    func voiceConversationSocket() -> URLRequest? {
+        client.socketRequest(VoiceConversationWire.socketPath)
+    }
+
     func apps() async throws -> [InstalledApp] {
         let list: AppList = try await client.get("/apps")
         return list.apps
@@ -720,6 +732,8 @@ extension RomeBackend {
     /// Stand-ins have no voice input.
     func voiceInputInfo() async throws -> VoiceInputInfo? { nil }
     func voiceInputSocket() -> URLRequest? { nil }
+    func voiceConversationInfo() async throws -> VoiceConversationInfo? { nil }
+    func voiceConversationSocket() -> URLRequest? { nil }
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
     func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }

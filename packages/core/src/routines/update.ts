@@ -18,6 +18,7 @@ import {
   type CreateRoutineInput,
 } from "./create.js";
 import type { RoutineEngine } from "./engine.js";
+import { isSyncedRoutineKey } from "./synced-routine-key.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";
 
@@ -80,8 +81,9 @@ export interface RoutineChangeRequest {
 }
 
 /** Changes a routine's name, what it runs or when, each by the rules a new
- * routine meets. A routine an app manages keeps what it runs and when, and a
- * routine keeps the chat it works for. */
+ * routine meets. A routine an app manages, or one core keeps in line with the
+ * Concierge's records, keeps what it runs and when, and a routine keeps the
+ * chat it works for. */
 export async function changeRoutine(
   deps: Parameters<typeof updateRoutine>[0] &
     Pick<
@@ -99,6 +101,13 @@ export async function changeRoutine(
     return {
       status: "refused",
       error: `This routine is managed by the "${routine.managedBy}" app, which decides what it runs and when. Change it from that app.`,
+    };
+  }
+  if ((changesWhat || request.trigger) && isSyncedRoutineKey(routine.key)) {
+    return {
+      status: "refused",
+      error:
+        "This routine follows the Concierge's own records, which decide what it runs and when. Change a task's schedule with chat_update, and a follow or the digest with core:concierge_following_configure.",
     };
   }
 

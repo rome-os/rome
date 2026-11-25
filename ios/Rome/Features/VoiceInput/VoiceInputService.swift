@@ -12,6 +12,9 @@ final class VoiceInputService {
     /// Cloud, Rome Cloud does not allow the account, or the instance is older
     /// than voice input.
     private(set) var available = false
+    /// False hides the voice conversation control: the account is off Rome
+    /// Cloud's voice input list, or the instance is older than voice conversations.
+    private(set) var conversationAvailable = false
     /// What the instance last said, for Settings to name where speech goes.
     private(set) var info: VoiceInputInfo?
     private let backend: RomeBackend
@@ -20,6 +23,8 @@ final class VoiceInputService {
     /// opened before the next answer already has its voice control: one that
     /// appears late lands where the field's end was, under a tap meant for it.
     private let availableKey: String
+    /// The same for `conversationAvailable`.
+    private let conversationAvailableKey: String
     private var checkedAt: Date?
     /// Why listening stopped in a chat the guardian left, shown on return.
     private var leftNotices: [String: VoiceInputStop] = [:]
@@ -32,6 +37,8 @@ final class VoiceInputService {
         self.defaults = defaults
         availableKey = VoiceInputMarks.availablePrefix + instance
         available = defaults.bool(forKey: availableKey)
+        conversationAvailableKey = VoiceInputMarks.conversationAvailablePrefix + instance
+        conversationAvailable = defaults.bool(forKey: conversationAvailableKey)
         marks = VoiceInputMarks(instance: instance, defaults: defaults)
         // The app closed while these chats listened, or before their notice went.
         for (chat, stop) in marks.takeLaunchNotices() { leftNotices[chat] = stop }
@@ -55,9 +62,27 @@ final class VoiceInputService {
         }
         available = info?.available ?? false
         if available { defaults.set(true, forKey: availableKey) } else { defaults.removeObject(forKey: availableKey) }
+        await refreshConversation()
+    }
+
+    /// Asks whether the instance offers a voice conversation, which follows
+    /// the same list. Kept as it was when the instance cannot say now.
+    private func refreshConversation() async {
+        let offered: Bool
+        do {
+            offered = try await backend.voiceConversationInfo()?.available ?? false
+        } catch APIError.notFound {
+            // An instance older than voice conversations.
+            offered = false
+        } catch {
+            return
+        }
+        conversationAvailable = offered
+        if offered { defaults.set(true, forKey: conversationAvailableKey) } else { defaults.removeObject(forKey: conversationAvailableKey) }
     }
 
     func socketRequest() -> URLRequest? { backend.voiceInputSocket() }
+    func conversationSocketRequest() -> URLRequest? { backend.voiceConversationSocket() }
 
     func keep(_ stop: VoiceInputStop, for chat: String) { leftNotices[chat] = stop }
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
@@ -120,9 +145,11 @@ struct VoiceInputMarks {
         return notices
     }
 
-    /// Every instance's marks, and whether it offered voice input, on sign-out.
+    /// Every instance's marks, and whether it offered voice input and voice
+    /// conversations, on sign-out.
     static func removeAll(defaults: UserDefaults = .standard) {
-        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) || key.hasPrefix(availablePrefix) {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(prefix) || key.hasPrefix(availablePrefix) || key.hasPrefix(conversationAvailablePrefix) {
             defaults.removeObject(forKey: key)
         }
     }
@@ -130,6 +157,8 @@ struct VoiceInputMarks {
     private static let prefix = "voiceInput.marks."
     /// `VoiceInputService`'s last answer on whether the instance offers voice input.
     static let availablePrefix = "voiceInput.available."
+    /// `VoiceInputService`'s last answer on whether the instance offers a voice conversation.
+    static let conversationAvailablePrefix = "voiceConversation.available."
     private static let listening = "listening:"
 }
 

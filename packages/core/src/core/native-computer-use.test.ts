@@ -1792,6 +1792,14 @@ describe("native computer-use agent admission", () => {
       body,
     });
     const result = await f.call("observe", { sessionId, screenshot: true });
+    expect(content(result)).toMatchObject({
+      ok: true,
+      result: {
+        sessionId,
+        stateVersion: 1,
+        screenshot: image,
+      },
+    });
     expect(result.content[1]).toEqual({
       type: "image",
       mimeType: "image/png",
@@ -2033,5 +2041,169 @@ describe("native computer-use agent admission", () => {
       expect((await f.call("act", act(sessionId))).isError).toBe(true);
       expect(f.client.run.mock.calls).toHaveLength(calls);
     }
+  });
+
+  it("proactively cancels active bindings and clears windows when cancelDevice is called", async () => {
+    const f = fixture();
+    const sessionId = await f.bind();
+    f.client.run.mockResolvedValueOnce(
+      ok({ sessionId: "native-session", terminalCause: "cancelled", stopConfirmed: true }),
+    );
+    await f.service.cancelDevice("device");
+    expect(f.client.run).toHaveBeenLastCalledWith("device", "computer.cancel", {
+      sessionId: "native-session",
+    });
+    const afterRevoke = await f.call("observe", { sessionId });
+    expect(afterRevoke.isError).toBe(true);
+    expect(content(afterRevoke)).toMatchObject({ error: { code: "invalid_session" } });
+  });
+
+  it("scopes cancelDevice to the revoking guardian actor and invalidates locally before remote cancel settles", async () => {
+    const f = fixture();
+    const defaultGrant = { deviceId: "device", expiresAt: Number.MAX_SAFE_INTEGER };
+    const guardianA = turn({
+      sessionId: "session-a",
+      actor: () => ({ kind: "guardian", userId: "guardian-a" }),
+      computerUseGrant: () => defaultGrant,
+    });
+    const guardianB = turn({
+      sessionId: "session-b",
+      actor: () => ({ kind: "guardian", userId: "guardian-b" }),
+      computerUseGrant: () => defaultGrant,
+    });
+
+    let bindCounter = 0;
+    let resolveRemoteCancel!: (value: ActionResponse) => void;
+    const remoteCancelPending = new Promise<ActionResponse>((resolve) => {
+      resolveRemoteCancel = resolve;
+    });
+    f.client.run.mockImplementation(async (_device, action, args) => {
+      if (action === "computer.windows") {
+        return ok({ windows: [{ windowRef: "native-window", title: "Synthetic window" }] });
+      }
+      if (action === "computer.bind") {
+        bindCounter += 1;
+        return ok({ sessionId: `native-session-${bindCounter}`, scope: "background" });
+      }
+      if (action === "computer.observe") {
+        return ok(observed({ sessionId: (args as { sessionId: string }).sessionId }));
+      }
+      if (action === "computer.cancel") {
+        return remoteCancelPending;
+      }
+      return ok({});
+    });
+
+    const windowsA = await f.call("windows", { deviceId: "device" }, guardianA);
+    const refA = content(windowsA).result.windows[0].windowRef as string;
+    const boundA = await f.call("bind", { deviceId: "device", windowRef: refA }, guardianA);
+    const sessionA = content(boundA).result.sessionId as string;
+
+    const windowsB = await f.call("windows", { deviceId: "device" }, guardianB);
+    const refB = content(windowsB).result.windows[0].windowRef as string;
+    const boundB = await f.call("bind", { deviceId: "device", windowRef: refB }, guardianB);
+    const sessionB = content(boundB).result.sessionId as string;
+
+    // Start cancelDevice for guardian A while remote cancel is still pending.
+    const cancelPromise = f.service.cancelDevice("device", { userId: "guardian-a" });
+
+    // Guardian A's local binding is stopped immediately without waiting for remote RPC.
+    const afterA = await f.call("observe", { sessionId: sessionA }, guardianA);
+    expect(afterA.isError).toBe(true);
+    expect(content(afterA)).toMatchObject({ error: { code: "session_stopped" } });
+
+    // Guardian B's binding on the same device remains active.
+    const afterB = await f.call("observe", { sessionId: sessionB }, guardianB);
+    expect(content(afterB).error).toBeUndefined();
+    expect(afterB.isError).toBeUndefined();
+
+    resolveRemoteCancel(
+      ok({ sessionId: "native-session-1", terminalCause: "cancelled", stopConfirmed: true }),
+    );
+    await cancelPromise;
+
+    const afterSettled = await f.call("observe", { sessionId: sessionA }, guardianA);
+    expect(afterSettled.isError).toBe(true);
+    expect(content(afterSettled)).toMatchObject({ error: { code: "invalid_session" } });
+
+    const cancelCalls = f.client.run.mock.calls.filter(
+      ([, action]) => action === "computer.cancel",
+    );
+    expect(cancelCalls).toEqual([["device", "computer.cancel", { sessionId: "native-session-1" }]]);
+  });
+
+  it("returns session_stopped (not unknown_outcome) when mid-call revocation cancel transport throws", async () => {
+    let current = true;
+    const expiresAt = Date.now() + 30_000;
+    const revocableCaller = turn({
+      computerUseGrant: () => ({
+        deviceId: "device",
+        expiresAt,
+        isCurrent: async () => current,
+      }),
+    });
+    const f = fixture(true);
+    const listed = await f.call("windows", { deviceId: "device" }, revocableCaller);
+    const windowRef = JSON.parse(listed.content[0].text).result.windows[0].windowRef;
+    const bound = await f.call("bind", { deviceId: "device", windowRef }, revocableCaller);
+    const sessionId = JSON.parse(bound.content[0].text).result.sessionId as string;
+    f.client.run
+      .mockImplementationOnce(async () => {
+        current = false;
+        return ok(observed());
+      })
+      .mockRejectedValueOnce(new Error("transport closed during cancel"));
+    const result = await f.call("observe", { sessionId }, revocableCaller);
+    expect(result.isError).toBe(true);
+    expect(content(result)).toMatchObject({ error: { code: "session_stopped" } });
+  });
+
+  it("matches localized macOS apps by bundleName, appName, and bundleId", async () => {
+    const f = fixture();
+    const windows = [
+      {
+        windowRef: "native-textedit",
+        appName: "文本编辑",
+        bundleName: "TextEdit",
+        bundleId: "com.apple.TextEdit",
+        title: "notes.txt",
+      },
+      {
+        windowRef: "native-browser",
+        appName: "Google Chrome",
+        bundleName: "Google Chrome",
+        bundleId: "com.google.Chrome",
+        title: "TextEdit documentation",
+      },
+    ];
+    f.client.run.mockImplementation(async (_device, action) => {
+      if (action === "computer.windows") return ok({ windows });
+      if (action === "computer.bind")
+        return ok({ sessionId: "native-session", scope: "background" });
+      return ok({});
+    });
+
+    for (const application of ["TextEdit", "文本编辑", "com.apple.TextEdit"]) {
+      const listed = await f.call("windows", { deviceId: "device", application });
+      expect(listed.isError).toBeUndefined();
+      const matched = content(listed).result.windows as Array<{ title: string; appName: string }>;
+      expect(matched).toHaveLength(1);
+      expect(matched[0]).toMatchObject({ appName: "文本编辑", title: "notes.txt" });
+    }
+
+    let listedForBind = await f.call("windows", { deviceId: "device" });
+    const textEditRef = (
+      content(listedForBind).result.windows as Array<{ windowRef: string; appName: string }>
+    ).find((w) => w.appName === "文本编辑")?.windowRef;
+    expect(textEditRef).toBeDefined();
+    const bound = await f.call("bind", {
+      deviceId: "device",
+      windowRef: textEditRef,
+      application: "TextEdit",
+    });
+    expect(bound.isError).toBeUndefined();
+    expect(f.client.run).toHaveBeenLastCalledWith("device", "computer.bind", {
+      windowRef: "native-textedit",
+    });
   });
 });
