@@ -165,11 +165,12 @@ function isAppApiPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
 
 /**
  * If `forwardedUri` targets an app's dashboard-side surface
- * (`/api/apps/<appId>` or `/api/apps/<appId>/*`) and the app is in
+ * (`/api/apps/<appId>/*`) and the app is in
  * `publicAccess.allowedApps`, treat it as public. The toggle is
  * user-driven (AppsIndexPage "public" switch) and means "anonymous
- * visitors can use this app's full HTTP surface" — so it covers
- * `/api/apps/<id>/{icon,manifest,...}` and the dispatcher fall-through.
+ * visitors can use the app's HTTP surface" — so it covers
+ * `/api/apps/<id>/{icon,manifest,...}` and the dispatcher fall-through,
+ * but not host-owned installation details or lifecycle operations.
  *
  * Per-path manifest `noAuth` does NOT apply here on purpose — `noAuth`
  * is the public-webhook surface (`/api/app-api/...`), which is governed
@@ -183,8 +184,9 @@ function isAppDashboardPathPublic(forwardedUri: string, deps: ApiDeps): boolean 
 
 function decodeDashboardAppId(forwardedUri: string): string | null {
   const path = forwardedUri.split("?")[0];
-  const match = path.match(/^\/api\/apps\/([^/]+)(?:\/.*)?$/);
-  if (!match) return null;
+  // Host-owned paths must not inherit either public or app-scoped email access.
+  const match = path.match(/^\/api\/apps\/([^/]+)\/(.+)$/);
+  if (!match || /^publish\/?$/.test(match[2])) return null;
 
   try {
     return decodeAppIdPathSegment(match[1]);

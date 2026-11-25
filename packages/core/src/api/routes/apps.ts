@@ -13,6 +13,7 @@ import type {
   SpecSource,
 } from "@rome/api-types/apps";
 import { type Context, Hono } from "hono";
+import { createMiddleware } from "hono/factory";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { parse as parseYaml } from "yaml";
@@ -334,10 +335,19 @@ function assertAppIdIsNotSystem(c: Context, appId: string, verbMessage: string) 
 
 export function appsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  const requireHostAccess = createMiddleware(async (c, next) => {
+    if (await resolveGuardianSession(c, deps.db)) return next();
+    const viewer = resolveVisitorSession(c);
+    if (!viewer) return c.json({ error: "Not authenticated" }, 401);
+    if (!deps.dashboardAccessState.isCloudEmailAllowed(viewer.email)) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+    return next();
+  });
 
   // Registered before the `:appId` GET so a human reader can see the static
   // segment wins without having to trust Hono's router precedence.
-  app.get("/apps/updates", async (c) => {
+  app.get("/apps/updates", requireHostAccess, async (c) => {
     const summary = await findUpgradeCandidates(deps.appCatalog, {
       romeCloudListings: deps.romeCloudListings,
     });
@@ -547,7 +557,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     });
   });
 
-  app.delete("/apps/:appId", async (c) => {
+  app.delete("/apps/:appId", requireHostAccess, async (c) => {
     const appId = c.req.param("appId");
     try {
       assertValidAppId(appId);
@@ -656,7 +666,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
 
   // Scoped to `enabled` only; use this (not PUT) to flip enabled state
   // without re-installing.
-  app.patch("/apps/:appId", async (c) => {
+  app.patch("/apps/:appId", requireHostAccess, async (c) => {
     const appId = c.req.param("appId");
     try {
       assertValidAppId(appId);
@@ -717,7 +727,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // authenticated by this instance's token. Version and handle policy are
   // enforced by the store; its rejection messages pass through verbatim with
   // their status so the dashboard can surface them.
-  app.post("/apps/:appId/publish", async (c) => {
+  app.post("/apps/:appId/publish", requireHostAccess, async (c) => {
     const appId = c.req.param("appId");
     try {
       assertValidAppId(appId);
@@ -807,7 +817,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     }
   });
 
-  app.get("/apps/:appId", async (c) => {
+  app.get("/apps/:appId", requireHostAccess, async (c) => {
     const appId = c.req.param("appId");
     try {
       assertValidAppId(appId);

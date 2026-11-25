@@ -63,6 +63,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { Permissions } from "../access/permissions.js";
 import { loadAppPermissions } from "../apps/app-permissions.js";
+import { COOKIE_NAME, createSession } from "../access/auth.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
@@ -1252,7 +1253,9 @@ export async function createAppLifecycleHarness(
 
   async function honoFetch(path: string, init: RequestInit = {}): Promise<Response> {
     const url = new URL(`http://app-e2e.test${path.startsWith("/") ? path : `/${path}`}`);
-    return runtime.router.fetch(new Request(url, init));
+    const request = new Request(url, init);
+    request.headers.set("cookie", `${COOKIE_NAME}=${createSession("guardian")}`);
+    return runtime.router.fetch(request);
   }
 
   function hasAction(name: string): boolean {
