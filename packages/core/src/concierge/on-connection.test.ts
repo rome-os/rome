@@ -16,13 +16,14 @@ describe("the Concierge on a connection", () => {
     expect(agentOfKind(null, true)).toBeNull();
   });
 
-  it("keeps its text private and withholds every action that needs a Concierge chat, only on a connection", () => {
+  it("keeps its text private, runs on the large tier and withholds every action that needs a Concierge chat, only on a connection", () => {
     // No finalText: the Concierge's own, private, holds here too.
     expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
       systemPromptPrefix: CONNECTION_PROMPT,
       handoffOnRenewal: false,
       withoutActions: CONCIERGE_CHAT_ACTIONS,
       withoutDefer: true,
+      tier: "large",
     });
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
     // Renaming checks a dashboard chat's owner, so a bot turn is refused even for the guardian.

@@ -111,10 +111,12 @@ export const CONCIERGE_CHAT_ACTIONS = [
  * wake-up sends skips the checks the message that asked for it passed. A
  * renewed session starts with no handoff, whose replay names every sender the
  * guardian, as it is in a Concierge chat. Its text stays private, as
- * everywhere: what it says goes through `say`.
+ * everywhere: what it says goes through `say`. It runs on the large tier at
+ * its own low effort, as no chat selection picks its model here.
  */
 const ON_CONNECTION: PlaceSetup = {
   systemPromptPrefix: CONNECTION_PROMPT,
+  tier: "large",
   handoffOnRenewal: false,
   withoutActions: CONCIERGE_CHAT_ACTIONS,
   withoutDefer: true,

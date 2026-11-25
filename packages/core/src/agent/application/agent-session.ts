@@ -1119,8 +1119,8 @@ function sessionSetupOf(
   isSubagent: boolean,
 ): SessionSetupSource {
   const config = agent.definition;
-  // The place can override the agent's policy and instructions and take
-  // actions away, never add them.
+  // The place can override the agent's policy, instructions and model tier,
+  // and take actions away, never add them.
   const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
   const promptAgent = {
     ...config,
@@ -1182,7 +1182,7 @@ function sessionSetupOf(
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
-    definition: config,
+    definition: place?.tier ? onTier(config, place.tier) : config,
     widgets,
     systemPrompt: () =>
       deps.systemPrompts.build(promptAgent, { contextSuffix: init.contextSuffix, widgets }),
@@ -2067,7 +2067,7 @@ async function openSession(
       modelResolutionRequest(
         selectionId,
         sessionPin,
-        config,
+        active.source.definition,
         credits,
         deps.heldProvider?.(key.channelThreadKey),
       ),
@@ -4782,6 +4782,12 @@ class AgentSessionImpl implements AgentSession {
 // Helpers
 
 /** The subagents this agent may hand work to, as its definition names them. */
+/** `definition` asking for `tier` alone: the model and provider it named give way. */
+function onTier(definition: AgentDefinition, tier: ModelTier): AgentDefinition {
+  const { modelId: _model, providerId: _provider, ...rest } = definition;
+  return { ...rest, tier };
+}
+
 function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] {
   return (config.allowedSubagents ?? []).map((name) => ({
     name,
