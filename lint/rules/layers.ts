@@ -192,14 +192,7 @@ export const listedCrossings: ListedCrossing[] = [
     from: "people/phone-book/application/resource.ts",
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
-    why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/person-history/application/account-messages.ts",
-    to: "chats/send.ts",
-    ticket: "ZHA-215",
-    why: "Person history sends to a person's account, until it does that through a port.",
+    why: "A person in the people listing carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
   },
   {
     rule: "application-imports-inward",

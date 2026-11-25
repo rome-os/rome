@@ -6,10 +6,8 @@ Who is behind an account, and how close they are to the guardian. People follows
 
 Someone the guardian knows: an entry in their phone book. The guardian is one of the people.
 
-- Two persons are the same person when they are the same entry. Nothing on a platform makes two persons one. Only the guardian does, by merging them.
-- A person exists from the moment the guardian creates them, by name or from an account. They stop existing when the guardian deletes them or merges them into another.
-- The guardian **creates**, **renames**, **merges** and **deletes** a person. A merge makes two persons one, and the links of the one that goes move onto the one that stays.
-- Deleting a person returns to strangers the accounts Rome has heard of. Every chat keeps its history, since [history belongs to the chat](chats.md#chat).
+- Two persons are the same person when they are the same entry. Nothing on a platform makes two persons one.
+- The dashboard offers no way to create, rename, merge or delete a person. Rome keeps the people it already has, and agents read them.
 - Every person has exactly one bond level.
 - An agent is not a person. An agent delegated by a person acts on that person's behalf, as [Delegate link](#delegate-link) says.
 
@@ -34,10 +32,10 @@ A participant's identity on a platform, as [Account](chats.md#account) in Chats 
 - Rome has **heard of** an account when the platform reported it, through a message or an address book. An account named only by a link is not heard of.
 - The platform's name for an account is read from Chats' [account profile](chats.md#account-profile) where one exists. Where none does, the account shows by its id.
 - An account is in one of three states. A **stranger** is one nobody has decided about. A **linked** account belongs to a person. A **dismissed** account is one the guardian decided belongs to nobody they track.
-- The guardian **links** an account to a person, **moves** it to another, **unlinks** it, **dismisses** it, and **restores** a dismissed one to a stranger.
-- Dismissing makes no person. The guardian sometimes does not know who a stranger is, and a person for every stranger is too much work.
+- The dashboard offers no way to link, move, unlink, dismiss or restore an account. Links and dismissals already made stay.
+- Dismissing makes no person.
 - An account linked to the guardian is one of theirs. The guardian's signed-in accounts, such as their own Telegram, WhatsApp, LinkedIn, WeChat or email, are theirs the moment they connect them, with no further step.
-- Where the platform does not say which account is the guardian's, the guardian links their account to themselves like any other. A code Rome shows them, sent in a direct message to any of Rome's accounts, is a shortcut for finding it. It works the same on every platform.
+- Where the platform does not say which account is the guardian's, a link code is the shortcut. A code Rome issues, sent in a direct message to any of Rome's accounts, links the sender to the guardian. It works the same on every platform. The dashboard shows no code.
 
 ## Link
 
@@ -45,9 +43,8 @@ The fact that an account belongs to a person. It is the only fact about who is w
 
 - One account has at most one link, so no account belongs to two persons.
 - A link names an account by its platform and the platform's own id, and needs nothing else to exist: no profile and no message. Rome checks only that the platform is one it knows and the id is not blank, since it cannot check an id against the platform.
-- A link is made only by the guardian, or from a statement the platform makes about which accounts are the guardian's. Never from what a sender says about itself, such as a display name.
+- A link is made only by a link code the guardian sends, from a statement the platform makes about which accounts are the guardian's, or was made earlier by the guardian. Never from what a sender says about itself, such as a display name.
 - A link reaches back. Linking attributes everything the account ever said to the person, and unlinking takes it away again.
-- Moving an account from one person to another is always the guardian's explicit act, never a side effect of something else.
 - A link outlives Rome's access. Disconnecting the last of Rome's accounts on a platform removes nothing from People, and connecting again later finds everyone already known.
 
 ## Delegate link
@@ -56,11 +53,11 @@ A link that says the account is an agent's, acting on behalf of the person it is
 
 - An agent's account belongs to the person who delegated the agent, never to the agent itself.
 - The link says it is a delegate, so whoever reads it knows they are talking to someone's agent and not to the person.
-- Rome makes this link itself when the platform says the agent is the guardian's. Rome Cloud says so for the guardian's own agents on other Romes. The guardian links anyone else's agent as they would any account.
+- Rome makes this link itself when the platform says the agent is the guardian's. Rome Cloud says so for the guardian's own agents on other Romes.
 
 ## Stranger
 
-An account Rome has heard of that nobody has decided about yet: it has no link and no dismissal. A stranger waits for the guardian to link or dismiss it.
+An account Rome has heard of that nobody has decided about yet: it has no link and no dismissal.
 
 - An account named only by a link leaves the [account directory](#account-directory) with its link, and returns the first time it writes.
 
@@ -71,19 +68,19 @@ An account Rome has heard of that nobody has decided about yet: it has no link a
 Every account Rome has heard of, and every account with a link or a dismissal, each shown as linked to a person, dismissed, or a stranger.
 
 - People owns it. Which accounts Rome has heard of is Chats' to say.
-- The dashboard's People page and the Link account picker read it.
+- The email field of an access allow-list reads it to suggest addresses.
 
 ## Who is this
 
 The one question Participation asks People about a sender. The answer is a person with their bond level, or nobody.
 
-- A stranger and a dismissed account both answer nobody. The difference matters only to the guardian, in which accounts are shown for them to decide about.
+- A stranger and a dismissed account both answer nobody.
 - Participation asks it about the sender of every message a wake hands an agent, each time a turn runs, and of every message an app hears as it is said.
 - An agent that meets someone it does not recognize reads who they are by name, with the guardian's notes on them. Sentinel, which answers senders Rome does not trust, reads the sender's own notes on each message instead, and no one else's.
 
 ## Decided against
 
-- **Pairing, a step a sender takes to be heard.** Its one job was linking the guardian's own account. The link verb already does that. Blocking an unknown sender until the guardian approves it made the guardian a stranger to their own agents.
+- **Pairing, a step a sender takes to be heard.** Its one job was linking the guardian's own account. Blocking an unknown sender until the guardian approves it made the guardian a stranger to their own agents.
 - **A fifth bond level, stranger, for accounts with no person.** A level grades a relationship. Nobody knows who the account is, so there is no relationship to grade.
 - **A person made for every dismissed account.** The guardian often does not know who a stranger is. Dismissing is a decision about the account, not a new entry in the phone book.
 - **An agent as a person of its own.** An agent acts for whoever delegated it. A reply needs to know it is talking to someone's agent, and a person of its own hides that.

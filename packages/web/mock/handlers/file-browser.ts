@@ -185,8 +185,7 @@ export function fileBrowserHandlers({
       return HttpResponse.json(toTreeNodes(node.children ?? [], depth));
     }),
     // useUrlSelectionSync resolves the URL's path on load, so without this a
-    // deep link to a file 404s before anything renders. It is also how the
-    // dossier's "Memory profile" link opens a person's profile.
+    // deep link to a file 404s before anything renders.
     http.get(`${apiBasePath}/resolve`, ({ request }) => {
       const path = new URL(request.url).searchParams.get("path") ?? "";
       const node = findNode(tree, path);

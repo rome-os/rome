@@ -2,11 +2,8 @@
 // channel mappings, and their profile file on disk.
 //
 // The derivation is part of the contract rather than an implementation detail
-// of the create route: the id is guardian-visible on the People page, and any
-// client that predicts one — the dashboard's mock backend today — has to
-// produce the same slug the server would. Keeping it here means the repository
-// and that client read one function instead of two that agree until the first
-// punctuation edge case.
+// of the repository: the id is guardian-visible in the people listing, and any
+// client that predicts one has to produce the same slug the server would.
 
 /** Why a person row refuses a guardian's edit. */
 export type ProtectedPersonReason = "guardian";
@@ -15,9 +12,9 @@ export type ProtectedPersonReason = "guardian";
  * Why this person refuses to be moved along the ladder or merged away, or null
  * when they accept both. The guardian anchors the ladder.
  *
- * Every write that reassigns or removes a person reads this — the route and the
- * dashboard's mock backend alike — so the two cannot disagree on who is off
- * limits. The caller phrases its own message from the reason.
+ * Every write that reassigns or removes a person reads this, so no two writes
+ * disagree on who is off limits. The caller phrases its own message from the
+ * reason.
  */
 export function protectedPersonReason(person: { bondLevel: string }): ProtectedPersonReason | null {
   return person.bondLevel === "guardian" ? "guardian" : null;
@@ -49,7 +46,7 @@ export function generatePersonSlug(displayName: string): string {
  *
  * The suffix numbers the person among everyone sharing the name, and `base` is
  * the first of them: the second Ada Lovelace is `ada-lovelace-2`, the third
- * `ada-lovelace-3`. So the id a guardian reads on the People page counts the
+ * `ada-lovelace-3`. So the id a guardian reads in the people listing counts the
  * way they would count, and no id claims to be the first of a name that
  * already has one.
  *

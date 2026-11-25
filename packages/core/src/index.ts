@@ -253,7 +253,6 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
-import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
@@ -815,7 +814,7 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
-  // The agents this Rome can message, one read for the People page and for
+  // The agents this Rome can message, one read for the people listing and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
@@ -3003,7 +3002,6 @@ async function main() {
     apiDeps.features = [
       linkCode({ ...apiDeps, isGuardian: isGuardianSession }),
       phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
-      personHistory(apiDeps),
     ];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);

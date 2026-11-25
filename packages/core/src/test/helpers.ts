@@ -347,7 +347,7 @@ export const noAccounts: Accounts = {
 
 /** The harness's channel list over `connections`, built by the production
  *  `channelList`. A test that fakes a talker rebuilds the list with it. */
-export function testChannels(
+function testChannels(
   deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
   connections: TestConnections,
 ): Channels {
@@ -1314,9 +1314,8 @@ export async function createAppLifecycleHarness(
 /**
  * Make each named channel one of the guardian's own connected accounts: a
  * channel record that knows its account, a live grant reaching that account,
- * and a link from it to the guardian. A person's page reads and sends only
- * over the guardian's own accounts, so a test of that page names the channels
- * it reads through here. `guardianId` is the seeded guardian's.
+ * and a link from it to the guardian. People reads and sends only over the
+ * guardian's own accounts, so a test of those reads names the channels here. `guardianId` is the seeded guardian's.
  */
 export function ownedByGuardian(
   db: DrizzleDb,
