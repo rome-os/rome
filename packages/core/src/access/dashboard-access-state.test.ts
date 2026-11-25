@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
+import { guardianAuth } from "../db/schema.js";
 import { createTestDb } from "../test/db.js";
+import { backfillMembers } from "./application/backfill-members.js";
 import {
   guardianSeatCreated,
   guardianSeatRebound,
@@ -9,6 +11,7 @@ import {
 } from "./application/members.js";
 import { placeAudience } from "../core/place-audience.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
+import { createCloudGuardian } from "./guardian-auth-state.js";
 
 describe("DashboardAccessState", () => {
   it("starts empty", () => {
@@ -38,6 +41,7 @@ describe("DashboardAccessState", () => {
     const testDb = createTestDb();
     try {
       const ctx = memberContext(testDb.db);
+      await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
       await guardianSeatCreated(ctx, {
         accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
       });
@@ -59,6 +63,7 @@ describe("DashboardAccessState", () => {
   it("reads a Rome with a Rome Cloud guardian and no members as having no one invited, so the guardian's chats stay private", async () => {
     const testDb = createTestDb();
     try {
+      await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
       await guardianSeatCreated(memberContext(testDb.db), {
         accounts: seatAccounts({ email: "owner@example.com" }),
       });
@@ -91,11 +96,13 @@ describe("DashboardAccessState", () => {
     const testDb = createTestDb();
     try {
       const ctx = memberContext(testDb.db);
+      await createCloudGuardian(testDb.db, "acct-owner", "old@example.com");
       await guardianSeatCreated(ctx, { accounts: seatAccounts({ email: "old@example.com" }) });
       const state = new DashboardAccessState();
       await state.load(testDb.db);
       expect(state.isCloudEmailAllowed("old@example.com")).toBe(true);
 
+      testDb.db.update(guardianAuth).set({ email: "new@example.com" }).run();
       await guardianSeatRebound(ctx, {
         previous: seatAccounts({ email: "old@example.com" }),
         current: seatAccounts({ email: "new@example.com" }),
@@ -104,6 +111,40 @@ describe("DashboardAccessState", () => {
 
       expect(state.isCloudEmailAllowed("new@example.com")).toBe(true);
       expect(state.isCloudEmailAllowed("old@example.com")).toBe(false);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("lets in only the seat's email when the guardian's person still holds an older one", async () => {
+    const testDb = createTestDb();
+    try {
+      const { db } = testDb;
+      await createCloudGuardian(db, "acct-owner", "a@example.com");
+      await backfillMembers(db);
+      // The seat moved to B while its step beside the write failed, so the
+      // next backfill gives the guardian's person B and leaves it A.
+      db.update(guardianAuth).set({ email: "b@example.com" }).run();
+      await backfillMembers(db);
+      const holderOfA = await memberContext(db).identity.personOf({
+        platform: "rome-cloud-email",
+        accountId: "a@example.com",
+      });
+      expect(holderOfA).not.toBeNull();
+
+      const state = new DashboardAccessState();
+      await state.load(db);
+      expect(state.isCloudEmailAllowed("a@example.com")).toBe(false);
+      expect(state.isCloudEmailAllowed("b@example.com")).toBe(true);
+
+      // A restart runs the backfill, then loads a fresh copy.
+      await backfillMembers(db);
+      const restarted = new DashboardAccessState();
+      await restarted.load(db);
+      expect(restarted.isCloudEmailAllowed("a@example.com")).toBe(false);
+      expect(restarted.isCloudEmailAllowed("B@Example.com")).toBe(true);
+      expect(restarted.hasCloudEmailAccess()).toBe(false);
+      expect(restarted.cloudEmails().size).toBe(0);
     } finally {
       testDb.close();
     }

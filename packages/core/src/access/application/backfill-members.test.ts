@@ -13,7 +13,10 @@ import {
 import type { DrizzleDb } from "../../db/index.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../dashboard-access-config.js";
+import {
+  DASHBOARD_ACCESS_SETTING_KEY,
+  normalizeDashboardAccessConfig,
+} from "../dashboard-access-config.js";
 import { DashboardAccessState } from "../dashboard-access-state.js";
 import { DashboardAccessStore } from "../dashboard-access-store.js";
 import { backfillMembers } from "./backfill-members.js";
@@ -161,7 +164,7 @@ describe("backfillMembers", () => {
     expect(snapshot(db)).toEqual(before);
   });
 
-  it("keeps an email invited after the first run a member across a restart, and a removed one removed", async () => {
+  it("keeps an email invited after the first run a member across a restart and a rollback, and a removed one removed", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -198,14 +201,13 @@ describe("backfillMembers", () => {
     expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
     expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
 
-    // The list an older build wrote stays as it was.
+    // An older build after a rollback reads the record's list: the members
+    // now, with the removed one gone and the invited one there.
     expect(
-      (
-        await new SettingsRepository(db).get<{ cloudEmailAccess: string[] }>(
-          DASHBOARD_ACCESS_SETTING_KEY,
-        )
-      )?.cloudEmailAccess,
-    ).toEqual(["ada@example.com", "lin@example.com", "owner@example.com"]);
+      normalizeDashboardAccessConfig(
+        await new SettingsRepository(db).get(DASHBOARD_ACCESS_SETTING_KEY),
+      ).cloudEmailAccess,
+    ).toEqual(["kim@example.com", "lin@example.com"]);
   });
 
   it("keeps a member removed by a save made before its first run", async () => {

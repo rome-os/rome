@@ -1,22 +1,24 @@
 import type { DrizzleDb } from "../db/index.js";
-import { guardianEmails, memberContext, memberEmails } from "./application/members.js";
+import { memberContext, memberEmails } from "./application/members.js";
+import { guardianSeatEmail } from "./guardian-auth-state.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /**
  * In-memory copy of the members' Rome Cloud sign-in emails and the
- * guardian's, for the auth-edge probe.
+ * guardian's seat's email, for the auth-edge probe.
  *
  * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request,
  * so the probe can't afford a DB round-trip. This state is loaded from the
- * members at startup and reloaded after each save of the invited emails and
- * each change of the guardian's seat. The members' emails say whether anyone
- * besides the guardian may open the dashboard. A sign-in with either set's
- * email is let in, since a sign-in with the guardian's email is the
- * guardian's person.
+ * members and the seat at startup and reloaded after each save of the invited
+ * emails and each change of the guardian's seat. The members' emails say
+ * whether anyone besides the guardian may open the dashboard. A sign-in with
+ * a member's email or the seat's email is let in, since a sign-in with the
+ * seat's email is the guardian's person. Another email the guardian's person
+ * holds is not let in.
  */
 export class DashboardAccessState {
   private memberEmails: Set<string> = new Set();
-  private guardianEmails: Set<string> = new Set();
+  private guardianEmail: string | null = null;
 
   /** The members' emails, the guardian's left out. */
   cloudEmails(): ReadonlySet<string> {
@@ -28,12 +30,12 @@ export class DashboardAccessState {
     return this.memberEmails.size > 0;
   }
 
-  /** Whether a Rome Cloud sign-in with `email` is a member's or the guardian's. */
+  /** Whether a Rome Cloud sign-in with `email` is a member's or the guardian's seat's. */
   isCloudEmailAllowed(email: string): boolean {
     const normalized = normalizeVisitorEmail(email);
     return (
       normalized !== null &&
-      (this.memberEmails.has(normalized) || this.guardianEmails.has(normalized))
+      (this.memberEmails.has(normalized) || normalized === this.guardianEmail)
     );
   }
 
@@ -42,13 +44,12 @@ export class DashboardAccessState {
     this.memberEmails = normalizedSet(emails);
   }
 
-  /** Replaces both sets with the sign-in emails of the members and the guardian in `db`. */
+  /** Replaces the members' emails and the guardian's with those in `db`. */
   async load(db: DrizzleDb): Promise<void> {
-    const ctx = memberContext(db);
-    const members = await memberEmails(ctx);
-    const guardian = await guardianEmails(ctx);
+    const members = await memberEmails(memberContext(db));
+    const guardian = await guardianSeatEmail(db);
     this.memberEmails = normalizedSet(members);
-    this.guardianEmails = normalizedSet(guardian);
+    this.guardianEmail = guardian;
   }
 }
 

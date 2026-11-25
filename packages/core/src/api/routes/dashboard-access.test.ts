@@ -10,6 +10,7 @@ import {
   memberContext,
 } from "../../access/application/members.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { createCloudGuardian } from "../../access/guardian-auth-state.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -82,6 +83,7 @@ describe("Dashboard-access API", () => {
     expect(pushed.map((list) => list.revision)).toEqual([1, 2, 3]);
     expect(pushed[2]).toEqual({ emails: [], revision: 3 });
     expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: [],
       revision: 3,
       visitorAccounts: {},
     });
@@ -91,6 +93,7 @@ describe("Dashboard-access API", () => {
 
   it("saves the members, then hands the snapshot and Rome Cloud the same emails, the guardian's left out", async () => {
     const ctx = memberContext(testDb.db);
+    await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
     await guardianSeatCreated(ctx, {
       accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
     });

@@ -82,17 +82,6 @@ export async function memberEmails({ identity, access }: MemberContext): Promise
   return emails.sort();
 }
 
-/** The email of every Rome Cloud sign-in account of the guardian, sorted. A
- *  sign-in with one of them is the guardian's person. */
-export async function guardianEmails({ identity, access }: MemberContext): Promise<string[]> {
-  const guardian = (await access.members()).find((m) => m.role === "guardian");
-  if (!guardian) return [];
-  return (await identity.accountsOf(guardian.personId))
-    .filter((account) => account.platform === ROME_CLOUD_EMAIL_PLATFORM)
-    .map((account) => account.accountId)
-    .sort();
-}
-
 /**
  * Makes the guardian's person hold `accounts`, creating the person, with
  * `name` and `avatarUrl`, when there is no guardian yet. When there is one,

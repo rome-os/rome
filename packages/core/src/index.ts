@@ -160,6 +160,7 @@ import {
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -3180,6 +3181,11 @@ async function main() {
   void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // The seat may have gained or changed its email, and the dashboard
+      // snapshot holds it.
+      await dashboardAccessState
+        .load(db)
+        .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
       // Signer mode links the instance during this check, so provisioning waits for it.
       await provisionAfterLink();
       if (identity.status !== "ok") return;

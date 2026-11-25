@@ -28,8 +28,9 @@ export interface VisitorAllowList {
  * Saves the invited emails to the members, and owns the settings record that
  * keeps the list's revision and the Rome Cloud account each member's email
  * last signed in as a visitor with. The members are the one source of which
- * emails are on the list. The record's own copy of the list stays as an older
- * build wrote it, for a rollback, and is never read. Every write runs one at a
+ * emails are on the list. Each save also writes the members' emails into the
+ * record's own copy of the list, so an older build after a rollback reads the
+ * right list. This build never reads that copy. Every write runs one at a
  * time, so each save gets its own revision and a raise or a sign-in never
  * loses a save.
  *
@@ -59,8 +60,9 @@ export class DashboardAccessStore {
 
   /**
    * Makes the members the persons behind the config's emails, stores the next
-   * revision and records that the members are the source of the list, all in
-   * one transaction, and answers the members' emails under that revision.
+   * revision and the members' emails as the record's copy of the list, and
+   * records that the members are the source of the list, all in one
+   * transaction, and answers the members' emails under that revision.
    * Rejects, changing nothing, when any of it cannot be written.
    */
   save(config: DashboardAccessConfig): Promise<VisitorAllowList> {
@@ -85,6 +87,9 @@ export class DashboardAccessStore {
           .run();
         await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
           ...asRecord(stored),
+          // Kept equal to the members so an older build reads the right list.
+          // Nothing in this build reads it.
+          cloudEmailAccess: emails,
           revision,
           visitorAccounts,
         });
@@ -145,7 +150,7 @@ export class DashboardAccessStore {
   }
 }
 
-// The stored record, kept whole so the list an older build wrote stays in it.
+// The stored record, kept whole so the list an older build reads stays in it.
 function asRecord(stored: unknown): Record<string, unknown> {
   return stored && typeof stored === "object" && !Array.isArray(stored)
     ? (stored as Record<string, unknown>)
