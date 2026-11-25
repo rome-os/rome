@@ -11,6 +11,7 @@ import {
   createSession,
   createVisitorSession,
 } from "../access/auth.js";
+import { discordApp, romeCloudDiscordApp } from "../connections/kinds/discord-app/index.js";
 import { guardianAuth } from "../db/schema.js";
 import { buildTestDeps, createTestDb } from "../test/helpers.js";
 import { buildApp } from "./index.js";
@@ -48,7 +49,14 @@ describe("the dashboard's entry step", () => {
     const deps = await buildTestDeps(testDb.db);
     members = deps.dashboardAccessState;
     members.setCloudEmailAccess(["ada@example.com"]);
-    app = buildApp(deps, { port: 0, host: "127.0.0.1" }).app;
+    // The kind of connection that mounts routes.
+    const discord = discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => null,
+      nameOf: async () => undefined,
+    });
+    const wired = { ...deps, connectionKinds: [discord] };
+    app = buildApp(wired, { port: 0, host: "127.0.0.1" }).app;
     behind = dashboardRequests(app).filter(({ path }) => !needsNoEntry(path));
   });
 
@@ -64,6 +72,7 @@ describe("the dashboard's entry step", () => {
 
   it("refuses anyone who is not a member on every route that needs entry", async () => {
     expect(behind.length).toBeGreaterThan(150);
+    expect(behind).toContainEqual({ method: "GET", path: "/api/connections/discord-app/servers" });
     for (const request of behind) {
       const name = `${request.method} ${request.path}`;
       expect(await answer(request), name).toBe(401);
