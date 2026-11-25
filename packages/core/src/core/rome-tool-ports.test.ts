@@ -404,12 +404,13 @@ describe("task input actor through the session tool port", () => {
     return { ...built, context };
   }
 
-  for (const audience of ["private", "shared"] as const) {
-    it(`captures the ${audience} source audience in the host handoff`, async () => {
-      const { context } = await provided({
-        audience: () => audience,
-        actor: () => (audience === "shared" ? visitor : guardian),
-      });
+  for (const [audience, actor] of [
+    ["private", guardian],
+    ["shared", guardian],
+    ["shared", visitor],
+  ] as const) {
+    it(`captures a ${actor.kind}'s ${audience} source audience in the host handoff`, async () => {
+      const { context } = await provided({ audience: () => audience, actor: () => actor });
       await context.captureTaskInput!()("target", body, async () => {
         expect(claimTaskInputActor("target", body, speaker)?.source.audience).toBe(audience);
       });
@@ -457,7 +458,6 @@ describe("task input actor through the session tool port", () => {
 
   for (const [name, overrides] of [
     ["unknown actor", { actor: () => undefined }],
-    ["shared guardian audience", { audience: () => "shared" as const }],
     ["anonymous actor", { actor: () => ({ kind: "anonymous" as const }) }],
     ["group", { threadContext: () => ({ ...thread, threadType: "group" as const }) }],
     ["missing privacy", { threadContext: () => ({ channel: "webchat", threadId: "source" }) }],

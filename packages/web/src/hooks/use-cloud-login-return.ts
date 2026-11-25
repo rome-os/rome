@@ -5,8 +5,9 @@ import { peekLoginReturn, takeLoginReturn } from "@/lib/login-return";
 
 /**
  * Rome Cloud sign-in finishes with a server redirect to `/?cloud=success`
- * (api/routes/cloud-login.ts), which no sign-in page sees. Once the session
- * is ready there, this names the page the guardian was sent to /login from.
+ * (api/routes/cloud-login.ts) for the guardian and a member alike, which no
+ * sign-in page sees. Once the session is ready there, this names the page the
+ * person was sent to /login from.
  * Mounted above the routes so the `/` → `/chat` redirect cannot win first.
  */
 export function useCloudLoginReturn(): string | null {
