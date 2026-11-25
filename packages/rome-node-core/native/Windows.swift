@@ -110,18 +110,17 @@ final class Windows {
         var expires: TimeInterval = 0
     }
 
+    // Only the window worker reads or writes the binding.
     private var binding: Binding?
+    var hasBinding: Bool { binding != nil }
     let instance: String
     let access: DesktopAccess
     let live: () throws -> Void
-    let authorize: () throws -> Void
 
-    init(instance: String, access: DesktopAccess, live: @escaping () throws -> Void,
-         authorize: @escaping () throws -> Void) {
+    init(instance: String, access: DesktopAccess, live: @escaping () throws -> Void) {
         self.instance = instance
         self.access = access
         self.live = live
-        self.authorize = authorize
     }
 
     static func onScreen() -> [[String: Any]]? {
@@ -360,7 +359,7 @@ final class Windows {
               belongs(node, to: latest), actions(node, role: role).contains(action),
               text(node, kAXRoleAttribute) == role else { throw Failure("element_unavailable") }
         try access.check()
-        try authorize()
+        try live()
         let status: AXError
         if let property {
             status = AXUIElementSetAttributeValue(node, kAXValueAttribute as CFString, property)
@@ -397,7 +396,7 @@ final class Windows {
         config.showsCursor = false
         config.ignoreShadowsSingleWindow = true
         try access.recording(granted: CGPreflightScreenCaptureAccess(), required: true)
-        try authorize()
+        try live()
         let image: CGImage = try captureCall {
             SCScreenshotManager.captureImage(contentFilter: filter, configuration: config, completionHandler: $0)
         }

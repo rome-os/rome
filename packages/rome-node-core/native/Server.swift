@@ -4,6 +4,7 @@ import Foundation
 final class Admission {
     private let lock = NSLock()
     private var active = false
+    private var hasBinding = false
     private var reason: String?
     private var exiting = false
 
@@ -21,9 +22,14 @@ final class Admission {
         }
     }
 
-    func finish() {
-        lock.withLock { active = false }
+    func finish(hasBinding: Bool) {
+        lock.withLock {
+            self.hasBinding = hasBinding
+            active = false
+        }
     }
+
+    var needsAccessCheck: Bool { lock.withLock { reason == nil && (active || hasBinding) } }
 
     func stop(_ reason: String = "session_stopped") -> [String: Any] {
         lock.withLock {
@@ -65,20 +71,13 @@ func socketAddress<T>(_ path: String, _ body: (UnsafePointer<sockaddr>, socklen_
     }
 }
 
-func readBytes(_ fd: Int32, count: Int, deadline: DispatchTime? = nil) throws -> Data {
+func readBytes(_ fd: Int32, count: Int) throws -> Data {
     var buffer = Data(count: count)
     try buffer.withUnsafeMutableBytes { bytes in
         var offset = 0
         while offset < count {
-            if let deadline {
-                var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-                guard DispatchTime.now() < deadline else { throw Failure("authentication_failed") }
-                let ready = poll(&event, 1, 50)
-                if ready == 0 || (ready < 0 && errno == EINTR) { continue }
-                guard ready > 0 else { throw Failure("authentication_failed") }
-            }
             let n = read(fd, bytes.baseAddress!.advanced(by: offset), count - offset)
-            if n < 0, errno == EINTR || (deadline != nil && errno == EAGAIN) { continue }
+            if n < 0, errno == EINTR { continue }
             guard n > 0 else { throw Failure("connection_closed") }
             offset += n
         }
@@ -141,16 +140,17 @@ final class Listener {
 
     var intact: Bool { state.socketIdentity() == socket }
 
-    func acceptHost(_ host: ProcessIdentity, admission: Admission) throws -> (Int32, Peer) {
+    func acceptHost(_ host: ProcessIdentity, admission: Admission, signed: Bool) throws -> (Int32, Peer) {
         let deadline = DispatchTime.now() + .seconds(10)
-        while DispatchTime.now() < deadline, intact, !admission.terminating, getppid() == host.pid {
+        while DispatchTime.now() < deadline, intact, !admission.terminating {
+            try host.verify()
             var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let n = poll(&event, 1, 100)
             if n == 0 || (n < 0 && errno == EINTR) { continue }
             guard n > 0, event.revents == POLLIN else { break }
             let peer = accept(fd, nil, nil)
             guard peer >= 0 else { continue }
-            if let identity = try? Peer.authenticate(peer, expecting: host) { return (peer, identity) }
+            if let identity = try? Peer.authenticate(peer, expecting: host, signed: signed) { return (peer, identity) }
             close(peer)
         }
         throw Failure("host_unavailable")
@@ -188,22 +188,15 @@ final class Connection {
 
     func verify() throws {
         var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        var byte: UInt8 = 0
-        guard !admission.terminating, listener.intact, getppid() == peer.identity.pid, (try? peer.identity.verify()) != nil,
+        guard !admission.terminating, listener.intact, (try? peer.identity.verify()) != nil,
               poll(&event, 1, 0) >= 0, Int32(event.revents) & (POLLHUP | POLLERR | POLLNVAL) == 0 else {
             end()
             throw Failure("connection_closed")
         }
+        guard event.revents & Int16(POLLIN) != 0 else { return }
+        var byte: UInt8 = 0
         let peek = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
         guard peek > 0 || (peek < 0 && [EAGAIN, EWOULDBLOCK, EINTR].contains(errno)) else {
-            end()
-            throw Failure("connection_closed")
-        }
-    }
-
-    func verifySignedPeer() throws {
-        try verify()
-        guard (try? peer.revalidate()) != nil else {
             end()
             throw Failure("connection_closed")
         }
@@ -215,7 +208,7 @@ final class Connection {
     }
 
     func sendNow(_ frame: Data) throws {
-        try verifySignedPeer()
+        try verify()
         try sendBytes(fd, frame)
     }
 
@@ -248,25 +241,19 @@ final class Connection {
 func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
            admission: Admission, desktop: Bool) throws {
     defer { listener.removeSocket() }
-    let (fd, peer) = try listener.acceptHost(host, admission: admission)
+    let (fd, peer) = try listener.acceptHost(host, admission: admission, signed: desktop)
     let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
     defer { connection.end() }
 
     let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
     let handshakeDeadline = DispatchTime.now() + .seconds(5)
     let authenticated = DispatchSemaphore(value: 0)
-    let access = DesktopAccess()
     watchdog.setEventHandler {
-        guard (try? connection.verifySignedPeer()) != nil else { return }
-        if authenticated.wait(timeout: .now()) == .success {
-            authenticated.signal()
-            if desktop {
-                do { try access.check() }
-                catch let failure as Failure { _ = admission.stop(failure.code) }
-                catch { _ = admission.stop() }
-            }
-        } else if DispatchTime.now() >= handshakeDeadline {
+        guard (try? connection.verify()) != nil, DispatchTime.now() >= handshakeDeadline else { return }
+        if authenticated.wait(timeout: .now()) == .timedOut {
             connection.end()
+        } else {
+            authenticated.signal()
         }
     }
     watchdog.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
@@ -288,12 +275,21 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     ]))
     authenticated.signal()
 
+    let access = DesktopAccess()
+    // A console scan can block without delaying the transport watchdog.
+    let accessWatchdog = desktop ? DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated)) : nil
+    accessWatchdog?.setEventHandler {
+        guard admission.needsAccessCheck else { return }
+        do { try access.check() }
+        catch { _ = admission.stop((error as? Failure)?.code ?? "session_stopped") }
+    }
+    accessWatchdog?.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(100))
+    accessWatchdog?.resume()
+    defer { accessWatchdog?.cancel() }
+
     let worker = DispatchQueue(label: "rome.computer-use.window", qos: .userInitiated)
     let windows = Windows(instance: instance, access: access, live: {
         try connection.verify()
-        try admission.check()
-    }, authorize: {
-        try connection.verifySignedPeer()
         try admission.check()
     })
 
@@ -325,7 +321,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 try connection.send(Wire.reply(request.id, result: state))
             case "windows", "bind", "observe", "act":
                 guard desktop else { throw Failure("desktop_disabled") }
-                try connection.verifySignedPeer()
+                try connection.verify()
                 try admission.begin()
                 worker.async {
                     let response: Data?
@@ -352,7 +348,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                     } catch {
                         response = try? Wire.failure(request.id, (error as? Failure)?.code ?? "internal_error")
                     }
-                    admission.finish()
+                    admission.finish(hasBinding: windows.hasBinding)
                     if let response { try? connection.send(response) }
                 }
             default:

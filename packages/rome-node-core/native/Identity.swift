@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Darwin.libproc
 import Darwin.sys.proc_info
@@ -50,9 +51,8 @@ struct ProcessIdentity: Equatable {
 struct Peer {
     let identity: ProcessIdentity
     let audit: Data
-    let cdHash: Data
 
-    static func authenticate(_ fd: Int32, expecting expected: ProcessIdentity) throws -> Self {
+    static func authenticate(_ fd: Int32, expecting expected: ProcessIdentity, signed: Bool) throws -> Self {
         var uid: uid_t = 0, gid: gid_t = 0, pid: pid_t = 0
         var token = audit_token_t()
         var pidSize = socklen_t(MemoryLayout.size(ofValue: pid))
@@ -67,31 +67,18 @@ struct Peer {
         }
 
         try expected.verify()
+        // The kernel pins the audit token to this connection for its lifetime.
         let audit = withUnsafeBytes(of: token) { Data($0) }
-        let hash = try signingHash(audit)
-        try expected.verify()
-        return Self(identity: expected, audit: audit, cdHash: hash)
-    }
-
-    func revalidate() throws {
-        try identity.verify()
-        guard try Self.signingHash(audit) == cdHash else { throw Failure("peer_rejected") }
-        try identity.verify()
-    }
-
-    private static func signingHash(_ audit: Data) throws -> Data {
-        var code: SecCode?
-        var staticCode: SecStaticCode?
-        var information: CFDictionary?
-        let attributes = [kSecGuestAttributeAudit as String: audit] as CFDictionary
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
-              let code, SecCodeCheckValidity(code, [], nil) == errSecSuccess,
-              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
-              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
-              let hash = (information as? [String: Any])?[kSecCodeInfoUnique as String] as? Data, !hash.isEmpty else {
-            throw Failure("peer_rejected")
+        if signed {
+            var code: SecCode?
+            let attributes = [kSecGuestAttributeAudit as String: audit] as CFDictionary
+            guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
+                  let code, SecCodeCheckValidity(code, [], nil) == errSecSuccess else {
+                throw Failure("peer_rejected")
+            }
+            try expected.verify()
         }
-        return hash
+        return Self(identity: expected, audit: audit)
     }
 }
 
@@ -108,6 +95,24 @@ struct FileIdentity: Equatable {
     init(_ info: stat) { device = info.st_dev; inode = info.st_ino }
 }
 
+private struct Bootstrap: Decodable {
+    let secret: String
+    let hostPid: pid_t
+    let hostExecutable: String
+
+    func key() throws -> SymmetricKey {
+        let hex = Array(secret.utf8)
+        guard hex.count == 64, hex.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+            throw Failure("authentication_failed")
+        }
+        func nibble(_ byte: UInt8) -> UInt8 { byte <= 57 ? byte - 48 : byte - 87 }
+        let bytes = stride(from: 0, to: hex.count, by: 2).map { index in
+            nibble(hex[index]) << 4 | nibble(hex[index + 1])
+        }
+        return SymmetricKey(data: bytes)
+    }
+}
+
 final class StateDirectory {
     let path: String
     let fd: Int32
@@ -122,7 +127,7 @@ final class StateDirectory {
             throw Failure("unsafe_state_directory")
         }
         let identity = FileIdentity(info)
-        guard Self.safe(path, identity: identity) else {
+        guard canonicalPath(path) == path, Self.safe(path, identity: identity) else {
             close(fd)
             throw Failure("unsafe_state_directory")
         }
@@ -137,10 +142,34 @@ final class StateDirectory {
 
     private static func safe(_ path: String, identity: FileIdentity) -> Bool {
         var info = stat()
-        guard lstat(path, &info) == 0, info.st_uid == getuid(),
-              info.st_mode & (S_IFMT | 0o7777) == S_IFDIR | 0o700,
-              FileIdentity(info) == identity else { return false }
-        return canonicalPath(path) == path
+        return lstat(path, &info) == 0 && info.st_uid == getuid() &&
+            info.st_mode & (S_IFMT | 0o7777) == S_IFDIR | 0o700 && FileIdentity(info) == identity
+    }
+
+    func consumeBootstrap() throws -> (host: ProcessIdentity, key: SymmetricKey) {
+        let name = "bootstrap.json"
+        let input = openat(fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard input >= 0 else { throw Failure("authentication_failed") }
+        defer { close(input) }
+        var opened = stat(), current = stat()
+        guard fstat(input, &opened) == 0,
+              opened.st_uid == getuid(), opened.st_mode & (S_IFMT | 0o7777) == S_IFREG | 0o600,
+              opened.st_nlink == 1,
+              fstatat(fd, name, &current, AT_SYMLINK_NOFOLLOW) == 0,
+              FileIdentity(current) == FileIdentity(opened) else { throw Failure("authentication_failed") }
+
+        // The open descriptor keeps the file readable after it is consumed.
+        guard unlinkat(fd, name, 0) == 0, (1...16384).contains(opened.st_size),
+              let data = try? readBytes(input, count: Int(opened.st_size)) else {
+            throw Failure("authentication_failed")
+        }
+        var extra: UInt8 = 0
+        guard read(input, &extra, 1) == 0, let bootstrap = try? JSONDecoder().decode(Bootstrap.self, from: data),
+              bootstrap.hostExecutable.hasPrefix("/"), !bootstrap.hostExecutable.utf8.contains(0),
+              let executable = canonicalPath(bootstrap.hostExecutable),
+              let host = try? ProcessIdentity.read(bootstrap.hostPid),
+              host.uid == getuid(), host.executable == executable else { throw Failure("authentication_failed") }
+        return (host, try bootstrap.key())
     }
 
     func socketIdentity() -> FileIdentity? {

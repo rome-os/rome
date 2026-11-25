@@ -98,6 +98,14 @@ func createOutputDirectory(_ url: URL) throws {
     if mkdir(url.path, 0o700) != 0, errno != EEXIST { throw BuildError("Cannot create output directory.") }
 }
 
+func temporaryDirectory(_ path: String, failure: String) throws -> URL {
+    var template = Array(path.utf8CString)
+    return try template.withUnsafeMutableBufferPointer { buffer in
+        guard let base = buffer.baseAddress, let temporary = mkdtemp(base) else { throw BuildError(failure) }
+        return URL(fileURLWithPath: String(cString: temporary), isDirectory: true)
+    }
+}
+
 func withPublication(_ output: URL, _ stageApp: (URL) throws -> Void) throws {
     guard output.lastPathComponent == appName else { throw BuildError("Expected output named \(appName).") }
     let parent = output.deletingLastPathComponent()
@@ -120,9 +128,8 @@ func withPublication(_ output: URL, _ stageApp: (URL) throws -> Void) throws {
           lockInfo.st_uid == getuid(), lockInfo.st_nlink == 1 else { throw BuildError("Unsafe build lock.") }
     guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw BuildError("Another helper build or install owns the output lock.") }
 
-    var template = Array(parent.appendingPathComponent(".rome-computer-use.XXXXXX").path.utf8CString)
-    guard let temp = mkdtemp(&template) else { throw BuildError("Cannot stage the helper.") }
-    let stage = URL(fileURLWithPath: String(cString: temp), isDirectory: true)
+    let stage = try temporaryDirectory(parent.appendingPathComponent(".rome-computer-use.XXXXXX").path,
+                                       failure: "Cannot stage the helper.")
     defer { try? files.removeItem(at: stage) }
     let candidate = stage.appendingPathComponent(appName, isDirectory: true)
     try stageApp(candidate)
@@ -190,9 +197,7 @@ func test(_ app: URL) throws {
         catch let error as BuildError where error.description == message { return }
         throw BuildError("Expected failure: \(message)")
     }
-    var template = Array("/private/tmp/rome-native-build.XXXXXX".utf8CString)
-    guard let temporary = mkdtemp(&template) else { throw BuildError("Cannot make test directory.") }
-    let root = URL(fileURLWithPath: String(cString: temporary), isDirectory: true)
+    let root = try temporaryDirectory("/private/tmp/rome-native-build.XXXXXX", failure: "Cannot make test directory.")
     defer { try? files.removeItem(at: root) }
     let installed = root.appendingPathComponent(appName, isDirectory: true)
     try rejects("The arm64 helper app or its executable is missing.") { try validate(installed, release: true) }

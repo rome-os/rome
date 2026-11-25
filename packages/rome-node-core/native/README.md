@@ -33,18 +33,39 @@ path so macOS can retain permissions across upgrades.
 1. Create a fresh mode `0700` directory owned by the graphical session user.
    Pass its absolute, canonical path to the helper. The path including
    `/helper.sock` is at most 103 UTF-8 bytes.
-2. Spawn the signed executable directly with `--serve STATE_DIR`. Write 32
-   cryptographically random bytes to its private standard input pipe and close
-   the pipe. Generate a new key for every launch. Treat the key as a credential.
-3. Connect to `STATE_DIR/helper.sock` from the same process that spawned the
-   helper. The helper pins the directory and socket inodes, checks the peer
-   UID and PID against its parent, and validates its audit token with Security.
-   A native caller can apply the same kernel checks to the expected child PID.
-4. Send `handshake` with a fresh 32-byte random `nonce` and the host `proof`.
+2. Create `STATE_DIR/bootstrap.json` exclusively as a regular, single-link
+   file with mode `0600`. Close it before launch. The fields are `secret` (32
+   cryptographically random bytes encoded as 64 lowercase hex digits),
+   `hostPid` (the connecting process's numeric PID), and `hostExecutable` (the
+   canonical absolute path to that process's executable). Generate a fresh key
+   for every launch and retain it in the host through the handshake.
+3. Start the signed app through LaunchServices.
+
+   ```sh
+   open -g -n -a "/path/to/Rome Computer Use.app" --args --serve "$state_dir"
+   ```
+
+   LaunchServices starts the helper in the graphical session under
+   `launchd`. macOS attributes Accessibility and Screen Recording to
+   `com.rome.computer-use` as the responsible process. A native host can
+   use `NSWorkspace.openApplication` to launch the app and get its PID.
+4. Connect to `STATE_DIR/helper.sock` from the declared host process. The
+   helper exposes the socket with mode `0600`. It checks the peer UID and PID
+   with `getpeereid` and `LOCAL_PEERPID`, then validates `LOCAL_PEERTOKEN`
+   with Security and pins it to the connection. A native host can apply the
+   same kernel checks to the helper.
+5. Send `handshake` with a fresh 32-byte random `nonce` and the host `proof`.
    Encode both as standard Base64. Verify the returned PID and helper proof
    before sending another request. Use constant-time MAC comparison.
 
-Compute proofs with HMAC-SHA256 keyed by the 32 bootstrap bytes. Encode the
+The helper takes an exclusive `flock` on the pinned directory inode. It opens
+`bootstrap.json` without following symlinks and verifies its owner, type, mode,
+link count and inode. It unlinks the file before reading up to 16 KiB from the
+open descriptor. Invalid JSON, an unavailable host PID, or a mismatched UID
+or executable path fails launch. A valid file also disappears if handshake
+or socket setup fails.
+
+Compute proofs with HMAC-SHA256 keyed by the decoded 32 bootstrap bytes. Encode the
 following fields as UTF-8, joined by one LF byte with no final newline.
 
 | Position | Host proof | Helper proof |
@@ -56,10 +77,15 @@ following fields as UTF-8, joined by one LF byte with no final newline.
 | 5 | Standard Base64 nonce | Standard Base64 nonce |
 | 6 | | Returned `instance` UUID |
 
-The helper waits up to 10 seconds for its parent to connect and up to 5 seconds
+The helper waits up to 10 seconds for the declared host to connect and up to 5 seconds
 for its handshake. A socket or directory replacement, peer identity change, or
 transport loss seals admission and ends the helper. Start a fresh instance to
 reconnect. Remove the per-launch state directory after the helper exits.
+
+`scripts/computer-use.swift test` runs the native handshake tests against
+`--self-test-server STATE_DIR`. A separate launcher starts the helper so
+the tests cover the same bootstrap and socket flow with a non-parent host.
+The test server checks kernel peer identity and HMAC with desktop access disabled.
 
 ## Frames
 
@@ -124,7 +150,8 @@ reader and can reply out of order while a window operation is busy.
 `kill -USR1 HELPER_PID` provides a local stop, and `SIGTERM` seals admission
 and exits. Session switching, sleep, and the console guard also seal
 admission. The console guard uses public session fields, display state and
-visible window levels.
+visible window levels. It runs during window operations and once per second
+while a slot or binding is active.
 
 Cancel permanently seals this helper's admission. `cancel_requested` means
 an admitted operation still occupies the slot. `stop_confirmed` means the

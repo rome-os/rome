@@ -1,6 +1,5 @@
 import AppKit
 import ApplicationServices
-import CryptoKit
 import Darwin
 import Foundation
 import Security
@@ -24,14 +23,10 @@ func signedApp() -> Bool {
 
 func launch(path: String, desktop: Bool) throws -> Never {
     let state = try StateDirectory(path)
-    let host = try ProcessIdentity.read(getppid())
-    var input = stat()
-    guard fstat(STDIN_FILENO, &input) == 0,
-          [S_IFIFO, S_IFSOCK].contains(input.st_mode & S_IFMT),
-          fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK) == 0 else { throw Failure("authentication_failed") }
-    let secret = try readBytes(STDIN_FILENO, count: 32, deadline: .now() + .seconds(5))
-    close(STDIN_FILENO)
-    let handshake = Handshake(key: SymmetricKey(data: secret), host: host.pid, helper: getpid())
+    // Serialize bootstrap consumption and socket ownership on the pinned directory inode.
+    guard flock(state.fd, LOCK_EX | LOCK_NB) == 0 else { throw Failure("state_directory_busy") }
+    let (host, key) = try state.consumeBootstrap()
+    let handshake = Handshake(key: key, host: host.pid, helper: getpid())
     let admission = Admission()
     signal(SIGUSR1, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
