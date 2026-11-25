@@ -6,8 +6,8 @@ import {
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { request } from "node:http";
+import { mayEnter } from "../../access/entry.js";
 import { currentSessionActor } from "../../access/session-actor.js";
-import { isOnTeam } from "../../access/team.js";
 import { signerSocketPath } from "../../instance/instance-identity.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
@@ -86,9 +86,8 @@ export function vaultRoutes(
   const app = new Hono();
 
   app.use("/vault/*", async (c, next) => {
-    const actor = await currentSessionActor();
-    if (!isOnTeam(actor, deps.dashboardAccessState))
-      return c.json({ error: "Guardian authentication required" }, 403);
+    const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
+    if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
     const readOnly = ["GET", "HEAD", "OPTIONS"].includes(c.req.method);
     // Only a browser session types a PIN. A loopback caller is any process in the container.
     if (
@@ -136,9 +135,8 @@ export function vaultRoutes(
   });
 
   app.post("/vault/grants", async (c) => {
-    const actor = await currentSessionActor();
-    if (!isOnTeam(actor, deps.dashboardAccessState))
-      return c.json({ error: "Guardian authentication required" }, 403);
+    const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
+    if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
     const input = await c.req
       .json<Record<string, unknown>>()
       .catch((): Record<string, unknown> => ({}));

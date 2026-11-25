@@ -1,8 +1,9 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { mayEnter } from "../../access/entry.js";
 import { currentSessionActor } from "../../access/session-actor.js";
-import { isOnTeam, type TeamActor } from "../../access/team.js";
+import type { TeamActor } from "../../access/team.js";
 import { teamOnly } from "../../access/team-only.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
@@ -83,9 +84,8 @@ export async function resolveApproval(
 
 async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve" | "reject") {
   const approvalId = c.req.param("id") as string;
-  const actor = await currentSessionActor();
-  if (!isOnTeam(actor, deps.dashboardAccessState))
-    return c.json({ error: "Guardian authentication required" }, 403);
+  const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
+  if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
   if (action === "approve") {
     const approval = await deps.approvalsRepo.findById(approvalId);
     if (approvalCall(approval).actionName === VAULT_APPLY_ACTION) {

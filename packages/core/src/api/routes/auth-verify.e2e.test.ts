@@ -15,7 +15,7 @@
  * The dashboard-side `/api/apps/<appId>/*` surface is intentionally NOT
  * consulted against `noAuth` — those always require a session.
  */
-import { afterAll, describe, expect, it } from "@rstest/core";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../index.js";
@@ -29,7 +29,7 @@ import {
 import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";
-import { settings } from "../../db/schema.js";
+import { guardianAuth, settings } from "../../db/schema.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
@@ -215,6 +215,43 @@ describe("/api/auth/verify", () => {
 
     expect(res.status).toBe(204);
     expect(res.headers.get("X-Rome-User-Id")).toBe("native-account");
+  });
+
+  describe("with a guardian seat", () => {
+    beforeEach(() => {
+      testDb.db
+        .insert(guardianAuth)
+        .values({
+          id: "g1",
+          userId: "seat-account",
+          passwordHash: "unused",
+          onboardingComplete: true,
+          createdAt: new Date(),
+        })
+        .run();
+    });
+    afterEach(() => {
+      testDb.db.delete(guardianAuth).run();
+    });
+
+    it("proves no one by the loopback peer asking", async () => {
+      const host = buildHost(await stubDeps([]));
+      const peer = { incoming: { socket: { remoteAddress: "127.0.0.1" } } };
+      const me = await host.request("/api/auth/me", {}, peer);
+      expect(await me.json()).toMatchObject({ kind: "guardian" });
+
+      const probes: Array<Record<string, string>> = [{ "X-Forwarded-Uri": "/api/people" }, {}];
+      for (const headers of probes) {
+        const res = await host.request("/api/auth/verify", { headers }, peer);
+        expect(res.status).toBe(401);
+      }
+    });
+
+    it("names the guardian as their cookie does", async () => {
+      const host = buildHost(await stubDeps([]));
+      const res = await verifyRequest(host, "/api/people", validCookieHeader());
+      expect(res.headers.get("X-Rome-User-Id")).toBe("u1");
+    });
   });
 
   it("returns 204 when forwardedUri targets an app declaring noAuth: true", async () => {

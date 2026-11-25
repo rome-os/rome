@@ -20,6 +20,16 @@ Two policies decide reach, each held as its own setting:
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
 - An app manifest's no-auth declaration opens only that app's public webhook paths. The dashboard-side app surface stays gated regardless.
 
+## Entry
+
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team).
+
+### Invariants
+
+- A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
+- The answer holds for the moment of the call. Nothing keeps it.
+- A person Rome cannot tell never enters.
+
 ## Request flow
 
 ```

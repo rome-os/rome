@@ -7843,7 +7843,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           channelThreadKey: "webchat:session-1",
         },
-        { selectionId: "gpt-5-6-terra" },
+        { selectionId: "openai/gpt-5.6-terra" },
       );
       const handle = await startAfter(session, { prompt: "Map model" });
       await collectMessages(handle.events());
@@ -7876,7 +7876,7 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:session-cold",
       };
-      const firstSession = await firstManager.open(key, { selectionId: "gpt-5-6-terra" });
+      const firstSession = await firstManager.open(key, { selectionId: "openai/gpt-5.6-terra" });
       await collectMessages((await startAfter(firstSession, { prompt: "Start" })).events());
       await firstManager.shutdown();
 
@@ -8218,7 +8218,7 @@ describe("AgentRunner", () => {
       if (pin !== "none") await ran(session, "before");
       current = "anthropic";
       const before = await sessionRepository.session(session.sessionId);
-      session.selectModelForOneTurn?.("claude-sonnet");
+      session.selectModelForOneTurn?.("anthropic/claude-sonnet-5-5");
       expect(await ran(session, "swapped")).toBe("claude-sonnet-5-5");
       // The swap writes nothing: the row names what it named before, on its provider.
       const after = await sessionRepository.session(session.sessionId);
@@ -8250,7 +8250,7 @@ describe("AgentRunner", () => {
           (message) => message.type === "result",
         );
       const own = (await ran("first")) as { content: string };
-      session.selectModelForOneTurn?.("claude-sonnet");
+      session.selectModelForOneTurn?.("anthropic/claude-sonnet-5-5");
       expect(await ran("swapped")).toMatchObject({ content: "claude-sonnet-5-5" });
       expect(await ran("after")).toMatchObject({ content: own.content });
       await manager.shutdown();
@@ -8268,7 +8268,7 @@ describe("AgentRunner", () => {
       const session = await first.open(key);
       await collectMessages((await startAfter(session, { prompt: "first" })).events());
       const own = (await sessionRepository.session(session.sessionId))!.model;
-      session.selectModelForOneTurn?.("claude-sonnet");
+      session.selectModelForOneTurn?.("anthropic/claude-sonnet-5-5");
       await collectMessages((await startAfter(session, { prompt: "swapped" })).events());
       // The row still names the session's own model, not the one the swap lent it.
       expect((await sessionRepository.session(session.sessionId))!.model).toBe(own);
@@ -8596,7 +8596,7 @@ describe("AgentRunner", () => {
       const manager = createSessions(managerDeps(modelResolver));
       const session = await manager.open(
         { agentName: "test-main", channelThreadKey: "webchat:override-pin" },
-        { selectionId: "claude-opus" },
+        { selectionId: "anthropic/claude-opus-4-8[1m]" },
       );
       expect(session.sessionId).toBe(pinnedId);
 
@@ -8656,7 +8656,7 @@ describe("AgentRunner", () => {
       const rescueManager = createSessions(managerDeps(modelResolver));
       const rescueSession = await rescueManager.open(
         { agentName: "test-main", channelThreadKey: "webchat:rescue" },
-        { selectionId: "gpt-5-6-terra" },
+        { selectionId: "openai/gpt-5.6-terra" },
       );
       expect(rescueSession.sessionId).toBe(strandedId);
 

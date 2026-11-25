@@ -74,6 +74,7 @@ describe("bundled Claude Code", () => {
     try {
       for await (const message of q) {
         if (message.type !== "system" || message.subtype !== "init") continue;
+        expect(message.model).toBe(model);
         const missing = [...builtinTools, ...romeTools].filter(
           (tool) => !message.tools.includes(tool),
         );

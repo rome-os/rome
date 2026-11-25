@@ -39,13 +39,13 @@ describe("ModelSelectorMenu", () => {
       expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
     );
     // The long tail is folded away until the guardian expands or searches.
-    expect(names).not.toContain("Sonnet");
-    expect(names).not.toContain("Haiku");
+    expect(names).not.toContain("Sonnet 5.5");
+    expect(names).not.toContain("Haiku 5.5");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
   });
 
   it("keeps a pinned non-curated model visible (with its check) when collapsed", () => {
-    render(<ModelSelectorMenu {...baseProps()} value="claude-haiku" />);
+    render(<ModelSelectorMenu {...baseProps()} value="anthropic/claude-haiku-5-5" />);
 
     // Haiku is not curated, but it is the current selection, so it stays
     // visible without expanding — a deliberately pinned model is not stranded.
@@ -57,13 +57,13 @@ describe("ModelSelectorMenu", () => {
     const user = userEvent.setup();
     render(<ModelSelectorMenu {...baseProps()} />);
 
-    expect(optionNames()).not.toContain("Sonnet");
+    expect(optionNames()).not.toContain("Sonnet 5.5");
     await user.click(screen.getByText(SHOW_ALL));
 
     await waitFor(() =>
       expect(screen.getAllByRole("option").length).toBe(LARGE_MODEL_OPTIONS.length),
     );
-    expect(optionNames()).toContain("Sonnet");
+    expect(optionNames()).toContain("Sonnet 5.5");
     // The show-all row is gone once everything is shown.
     expect(screen.queryByText(SHOW_ALL)).toBeNull();
   });
@@ -76,7 +76,7 @@ describe("ModelSelectorMenu", () => {
 
     await waitFor(() => {
       const names = optionNames();
-      expect(names).toContain("Sonnet");
+      expect(names).toContain("Sonnet 5.5");
       expect(names).not.toContain("Auto (default provider)");
     });
   });
@@ -89,7 +89,7 @@ describe("ModelSelectorMenu", () => {
     await user.type(screen.getByPlaceholderText("Search models…"), "6.1");
     await user.click(await screen.findByRole("option", { name: "GPT-6.1 Sol" }));
 
-    expect(props.onChange).toHaveBeenCalledWith("gpt-6-1-sol");
+    expect(props.onChange).toHaveBeenCalledWith("openai/gpt-6.1-sol");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -110,7 +110,7 @@ describe("ModelSelectorMenu", () => {
 
     await user.click(screen.getByRole("option", { name: /Opus 5\.5/ }));
 
-    expect(props.onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    expect(props.onChange).toHaveBeenCalledWith("anthropic/claude-opus-5-5[1m]");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -129,9 +129,9 @@ describe("ModelSelectorMenu", () => {
 
     // Filter down to a non-curated model, then pick it — selection closes the menu.
     await user.type(screen.getByPlaceholderText("Search models…"), "sonnet");
-    await waitFor(() => expect(optionNames()).toContain("Sonnet"));
+    await waitFor(() => expect(optionNames()).toContain("Sonnet 5.5"));
     await user.click(screen.getByRole("option", { name: /Sonnet/ }));
-    expect(props.onChange).toHaveBeenCalledWith("claude-sonnet");
+    expect(props.onChange).toHaveBeenCalledWith("anthropic/claude-sonnet-5-5");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
 
     // Selecting a row flips the parent's `open` prop rather than going through
@@ -145,7 +145,7 @@ describe("ModelSelectorMenu", () => {
     expect(names).toEqual(
       expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
     );
-    expect(names).not.toContain("Sonnet");
+    expect(names).not.toContain("Sonnet 5.5");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
     // The search field is cleared too.
     expect((screen.getByPlaceholderText("Search models…") as HTMLInputElement).value).toBe("");
@@ -170,10 +170,41 @@ describe("ModelSelectorMenu sign-ins", () => {
     render(
       <ModelSelectorMenu
         {...baseProps()}
-        value="gpt-6-luna"
+        value="openai/gpt-6-luna"
         signedIn={{ anthropic: true, openai: false, rome_credits: false }}
       />,
     );
     expect(optionNames()).toContain("GPT-6 Luna");
   });
+});
+
+it.each([
+  ["en", "anthropic/claude-opus-4-8[1m]", "Opus 4.8"],
+  ["zh-CN", "anthropic/claude-opus-4-8[1m]", "Opus 4.8"],
+  ["en", "anthropic/claude-sonnet-5-5", "Sonnet 5.5"],
+  ["zh-CN", "anthropic/claude-haiku-5-5", "Haiku 5.5"],
+  ["en", "anthropic/claude-fable-5-1[1m]", "Fable 5.1"],
+])("keeps stored %s/%s selected with its exact version", async (language, value, label) => {
+  await i18n.changeLanguage(language);
+  const props = { ...baseProps(), value };
+  const view = render(<ModelSelectorMenu {...props} />);
+  try {
+    const row = screen.getByRole("option", { name: label });
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: language === "en" ? "Model" : "模型" }).textContent,
+    ).toContain(label);
+    await userEvent.setup().click(row);
+    expect(props.onChange).toHaveBeenCalledWith(value);
+  } finally {
+    view.unmount();
+    await i18n.changeLanguage("en");
+  }
+});
+
+it("shows an unknown saved choice verbatim instead of naming it Auto", () => {
+  render(<ModelSelectorMenu {...baseProps()} value="unrecognized-old-choice" />);
+  expect(screen.getByRole("button", { name: "Model" }).textContent).toContain(
+    "unrecognized-old-choice",
+  );
 });

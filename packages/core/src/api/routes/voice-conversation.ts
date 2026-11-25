@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { VoiceConversationInfo } from "@rome/api-types/voice-conversation";
+import { mayEnter } from "../../access/entry.js";
 import { currentSessionActor } from "../../access/session-actor.js";
-import { isOnTeam } from "../../access/team.js";
 import { NO_VOICE_INPUT } from "../../voice-input/index.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -16,7 +16,7 @@ export function voiceConversationRoutes(
   app.get("/voice-conversation", async (c) => {
     const available =
       Boolean(deps.speaker) &&
-      isOnTeam(await currentSessionActor(), deps.dashboardAccessState) &&
+      (await mayEnter(await currentSessionActor(), deps.dashboardAccessState)) !== null &&
       (await (deps.voiceInput ?? NO_VOICE_INPUT).info()).available;
     return c.json({ available } satisfies VoiceConversationInfo);
   });
