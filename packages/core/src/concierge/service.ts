@@ -64,7 +64,7 @@ import {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
-import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
+import { OWNERS_BY_ROLE, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 import { guardianNow } from "./alerts.js";
 import { resolveGuardianTimezone } from "../instance/timezone.js";
 
@@ -557,14 +557,9 @@ export class ConciergeService {
     );
   }
 
-  /** Who each owner is, and whether Rome still serves them. */
+  /** Who each owner is. */
   get owners(): ConciergeOwners {
-    return this.deps.owners ?? ALL_OWNERS_SERVED;
-  }
-
-  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a dashboard admin while on the allow-list. */
-  isServed(owner: ConciergeOwner): Promise<boolean> {
-    return this.owners.isServed(owner);
+    return this.deps.owners ?? OWNERS_BY_ROLE;
   }
 
   /**
