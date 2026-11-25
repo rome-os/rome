@@ -129,8 +129,8 @@ A project-specific term earns admission only with a one-line separation from its
 
 If a concept has a canonical home, link to it instead of re-explaining it.
 
-> Prefer: "messages are triaged by the [sentinel](../concepts/messaging.md#sentinel)."
-> Over: restating what the sentinel is, then using it.
+> Prefer: "a message wakes the agent past the [wake gate](../domains/participation.md#wake-gate)."
+> Over: restating what the wake gate is, then using it.
 
 ## Checking
 

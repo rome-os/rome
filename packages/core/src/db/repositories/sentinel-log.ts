@@ -6,7 +6,9 @@ import { sentinelLog } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 
 /**
- * The triage record: what the sentinel decided about each message it saw.
+ * The triage record of past releases: what the sentinel agent decided about
+ * each message it saw. Nothing in Rome writes it anymore. It stays for the
+ * account reads, and an app may still write it for one release.
  *
  * An entry names the channel the message arrived on, as apps write it, and the
  * sender's account: the account an app passes, or else the platform of that

@@ -7,7 +7,7 @@ The highest trust level. Full access to all capabilities.
 Trusted friends and family. Can interact freely but outgoing messages require envoy approval.
 
 ## Acquaintance
-Known contacts. Sentinel triages their messages.
+Known contacts.
 
 ## Other
-Unknown senders. Sentinel triages; most interactions are limited.
+Unknown senders. Most interactions are limited.

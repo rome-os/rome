@@ -65,8 +65,8 @@ A **cost note** covers a performance property the surrounding lines do not show:
 
 A comment names a thing by its identifier in the code. A synonym for a named type, function, or field fails, however well it reads. One term per concept across a module. Word choice follows [WRITING.md](WRITING.md). `[llm]`
 
-> Prefer: `// The sentinel drops the event when no ChannelAdapter claims it.`
-> Over: `// The triage layer drops the event when no connector claims it.`
+> Prefer: `// The wake gate drops the event when no ChannelAdapter claims it.`
+> Over: `// The filter layer drops the event when no connector claims it.`
 
 ## Admission
 

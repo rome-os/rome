@@ -261,8 +261,8 @@ provider's native structured-output API. The provider returns one schema-valid
 terminal value or fails the turn.
 
 ```yaml
-name: sentinel
-description: Triages incoming messages from untrusted senders
+name: triage
+description: Triages incoming support requests
 tier: small
 permissionMode: bypassPermissions
 tools: []
@@ -286,7 +286,7 @@ While iterating `agentRunner.run()`, callers read the validated payload from
 the terminal `result`:
 
 ```ts
-for await (const msg of agentRunner.run({ agentName: "research-app:sentinel", prompt })) {
+for await (const msg of agentRunner.run({ agentName: "research-app:triage", prompt })) {
   if (msg.type === "result" && msg.structuredOutput) {
     const { decision, reason } = msg.structuredOutput as {
       decision: string;
@@ -1242,8 +1242,8 @@ The template's `src/db/README.md` has more detail.
 
 A hook is a callback registered against the daemon's event loop. The
 canonical example is the `channel-message` hook: every incoming channel
-message flows through it, and the hook decides whether to dispatch the
-sentinel agent.
+message from someone let in flows through it, and the hook decides whether
+to wake an agent.
 
 Hook directory layout:
 

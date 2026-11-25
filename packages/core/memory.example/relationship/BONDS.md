@@ -44,7 +44,7 @@ Known contacts with minimal relationship to the guardian.
 - Channel mappings
 - Stored in: `memory/relationship/<person-id>.md`
 
-> **Strangers**: Do NOT remember anything. Do not create profiles. Route through sentinel.
+> **Strangers**: Do NOT remember anything. Do not create profiles.
 
 ## How to Classify People
 

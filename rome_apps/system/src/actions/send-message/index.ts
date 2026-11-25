@@ -112,7 +112,7 @@ async function sendThroughChats(
         channel: input.channel,
         threadId,
         // A send must not bind an unclaimed conversation to whichever
-        // background or sentinel agent happened to send first.
+        // background agent happened to send first.
         agentName: "main",
         threadType: "private",
       })
