@@ -12,13 +12,19 @@ import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { MemoryHeadroom } from "../../instance/memory-headroom.js";
 import { type Action, type ActionResult, withApprovalPerCall } from "./types.js";
+import type { IpcRpc } from "./ipc.js";
+import type { WorkerRpcServer } from "./worker-rpc.js";
 import { callAction } from "./call-action.js";
 import { emitAgentMessage, type ActionRuntimeEvent } from "./runtime-events.js";
 import {
   getCurrentHookInvocationContext,
   runWithHookInvocationContext,
 } from "../../core/hook-recursion.js";
-import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
+import {
+  currentSessionActor,
+  runWithSessionActor,
+  type SessionActor,
+} from "../../access/session-actor.js";
 import {
   createTestRome,
   buildAction,
@@ -195,6 +201,30 @@ describe("ActionEngine", () => {
 
       await engine.stopWorkerWarmPool();
       expect(children[0].sent).toContainEqual({ type: "shutdown" });
+    });
+
+    it("serves a worker's call as no one's, whoever's work forked the worker", async () => {
+      const { children, actionWorkerFork } = installFakeChildProcessFactory();
+      const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+        processRole: "main",
+        workerWarmPoolSize: 1,
+        actionWorkerFork,
+      });
+      const servedAs: unknown[] = [];
+      engine.setWorkerRpcServer({
+        register: (rpc: IpcRpc) =>
+          rpc.handle("test.whose", async () => {
+            servedAs.push((await currentSessionActor()) ?? null);
+          }),
+      } as unknown as WorkerRpcServer);
+      engine.startWorkerWarmPool();
+
+      const request = { type: "rpc_request", reqId: "1", method: "test.whose", params: {} };
+      runWithSessionActor({ kind: "guardian", userId: "g", via: "cookie" }, () =>
+        children[0].emit("message", request),
+      );
+      await rs.waitFor(() => expect(servedAs).toEqual([null]));
+      await engine.stopWorkerWarmPool();
     });
 
     it("recycles idle warm workers on pool restart", async () => {
