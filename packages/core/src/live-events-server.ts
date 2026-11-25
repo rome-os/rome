@@ -4,9 +4,8 @@
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: a
-// dashboard admin gets every topic the guardian gets, and loses the socket at
-// the next ping once off the team. `concierge.activity` carries the caller's own
-// Concierge chats, `chat.tasks:<id>` only the
+// dashboard admin gets every topic the guardian gets. `concierge.activity`
+// carries the caller's own Concierge chats, `chat.tasks:<id>` only the
 // caller's own Concierge chat, and another owner's Concierge or task chat is
 // not found.
 //
@@ -34,8 +33,7 @@ import {
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
-import type { DashboardAccessState } from "./access/dashboard-access-state.js";
-import { isOnTeam, type TeamActor } from "./access/team.js";
+import type { DashboardAllowList, TeamActor } from "./access/team.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
 import type { DashboardActivity } from "./lib/dashboard-activity.js";
@@ -70,7 +68,6 @@ const PING_INTERVAL_MS = 25_000;
 // A tab that stops reading would otherwise grow this buffer without bound. The
 // client resyncs on reconnect, so closing it loses nothing.
 const MAX_BUFFERED_BYTES = 1024 * 1024;
-const CLOSE_POLICY_VIOLATION = 1008;
 const CLOSE_TRY_AGAIN_LATER = 1013;
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -114,7 +111,7 @@ function errorMessage(err: unknown): string {
 export function attachLiveEventsServer(
   httpServer: Server,
   db: DrizzleDb,
-  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess: DashboardAllowList,
   sources: LiveEventSources,
   phoneWatching?: PhoneWatching,
   dashboardActivity?: DashboardActivity,
@@ -157,10 +154,6 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    // A dashboard admin dropped from the allow-list loses new subscriptions at
-    // once and the socket at the next ping, as the edge probe would refuse a
-    // new stream.
-    const onTeam = () => isOnTeam(actor, dashboardAccess);
     // Whose Concierge todo list and private chats this socket may read.
     const owner = actor.kind === "guardian" ? "guardian" : `visitor:${actor.accountId}`;
     // A dashboard holds back only its own person's pushes; a phone's
@@ -212,10 +205,6 @@ export function attachLiveEventsServer(
         sendError("Unknown topic", name);
         return;
       }
-      if (!onTeam()) {
-        sendError("Forbidden", name);
-        return;
-      }
       const entry: { unsubscribe: Unsubscribe | null } = { unsubscribe: null };
       subscriptions.set(name, entry);
       exists(topic)
@@ -259,10 +248,6 @@ export function attachLiveEventsServer(
     };
 
     const ping = setInterval(() => {
-      if (!onTeam()) {
-        ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
-        return;
-      }
       if (!alive) {
         ws.terminate();
         return;
@@ -290,7 +275,7 @@ export function attachLiveEventsServer(
       if (message.type === "subscribe") subscribe(message.topic);
       else if (message.type === "unsubscribe") unsubscribe(message.topic);
       else if (message.state === "away") activity?.away();
-      else if (onTeam()) activity?.active();
+      else activity?.active();
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

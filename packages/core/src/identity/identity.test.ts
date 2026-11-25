@@ -23,7 +23,7 @@ describe("Identity", () => {
     return { db: testDb.db, identity: createIdentity(testDb.db) };
   }
 
-  it("resolves a claimed account to its person and an unclaimed one to nobody", async () => {
+  it("resolves a held account to its person and one nobody holds to nobody", async () => {
     const { identity } = setup();
     const ann = await identity.createPerson({ name: "Ann", accounts: [ANN_SLACK] });
 
