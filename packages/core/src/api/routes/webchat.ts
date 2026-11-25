@@ -2771,67 +2771,37 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const app = new Hono();
 
-  // A Concierge chat and the task chats it starts are their owner's alone:
-  // to anyone else they do not exist (docs/domains/chats.md#concierge-chat).
-  const callerOwner = currentChatOwner;
-  // Fails closed: only a chat that exists and the caller may open passes.
-  // Two routes share the pattern without naming a chat, and pass through.
-  const privateChatGate: MiddlewareHandler = async (c, next) => {
+  // Only a chat that exists passes. Two routes share the pattern without
+  // naming a chat, and pass through.
+  const chatGate: MiddlewareHandler = async (c, next) => {
     if (/\/chat\/sessions\/search$|\/sessions\/messages\//.test(c.req.path)) return next();
     const sessionId = c.req.param("id") ?? c.req.param("sessionId") ?? "";
-    if (
-      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, await callerOwner()))
-    ) {
+    if (!(await deps.webchatRepo.getSession(sessionId))) {
       return c.json({ error: "Session not found" }, 404);
     }
     await next();
   };
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
-    app.use(path, privateChatGate);
+    app.use(path, chatGate);
   }
-  // A turn or a message reached by its own id is its chat's, and kept the same
-  // way: refused when any chat it may belong to is one the caller may not open.
-  const privateByIdGate =
-    (openTo: (id: string, owner: string | null) => Promise<boolean>): MiddlewareHandler =>
-    async (c, next) => {
-      const id = c.req.param("id") ?? c.req.param("turnId") ?? "";
-      if (!(await openTo(id, await callerOwner()))) return c.json({ error: "Not found" }, 404);
-      await next();
-    };
-  // Fails closed: open only when the chats found are all ones the caller may
-  // open, and at least one is found.
-  const chatsOpenTo = async (chatIds: (string | null | undefined)[], owner: string | null) => {
-    const found = chatIds.filter((chatId): chatId is string => Boolean(chatId));
-    if (found.length === 0) return false;
-    for (const chatId of found) {
-      if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
-        return false;
-      }
-    }
-    return true;
-  };
   // A turn answers for the chat it runs in: its dashboard stream's, its
   // registered stream's (every one names the chat it is recorded in), else
   // its stored messages'. A turn whose chat is gone, or that names none, is
-  // not found to anyone.
-  const turnOpenTo = async (turnId: string, owner: string | null) => {
+  // not found.
+  app.use("/chat/turns/:turnId/*", async (c, next) => {
+    const turnId = c.req.param("turnId") ?? "";
     const registered = deps.agentTurnStreamRegistry.get(turnId);
-    if (registered && !registered.chatId) return false;
-    return chatsOpenTo(
-      [
-        streamsByTurnId.get(turnId)?.sessionId,
-        registered?.chatId,
-        await deps.webchatRepo.sessionIdOfTurn(turnId),
-      ],
-      owner,
-    );
-  };
-  const messageOpenTo = async (messageId: string, owner: string | null) =>
-    chatsOpenTo([await deps.webchatRepo.sessionIdOfMessage(messageId)], owner);
-  app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
-  app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
-  app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
-  // After the gates: a chat's outputs are as private as the chat.
+    const chatIds = [
+      streamsByTurnId.get(turnId)?.sessionId,
+      registered?.chatId,
+      await deps.webchatRepo.sessionIdOfTurn(turnId),
+    ].filter((chatId) => typeof chatId === "string");
+    const chats = await Promise.all(chatIds.map((id) => deps.webchatRepo.getSession(id)));
+    if ((registered && !registered.chatId) || chats.length === 0 || chats.includes(null)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    await next();
+  });
   app.route("/", chatOutputsRoutes(deps));
 
   app.get("/sessions/:id/messages", async (c) => {
@@ -2898,7 +2868,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const ownerKey =
       c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
-    const sessions = await deps.webchatRepo.listSessions(status, ownerKey, await callerOwner());
+    const sessions = await deps.webchatRepo.listSessions(
+      status,
+      ownerKey,
+      await currentChatOwner(),
+    );
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -2957,7 +2931,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // are ones they may open.
     const matches = await deps.webchatRepo.searchSessionMessages(query, {
       sessionLimit: 20,
-      visibleTo: await callerOwner(),
+      visibleTo: await currentChatOwner(),
     });
     return c.json(
       matches.map((match) => ({
@@ -3605,7 +3579,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // one list of their links. A visitor sees only their own; someone not
   // signed in sees none.
   app.get("/chat/shares", async (c) => {
-    const shares = await deps.webchatRepo.listSharedChatsByOwner(await callerOwner());
+    const shares = await deps.webchatRepo.listSharedChatsByOwner(await currentChatOwner());
     return c.json(
       shares.map((s) => ({
         id: s.id,
@@ -5816,16 +5790,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  // A socket reaches the chats its person's dashboard opens, as the routes' gate allows.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    const owner = await currentChatOwner();
-    if (!owner || !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
-      return "Session not found";
-    }
-    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
-      ? null
-      : "A voice conversation is only for a Concierge chat";
+    const chat = await deps.webchatRepo.getSession(chatId);
+    if (!chat) return "Session not found";
+    return isConciergeChat(chat) ? null : "A voice conversation is only for a Concierge chat";
   };
 
   const runtime: WebchatRuntime = {
