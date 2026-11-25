@@ -6,7 +6,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { platformOf } from "@rome/api-types/platform";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { privateOwnerOf } from "./privacy.js";
+import { canOpen, privateOwnerOf } from "./privacy.js";
 import { type SessionActor, sessionOwnerKey } from "../access/session-actor.js";
 import type { ChannelSurface } from "../core/session-opening.js";
 import type { WebChatRepository } from "./repository.js";
@@ -105,8 +105,7 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
         const owner = await readerOwner(webchatRepo, dashboardCaller());
         const hidden = new Set<string>();
         for (const id of chatId ? [] : new Set(lines.map((message) => message.chatId))) {
-          const whose = privateOwnerOf(await webchatRepo.getSession(id));
-          if (whose !== null && whose !== owner) hidden.add(id);
+          if (!canOpen(await webchatRepo.getSession(id), owner)) hidden.add(id);
         }
         const newestFirst = lines
           .filter((message) => !hidden.has(message.chatId))

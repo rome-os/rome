@@ -13,7 +13,7 @@ import type { AgentSession, SessionOpening, Sessions, AgentTurnHandle } from "..
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
-import { privateOwnerOf } from "../webchat/privacy.js";
+import { canOpen } from "../webchat/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../apps/actions/ipc.js";
 import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb } from "../test/db.js";
@@ -283,7 +283,7 @@ describe("AgentSessionBridge conversation", () => {
 });
 
 describe("AgentSessionBridge resuming a session by its id", () => {
-  it("resumes a Concierge session for anyone", async () => {
+  it("refuses a caller who may not open the session's chat, and lets its owner in", async () => {
     const testDb = createTestDb();
     try {
       const repo = new ChatsWebChatRepository(testDb.db);
@@ -338,24 +338,20 @@ describe("AgentSessionBridge resuming a session by its id", () => {
             input: { prompt: "what did they say?" },
           },
         });
-      summon("as-member", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        ) as { error?: unknown } | undefined;
+
+      summon("as-visitor", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("as-visitor")).toBeDefined());
+      expect(responseTo("as-visitor")?.error).toBeDefined();
+      expect(sent).toEqual([]);
+
+      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
       await rs.waitFor(() => expect(sent).toHaveLength(1));
-      const guardian = { kind: "guardian", userId: "seat", via: "cookie" };
-      summon("as-guardian", guardian);
-      await rs.waitFor(() => expect(sent).toHaveLength(2));
-      // A session whose chat was deleted is not found.
-      await repo.deleteSession("concierge");
-      summon("deleted", guardian);
-      await rs.waitFor(() =>
-        expect(
-          child.sent.find(
-            (m) =>
-              (m as { reqId?: string }).reqId === "deleted" &&
-              (m as { type?: string }).type === "rpc_response",
-          ),
-        ).toHaveProperty("error"),
-      );
-      expect(sent).toHaveLength(2);
     } finally {
       testDb.close();
     }
@@ -519,7 +515,8 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
       await rs.waitFor(async () => expect(await repo.getSession(runId)).not.toBeNull());
       const run = await repo.getSession(runId);
       expect(run).toMatchObject({ ownerKey: "guardian", triggerKind: "concierge_fork" });
-      expect(privateOwnerOf(run)).toBe("guardian");
+      expect(canOpen(run, "visitor:a")).toBe(false);
+      expect(canOpen(run, "guardian")).toBe(true);
     } finally {
       testDb.close();
     }
