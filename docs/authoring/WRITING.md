@@ -138,6 +138,8 @@ If a concept has a canonical home, link to it instead of re-explaining it.
 
 Four words on the lists above are deliberately absent from the gate: *begin*, *initiate*, *acquire*, and *robust*. Each carries a technical sense a word list cannot tell from the prose one, so checking them would report more wrong answers than right ones. Apply them by reading.
 
+The semicolon rule is absent from the gate too. Checking it reported more noise than signal, so apply it by reading.
+
 Comments follow the same word lists as docs, and three rules are lifted for them. [comments.md](comments.md) admits the history phrasings in present-tense prose, and the bans on semicolons and contractions cover `docs/` only.
 
 Prose written before the check is recorded in [`scripts/prose-baseline.mjs`](../../scripts/prose-baseline.mjs) and gates nothing. A new violation fails the check, and so does a baseline entry that has been fixed, which keeps the list shrinking.
