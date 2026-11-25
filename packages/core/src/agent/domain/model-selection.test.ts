@@ -9,9 +9,11 @@ describe("model selections", () => {
   });
 
   it("recognizes a selection id and nothing else", () => {
-    expect(isModelSelectionId("claude-sonnet")).toBe(true);
-    expect(isModelSelectionId("gpt-6-luna")).toBe(true);
+    expect(isModelSelectionId("anthropic/claude-sonnet-5-5")).toBe(true);
+    expect(isModelSelectionId("openai/gpt-6-luna")).toBe(true);
     expect(isModelSelectionId("auto")).toBe(false);
+    expect(isModelSelectionId("claude-opus")).toBe(false);
+    expect(isModelSelectionId("opus")).toBe(false);
     expect(isModelSelectionId("toString")).toBe(false);
     expect(isModelSelectionId(42)).toBe(false);
   });

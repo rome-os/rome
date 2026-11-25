@@ -3,12 +3,13 @@
 // docs/domains/connections.md#device-connection.
 
 import { type Context, Hono } from "hono";
+import { mayEnter } from "../../access/entry.js";
 import {
   resolveSessionActorFromMaterial,
   type SessionActor,
   sessionActorMaterial,
 } from "../../access/session-actor.js";
-import { bySignedInSession, type DashboardAllowList, isOnTeam } from "../../access/team.js";
+import { bySignedInSession, type DashboardAllowList } from "../../access/team.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { readCappedBody } from "../../lib/read-capped-body.js";
 import { createLogger } from "../../logger.js";
@@ -38,8 +39,8 @@ export function deviceConnectionRoutes(deps: DeviceConnectionRoutesDeps): Hono {
   // listed device as the guardian's. A loopback caller, which an agent's shell
   // is, does not count here.
   app.use("/device-connections", async (c, next) => {
-    const actor = await sessionActor(c);
-    if (!isOnTeam(actor, deps.dashboardAccessState) || !bySignedInSession(actor)) {
+    const actor = await mayEnter(await sessionActor(c), deps.dashboardAccessState);
+    if (!actor || !bySignedInSession(actor)) {
       return c.json({ error: "Guardian session required" }, 403);
     }
     const reads = c.req.method === "GET" || c.req.method === "HEAD";

@@ -137,7 +137,7 @@ describe("ModelResolver", () => {
       { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6.1-sol" },
       { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6-astra" },
       { kind: "exact" as const, providerId: "openai" as const, model: "gpt-6.1-sol:high" },
-      selected("gpt-6-1-sol"),
+      selected("openai/gpt-6.1-sol"),
     ])("fails an unserved pin or selection with model_unavailable: %o", async (request) => {
       const r = resolver(loggedOut, {}, true, ["gpt-5.6-terra"]);
       await expect(r.resolve(request)).rejects.toMatchObject({
@@ -457,11 +457,11 @@ describe("ModelResolver", () => {
     await expect(
       resolver().resolve({ kind: "tier", tier: "large", providerId: "openai" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
-    await expect(resolver().resolve(selected("gpt-6-1-sol"))).resolves.toMatchObject({
+    await expect(resolver().resolve(selected("openai/gpt-6.1-sol"))).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6.1-sol",
     });
-    await expect(resolver().resolve(selected("gpt-6-sol"))).resolves.toMatchObject({
+    await expect(resolver().resolve(selected("openai/gpt-6-sol"))).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6-sol",
     });
@@ -469,7 +469,7 @@ describe("ModelResolver", () => {
     const unavailable = resolver({
       openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
-    await expect(unavailable.resolve(selected("gpt-6-1-sol"))).rejects.toMatchObject({
+    await expect(unavailable.resolve(selected("openai/gpt-6.1-sol"))).rejects.toMatchObject({
       code: "model_unavailable",
       reason: "model_access_denied",
     });
@@ -489,15 +489,15 @@ describe("ModelResolver", () => {
   });
 
   it("keeps explicit Astra/Sol/Luna exact and never falls back", async () => {
-    await expect(resolver().resolve(selected("gpt-6-astra"))).resolves.toMatchObject({
+    await expect(resolver().resolve(selected("openai/gpt-6-astra"))).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6-astra",
     });
-    await expect(resolver().resolve(selected("gpt-5-6-sol"))).resolves.toMatchObject({
+    await expect(resolver().resolve(selected("openai/gpt-5.6-sol"))).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-5.6-sol",
     });
-    await expect(resolver().resolve(selected("gpt-5-6-luna"))).resolves.toMatchObject({
+    await expect(resolver().resolve(selected("openai/gpt-5.6-luna"))).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-5.6-luna",
     });
@@ -505,10 +505,10 @@ describe("ModelResolver", () => {
     const unavailable = resolver({
       openai: reportOf("available", { ...RESTRICTED_PLAN }),
     });
-    await expect(unavailable.resolve(selected("gpt-5-6-sol"))).rejects.toThrow(
+    await expect(unavailable.resolve(selected("openai/gpt-5.6-sol"))).rejects.toThrow(
       "Selected model is unavailable",
     );
-    await expect(unavailable.resolve(selected("gpt-6-astra"))).rejects.toThrow(
+    await expect(unavailable.resolve(selected("openai/gpt-6-astra"))).rejects.toThrow(
       "Selected model is unavailable",
     );
   });
@@ -530,7 +530,7 @@ describe("ModelResolver", () => {
       accounts: { read: () => value, refresh },
     });
 
-    await expect(r.resolve(selected("gpt-5-6-sol"))).rejects.toMatchObject({
+    await expect(r.resolve(selected("openai/gpt-5.6-sol"))).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -549,7 +549,7 @@ describe("ModelResolver", () => {
       accounts: fakeAccounts(() => value),
     });
 
-    await expect(r.resolve(selected("gpt-5-6-sol"))).rejects.toMatchObject({
+    await expect(r.resolve(selected("openai/gpt-5.6-sol"))).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "quota_exhausted",

@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 // What a dashboard chat shows when the provider its turn needed cannot run.
 // Rome never moves a chat to another provider on its own. It recovers by
 // itself only when no context is lost, no money is spent and nobody's pick is
@@ -787,7 +788,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         ? sameProviderTarget(deps.accounts.read(), card.runsOn, card.part.model)
         : null;
       if (
-        card.part.replacement?.selection === change.selection &&
+        canonicalModelSelection(card.part.replacement?.selection) === change.selection &&
         now_?.selectionId !== change.selection
       ) {
         throw new StaleOption();
@@ -1120,12 +1121,18 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     continuing(chatId) {
       if (cardedChats.has(chatId)) resuming.add(chatId);
     },
-    switchCard: (messageId, change) =>
-      runFromCard(
+    switchCard: (messageId, change) => {
+      if (change.kind === "model") {
+        const id = canonicalModelSelection(change.selection);
+        if (!id) return Promise.reject(new Error("Unknown model"));
+        change = { ...change, selection: id };
+      }
+      return runFromCard(
         messageId,
         (card) => moveChat(card, card.chatId, card.agentName, change),
         (continued) => switchResolution(change, continued),
-      ),
+      );
+    },
     continueCard: async (messageId) => {
       await runFromCard(
         messageId,

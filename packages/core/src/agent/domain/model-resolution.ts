@@ -100,9 +100,9 @@ export type ModelResolutionOutcome =
   | { ok: false; failure: ModelResolutionFailure };
 
 const CLAUDE_TIER_MODELS: Record<ModelTier, string> = {
-  large: "claude-opus-5-5[1m]",
-  medium: "claude-sonnet-5-5",
-  small: "claude-haiku-5-5",
+  large: MODEL_SELECTIONS["anthropic/claude-opus-5-5[1m]"].model,
+  medium: MODEL_SELECTIONS["anthropic/claude-sonnet-5-5"].model,
+  small: MODEL_SELECTIONS["anthropic/claude-haiku-5-5"].model,
 };
 
 const MOCK_TIER_MODELS: Record<ModelTier, string> = CLAUDE_TIER_MODELS;
@@ -365,7 +365,11 @@ function modelAsk(
       throw new Error("An agent modelId requires a provider and cannot be combined with tier");
     }
     if (pin && pin.providerId === agent.providerId) return { kind: "exact", ...pin };
-    return { kind: "exact", providerId: agent.providerId, model: agent.modelId };
+    return {
+      kind: "exact",
+      providerId: agent.providerId,
+      model: agent.modelId,
+    };
   }
   if (!agent.tier) {
     throw new Error("Agent config requires a tier or a provider with modelId");
