@@ -24,8 +24,6 @@ import { seedBaseline } from "../seeds.js";
 import { guardianAuth, settings, visitorProfiles } from "../../db/schema.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
-import { isGuardianSession } from "../../access/session-actor.js";
-import { linkCode } from "../../people/link-code/index.js";
 import { phoneBook } from "../../people/phone-book/index.js";
 import { feishu } from "../../connections/kinds/feishu/index.js";
 import { discordApp, romeCloudDiscordApp } from "../../connections/kinds/discord-app/index.js";
@@ -50,7 +48,7 @@ export const OUTSIDER = { accountId: "acct-outsider", email: "outsider@team-veri
 
 /** The daemon's mount lists in `src/index.ts`, by factory name. `mountDrift`
  *  compares them with what this file mounts. */
-export const MOUNTED_FEATURES = ["linkCode", "phoneBook"] as const;
+export const MOUNTED_FEATURES = ["phoneBook"] as const;
 export const MOUNTED_KINDS = ["feishu", "discordApp", "linkedin"] as const;
 
 export interface InstanceOptions {
@@ -134,7 +132,6 @@ function connectionKinds(deps: TestDeps): KindMount[] {
 
 function features(deps: ApiDeps): Feature[] {
   return [
-    linkCode({ ...deps, isGuardian: isGuardianSession }),
     phoneBook({
       ...deps,
       ownerOfChat: (chatId) => ownerOfChat((id) => deps.webchatRepo.getSession(id), chatId),

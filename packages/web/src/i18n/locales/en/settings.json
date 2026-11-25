@@ -414,23 +414,6 @@
     "neverUsed": "Never used",
     "grantedUntil": "Granted until {{time}}"
   },
-  "trust": {
-    "title": "Bond level rules",
-    "trustedLevels": {
-      "title": "Trusted messages",
-      "description": "Messages from persons with these bond levels bypass sentinel triage."
-    },
-    "replyToLevels": {
-      "title": "Reply to messages",
-      "description": "Rome replies only to incoming messages from these bond levels."
-    },
-    "levels": {
-      "guardian": "guardian",
-      "inner-circle": "inner-circle",
-      "acquaintance": "acquaintance",
-      "other": "other"
-    }
-  },
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "Search chats",
@@ -796,13 +779,6 @@
       "pause": "Chats pause until you log in again.",
       "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }
-  },
-  "sentinelLog": {
-    "title": "Sentinel log",
-    "empty": "No sentinel log entries.",
-    "responsePrefix": "Response: {{response}}",
-    "markReviewed": "Mark reviewed",
-    "reviewed": "Reviewed"
   },
   "advanced": {
     "presentationMode": {

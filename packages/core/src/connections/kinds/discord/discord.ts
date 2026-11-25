@@ -53,7 +53,6 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
-import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import { archivedDiscordThreads } from "./discord-threads.js";
 import type { TalkHistoryRead } from "../../types.js";
 import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
@@ -158,9 +157,9 @@ const USER_MENTION = /<@!?([^\s>&]+)>/g;
  * The text of an inbound message as a person sees it: each user mention
  * shows as `@name`, Rome's own accounts included, so the text is the same
  * whichever of Rome's accounts heard it. A mention whose name the message
- * does not carry stays as typed. A command after mentions alone, `/stop` or
- * a link code, reads as the bare command, so its rule matches it; whom it
- * addresses is Participation's to work out from the mentions.
+ * does not carry stays as typed. A `/stop` after mentions alone reads as the
+ * bare command, so its rule matches it; whom it addresses is Participation's
+ * to work out from the mentions.
  */
 export function discordInboundText(
   content: string,
@@ -168,7 +167,6 @@ export function discordInboundText(
 ): string {
   const command = withoutMentions(content);
   if (isStopCommand(command)) return "/stop";
-  if (isLinkCodeMessage(command)) return command;
   return content
     .replace(USER_MENTION, (token, id: string) => {
       const name = nameOf(id)?.trim();

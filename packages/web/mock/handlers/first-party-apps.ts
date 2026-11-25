@@ -17,7 +17,7 @@ import workflowStudioIcon from "../../../../rome_apps/workflow-studio/src/assets
 // One entry per rome_apps/<id>/ that has an app.yaml, which is the set
 // `pnpm build:apps` packs into dist/first-party-artifacts/ and boot installs.
 // Each field is copied from that app.yaml. `hasFrontend` mirrors whether the
-// manifest declares `web:`. Core still lists an app without one (assistant),
+// manifest declares `web:`. Core still lists an app without one (assistant, inbox),
 // with no open link. `hideInLauncher` mirrors the manifest's top-level flag.
 const definitions = [
   {
@@ -75,7 +75,7 @@ const definitions = [
     displayName: "Inbox",
     version: "0.2.13",
     description: "Incoming-message triage, routing, and channel hooks",
-    hasFrontend: true,
+    hasFrontend: false,
     iconUrl: inboxIcon,
   },
   {

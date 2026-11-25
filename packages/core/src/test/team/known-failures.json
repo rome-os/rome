@@ -4,7 +4,6 @@
     "DELETE /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",
     "DELETE /api/personal-data/sources/:source/origins/:origin",
     "GET /api/chat/sessions/:id/computer-use in the caller's own Concierge chat",
-    "POST /api/people/link-code",
     "POST /api/personal-data/ingest",
     "POST /api/settings/guardian-timezone/detected",
     "PUT /api/chat/sessions/:id/computer-use/:deviceId in the caller's own Concierge chat",

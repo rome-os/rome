@@ -55,7 +55,6 @@ import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { assistantsRoutes } from "./routes/assistants.js";
-import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
@@ -215,7 +214,6 @@ export function buildApp(
   api.route("/", eventCatalogRoutes(deps));
   for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());

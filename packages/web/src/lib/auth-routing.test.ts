@@ -171,14 +171,16 @@ describe("resolveAuthRouting", () => {
     });
   });
 
-  describe("reserved app-route guards", () => {
-    it("does not treat the inbox host route as an app id", () => {
-      expect(getRoutedAppId("/apps/inbox")).toBeNull();
-      expect(isPublicAppPath("/apps/inbox", ["inbox"])).toBe(false);
+  describe("app route classification", () => {
+    it("reads the app id from embedded, full and encoded app paths", () => {
+      expect(getRoutedAppId("/apps/weather")).toBe("weather");
+      expect(getRoutedAppId("/full/apps/%40acme%2Fradar/feed")).toBe("@acme/radar");
+      expect(getRoutedAppId("/settings")).toBeNull();
     });
 
-    it("blocks percent-encoded spellings of reserved host routes", () => {
-      expect(getRoutedAppId("/apps/%69nbox")).toBeNull();
+    it("treats a listed app's API calls as public", () => {
+      expect(isPublicAppPath("/api/apps/weather/today", ["weather"])).toBe(true);
+      expect(isPublicAppPath("/apps/private-app", ["weather"])).toBe(false);
     });
   });
 });

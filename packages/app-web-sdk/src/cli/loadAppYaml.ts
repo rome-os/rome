@@ -13,7 +13,8 @@ export interface AppYaml {
   version: string;
   icon?: string;
   appRoot?: string;
-  web: AppYamlWeb;
+  /** Absent for an app with no web bundle, which `rome build` builds without one. */
+  web?: AppYamlWeb;
 }
 
 export interface LoadedAppYaml {
@@ -40,14 +41,12 @@ export function loadAppYaml(startDir: string): LoadedAppYaml {
   if (typeof parsed.version !== "string" || parsed.version.length === 0) {
     throw new Error(`rome: app.yaml is missing required field "version"`);
   }
-  if (!parsed.web || typeof parsed.web !== "object") {
-    throw new Error(
-      `rome: app.yaml is missing "web" section — required when running rome dev/build`,
-    );
+  if (parsed.web !== undefined && (!parsed.web || typeof parsed.web !== "object")) {
+    throw new Error(`rome: app.yaml "web" must be a section`);
   }
 
-  const web = parsed.web as Partial<AppYamlWeb>;
-  if (typeof web.displayName !== "string" || web.displayName.length === 0) {
+  const web = parsed.web as Partial<AppYamlWeb> | undefined;
+  if (web && (typeof web.displayName !== "string" || web.displayName.length === 0)) {
     throw new Error(`rome: app.yaml "web.displayName" is required (used in manifest.json)`);
   }
 
@@ -61,8 +60,8 @@ export function loadAppYaml(startDir: string): LoadedAppYaml {
       version: parsed.version,
       icon: typeof parsed.icon === "string" && parsed.icon.length > 0 ? parsed.icon : undefined,
       appRoot,
-      web: {
-        displayName: web.displayName,
+      web: web && {
+        displayName: web.displayName as string,
         navLabel: web.navLabel,
         entry: web.entry,
       },

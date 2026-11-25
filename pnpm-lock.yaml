@@ -1296,12 +1296,6 @@ importers:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
 
   rome_apps/showcases:
     dependencies:
