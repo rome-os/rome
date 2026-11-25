@@ -2,6 +2,7 @@
 // message from the account they want added. Vocabulary:
 // docs/domains/identity.md#account-code.
 
+import type { AccountCodeIssued } from "@rome/api-types";
 import { Hono } from "hono";
 import { createAccess } from "../../access/access.js";
 import { currentSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -50,7 +51,7 @@ export function accountCodesRoutes(
     const personId = await personOf(actor);
     if (!personId) return c.json({ error: "This sign-in belongs to no person" }, 403);
     const { code, expiresAt } = await accountCodeIssued(codes, personId);
-    return c.json({ code, expiresAt: expiresAt.toISOString() });
+    return c.json({ code, expiresAt: expiresAt.toISOString() } satisfies AccountCodeIssued);
   });
 
   return app;
