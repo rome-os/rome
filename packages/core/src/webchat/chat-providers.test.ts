@@ -594,5 +594,15 @@ it.each([
   expect(selected.some(([id]) => id === "plain")).toBe(false);
   expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
   expect((await row("fast")).by).toBe("kept");
+  await providers.beforeDefaultChange({
+    from: "openai",
+    to: "anthropic",
+    by: "guardian",
+    moveExisting: false,
+  });
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
+  expect(selected.some(([id]) => id === "plain")).toBe(false);
   await expect(providers.follow("plain")).resolves.not.toThrow();
+  expect(providers.heldProvider("webchat:plain")).toBeUndefined();
 });

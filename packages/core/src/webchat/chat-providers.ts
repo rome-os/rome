@@ -288,7 +288,9 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         // Rome credits stop the moment an account is logged in: nothing stays on them.
         if (!change.from || change.from === "rome_credits") return;
         const provider = providerOfDefault(change.from);
-        const chats = await deps.webchatRepo.followingChats();
+        const chats = (await deps.webchatRepo.followingChats()).filter(
+          (chat) => !held.has(webchatSessionKey(chat.id)),
+        );
         const agents = await deps.webchatRepo.modelSelectionsOf(chats.map((chat) => chat.id));
         for (const chat of chats) {
           const agentName = agents.get(chat.id)?.agentName ?? null;
