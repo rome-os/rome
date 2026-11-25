@@ -155,7 +155,7 @@ import type {
   BackendTurnOptions,
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
-import { withReplyContext } from "../../agent/index.js";
+import { currentMessageSection, withReplyContext } from "../../agent/index.js";
 import {
   answersFromQuestionCard,
   parseAskQuestionInput,
@@ -2784,10 +2784,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, chatGate);
   }
-  // Only its owner sends into a Concierge or task chat, since a turn there
-  // speaks to the owner.
-  const maySend = async (chatId: string) =>
-    canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await currentChatOwner());
   // A turn answers for the chat it runs in: its dashboard stream's, its
   // registered stream's (every one names the chat it is recorded in), else
   // its stored messages'. A turn whose chat is gone, or that names none, is
@@ -4349,7 +4345,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
-    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // A Concierge chat holds only people's messages and the Concierge's. A
     // routine, an app or another agent sending into it wakes the Concierge
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
@@ -4615,7 +4611,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
     // keeps it.
-    const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    // A message a person writes in a Concierge chat names them, the owner too,
+    // since every member writes there.
+    const writer =
+      isConciergeChat(session) && !saidBy && actor && deps.concierge
+        ? await deps.concierge.writerOf(actor)
+        : null;
+    const quotedPrompt = reply
+      ? withReplyContext(turnPrompt, reply.promptLine, writer)
+      : writer
+        ? currentMessageSection(turnPrompt, writer).join("\n")
+        : turnPrompt;
     const repliedPrompt =
       body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
@@ -4633,8 +4639,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
-    // A Concierge turn opens with the chat it runs in and the person it
-    // serves, on each turn, so a rename reaches a running session (rome-os/rome#1739).
+    // A Concierge turn opens with the chat it runs in and the person whose
+    // chat it is, on each turn, so a rename reaches a running session (rome-os/rome#1739).
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
@@ -5517,7 +5523,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   app.post("/chat/sessions/:id/turns", async (c) => {
-    if (!(await maySend(c.req.param("id")))) return c.json({ error: "Session not found" }, 404);
     let body: SendBody;
     try {
       body = await parseChatSendBody(c);
@@ -5797,10 +5802,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Why a spoken turn may not go into `chatId`, or null when it may.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    if (!(await maySend(chatId))) return "Session not found";
-    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
-      ? null
-      : "A voice conversation is only for a Concierge chat";
+    const chat = await deps.webchatRepo.getSession(chatId);
+    if (!chat) return "Session not found";
+    return isConciergeChat(chat) ? null : "A voice conversation is only for a Concierge chat";
   };
 
   const runtime: WebchatRuntime = {
