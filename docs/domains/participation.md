@@ -10,11 +10,13 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 ## Entry
 
-Whether what someone says or presses on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names.
+Whether what someone says on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names.
 
 - The guardian, a member, and an agent acting for the guardian ([delegate link](people.md#delegate-link)) are let in, as they are at that moment.
-- Anyone else's message is recorded in its chat and wakes no agent, and no app hears it. The same holds for a sender whose address the connection could not verify, and when no answer can be had. An agent woken later may read it.
+- Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a sender whose address the connection could not verify, and everyone when no answer can be had.
+- The answer is asked before anything hears the message, and stays with it. The message of someone not let in is recorded in its chat and wakes no agent, and no app hears it. An agent woken later may read it.
 - Whom the wake gate would wake for, and what Rome starts itself, are other questions: entry comes before the one and never asks about the other.
+- A message from an unknown sender that addresses one of Rome's [own accounts](chats.md#own-account) can be told of once it is on record, at most once, and nothing waits for that. What a bot or an app posted, and what one of Rome's accounts said, is never told of.
 
 ## Wake
 

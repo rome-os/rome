@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Channel, ChannelMessage, ChatId, InboundEvent } from "@rome-os/app-runtime";
-import { markEntered } from "../participation/entrance.js";
+import { markArrival } from "../participation/entrance.js";
 import { enteredChannels } from "./entered-channels.js";
 
 describe("enteredChannels", () => {
@@ -35,7 +35,12 @@ describe("enteredChannels", () => {
         timestamp: new Date(),
       };
       const event: InboundEvent = { kind: "message", message, ref: { connectionId: "c", chatId } };
-      await deliver(markEntered(event, senderId === "ada" ? "Ada" : undefined));
+      await deliver(
+        markArrival(event, {
+          entry: senderId === "ada" ? { kind: "entered", person: "Ada" } : { kind: "unknown" },
+          automated: false,
+        }),
+      );
     }
     expect(heard).toEqual(["ada"]);
   });

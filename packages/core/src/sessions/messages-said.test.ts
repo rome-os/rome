@@ -10,7 +10,7 @@ import type {
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
 import { SenderLabels } from "../chats/sender-labels.js";
-import { markEntered } from "../participation/entrance.js";
+import { markArrival } from "../participation/entrance.js";
 import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
@@ -84,7 +84,12 @@ function fakeChannel(name: string) {
         message: incoming,
         ref: { connectionId: `connection:${name}`, chatId: incoming.chatId },
       };
-      await handler(markEntered(event, person ?? undefined));
+      await handler(
+        markArrival(event, {
+          entry: person === null ? { kind: "unknown" } : { kind: "entered", person },
+          automated: false,
+        }),
+      );
     }
   };
   return { channel, deliver, handlers };
