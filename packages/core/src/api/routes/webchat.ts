@@ -4619,10 +4619,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // keeps it.
     // A message a person writes in a Concierge chat names them, the owner too,
     // since every member writes there.
-    const writer =
-      isConciergeChat(session) && !saidBy && actor && deps.concierge
-        ? await deps.concierge.writerOf(actor)
-        : null;
+    const sender =
+      isConciergeChat(session) && !saidBy && actor
+        ? (await resolveChatSenders(deps, new Map([["", actor]]))).get("")
+        : undefined;
+    const writer = sender ? { name: sender.name ?? sender.kind } : null;
     const quotedPrompt = reply
       ? withReplyContext(turnPrompt, reply.promptLine, writer)
       : writer
@@ -5439,8 +5440,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const actingActor = said.taskActor ?? turnActor(actor, saidBy);
+    // A push goes to the chat's owner, so in a private chat only the reply to
+    // the owner's own message pushes.
+    const pushesTo = privateOwnerOf(session);
     const options = {
-      ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      ...(replyPushes(actor, saidBy) && (!pushesTo || pushesTo === sessionOwnerKey(actor))
+        ? { pushLevel: "active" as const }
+        : {}),
       // Who the turn acts for, captured now: its tool calls run as this
       // person however late the model's callback arrives.
       ...(actingActor ? { actor: actingActor } : {}),
