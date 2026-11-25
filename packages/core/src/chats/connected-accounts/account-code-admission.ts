@@ -1,15 +1,12 @@
 /**
  * The steps that hear an [account code](docs/domains/identity.md#account-code)
- * sent to an [own account](docs/domains/chats.md#own-account) of Rome's. A
- * message whose whole text is a code is kept from the chat, so no subscriber,
- * agent or app hears it and it is not recorded. In a direct message the code
- * adds the sender's account to the person the code belongs to, and Rome
- * answers there. Anywhere else every code in the text is voided in silence,
- * since everyone in that chat has seen it, and a longer message is then heard
- * as an ordinary one. A history read from the platform leaves out every
- * message whose whole text is a code, and a message that quotes one is handed
- * on without the quote, live or read. On the guardian's own account a message
- * is to the guardian, not to Rome, so a code there is an ordinary message.
+ * in a message. A code Rome has seen in any message, heard live or read back
+ * from a platform, is dead before anyone else is handed that message, so a
+ * code is harmless wherever it is read later. Only a direct message to an
+ * [own account](docs/domains/chats.md#own-account) of Rome's whose whole text
+ * is the code redeems it: that message is kept from the chat, so no
+ * subscriber, agent or app hears it and it is not recorded, and Rome answers
+ * there. Every other code is voided in silence.
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -28,7 +25,7 @@ import { AccountTakenError } from "../../identity/identity.js";
 import { accountCodesIn } from "../../lib/account-code-shape.js";
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
-import type { Admission, HandedOn } from "./admission.js";
+import type { Admission, ReadBack } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
 
 const log = createLogger("account-code-admission");
@@ -55,24 +52,24 @@ export interface AccountCodeAdmissionDeps {
 }
 
 /**
- * Keeps every message whose whole text is shaped like a code from the chat on
- * a connection to an own account, redeeming the code for the sender's account
- * in a direct message. Anywhere else it voids every code-shaped token in the
- * text, and admits a longer message. Admits every message that holds no code
- * without a database read.
+ * Redeems a code that is the whole text of a direct message to an own account
+ * for the sender's account, answers, and keeps the message from the chat. In
+ * every other message it voids every code-shaped token in the text, and
+ * admits the message unless it is a code alone in a shared chat on an own
+ * account. Admits every message that holds no code without a database read.
  */
 export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission {
   return async (connectionId, connectionKind, message) => {
     const codes = accountCodesIn(message.text);
     if (codes.length === 0) return true;
-    if (deps.linkOf(connectionKind) !== "own_account") return true;
+    const ownAccount = deps.linkOf(connectionKind) === "own_account";
+    const direct = message.thread?.kind === "dm";
     const wholeText = looksLikeAccountCode(message.text);
-    if (message.thread?.kind !== "dm") {
+    if (!ownAccount || !direct || !wholeText) {
       for (const code of codes) await accountCodeVoided(deps.codes, code);
-      log.info("account code voided in a shared chat", { connectionId, codes: codes.length });
-      return !wholeText;
+      log.info("account code voided", { connectionId, codes: codes.length });
+      return !(ownAccount && wholeText);
     }
-    if (!wholeText) return true;
     const account = {
       platform: deps.platformOf(connectionId, message),
       accountId: message.senderId,
@@ -94,23 +91,18 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
 }
 
 /**
- * A message on a connection to an own account as a subscriber or a history
- * reader is handed it. One whose whole text is shaped like a code is left
- * out: live delivery never handed it on, so a read must not either, and a
- * code refused there may still be usable. One that quotes such a message
- * keeps its reply reference without the quoted text. Nothing is redeemed,
- * voided or read from the database: the code was handled when it was sent.
+ * Voids every code-shaped token in every message a history read answers, on
+ * every kind of connection, so a code Rome missed live, such as one said
+ * where Rome's account hears only mentions or edited in later, is dead before
+ * the page is handed on. A page with no code-shaped token costs no database
+ * read.
  */
-export function withoutAccountCodes(deps: Pick<AccountCodeAdmissionDeps, "linkOf">): HandedOn {
-  return (connectionKind, message) => {
-    const isCode = looksLikeAccountCode(message.text);
-    const quoted = message.replyTo?.content;
-    const quotesCode = quoted !== undefined && looksLikeAccountCode(quoted);
-    if (!isCode && !quotesCode) return message;
-    if (deps.linkOf(connectionKind) !== "own_account") return message;
-    if (isCode) return null;
-    const { content: _code, ...replyTo } = message.replyTo!;
-    return { ...message, replyTo };
+export function accountCodeReadBack(deps: Pick<AccountCodeAdmissionDeps, "codes">): ReadBack {
+  return async (messages) => {
+    const codes = new Set(messages.flatMap((message) => accountCodesIn(message.text)));
+    if (codes.size === 0) return;
+    for (const code of codes) await accountCodeVoided(deps.codes, code);
+    log.info("account code voided in a history read", { codes: codes.size });
   };
 }
 

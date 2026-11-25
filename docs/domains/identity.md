@@ -40,10 +40,11 @@ How an account nobody holds becomes a person's. A signed-in guardian or member g
 - A code belongs to one person. A new code replaces the person's earlier one, and the earlier one then adds nothing.
 - A code can be used for ten minutes after it is given, and once.
 - Rome never stores the code, only a hash of it. The stored hash cannot be turned back into a code.
-- The whole message must be the code. Case and surrounding spaces do not matter. A code inside a longer text is not a code.
-- Sending the code adds the account and uses the code up, together. An account that belongs to another person is refused, nothing changes, and the code can still be used. An account the person already holds uses the code up and changes nothing else.
-- A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused.
-- The code is sent in a direct message to an account Rome speaks as, a bot or an app. A code shown in a shared chat there is voided, even inside a longer text. A code sent to the guardian's own account is an ordinary message. Chats applies these rules when it [hears the message](chats.md#message), not Identity.
+- The whole message must be the code. Case and surrounding spaces do not matter. A code inside a longer text adds nothing.
+- Every attempt to redeem a known code that is still valid uses it up. Sending the code adds the account and uses the code up, together. An account that belongs to another person is refused, nothing is added, and the code is used up. An account the person already holds uses the code up and changes nothing else.
+- A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused, and the code is used up.
+- The code is sent alone in a direct message to an account Rome speaks as, a bot or an app. A code Rome sees anywhere else, in a shared chat, inside a longer text, on the guardian's own account, or in a message Rome reads back from a platform, is voided before anyone else is handed that message. A code dead this way is harmless wherever it is read later. Chats applies these rules when it [hears the message](chats.md#message), not Identity.
+- Outside that promise: a code shown only in an attachment or an image, a code in a chat Rome's account cannot read or never reads, and the time between a person posting a code where others can read it and Rome first reading it.
 - Deleting a person deletes their open code.
 - A code proves that whoever sent it had the code. A person who gives their code to someone else gives that account their role, so the page that shows a code tells the person to send it only from their own account and to share it with nobody (accepted cost, Ouou, 2026-11-25).
 

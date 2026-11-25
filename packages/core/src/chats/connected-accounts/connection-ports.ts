@@ -32,9 +32,9 @@ import type { ChannelRecordsRepository } from "../../db/repositories/channel-rec
 import { createLogger } from "../../logger.js";
 import {
   type Admission,
-  type HandedOn,
   OrderedAdmission,
   type OrderedAdmissionOptions,
+  type ReadBack,
 } from "./admission.js";
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
@@ -54,10 +54,9 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
-  /** What each admitted message and each message a history read from the
-   *  platform answers is handed on as. Absent, every one is handed on as it
-   *  is. */
-  handedOn?: HandedOn;
+  /** Runs on each page a history read from the platform answers, before the
+   *  page is handed on. */
+  readBack?: ReadBack;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
@@ -204,13 +203,11 @@ function connectionDirectory(backing: Backing): AccountChats {
  * A chat's history read live from the platform through the Connection that
  * backs the channel now, one chat at a time. A cursor from an earlier page
  * (`after`) names the message the page ended on, so it reads as `olderThan`
- * that message. With no bound, it reads back as far as `limit` reaches. A
- * message `deps.handedOn` leaves out is dropped from the page, so a page can
- * hold fewer than `limit`.
+ * that message. With no bound, it reads back as far as `limit` reaches.
+ * `deps.readBack` runs on each page before it is returned.
  */
 function connectionMessages(backing: Backing): Messages {
-  const { deps, connectionKind, channel } = backing;
-  const handedOn = deps.handedOn ?? ((_kind: string, message: ChannelMessage) => message);
+  const { deps, channel } = backing;
   return {
     live: true,
     byAccount: null,
@@ -233,11 +230,9 @@ function connectionMessages(backing: Backing): Messages {
         limit: queryLimit(limit),
       };
       const messages = await callTalker(connection, (talker) => talker.history?.read(chatId, read));
+      await deps.readBack?.(messages);
       // A later channel of the kind names itself, not the kind's first one.
-      return messages.flatMap((message) => {
-        const shown = handedOn(connectionKind, message);
-        return shown ? [{ ...shown, channel }] : [];
-      });
+      return messages.map((message) => ({ ...message, channel }));
     },
   };
 }
@@ -351,7 +346,7 @@ function isAnswerable(message: ChannelMessage): boolean {
 }
 
 function connectionInbound(backing: Backing): ChannelInbound {
-  const { deps, connectionKind, channel } = backing;
+  const { deps, channel } = backing;
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
   const subscriptions = new Set<ChatBuffers<InboundEvent>>();
@@ -376,9 +371,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
       // connection kind. The event names the channel and the account it
       // arrived on.
       const account = deps.accountOf?.(connectionId) ?? null;
-      const shown = deps.handedOn ? deps.handedOn(connectionKind, message) : message;
-      if (!shown) return;
-      const named: ChannelMessage = { ...shown, channel, ...(account ? { account } : {}) };
+      const named: ChannelMessage = { ...message, channel, ...(account ? { account } : {}) };
       // A message with nothing to answer still says who sent it.
       deps.heard?.(named);
       if (!isAnswerable(message)) return;

@@ -19,12 +19,10 @@ export type Admission = (
   message: ChannelMessage,
 ) => Promise<boolean>;
 
-/** The message as a subscriber or a reader of the platform's own history is
- *  handed it, on a Connection of `connectionKind`, or null to leave it out.
- *  Admission's sibling for what a message carries: it runs on every admitted
- *  message and on every message a history read answers, so a message
- *  admission keeps from the chat is one a read leaves out too. */
-export type HandedOn = (connectionKind: string, message: ChannelMessage) => ChannelMessage | null;
+/** A step that runs on every page a history read from the platform answers,
+ *  and finishes before the page is handed on. It changes no message and drops
+ *  none. Admission's sibling for messages read back rather than heard live. */
+export type ReadBack = (messages: readonly ChannelMessage[]) => Promise<void>;
 
 /** How long one admission may hold its conversation. Admission is a few
  *  database reads, so fifteen seconds means the database is stuck. */

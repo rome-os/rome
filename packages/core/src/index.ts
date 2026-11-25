@@ -18,7 +18,7 @@ import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import {
   accountCodeAdmission,
-  withoutAccountCodes,
+  accountCodeReadBack,
 } from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -774,15 +774,16 @@ async function main() {
   // still names its platform by its channel.
   const senderPlatformOf = (connectionId: string, message: ChannelMessage): string =>
     accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
+  const accountCodes = accountCodeContext(db);
   const heardAccountCode = accountCodeAdmission({
-    codes: accountCodeContext(db),
+    codes: accountCodes,
     linkOf: accountLinkOf(connectionRegistry),
     registry: connectionRegistry,
     platformOf: senderPlatformOf,
   });
-  // What admission keeps from the chat for being a code, a history read from
-  // the platform leaves out, and no message hands on a quote of one.
-  const handedOn = withoutAccountCodes({ linkOf: accountLinkOf(connectionRegistry) });
+  // A code a history read from the platform finds is voided before the page
+  // is handed on, as admission voids one heard live.
+  const readBack = accountCodeReadBack({ codes: accountCodes });
   // Read at each message, once the chat settings below exist.
   const heardInChat = heardUnlessSwitchedOff({
     settings: { get: (ref) => chatSettings.get(ref) },
@@ -2492,7 +2493,7 @@ async function main() {
     connections: {
       registry: connectionRegistry,
       admit,
-      handedOn,
+      readBack,
       channelOf,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -2628,7 +2629,7 @@ async function main() {
       {
         registry: connectionRegistry,
         admit,
-        handedOn,
+        readBack,
         channelOf,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),

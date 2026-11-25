@@ -1,22 +1,21 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ChatId, InboundEvent } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type * as connections from "../../connections/message.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
-import { legacyMessage } from "../../connections/test-fixtures.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
   type AccountCodeContext,
   accountCodeContext,
+  AccountCodeUsedError,
   accountCodeIssued,
+  accountCodeRedeemed,
 } from "../../identity/application/account-codes.js";
 import { createIdentity } from "../../identity/identity.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { chatPromptFacts } from "../../core/chat-prompt-facts.js";
 import {
   ACCOUNT_CODE_ANSWERS,
   accountCodeAdmission,
-  withoutAccountCodes,
+  accountCodeReadBack,
 } from "./account-code-admission.js";
 import { OrderedAdmission } from "./admission.js";
 import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
@@ -138,7 +137,7 @@ describe("account code admission", () => {
     expect(heard).toEqual([]);
   });
 
-  it("refuses an account another person holds and leaves the code usable", async () => {
+  it("refuses an account another person holds, adds nothing, and the code then fails from another account", async () => {
     const { ctx, identity, deliver, heard, answers } = setup();
     const ann = await identity.createPerson({ accounts: [] });
     const bo = await identity.createPerson({ accounts: [ANN_SLACK] });
@@ -146,11 +145,48 @@ describe("account code admission", () => {
 
     await deliver(message(code));
     expect((await identity.personOf(ANN_SLACK))?.id).toBe(bo.id);
+    expect(await identity.accountsOf(ann.id)).toEqual([]);
 
     await deliver(message(code, { messageId: "m2", senderId: "T1:U8" }));
-    expect((await identity.personOf({ platform: "slack", accountId: "T1:U8" }))?.id).toBe(ann.id);
-    expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.taken, ACCOUNT_CODE_ANSWERS.added]);
+    expect(await identity.personOf({ platform: "slack", accountId: "T1:U8" })).toBeNull();
+    expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.taken, ACCOUNT_CODE_ANSWERS.used]);
     expect(heard).toEqual([]);
+  });
+
+  it("finds a code quoted only in a Telegram reply's raw payload already dead", async () => {
+    // The point: a reply can carry a quote of a code where no filter sees it,
+    // here only in the Bot API's `reply_to_message`. That is harmless, since
+    // the code was used up when Rome first heard it, refused or not.
+    const { ctx, identity, deliver, heard, answers } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    await identity.createPerson({ accounts: [ANN_SLACK] });
+    const { code } = await accountCodeIssued(ctx, ann.id);
+    await deliver(message(code, { messageId: "41" }));
+
+    const reply = message("did that work?", {
+      messageId: "42",
+      replyTo: { messageId: "41" },
+      raw: {
+        message_id: 42,
+        date: 1764064800,
+        chat: { id: 7001, type: "private", first_name: "Ann" },
+        from: { id: 7001, is_bot: false, first_name: "Ann" },
+        text: "did that work?",
+        reply_to_message: {
+          message_id: 41,
+          date: 1764064790,
+          chat: { id: 7001, type: "private", first_name: "Ann" },
+          from: { id: 7001, is_bot: false, first_name: "Ann" },
+          text: code,
+        },
+      },
+    });
+    await deliver(reply);
+    expect(heard).toEqual([reply]);
+
+    await deliver(message(code, { messageId: "43", senderId: "T1:U8" }));
+    expect(await identity.personOf({ platform: "slack", accountId: "T1:U8" })).toBeNull();
+    expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.taken, ACCOUNT_CODE_ANSWERS.used]);
   });
 
   it("voids a code said in a shared chat without answering, and the code then fails in a direct message", async () => {
@@ -169,13 +205,15 @@ describe("account code admission", () => {
   });
 
   for (const link of ["delegate", null] as const) {
-    it(`admits a code untouched on a connection where Rome has no own account (${link ?? "no agent"})`, async () => {
+    it(`hears a code as an ordinary message and voids it on a connection where Rome has no own account (${link ?? "no agent"})`, async () => {
       const { ctx, identity, deliver, heard, sent, answers, speakAs } = setup();
       speakAs(link);
       const ann = await identity.createPerson({ accounts: [] });
-      const { code } = await accountCodeIssued(ctx, ann.id);
-      const direct = message(code);
-      const shared = message(code, {
+      const bo = await identity.createPerson({ accounts: [] });
+      const { code: annCode } = await accountCodeIssued(ctx, ann.id);
+      const { code: boCode } = await accountCodeIssued(ctx, bo.id);
+      const direct = message(annCode);
+      const shared = message(boCode, {
         messageId: "m2",
         chatId: "C1" as ChatId,
         thread: { kind: "group" },
@@ -187,11 +225,11 @@ describe("account code admission", () => {
       expect(heard).toEqual([direct, shared]);
       expect(await identity.personOf(ANN_SLACK)).toBeNull();
       expect(sent).toEqual([]);
-      // The code was neither redeemed nor voided, so it still works where Rome
-      // has its own account.
       speakAs("own_account");
-      await deliver(message(code, { messageId: "m3" }));
-      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.added]);
+      await deliver(message(annCode, { messageId: "m3" }));
+      await deliver(message(boCode, { messageId: "m4", senderId: "T1:U8" }));
+      expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.used, ACCOUNT_CODE_ANSWERS.used]);
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
     });
   }
 
@@ -210,17 +248,26 @@ describe("account code admission", () => {
     expect(sent).toEqual([]);
   });
 
-  it("admits a code inside a longer text as an ordinary message", async () => {
-    const { ctx, identity, deliver, heard, sent } = setup();
-    const ann = await identity.createPerson({ accounts: [] });
-    const { code } = await accountCodeIssued(ctx, ann.id);
+  for (const [said, text] of [
+    ["the code and a full stop", (code: string) => `${code}.`],
+    ["the code after other words", (code: string) => `here: ${code}`],
+    ["a Telegram start command with the code", (code: string) => `/start ${code}`],
+  ] as const) {
+    it(`hears ${said} in a direct message as an ordinary message, and voids the code`, async () => {
+      const { ctx, identity, deliver, heard, answers } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
 
-    await deliver(message(`my code is ${code}`));
+      await deliver(message(text(code)));
+      expect(heard.map((m) => m.text)).toEqual([text(code)]);
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
 
-    expect(heard.map((m) => m.text)).toEqual([`my code is ${code}`]);
-    expect(await identity.personOf(ANN_SLACK)).toBeNull();
-    expect(sent).toEqual([]);
-  });
+      await deliver(message(code, { messageId: "m2" }));
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+    });
+  }
+
   const group = (text: string, messageId: string): ChannelMessage =>
     message(text, { messageId, chatId: "G1" as ChatId, thread: { kind: "group" } });
 
@@ -270,7 +317,7 @@ describe("account code admission", () => {
   });
 });
 
-describe("what a subscriber and a history reader are handed on an own account", () => {
+describe("a history read from the platform", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
     testDb?.close();
@@ -278,31 +325,31 @@ describe("what a subscriber and a history reader are handed on an own account", 
   });
 
   /**
-   * A Slack app's direct message with Ann, through the channel's ports as
-   * Rome builds them: live delivery runs admission and hands subscribers what
-   * is left, and the platform keeps every message, read back through the
-   * messages port.
+   * A Slack app's chats, through the channel's ports as Rome builds them. The
+   * platform keeps every message said, whether or not it reached Rome live,
+   * and answers a history read with what it holds now, edits included.
    */
-  function setup() {
+  function setup(untouchable = false) {
     testDb = createTestDb();
-    const codes = accountCodeContext(testDb.db);
+    const real = accountCodeContext(testDb.db);
+    const codes = untouchable
+      ? new Proxy({} as AccountCodeContext, {
+          get() {
+            throw new Error("read the codes");
+          },
+        })
+      : real;
     const identity = createIdentity(testDb.db);
-    const linkOf = (): AccountLink => "own_account";
-    // The platform keeps every message it delivered, newest first.
     const platform: ChannelMessage[] = [];
     const talker = {
       send: async (chatId: ChatId) => ({ messageId: "sent", chatId }),
       history: { read: async () => [...platform].reverse() },
     };
-    let hearTalker: ((said: connections.Message) => Promise<void>) | undefined;
     const connection = {
       id: "conn",
       connectionKind: "slack_app",
       withTalker: (call: (talker: object) => unknown) => call(talker),
-      hearTalker: (listener: (said: connections.Message) => Promise<void>) => {
-        hearTalker = listener;
-        return () => {};
-      },
+      hearTalker: () => () => {},
     };
     const registry = {
       get: () => connection,
@@ -315,126 +362,61 @@ describe("what a subscriber and a history reader are handed on an own account", 
     const ports = connectionPorts(
       {
         registry,
-        admit: accountCodeAdmission({
-          codes,
-          linkOf,
-          registry: registry as unknown as Pick<ConnectionRegistry, "get">,
-          platformOf: () => ANN_SLACK.platform,
-        }),
         channelOf: () => "slack_app",
-        handedOn: withoutAccountCodes({ linkOf }),
+        readBack: accountCodeReadBack({ codes }),
       } as unknown as ConnectionPortsDeps,
       "slack_app",
     );
-    // What a subscriber, and so Chats, an agent or an app, hears live.
-    const heard: ChannelMessage[] = [];
-    ports!.inbound!.subscribe(async (event: InboundEvent) => {
-      if (event.kind === "message") heard.push(event.message);
-    });
-    let at = 0;
-    const deliver = async (
-      text: string,
-      { senderId = ANN_SLACK.accountId, quoting }: { senderId?: string; quoting?: string } = {},
-    ) => {
-      at += 1;
-      const said = message(text, {
-        messageId: `m${at}`,
-        senderId,
-        timestamp: new Date(at * 1000),
-        ...(quoting === undefined ? {} : { replyTo: { messageId: "m1", content: quoting } }),
-      });
-      platform.push(said);
-      await hearTalker!(legacyMessage(said));
-    };
-    // The port an app's `ChannelsService.query` reads, and a new session's
-    // read of the chat's latest messages through it (index.ts).
+    // The port an app's `ChannelsService.query` and an agent's read of the
+    // chat's earlier messages both go through.
     const history = ports!.messages!;
-    const facts = chatPromptFacts({
-      facts: { unseen: () => [], seen: () => undefined },
-      messages: { byIds: () => [] },
-      labels: {
-        read: async (lines) =>
-          lines.map(({ senderName, account: _account, ...line }) => ({
-            ...line,
-            sender: senderName,
-            who: "labelled",
-            quoted: null,
-          })) as never,
-        readUnseen: async () => [],
-      },
-      channelOfChat: () => null,
-      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
-      latest: (place, read) => history.query({ chatId: place.threadId as ChatId, ...read }),
-    });
-    return { codes, identity, deliver, heard, history, facts };
+    const read = () => history.query({ chatId: "C1" as ChatId });
+    // A code tried afterwards from a direct message, which a dead code fails.
+    const dead = (code: string) =>
+      expect(
+        accountCodeRedeemed(real, code, { platform: "slack", accountId: "T1:U9" }),
+      ).rejects.toBeInstanceOf(AccountCodeUsedError);
+    return { codes: real, identity, platform, read, dead };
   }
 
-  it("leaves out a code refused because the account was taken, which is still usable", async () => {
-    const { codes, identity, deliver, history, facts } = setup();
-    const ann = await identity.createPerson({ accounts: [] });
-    await identity.createPerson({ accounts: [ANN_SLACK] });
-    const { code } = await accountCodeIssued(codes, ann.id);
-
-    await deliver(code);
-    await deliver("lunch at noon?");
-
-    const read = await history.query({ chatId: "D1" as ChatId });
-    expect(read.map((m) => m.text)).toEqual(["lunch at noon?"]);
-    const earlier = await facts.earlier?.(
-      { channel: "slack_app", threadId: "D1", threadType: "private" },
-      new Date(60_000),
-    );
-    expect(earlier?.map((m) => m.text)).toEqual(["lunch at noon?"]);
-
-    // The code was neither redeemed nor voided by the reads.
-    await deliver(code, { senderId: "T1:U8" });
-    expect((await identity.personOf({ platform: "slack", accountId: "T1:U8" }))?.id).toBe(ann.id);
-  });
-
-  it("keeps a code inside a longer text in the read", async () => {
-    const { deliver, history } = setup();
-
-    await deliver("my code is ROME-222222-222222");
-
-    const read = await history.query({ chatId: "D1" as ChatId });
-    expect(read.map((m) => m.text)).toEqual(["my code is ROME-222222-222222"]);
-  });
-
-  it("hands on a code and a quote of one untouched where Rome has no own account", () => {
-    const code = message("ROME-222222-222222");
-    const quote = message("did that work?", {
-      replyTo: { messageId: "m0", content: "ROME-222222-222222" },
+  const said = (text: string, at: number): ChannelMessage =>
+    message(text, {
+      messageId: `m${at}`,
+      chatId: "C1" as ChatId,
+      thread: { kind: "group" },
+      timestamp: new Date(at * 1000),
     });
-    for (const link of ["delegate", null] as const) {
-      const handedOn = withoutAccountCodes({ linkOf: () => link });
-      expect(handedOn("telegram_user", code)).toBe(code);
-      expect(handedOn("telegram_user", quote)).toBe(quote);
-    }
-    expect(withoutAccountCodes({ linkOf: () => "own_account" })("slack_app", code)).toBeNull();
+
+  it("voids a code pasted in a shared chat that Rome never heard live, and hands the page on whole", async () => {
+    const { codes, identity, platform, read, dead } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const { code } = await accountCodeIssued(codes, ann.id);
+    platform.push(said("lunch at noon?", 1), said(code, 2), said(`mine is ${code}`, 3));
+
+    const page = await read();
+
+    expect(page.map((m) => m.text)).toEqual([`mine is ${code}`, code, "lunch at noon?"]);
+    await dead(code);
   });
 
-  it("hands on a reply that quotes a code without the quote, live and in a read", async () => {
-    const { deliver, heard, history } = setup();
+  it("voids a code a message was edited into after Rome heard it", async () => {
+    const { codes, identity, platform, read, dead } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const { code } = await accountCodeIssued(codes, ann.id);
+    platform.push(said("hi", 1), said("lunch at noon?", 2));
+    platform[0] = { ...platform[0], text: code };
 
-    await deliver("ROME-222222-222222");
-    await deliver("did that work?", { quoting: "rome-222222-222222 " });
+    const page = await read();
 
-    expect(heard.map((m) => [m.text, m.replyTo])).toEqual([
-      ["did that work?", { messageId: "m1" }],
-    ]);
-    const read = await history.query({ chatId: "D1" as ChatId });
-    expect(read.map((m) => [m.text, m.replyTo])).toEqual([["did that work?", { messageId: "m1" }]]);
+    expect(page).toHaveLength(2);
+    expect(page[1].text).toBe(code);
+    await dead(code);
   });
 
-  it("hands on an ordinary quote untouched", async () => {
-    const { deliver, heard, history } = setup();
+  it("makes no database read for a page with no code", async () => {
+    const { platform, read } = setup(true);
+    platform.push(said("lunch at noon?", 1), said("yes", 2));
 
-    await deliver("lunch at noon?");
-    await deliver("yes", { quoting: "lunch at noon?" });
-
-    const quote = { messageId: "m1", content: "lunch at noon?" };
-    expect(heard.at(-1)?.replyTo).toEqual(quote);
-    const read = await history.query({ chatId: "D1" as ChatId });
-    expect(read[0].replyTo).toEqual(quote);
+    expect((await read()).map((m) => m.text)).toEqual(["yes", "lunch at noon?"]);
   });
 });

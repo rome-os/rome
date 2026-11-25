@@ -98,21 +98,24 @@ export async function accountCodeIssued(
 /**
  * Adds `account` to the person the code belongs to and uses the code up, in
  * one transaction. When the person already holds the account, uses the code
- * up and changes nothing else. Rejects, changing nothing, with
- * {@link SignInAccountCodeError} for an account on a sign-in platform,
- * {@link UnknownAccountCodeError}, {@link AccountCodeExpiredError} or
- * {@link AccountCodeUsedError} for a text that is no open code, and
- * {@link AccountTakenError} when another person holds the account. The code
- * stays usable after a refusal.
+ * up and changes nothing else. Rejects with {@link UnknownAccountCodeError},
+ * {@link AccountCodeExpiredError} or {@link AccountCodeUsedError} for a text
+ * that is no open code. Uses an open code up, adds nothing and rejects with
+ * {@link SignInAccountCodeError} for an account on a sign-in platform, and
+ * with {@link AccountTakenError} when another person holds the account: a
+ * code someone tried to redeem is never usable again.
  */
 export async function accountCodeRedeemed(
   { codes, now }: AccountCodeContext,
   code: string,
   account: Account,
 ): Promise<{ personId: string }> {
-  if (SIGN_IN_PLATFORMS.has(account.platform)) throw new SignInAccountCodeError(account);
   const normal = normalizedCode(code);
   if (!looksLikeAccountCode(normal)) throw new UnknownAccountCodeError();
+  if (SIGN_IN_PLATFORMS.has(account.platform)) {
+    codes.void(hashOf(normal), now());
+    throw new SignInAccountCodeError(account);
+  }
   const result = codes.redeem(hashOf(normal), normalizedAccount(account), now());
   if (!("refused" in result)) return result;
   switch (result.refused) {
