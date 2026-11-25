@@ -26,7 +26,6 @@ export interface DeviceToolDeps {
   /** Runs one action on a device through core's node client. */
   run: DeviceActionDeps["run"];
   now?: () => number;
-  sleep?: (ms: number) => Promise<void>;
 }
 
 const agentTool = agentToolsOf<DeviceToolDeps>();
@@ -163,7 +162,10 @@ export const removeDevice = agentTool({
 const FRESH_FOR_MS = 10_000;
 /** How long a read waits for that check: the service bounds one at 15 s. */
 const WAIT_FOR_CHECK_MS = 20_000;
-const POLL_MS = 500;
+/** A check that fails leaves the snapshot stale, and the next read starts
+ *  another, so the wait between reads doubles from the first to the last. */
+const FIRST_POLL_MS = 500;
+const LAST_POLL_MS = 4_000;
 
 /** The devices' status checked in the last 10 s, as the Devices page has it
  *  by polling. A read answers once, so it waits for the check its read
@@ -171,14 +173,32 @@ const POLL_MS = 500;
  *  `checkedAt` says how old it is. */
 async function freshStatus(deps: DeviceToolDeps): Promise<DevicesStatus> {
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = now() + WAIT_FOR_CHECK_MS;
   let status = await deps.devices.getStatus();
+  let wait = FIRST_POLL_MS;
   while (now() - Date.parse(status.checkedAt) >= FRESH_FOR_MS && now() < deadline) {
-    await sleep(POLL_MS);
-    status = await deps.devices.getStatus();
+    const pause = Math.min(wait, deadline - now());
+    await new Promise((resolve) => setTimeout(resolve, pause));
+    wait = Math.min(wait * 2, LAST_POLL_MS);
+    // A read the service holds past the deadline answers nothing newer.
+    const next = now() < deadline ? await within(deps.devices.getStatus(), deadline - now()) : null;
+    if (!next) break;
+    status = next;
   }
   return status;
+}
+
+/** The promise's value, or null when `ms` pass first. */
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The Devices page's agent tools. */

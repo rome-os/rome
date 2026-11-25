@@ -179,49 +179,70 @@ describe("the Devices page's tools", () => {
   });
 
   describe("reading the devices' status fresh", () => {
-    let clock: number;
-    let reads: DevicesStatus[];
+    let reads: number;
+    let answers: Array<() => Promise<DevicesStatus>>;
 
     beforeEach(() => {
-      clock = NOW;
-      deps.now = () => clock;
-      deps.sleep = async (ms) => {
-        clock += ms;
+      rs.useFakeTimers();
+      rs.setSystemTime(NOW);
+      deps.now = undefined;
+      // The device service answers its last snapshot, then whatever the test
+      // queues, then `status`.
+      reads = 0;
+      answers = [];
+      deps.devices.getStatus = async () => {
+        reads += 1;
+        return await (answers.shift()?.() ?? status);
       };
-      // The device service answers its last snapshot, then the check that
-      // reading it started.
-      reads = [];
-      deps.devices.getStatus = async () => reads.shift() ?? status;
+    });
+    afterEach(() => {
+      rs.useRealTimers();
     });
 
+    const stale = { ...ONLINE, checkedAt: new Date(NOW - 60_000).toISOString() };
+    /** Reads the devices while the clock runs for `ms`. */
+    const readFor = async (ms: number) => {
+      const read = callTool(readDevices, deps, {});
+      await rs.advanceTimersByTimeAsync(ms);
+      return (await read) as { data: { checkedAt: string; devices: unknown[] } };
+    };
+
     it("waits for the check a stale snapshot starts, as the page's next poll would", async () => {
-      reads = [
-        {
-          ...ONLINE,
-          checkedAt: new Date(NOW - 60_000).toISOString(),
+      answers = [
+        async () => ({
+          ...stale,
           devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "connected" }],
-        },
+        }),
       ];
       status = {
         ...ONLINE,
-        checkedAt: new Date(NOW + 2_000).toISOString(),
+        checkedAt: new Date(NOW + 400).toISOString(),
         devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "not_connected" }],
       };
 
-      const result = await callTool(readDevices, deps, {});
+      const { data } = await readFor(1_000);
 
-      const data = (result as { data: { checkedAt: string; devices: unknown[] } }).data;
       expect(data.devices[0]).toMatchObject({ deviceId: "dev-phone", status: "not_connected" });
       expect(data.checkedAt).toBe(status.checkedAt);
     });
 
-    it("answers the last snapshot with its age when no check comes in time", async () => {
-      status = { ...ONLINE, checkedAt: new Date(NOW - 60_000).toISOString() };
+    it("answers the last snapshot with its age when no check comes in time, reading it a few times", async () => {
+      status = stale;
 
-      const result = await callTool(readDevices, deps, {});
+      const { data } = await readFor(20_000);
 
-      expect((result as { data: { checkedAt: string } }).data.checkedAt).toBe(status.checkedAt);
-      expect(clock - NOW).toBeLessThanOrEqual(20_000);
+      expect(data.checkedAt).toBe(stale.checkedAt);
+      expect(Date.now() - NOW).toBeLessThanOrEqual(20_000);
+      expect(reads).toBeLessThanOrEqual(10);
+    });
+
+    it("answers the last snapshot at the deadline when the service holds a read", async () => {
+      answers = [async () => stale, () => new Promise<DevicesStatus>(() => {})];
+
+      const { data } = await readFor(20_000);
+
+      expect(data.checkedAt).toBe(stale.checkedAt);
+      expect(reads).toBe(2);
     });
   });
 

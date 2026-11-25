@@ -323,6 +323,7 @@ describe("personal-data actions", () => {
     const lifecycle = withDeviceLifecycle(
       {
         removeDevice: async (_deviceId: string) => ({ ok: true as const }),
+        listDevices: async () => ({ devices: [] }),
       },
       {
         connections: () => devices,
