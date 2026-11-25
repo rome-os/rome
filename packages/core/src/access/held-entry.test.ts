@@ -45,6 +45,17 @@ describe("holdEntry", () => {
     expect(lost).toBe(1);
   });
 
+  it("outlives an onLost that throws", async () => {
+    holdEntry(member, allowList, () => {
+      onLost();
+      throw new Error("already closed");
+    });
+    allowList.setCloudEmailAccess([]);
+    await recheck();
+    await recheck();
+    expect(lost).toBe(1);
+  });
+
   it("asks nothing once released", async () => {
     const release = holdEntry(member, allowList, onLost);
     allowList.setCloudEmailAccess([]);

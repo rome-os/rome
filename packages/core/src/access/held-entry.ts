@@ -13,8 +13,8 @@ export const ENTRY_RECHECK_MS = 25_000;
 /**
  * Asks every {@link ENTRY_RECHECK_MS} whether `actor` may still enter, and runs
  * `onLost` once when they may not or the question fails. Call the answered
- * function when the connection closes: `onLost` never runs after it. The
- * guardian's entry never ends.
+ * function when the connection closes: `onLost` never runs after it. What `onLost`
+ * throws is logged. The guardian's entry never ends.
  */
 export function holdEntry(
   actor: TeamActor,
@@ -34,7 +34,13 @@ export function holdEntry(
     });
     if (still || !held) return;
     release();
-    onLost();
+    try {
+      onLost();
+    } catch (err) {
+      log.error("could not end a connection whose entry ended", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }, ENTRY_RECHECK_MS);
   return release;
 }
