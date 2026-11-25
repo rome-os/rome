@@ -8,10 +8,6 @@ import type { EntryAccount } from "./entry.js";
 
 const log = createLogger("unknown-senders");
 
-/** How many told messages are remembered. Another of Rome's accounts hears a
- *  message moments after the first, so only the latest matter. */
-const TOLD_KEPT = 1_000;
-
 /** A recorded message addressed to Rome, from an account nobody holds. */
 export interface UnknownSenderMessage {
   /** The message's id in Rome's records. */
@@ -35,6 +31,9 @@ export interface UnknownSendersDeps {
   /** Whether Rome speaks on the connection as an account of its own, rather
    *  than as the guardian's. */
   isOwnAccount(connectionId: string): boolean;
+  /** How long after a message is on record another of Rome's accounts may still
+   *  hear it. What was told of is remembered for as long. */
+  heardForMs: number;
   /** Called in the background, at most once for each message. Absent, nobody
    *  is told. */
   tell?(message: UnknownSenderMessage): Promise<void>;
@@ -51,7 +50,14 @@ export function unknownSenders(
   recorded: { id: number; saidBy: { account: EntryAccount } },
   event: Pick<InboundEvent, "message" | "ref">,
 ) => void {
-  const told = new Set<number>();
+  /** When each message was told of, oldest first. */
+  const told = new Map<number, number>();
+  const forget = (now: number): void => {
+    for (const [id, at] of told) {
+      if (now - at < deps.heardForMs) break;
+      told.delete(id);
+    }
+  };
   return (recorded, event) => {
     if (!deps.tell) return;
     const arrival = arrivalOf(event);
@@ -63,11 +69,9 @@ export function unknownSenders(
     const sender = recorded.saidBy.account;
     const tell = async () => {
       if (!deps.isOwnAccount(ref.connectionId) || deps.isRomes(sender)) return;
-      told.add(recorded.id);
-      for (const oldest of told) {
-        if (told.size <= TOLD_KEPT) break;
-        told.delete(oldest);
-      }
+      const now = Date.now();
+      forget(now);
+      told.set(recorded.id, now);
       await deps.tell?.({
         messageId: recorded.id,
         sender,
