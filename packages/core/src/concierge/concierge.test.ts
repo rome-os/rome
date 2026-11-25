@@ -139,6 +139,7 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
       ...(card ? { card } : {}),
       ...(row.turnId ? { turnId: row.turnId } : {}),
       ...(row.senderName ? { senderName: row.senderName } : {}),
+      ...(row.senderId ? { saidBy: { account: { platform: "webchat", id: row.senderId } } } : {}),
     };
   });
   return {
@@ -2305,6 +2306,7 @@ describe("Concierge tools", () => {
         content: JSON.stringify([{ type: "text", content: "only interviews" }]),
         senderName: "ann@example.com",
       },
+      { role: "user", content: textContent("and calls"), senderId: "guardian" },
     ]);
     const read = await s.tool("chat_read", { chatId: TOPIC_CHAT });
     expect(read.isError).toBeFalsy();
@@ -2312,7 +2314,10 @@ describe("Concierge tools", () => {
       chatId: TOPIC_CHAT,
       title: "Calendar",
       kind: "topic chat",
-      messages: [{ role: "user", from: "ann@example.com", text: "only interviews" }],
+      messages: [
+        { role: "user", from: "ann@example.com", text: "only interviews" },
+        { role: "user", from: "guardian", text: "and calls" },
+      ],
     });
     s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });
     const refused = await s.tool("chat_read", { chatId: "plain" });

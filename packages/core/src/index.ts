@@ -1404,7 +1404,7 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
-  // A chat private to one person rings them when an action in it notifies.
+  // A chat private to one person rings them when a turn that acts for no one notifies.
   const privateOwnerOfChat = async (chatId: string) =>
     privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
