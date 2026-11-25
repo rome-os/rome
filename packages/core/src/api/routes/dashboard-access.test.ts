@@ -46,6 +46,30 @@ describe("Dashboard-access API", () => {
     expect(await res.json()).toEqual({ cloudEmailAccess: ["ada@example.com"] });
   });
 
+  it("shows the list an older build saved last while the members do not hold it, and a save lets members in", async () => {
+    await inviteMember(memberContext(testDb.db), "ada@example.com");
+    await inviteMember(memberContext(testDb.db), "lin@example.com");
+    // An older build removed ada, its update of the members failed, and the
+    // startup import did not read the list.
+    await new SettingsRepository(testDb.db).set(DASHBOARD_ACCESS_SETTING_KEY, {
+      cloudEmailAccess: ["lin@example.com"],
+      revision: 4,
+    });
+    await dashboardAccessState.load(testDb.db);
+    expect(dashboardAccessState.isCloudEmailAllowed("lin@example.com")).toBe(false);
+
+    const getRes = await app.request("/dashboard-access");
+    expect(await getRes.json()).toEqual({ cloudEmailAccess: ["lin@example.com"] });
+
+    await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com"] }),
+    });
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("ada@example.com")).toBe(false);
+  });
+
   it("persists the normalized config and refreshes the auth-edge snapshot", async () => {
     const res = await app.request("/dashboard-access", {
       method: "PUT",

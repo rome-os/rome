@@ -1,5 +1,7 @@
 import type { DrizzleDb } from "../db/index.js";
+import { createLogger } from "../logger.js";
 import { memberContext, memberEmails } from "./application/members.js";
+import { membersMatchInvitedEmails } from "./dashboard-access-store.js";
 import { guardianSeatEmail } from "./guardian-auth-state.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
@@ -16,10 +18,16 @@ import { normalizeVisitorEmail } from "./visitor-email.js";
  * seat's email alone. A sign-in with a member's email or the seat's email is
  * let in, since a sign-in with the seat's email is the guardian's person.
  * Another email the guardian's person holds is not let in.
+ *
+ * While the members do not hold the list an older build saved last
+ * ({@link membersMatchInvitedEmails}), a load keeps no member's email, so no
+ * member gets in until the startup import reads that list or a save replaces
+ * it. The guardian's seat still does.
  */
 export class DashboardAccessState {
   private memberEmails: Set<string> = new Set();
   private guardianEmail: string | null = null;
+  private lockoutLogged = false;
 
   /** The members' emails, the guardian's left out. */
   cloudEmails(): ReadonlySet<string> {
@@ -55,12 +63,23 @@ export class DashboardAccessState {
 
   /** Replaces the members' emails and the guardian's with those in `db`. */
   async load(db: DrizzleDb): Promise<void> {
-    const members = await memberEmails(memberContext(db));
+    const trusted = membersMatchInvitedEmails(db);
+    const members = trusted ? await memberEmails(memberContext(db)) : [];
     const guardian = await guardianSeatEmail(db);
     this.memberEmails = normalizedSet(members);
     this.guardianEmail = guardian;
+    if (trusted) {
+      this.lockoutLogged = false;
+    } else if (!this.lockoutLogged) {
+      this.lockoutLogged = true;
+      log.error(
+        "members locked out of the dashboard: an older build saved the invited emails after the members were last brought in line with them; the guardian still gets in, and a save on the settings page or a startup that reads the list lets members in again",
+      );
+    }
   }
 }
+
+const log = createLogger("dashboard-access");
 
 function normalizedSet(emails: Iterable<string>): Set<string> {
   return new Set(

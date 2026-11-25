@@ -14,8 +14,9 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   app.get("/dashboard-access", async (c) => {
-    const { emails } = await deps.dashboardAccessStore.read();
-    const config: DashboardAccessConfig = { cloudEmailAccess: [...emails] };
+    const config: DashboardAccessConfig = {
+      cloudEmailAccess: await deps.dashboardAccessStore.shownEmails(),
+    };
     return c.json(config);
   });
 

@@ -10,7 +10,11 @@ import {
   seatAccounts,
 } from "./application/members.js";
 import { placeAudience } from "../core/place-audience.js";
+import { SettingsRepository } from "../db/repositories/settings.js";
+import type { DrizzleDb } from "../db/index.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
+import { DashboardAccessStore } from "./dashboard-access-store.js";
 import { createCloudGuardian } from "./guardian-auth-state.js";
 
 describe("DashboardAccessState", () => {
@@ -151,5 +155,81 @@ describe("DashboardAccessState", () => {
     } finally {
       testDb.close();
     }
+  });
+
+  describe("after an older build saved a list the members do not hold", () => {
+    // This build invites ada and lin. An older build after a rollback removes
+    // ada, but its own update of the members fails, so ada stays a member.
+    async function olderBuildRemovedAda(db: DrizzleDb): Promise<DashboardAccessStore> {
+      await createCloudGuardian(db, "acct-owner", "owner@example.com");
+      await backfillMembers(db);
+      const settingsRepo = new SettingsRepository(db);
+      const store = new DashboardAccessStore(settingsRepo, db);
+      const saved = await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
+      await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+        cloudEmailAccess: ["lin@example.com"],
+        revision: saved.revision + 1,
+      });
+      return store;
+    }
+
+    it("lets in only the guardian's seat while the startup import has not read the list", async () => {
+      const testDb = createTestDb();
+      try {
+        const store = await olderBuildRemovedAda(testDb.db);
+        // The startup import failed, so it read nothing.
+        const state = new DashboardAccessState();
+        await state.load(testDb.db);
+
+        expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
+        expect(state.isCloudEmailAllowed("lin@example.com")).toBe(false);
+        expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
+        expect(state.hasCloudEmailAccess()).toBe(false);
+        expect(state.cloudEmails().size).toBe(0);
+        expect(state.hasSignInEmails()).toBe(true);
+        expect(store.membersAreSource()).toBe(false);
+        // The settings page shows the list the older build saved last.
+        expect(await store.shownEmails()).toEqual(["lin@example.com"]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("lets members in once the startup import reads the list", async () => {
+      const testDb = createTestDb();
+      try {
+        const store = await olderBuildRemovedAda(testDb.db);
+        await backfillMembers(testDb.db);
+        const state = new DashboardAccessState();
+        await state.load(testDb.db);
+
+        expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
+        expect(state.isCloudEmailAllowed("lin@example.com")).toBe(true);
+        expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
+        expect(store.membersAreSource()).toBe(true);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("lets the saved members in after a save on the settings page", async () => {
+      const testDb = createTestDb();
+      try {
+        const store = await olderBuildRemovedAda(testDb.db);
+        const state = new DashboardAccessState();
+        await state.load(testDb.db);
+        expect(state.isCloudEmailAllowed("lin@example.com")).toBe(false);
+
+        await store.save({ cloudEmailAccess: ["lin@example.com", "kim@example.com"] });
+        await state.load(testDb.db);
+
+        expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
+        expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
+        expect(state.isCloudEmailAllowed("lin@example.com")).toBe(true);
+        expect(store.membersAreSource()).toBe(true);
+      } finally {
+        testDb.close();
+      }
+    });
   });
 });

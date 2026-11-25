@@ -2731,8 +2731,10 @@ async function main() {
   // The members learn the guardian's seat, and on the first run the invited
   // emails, before the dashboard snapshot below is loaded from them. A failure
   // is logged and Rome starts, so the guardian can still sign in. Until a run
-  // or a save of the invited emails succeeds, Rome Cloud is not sent the list
-  // (src/access/application/backfill-members.ts).
+  // or a save of the invited emails succeeds, Rome Cloud is not sent the list,
+  // and when an older build saved a list the run did not read, no member gets
+  // in (src/access/application/backfill-members.ts). The run is retried only at
+  // the next start.
   await backfillMembers(db).catch((err: unknown) => {
     log.error("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
   });

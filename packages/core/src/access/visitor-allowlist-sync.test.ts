@@ -22,11 +22,12 @@ import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./visitor-allo
 const ORIGIN = "https://cloud.test";
 
 // Records what the members backfill records on its first run: the members are
-// the source of the list.
-function membersBecameSource(db: DrizzleDb): void {
+// the source of the list, read at `revision`.
+function membersBecameSource(db: DrizzleDb, revision: number): void {
+  const updatedAt = new Date();
   db.insert(settings)
-    .values({ key: INVITED_EMAILS_DONE_KEY, value: true, updatedAt: new Date() })
-    .onConflictDoNothing()
+    .values({ key: INVITED_EMAILS_DONE_KEY, value: revision, updatedAt })
+    .onConflictDoUpdate({ target: settings.key, set: { value: revision, updatedAt } })
     .run();
 }
 
@@ -399,7 +400,7 @@ describe("syncStoredVisitorAllowList", () => {
     const settingsRepo = new SettingsRepository(testDb.db);
     await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision: 9 });
     await inviteMember(memberContext(testDb.db), "Ada@Example.com");
-    membersBecameSource(testDb.db);
+    membersBecameSource(testDb.db, 9);
     const pushed: unknown[] = [];
 
     await syncStoredVisitorAllowList(new DashboardAccessStore(settingsRepo, testDb.db), {
@@ -423,7 +424,7 @@ describe("VisitorAllowListSync — Rome Cloud ahead", () => {
       revision: 2,
     });
     await inviteMember(memberContext(testDb.db), "ada@example.com");
-    membersBecameSource(testDb.db);
+    membersBecameSource(testDb.db, 2);
     const store = new DashboardAccessStore(settingsRepo, testDb.db);
     const cloud = fakeCloud([], { held: 7 });
     const sync = new VisitorAllowListSync({
@@ -586,7 +587,7 @@ describe("VisitorAllowListSync — applied contract", () => {
     const settingsRepo = new SettingsRepository(testDb.db);
     await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, { revision });
     await invitedEmailsSaved(memberContext(testDb.db), emails);
-    membersBecameSource(testDb.db);
+    membersBecameSource(testDb.db, revision);
     return new DashboardAccessStore(settingsRepo, testDb.db);
   }
 

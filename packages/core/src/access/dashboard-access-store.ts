@@ -15,6 +15,7 @@ import {
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
   INVITED_EMAILS_DONE_KEY,
+  normalizeDashboardAccessConfig,
   readDashboardAccessRevision,
   readInvitedEmailsDoneRevision,
   type DashboardAccessConfig,
@@ -63,18 +64,28 @@ export class DashboardAccessStore {
   }
 
   /**
+   * The emails the settings page shows the guardian: the members' while they
+   * match the record, else the record's own list, which an older build saved
+   * last and the startup import has not read. Saving the page then saves that
+   * list, not a member the older build removed.
+   */
+  async shownEmails(): Promise<string[]> {
+    if (membersMatchInvitedEmails(this.db)) return memberEmails(this.members);
+    const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
+    return normalizeDashboardAccessConfig(stored).cloudEmailAccess;
+  }
+
+  /**
    * Whether the members are the source of the invited emails: the members
-   * backfill imported the older list, or a save ran. Until then the members
-   * may lack invited emails the settings record still holds. Stays true after
-   * a rollback and an upgrade again.
+   * backfill imported the older list, or a save ran, and no older build has
+   * saved the list since. Until then the members may lack invited emails the
+   * settings record holds, or hold ones it removed.
    */
   membersAreSource(): boolean {
-    const marker = this.db
-      .select({ key: settings.key })
-      .from(settings)
-      .where(eq(settings.key, INVITED_EMAILS_DONE_KEY))
-      .get();
-    return marker !== undefined;
+    return (
+      settingValue(this.db, INVITED_EMAILS_DONE_KEY) !== undefined &&
+      membersMatchInvitedEmails(this.db)
+    );
   }
 
   /**
@@ -181,7 +192,19 @@ export class DashboardAccessStore {
   }
 }
 
-function settingValue(tx: DrizzleTx, key: string): unknown {
+/**
+ * Whether the members hold the invited emails of the settings record's current
+ * revision: the startup import or a save by this build wrote that revision, or
+ * no list was ever saved. False after an older build saved the list past the
+ * revision this build last wrote or read, until the import reads it or a save
+ * replaces it.
+ */
+export function membersMatchInvitedEmails(db: DrizzleDb | DrizzleTx): boolean {
+  const current = readDashboardAccessRevision(settingValue(db, DASHBOARD_ACCESS_SETTING_KEY));
+  return current <= readInvitedEmailsDoneRevision(settingValue(db, INVITED_EMAILS_DONE_KEY));
+}
+
+function settingValue(tx: DrizzleDb | DrizzleTx, key: string): unknown {
   return tx.select({ value: settings.value }).from(settings).where(eq(settings.key, key)).get()
     ?.value;
 }
