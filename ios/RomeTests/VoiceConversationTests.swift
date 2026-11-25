@@ -178,14 +178,17 @@ import Testing
     @Test func aDroppedConnectionIsCalledAgainForThirtySecondsFromTheFirstDrop() {
         var reconnect = VoiceReconnect()
         let start = ContinuousClock.now
-        #expect(reconnect.lost(at: start))
-        #expect(reconnect.lost(at: start + .seconds(29)))
-        #expect(!reconnect.lost(at: start + .seconds(30)))
+        // `#expect` cannot call a mutating method: each answer is read first.
+        let first = reconnect.lost(at: start)
+        let late = reconnect.lost(at: start + .seconds(29))
+        let over = reconnect.lost(at: start + .seconds(30))
+        #expect(first && late && !over)
         // Rome answered again: the next drop gets the whole window.
         reconnect.recovered()
-        #expect(reconnect.lost(at: start + .seconds(40)))
-        #expect(reconnect.lost(at: start + .seconds(69)))
-        #expect(!reconnect.lost(at: start + .seconds(71)))
+        let again = reconnect.lost(at: start + .seconds(40))
+        let againLate = reconnect.lost(at: start + .seconds(69))
+        let againOver = reconnect.lost(at: start + .seconds(71))
+        #expect(again && againLate && !againOver)
     }
 
     @Test func theGuardiansEndLeavesNoLine() async {
