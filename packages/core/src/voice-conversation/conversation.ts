@@ -137,14 +137,29 @@ const realSchedule = (ms: number, fn: () => void) => {
   return () => clearTimeout(timer);
 };
 
+const normalizeWords = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+
 const languageOf = (text: string): ReplyLanguage => (/\p{Script=Han}/u.test(text) ? "zh" : "en");
 
-const logTiming = (timing: VoiceTurnTiming) => log.info("voice turn timing", { ...timing });
+/** A turn's timing as log fields, each step a field of its own, such as `firstAudioMs`. */
+export function turnTimingFields(
+  timing: VoiceTurnTiming,
+  context: Record<string, string> = {},
+): Record<string, string | number> {
+  const { steps, ...rest } = timing;
+  const fields: Record<string, string | number> = { ...context, ...rest };
+  for (const [step, ms] of Object.entries(steps)) fields[`${step}Ms`] = ms;
+  return fields;
+}
+
+/** Logs a turn's timing, with `context` such as its chat. */
+export const logTurnTiming = (timing: VoiceTurnTiming, context: Record<string, string> = {}) =>
+  log.info("voice turn timing", turnTimingFields(timing, context));
 
 export function createConversation(deps: ConversationDeps): Conversation {
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? Date.now;
-  const timed = deps.timed ?? logTiming;
+  const timed = deps.timed ?? ((timing: VoiceTurnTiming) => logTurnTiming(timing));
   let speaker: SpeakerSession | null = null;
   let closed = false;
   let state: VoiceConversationState = "listening";
@@ -332,8 +347,9 @@ export function createConversation(deps: ConversationDeps): Conversation {
       if (reply !== to) return;
       to.timer.mark("agentStarted");
       if (event.type === "said") {
+        // A message comes whole once it is stored: when its writing began is
+        // known only from its input streaming in, which not every provider does.
         saidAny ||= event.text.trim() !== "";
-        if (saidAny) to.timer.mark("writing");
         // A message ends its sentence.
         feed(to, `${event.text}\n`);
         continue;
@@ -405,9 +421,11 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     heard(newSettled, newPending) {
       if (closed) return;
-      if (newSettled || newPending !== pending) lastWordsAt = now();
+      // Words only settling, as they do with the endpoint, are not new words.
+      const before = normalizeWords(`${settled}${pending}`);
       settled += newSettled;
       pending = newPending;
+      if (normalizeWords(`${settled}${pending}`) !== before) lastWordsAt = now();
       deps.message({ type: "heard", settled, pending });
       const words = `${settled}${pending}`;
       if (!begun && words.trim()) {
