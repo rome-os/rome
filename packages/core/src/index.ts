@@ -16,7 +16,10 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import { accountCodeAdmission } from "./chats/connected-accounts/account-code-admission.js";
+import {
+  accountCodeAdmission,
+  accountCodesLeftOut,
+} from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
@@ -777,6 +780,9 @@ async function main() {
     registry: connectionRegistry,
     platformOf: senderPlatformOf,
   });
+  // What admission keeps from the chat for being a code, a history read from
+  // the platform leaves out.
+  const readable = accountCodesLeftOut({ linkOf: accountLinkOf(connectionRegistry) });
   // Read at each message, once the chat settings below exist.
   const heardInChat = heardUnlessSwitchedOff({
     settings: { get: (ref) => chatSettings.get(ref) },
@@ -2486,6 +2492,7 @@ async function main() {
     connections: {
       registry: connectionRegistry,
       admit,
+      readable,
       channelOf,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -2621,6 +2628,7 @@ async function main() {
       {
         registry: connectionRegistry,
         admit,
+        readable,
         channelOf,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),

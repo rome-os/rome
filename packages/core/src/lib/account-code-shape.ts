@@ -9,9 +9,10 @@ export const ACCOUNT_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const ACCOUNT_CODE_GROUP_LENGTH = 6;
 export const ACCOUNT_CODE_PREFIX = "ROME";
 
-const CODE_SHAPE = new RegExp(
-  `^${ACCOUNT_CODE_PREFIX}-[${ACCOUNT_CODE_ALPHABET}]{${ACCOUNT_CODE_GROUP_LENGTH}}-[${ACCOUNT_CODE_ALPHABET}]{${ACCOUNT_CODE_GROUP_LENGTH}}$`,
-);
+const GROUP = `[${ACCOUNT_CODE_ALPHABET}]{${ACCOUNT_CODE_GROUP_LENGTH}}`;
+const CODE = `${ACCOUNT_CODE_PREFIX}-${GROUP}-${GROUP}`;
+const CODE_SHAPE = new RegExp(`^${CODE}$`);
+const CODE_ANYWHERE = new RegExp(CODE, "g");
 
 /** `text` as a code is compared: case and surrounding spaces do not count. */
 export function normalizedAccountCode(text: string): string {
@@ -23,4 +24,10 @@ export function normalizedAccountCode(text: string): string {
  *  ignoring case and surrounding spaces. */
 export function looksLikeAccountCode(text: string): boolean {
   return CODE_SHAPE.test(normalizedAccountCode(text));
+}
+
+/** Every code-shaped token in `text`, wherever it sits, as a code is
+ *  compared. Empty for a text that holds none. */
+export function accountCodesIn(text: string): string[] {
+  return text.toUpperCase().match(CODE_ANYWHERE) ?? [];
 }

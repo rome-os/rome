@@ -1,12 +1,14 @@
 /**
- * The step that hears an [account code](docs/domains/identity.md#account-code)
+ * The steps that hear an [account code](docs/domains/identity.md#account-code)
  * sent to an [own account](docs/domains/chats.md#own-account) of Rome's. A
- * code in a direct message adds the sender's account to the person the code
- * belongs to, and Rome answers there. A code anywhere else is voided in
- * silence, since everyone in that chat has seen it. Either way the message is
- * kept from the chat, so no subscriber, agent or app hears it and it is not
- * recorded. On the guardian's own account a message is to the guardian, not
- * to Rome, so a code there is an ordinary message.
+ * message whose whole text is a code is kept from the chat, so no subscriber,
+ * agent or app hears it and it is not recorded. In a direct message the code
+ * adds the sender's account to the person the code belongs to, and Rome
+ * answers there. Anywhere else every code in the text is voided in silence,
+ * since everyone in that chat has seen it, and a longer message is then heard
+ * as an ordinary one. A history read from the platform leaves out every
+ * message whose whole text is a code. On the guardian's own account a message
+ * is to the guardian, not to Rome, so a code there is an ordinary message.
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -22,9 +24,10 @@ import {
   UnknownAccountCodeError,
 } from "../../identity/application/account-codes.js";
 import { AccountTakenError } from "../../identity/identity.js";
+import { accountCodesIn } from "../../lib/account-code-shape.js";
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
-import type { Admission } from "./admission.js";
+import type { Admission, HistoryFilter } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
 
 const log = createLogger("account-code-admission");
@@ -53,38 +56,52 @@ export interface AccountCodeAdmissionDeps {
 /**
  * Keeps every message whose whole text is shaped like a code from the chat on
  * a connection to an own account, redeeming the code for the sender's account
- * in a direct message and voiding it anywhere else. Admits every other
- * message without a database read.
+ * in a direct message. Anywhere else it voids every code-shaped token in the
+ * text, and admits a longer message. Admits every message that holds no code
+ * without a database read.
  */
 export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission {
   return async (connectionId, connectionKind, message) => {
-    if (!looksLikeAccountCode(message.text)) return true;
+    const codes = accountCodesIn(message.text);
+    if (codes.length === 0) return true;
     if (deps.linkOf(connectionKind) !== "own_account") return true;
+    const wholeText = looksLikeAccountCode(message.text);
     if (message.thread?.kind !== "dm") {
-      await accountCodeVoided(deps.codes, message.text);
-      log.info("account code voided in a shared chat", { connectionId });
-      return false;
+      for (const code of codes) await accountCodeVoided(deps.codes, code);
+      log.info("account code voided in a shared chat", { connectionId, codes: codes.length });
+      return !wholeText;
     }
-    // Answers go out in the background: admission holds the chat's next
-    // message until it returns, and a send that hangs must not.
-    const answer = (text: string): void => {
-      sendThrough(deps.registry.get(connectionId), message.chatId, { text }).catch(() => {
-        // Provider errors may include the rejected request body. Do not log them.
-        log.error("account code answer failed", { connectionId });
-      });
-    };
-    // A Telegram channel posts under the channel's own negative id, which is no
-    // person's account.
-    if (connectionKind === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
+    if (!wholeText) return true;
     const account = {
       platform: deps.platformOf(connectionId, message),
       accountId: message.senderId,
     };
     const outcome = await redeemed(deps.codes, message.text, account);
     log.info("account code heard", { connectionId, outcome });
-    answer(ACCOUNT_CODE_ANSWERS[outcome]);
+    // The answer goes out in the background: admission holds the chat's next
+    // message until it returns, and a send that hangs must not. A connection
+    // removed since the message arrived fails the answer, not admission.
+    const text = ACCOUNT_CODE_ANSWERS[outcome];
+    Promise.resolve()
+      .then(() => sendThrough(deps.registry.get(connectionId), message.chatId, { text }))
+      .catch(() => {
+        // Provider errors may include the rejected request body. Do not log them.
+        log.error("account code answer failed", { connectionId });
+      });
     return false;
   };
+}
+
+/**
+ * Whether a message read from a platform's history may reach the reader: not
+ * one whose whole text is shaped like a code, on a connection to an own
+ * account. Live delivery never handed it on, so a read must not either, and
+ * a code refused there may still be usable. Nothing is redeemed, voided or
+ * read from the database.
+ */
+export function accountCodesLeftOut(deps: Pick<AccountCodeAdmissionDeps, "linkOf">): HistoryFilter {
+  return (connectionKind, message) =>
+    !looksLikeAccountCode(message.text) || deps.linkOf(connectionKind) !== "own_account";
 }
 
 async function redeemed(

@@ -19,6 +19,11 @@ export type Admission = (
   message: ChannelMessage,
 ) => Promise<boolean>;
 
+/** Whether a message read from a platform's own history, on a Connection of
+ *  `connectionKind`, may reach the reader. Admission's sibling for reads: a
+ *  message admission keeps from the chat is one a read leaves out too. */
+export type HistoryFilter = (connectionKind: string, message: ChannelMessage) => boolean;
+
 /** How long one admission may hold its conversation. Admission is a few
  *  database reads, so fifteen seconds means the database is stuck. */
 export const ADMISSION_TIMEOUT_MS = 15_000;

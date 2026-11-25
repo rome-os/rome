@@ -10,8 +10,14 @@ import {
 } from "../../identity/application/account-codes.js";
 import { createIdentity } from "../../identity/identity.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { ACCOUNT_CODE_ANSWERS, accountCodeAdmission } from "./account-code-admission.js";
+import { chatPromptFacts } from "../../core/chat-prompt-facts.js";
+import {
+  ACCOUNT_CODE_ANSWERS,
+  accountCodeAdmission,
+  accountCodesLeftOut,
+} from "./account-code-admission.js";
 import { OrderedAdmission } from "./admission.js";
+import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
 
 const ANN_SLACK = { platform: "slack", accountId: "T1:U7" };
 
@@ -37,7 +43,7 @@ describe("account code admission", () => {
     testDb = undefined;
   });
 
-  function setup(codes?: AccountCodeContext) {
+  function setup(codes?: AccountCodeContext, connected = true) {
     testDb = createTestDb();
     const clock = { now: new Date("2026-11-25T10:00:00Z") };
     const ctx = codes ?? accountCodeContext(testDb.db, () => clock.now);
@@ -53,8 +59,12 @@ describe("account code admission", () => {
       sent.push({ chatId, text: out.text ?? "" });
       return { messageId: "sent", chatId };
     });
+    // `ConnectionRegistry.get` throws for a connection it no longer holds.
     const registry = {
-      get: () => ({ withTalker: (call: (talker: object) => unknown) => call({ send }) }),
+      get: () => {
+        if (!connected) throw new Error("Unknown connection conn");
+        return { withTalker: (call: (talker: object) => unknown) => call({ send }) };
+      },
     } as unknown as Pick<ConnectionRegistry, "get">;
     const admit = accountCodeAdmission({
       codes: ctx,
@@ -208,5 +218,173 @@ describe("account code admission", () => {
     expect(heard.map((m) => m.text)).toEqual([`my code is ${code}`]);
     expect(await identity.personOf(ANN_SLACK)).toBeNull();
     expect(sent).toEqual([]);
+  });
+  const group = (text: string, messageId: string): ChannelMessage =>
+    message(text, { messageId, chatId: "G1" as ChatId, thread: { kind: "group" } });
+
+  for (const [said, text] of [
+    ["a mention, then the code, in a Telegram group", (code: string) => `@RomeBot ${code}`],
+    ["the code inside a sentence", (code: string) => `my code is ${code}`],
+  ] as const) {
+    it(`voids ${said}, and hears the message as an ordinary one`, async () => {
+      const { ctx, identity, deliver, heard, answers } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
+
+      await deliver(group(text(code), "m1"));
+      expect(heard.map((m) => m.text)).toEqual([text(code)]);
+
+      await deliver(message(code, { messageId: "m2" }));
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+    });
+  }
+
+  it("voids every code in one message said in a shared chat", async () => {
+    const { ctx, identity, deliver, heard, answers } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const bo = await identity.createPerson({ accounts: [] });
+    const { code: annCode } = await accountCodeIssued(ctx, ann.id);
+    const { code: boCode } = await accountCodeIssued(ctx, bo.id);
+
+    await deliver(group(`${annCode} and ${boCode.toLowerCase()}`, "m1"));
+    expect(heard).toHaveLength(1);
+
+    await deliver(message(annCode, { messageId: "m2" }));
+    await deliver(message(boCode, { messageId: "m3", senderId: "T1:U8" }));
+    expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.used, ACCOUNT_CODE_ANSWERS.used]);
+  });
+
+  it("admits a code in a direct message whose connection was removed before the answer", async () => {
+    const { ctx, identity, deliver, heard, sent } = setup(undefined, false);
+    const ann = await identity.createPerson({ accounts: [] });
+    const { code } = await accountCodeIssued(ctx, ann.id);
+
+    await expect(deliver(message(code))).resolves.toBeUndefined();
+
+    expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
+    expect(heard).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("history read on an own account", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => {
+    testDb?.close();
+    testDb = undefined;
+  });
+
+  /**
+   * A Slack app's direct message with Ann: every message live delivery
+   * hands admission, and the platform's own history of the same chat, read
+   * through the channel's messages port as Rome reads it.
+   */
+  function setup() {
+    testDb = createTestDb();
+    const codes = accountCodeContext(testDb.db);
+    const identity = createIdentity(testDb.db);
+    const linkOf = (): AccountLink => "own_account";
+    // The platform keeps every message it delivered, newest first.
+    const platform: ChannelMessage[] = [];
+    const talker = {
+      send: async (chatId: ChatId) => ({ messageId: "sent", chatId }),
+      history: { read: async () => [...platform].reverse() },
+    };
+    const connection = {
+      id: "conn",
+      connectionKind: "slack_app",
+      withTalker: (call: (talker: object) => unknown) => call(talker),
+      hearTalker: () => () => {},
+    };
+    const registry = {
+      get: () => connection,
+      getDescriptor: () => ({ capabilities: { talker: { reads: true } } }),
+      find: () => [connection],
+      onUnlocked: () => {},
+      registeredKinds: () => ["slack_app"],
+    };
+    const admission = new OrderedAdmission(
+      accountCodeAdmission({
+        codes,
+        linkOf,
+        registry: registry as unknown as Pick<ConnectionRegistry, "get">,
+        platformOf: () => ANN_SLACK.platform,
+      }),
+    );
+    let at = 0;
+    const deliver = async (text: string, senderId = ANN_SLACK.accountId) => {
+      at += 1;
+      const said = message(text, { messageId: `m${at}`, senderId, timestamp: new Date(at * 1000) });
+      platform.push(said);
+      await admission.deliver(connection, said, async () => {});
+    };
+    const ports = connectionPorts(
+      {
+        registry,
+        channelOf: () => "slack_app",
+        readable: accountCodesLeftOut({ linkOf }),
+      } as unknown as ConnectionPortsDeps,
+      "slack_app",
+    );
+    // The port an app's `ChannelsService.query` reads, and a new session's
+    // read of the chat's latest messages through it (index.ts).
+    const history = ports!.messages!;
+    const facts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => undefined },
+      messages: { byIds: () => [] },
+      labels: {
+        read: async (lines) =>
+          lines.map(({ senderName, account: _account, ...line }) => ({
+            ...line,
+            sender: senderName,
+            who: "labelled",
+            quoted: null,
+          })) as never,
+        readUnseen: async () => [],
+      },
+      channelOfChat: () => null,
+      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+      latest: (place, read) => history.query({ chatId: place.threadId as ChatId, ...read }),
+    });
+    return { codes, identity, deliver, history, facts };
+  }
+
+  it("leaves out a code refused because the account was taken, which is still usable", async () => {
+    const { codes, identity, deliver, history, facts } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    await identity.createPerson({ accounts: [ANN_SLACK] });
+    const { code } = await accountCodeIssued(codes, ann.id);
+
+    await deliver(code);
+    await deliver("lunch at noon?");
+
+    const read = await history.query({ chatId: "D1" as ChatId });
+    expect(read.map((m) => m.text)).toEqual(["lunch at noon?"]);
+    const earlier = await facts.earlier?.(
+      { channel: "slack_app", threadId: "D1", threadType: "private" },
+      new Date(60_000),
+    );
+    expect(earlier?.map((m) => m.text)).toEqual(["lunch at noon?"]);
+
+    // The code was neither redeemed nor voided by the reads.
+    await deliver(code, "T1:U8");
+    expect((await identity.personOf({ platform: "slack", accountId: "T1:U8" }))?.id).toBe(ann.id);
+  });
+
+  it("keeps a code inside a longer text in the read", async () => {
+    const { deliver, history } = setup();
+
+    await deliver("my code is ROME-222222-222222");
+
+    const read = await history.query({ chatId: "D1" as ChatId });
+    expect(read.map((m) => m.text)).toEqual(["my code is ROME-222222-222222"]);
+  });
+  it("keeps a code in the read where Rome has no own account", () => {
+    const code = message("ROME-222222-222222");
+    for (const link of ["delegate", null] as const) {
+      expect(accountCodesLeftOut({ linkOf: () => link })("telegram_user", code)).toBe(true);
+    }
+    expect(accountCodesLeftOut({ linkOf: () => "own_account" })("slack_app", code)).toBe(false);
   });
 });

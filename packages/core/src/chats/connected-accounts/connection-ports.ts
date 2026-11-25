@@ -30,7 +30,12 @@ import type {
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
-import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import {
+  type Admission,
+  type HistoryFilter,
+  OrderedAdmission,
+  type OrderedAdmissionOptions,
+} from "./admission.js";
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
@@ -49,6 +54,9 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
+  /** Which messages a history read from the platform hands back. Absent,
+   *  every one is. */
+  readable?: HistoryFilter;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
@@ -195,10 +203,13 @@ function connectionDirectory(backing: Backing): AccountChats {
  * A chat's history read live from the platform through the Connection that
  * backs the channel now, one chat at a time. A cursor from an earlier page
  * (`after`) names the message the page ended on, so it reads as `olderThan`
- * that message. With no bound, it reads back as far as `limit` reaches.
+ * that message. With no bound, it reads back as far as `limit` reaches. A
+ * message `deps.readable` leaves out is dropped from the page, so a page can
+ * hold fewer than `limit`.
  */
 function connectionMessages(backing: Backing): Messages {
-  const { channel } = backing;
+  const { deps, connectionKind, channel } = backing;
+  const readable = deps.readable ?? (() => true);
   return {
     live: true,
     byAccount: null,
@@ -222,7 +233,9 @@ function connectionMessages(backing: Backing): Messages {
       };
       const messages = await callTalker(connection, (talker) => talker.history?.read(chatId, read));
       // A later channel of the kind names itself, not the kind's first one.
-      return messages.map((message) => ({ ...message, channel }));
+      return messages
+        .filter((message) => readable(connectionKind, message))
+        .map((message) => ({ ...message, channel }));
     },
   };
 }
