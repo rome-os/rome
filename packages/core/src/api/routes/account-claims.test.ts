@@ -28,7 +28,8 @@ describe("account claims API", () => {
 
   afterEach(() => testDb.close());
 
-  const start = async () => (await accountClaimStarted(claimContext(testDb.db), ANN_SLACK)).token;
+  const start = async (label?: string) =>
+    (await accountClaimStarted(claimContext(testDb.db), ANN_SLACK, { label })).token;
   const confirm = (as: SessionActor | undefined, token: string) => {
     const request = () =>
       app.request(`/account-claims/${token}/confirm`, { method: "POST", headers: SAME_ORIGIN });
@@ -38,13 +39,17 @@ describe("account claims API", () => {
 
   it("shows a member what the claim is for and changes nothing", async () => {
     await inviteMember(ctx, "ann@example.com");
-    const token = await start();
+    const token = await start("Ann Lee");
     const ann = { kind: "visitor", accountId: "acct-ann", email: "ann@example.com" } as const;
 
     const res = await runWithSessionActor(ann, () => app.request(`/account-claims/${token}`));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ platform: "slack", account: "T1:U7" });
+    expect(await res.json()).toMatchObject({
+      platform: "slack",
+      account: "T1:U7",
+      label: "Ann Lee",
+    });
     expect(await holder()).toBeNull();
     const missing = await runWithSessionActor(ann, () => app.request("/account-claims/nope"));
     expect(missing.status).toBe(404);
@@ -52,7 +57,7 @@ describe("account claims API", () => {
 
   it("adds the account to a member who confirms", async () => {
     const ann = await inviteMember(ctx, "ann@example.com");
-    const token = await start();
+    const token = await start("Ann Lee");
 
     const res = await confirm(
       { kind: "visitor", accountId: "acct-ann", email: "Ann@Example.com" },
@@ -60,6 +65,7 @@ describe("account claims API", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ platform: "slack", account: "T1:U7", label: "Ann Lee" });
     expect(await holder()).toBe(ann.id);
     expect(
       (await confirm({ kind: "visitor", accountId: "a", email: "ann@example.com" }, token)).status,
@@ -74,6 +80,21 @@ describe("account claims API", () => {
 
     const res = await confirm(
       { kind: "guardian", userId: "seat", email: "owner@example.com", via: "cookie" },
+      token,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await holder()).toBe(guardian.id);
+  });
+
+  it("adds the account to the guardian whatever email the guardian's session names", async () => {
+    const guardian = await guardianSeatCreated(ctx, {
+      accounts: seatAccounts({ email: "owner@example.com" }),
+    });
+    const token = await start();
+
+    const res = await confirm(
+      { kind: "guardian", userId: "seat", email: "renamed@example.com", via: "cookie" },
       token,
     );
 

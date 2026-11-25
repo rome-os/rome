@@ -200,6 +200,8 @@ export const accountClaims = sqliteTable(
     tokenHash: text("token_hash").primaryKey(),
     platform: text("platform").notNull(),
     accountId: text("account_id").notNull(),
+    /** The account's name as the platform shows it, for the person confirming. */
+    label: text("label"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     confirmedAt: integer("confirmed_at", { mode: "timestamp" }),

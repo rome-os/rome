@@ -38,6 +38,8 @@ An account belongs to at most one person.
 How an account nobody holds becomes a person's. Rome starts a claim on the account and sends its sign-in link to whoever uses the account. A person who opens the link while signed in and confirms it gets the account. In code, the steps are in [`packages/core/src/identity/application/account-claims.ts`](../../packages/core/src/identity/application/account-claims.ts).
 
 - A claim is only for an account nobody holds. Starting one on an account a person holds is refused, and nothing changes.
+- A claim is for an account on a platform a connection hears, never for a sign-in address. Starting one on an email or Rome Cloud email account is refused.
+- A claim carries the account's name as the platform shows it, so the person confirming can recognise it. Identity only shows the name and trusts it for nothing.
 - An account has at most one claim. Starting another replaces the earlier one, whose link then leads nowhere.
 - A claim can be confirmed for 15 minutes after it starts, and once.
 - Opening the link changes nothing. Only confirming writes.
@@ -49,4 +51,5 @@ How an account nobody holds becomes a person's. Rome starts a claim on the accou
 
 - **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is a member.
 - **Roles in Identity.** Identity would then answer two questions, and every part that only asks who a sender is would depend on roles.
+- **A claim tied to the person it was sent to.** A claim proves only that the person confirming holds the link, so a person talked into confirming someone else's link gives that account their role. The name on the page is the guard.
 - **The Rome Cloud id as the account.** It needed a step where an invited email is claimed by the Rome Cloud account that signs in with it, and an exception for the guardian. The costs accepted instead: an address that passes to someone else carries its access until that person is removed, and a member who changes their Rome Cloud email must be invited again (Ouou, 2026-11-25).

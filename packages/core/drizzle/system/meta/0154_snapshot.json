@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "96942ede-0df9-42c8-ac60-a3ef2aff6dd1",
+  "id": "ac1a8825-be13-4aab-9292-e8a496e27492",
   "prevId": "03e2565c-ed3e-4d57-85eb-bf0da754d9a0",
   "tables": {
     "account_claims": {
@@ -26,6 +26,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

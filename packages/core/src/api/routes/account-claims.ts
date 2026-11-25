@@ -32,20 +32,19 @@ export function accountClaimsRoutes(
   const identity = createIdentity(deps.db);
   const access = createAccess(deps.db);
 
-  // The person a signed-in session is: the one who holds its email as a Rome
-  // Cloud sign-in's account. A local password seat has no email, and is the
-  // person with the guardian's role.
+  // The person a signed-in session is. The guardian's seat, by Rome Cloud or
+  // the local password, is the person with the guardian's role. A visitor is
+  // the one who holds the session's email as a Rome Cloud sign-in's account.
   async function personOf(actor: SessionActor): Promise<string | null> {
     if (actor.kind === "anonymous") return null;
-    if (actor.email) {
-      const person = await identity.personOf({
-        platform: ROME_CLOUD_EMAIL_PLATFORM,
-        accountId: actor.email,
-      });
-      return person?.id ?? null;
+    if (actor.kind === "guardian") {
+      return (await access.members()).find((m) => m.role === "guardian")?.personId ?? null;
     }
-    if (actor.kind !== "guardian") return null;
-    return (await access.members()).find((m) => m.role === "guardian")?.personId ?? null;
+    const person = await identity.personOf({
+      platform: ROME_CLOUD_EMAIL_PLATFORM,
+      accountId: actor.email,
+    });
+    return person?.id ?? null;
   }
 
   app.get("/account-claims/:token", async (c) => {
@@ -56,6 +55,7 @@ export function accountClaimsRoutes(
     return c.json({
       platform: claim.account.platform,
       account: claim.account.accountId,
+      label: claim.label,
       expiresAt: claim.expiresAt.toISOString(),
     });
   });
@@ -74,8 +74,12 @@ export function accountClaimsRoutes(
     const personId = await personOf(actor);
     if (!personId) return c.json({ error: "This sign-in belongs to no person" }, 403);
     try {
-      const account = await accountClaimConfirmed(claims, c.req.param("token"), personId);
-      return c.json({ platform: account.platform, account: account.accountId });
+      const { account, label } = await accountClaimConfirmed(
+        claims,
+        c.req.param("token"),
+        personId,
+      );
+      return c.json({ platform: account.platform, account: account.accountId, label });
     } catch (err) {
       if (
         err instanceof UnknownClaimError ||

@@ -9,7 +9,9 @@ import {
   CLAIM_LIFETIME_MS,
   ClaimExpiredError,
   claimContext,
+  CLAIM_LABEL_MAX_LENGTH,
   ClaimUsedError,
+  SignInAccountClaimError,
   UnknownClaimError,
 } from "./account-claims.js";
 
@@ -40,9 +42,50 @@ describe("account claims", () => {
     const { token, expiresAt } = await accountClaimStarted(ctx, ANN_SLACK);
 
     expect(expiresAt).toEqual(new Date(Date.parse("2026-11-25T10:00:00Z") + CLAIM_LIFETIME_MS));
-    expect(await accountClaimOf(ctx, token)).toEqual({ account: ANN_SLACK, expiresAt });
-    expect(await accountClaimConfirmed(ctx, token, ann.id)).toEqual(ANN_SLACK);
+    expect(await accountClaimOf(ctx, token)).toEqual({
+      account: ANN_SLACK,
+      label: null,
+      expiresAt,
+    });
+    expect(await accountClaimConfirmed(ctx, token, ann.id)).toEqual({
+      account: ANN_SLACK,
+      label: null,
+    });
     expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
+  });
+
+  it("keeps the account's name trimmed and cut short, for the person confirming", async () => {
+    const { ctx, identity } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+
+    const short = await accountClaimStarted(ctx, ANN_SLACK, { label: "  Ann Lee  " });
+    expect((await accountClaimOf(ctx, short.token))?.label).toBe("Ann Lee");
+
+    const long = await accountClaimStarted(ctx, ANN_SLACK, { label: `${"😀".repeat(200)}` });
+    const label = (await accountClaimOf(ctx, long.token))?.label;
+    expect(Array.from(label ?? "")).toHaveLength(CLAIM_LABEL_MAX_LENGTH);
+    expect(label).toBe("😀".repeat(CLAIM_LABEL_MAX_LENGTH));
+    expect((await accountClaimConfirmed(ctx, long.token, ann.id)).label).toBe(label);
+
+    const blank = await accountClaimStarted(
+      ctx,
+      { platform: "discord", accountId: "9" },
+      {
+        label: "   ",
+      },
+    );
+    expect((await accountClaimOf(ctx, blank.token))?.label).toBeNull();
+  });
+
+  it("refuses to start a claim on a sign-in address", async () => {
+    const { db, ctx } = setup();
+
+    for (const platform of ["email", "rome-cloud-email"]) {
+      await expect(
+        accountClaimStarted(ctx, { platform, accountId: "ann@example.com" }),
+      ).rejects.toBeInstanceOf(SignInAccountClaimError);
+    }
+    expect(db.select().from(accountClaims).all()).toEqual([]);
   });
 
   it("changes nothing when the claim is only opened", async () => {
@@ -127,7 +170,7 @@ describe("account claims", () => {
     await expect(accountClaimConfirmed(ctx, first.token, ann.id)).rejects.toBeInstanceOf(
       UnknownClaimError,
     );
-    expect(await accountClaimConfirmed(ctx, second.token, ann.id)).toEqual(ANN_SLACK);
+    expect((await accountClaimConfirmed(ctx, second.token, ann.id)).account).toEqual(ANN_SLACK);
   });
 
   it("refuses to start a claim on an account a person holds", async () => {
@@ -158,7 +201,7 @@ describe("account claims", () => {
     const { token } = await accountClaimStarted(ctx, ANN_SLACK);
     await identity.addAccount(ann.id, ANN_SLACK);
 
-    expect(await accountClaimConfirmed(ctx, token, ann.id)).toEqual(ANN_SLACK);
+    expect((await accountClaimConfirmed(ctx, token, ann.id)).account).toEqual(ANN_SLACK);
     expect(await identity.accountsOf(ann.id)).toEqual([ANN_SLACK]);
   });
 });

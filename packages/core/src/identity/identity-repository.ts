@@ -82,21 +82,8 @@ export class IdentityRepository {
   /** Gives `account` to `personId` unless no such person exists or another
    *  person holds it. Returns `"unknown"` or `"taken"` for those, having
    *  written nothing, else null. */
-  insertAccount(personId: string, account: Account, now: Date): "unknown" | "taken" | null {
-    return this.db.transaction((tx) => {
-      const known = tx
-        .select({ id: identities.id })
-        .from(identities)
-        .where(eq(identities.id, personId))
-        .get();
-      if (!known) return "unknown";
-      const holder = holderOf(tx, account);
-      if (holder !== null) return holder === personId ? null : "taken";
-      tx.insert(identityAccounts)
-        .values({ ...account, identityId: personId, createdAt: now })
-        .run();
-      return null;
-    });
+  insertAccount(personId: string, account: Account, now: Date): AccountRefusal | null {
+    return this.db.transaction((tx) => insertAccountIn(tx, personId, account, now));
   }
 
   deleteAccount(account: Account): void {
@@ -119,6 +106,34 @@ function accountIs(account: Account) {
     eq(identityAccounts.platform, account.platform),
     eq(identityAccounts.accountId, account.accountId),
   );
+}
+
+/** Why giving an account to a person wrote nothing: no such person, or another
+ *  person holds the account. */
+export type AccountRefusal = "unknown" | "taken";
+
+/** Gives `account` to `personId` inside `exec`, the one place Identity's rule
+ *  that an account has one person is written. Giving it to the person who
+ *  holds it already is a no-op. Returns why it wrote nothing, else null. */
+export function insertAccountIn(
+  exec: Exec,
+  personId: string,
+  account: Account,
+  now: Date,
+): AccountRefusal | null {
+  const known = exec
+    .select({ id: identities.id })
+    .from(identities)
+    .where(eq(identities.id, personId))
+    .get();
+  if (!known) return "unknown";
+  const holder = holderOf(exec, account);
+  if (holder !== null) return holder === personId ? null : "taken";
+  exec
+    .insert(identityAccounts)
+    .values({ ...account, identityId: personId, createdAt: now })
+    .run();
+  return null;
 }
 
 /** The id of the person who holds `account`, or null when nobody does. */

@@ -2,12 +2,13 @@
 
 import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { accountClaims, identities, identityAccounts } from "../db/schema.js";
-import { type Account, holderOf } from "./identity-repository.js";
+import { accountClaims } from "../db/schema.js";
+import { type Account, holderOf, insertAccountIn } from "./identity-repository.js";
 
 /** A claim as stored, known by the hash of its token. */
 export interface StoredClaim {
   account: Account;
+  label: string | null;
   expiresAt: Date;
   confirmedAt: Date | null;
 }
@@ -25,12 +26,18 @@ export class AccountClaimRepository {
   /** Stores a claim on `account` in place of any earlier claim on it, unless
    *  a person holds the account. Returns `"taken"` then, having written
    *  nothing, else null. */
-  replace(tokenHash: string, account: Account, createdAt: Date, expiresAt: Date): "taken" | null {
+  replace(
+    tokenHash: string,
+    account: Account,
+    label: string | null,
+    createdAt: Date,
+    expiresAt: Date,
+  ): "taken" | null {
     return this.db.transaction((tx) => {
       if (holderOf(tx, account) !== null) return "taken";
       tx.delete(accountClaims).where(claimIsOn(account)).run();
       tx.insert(accountClaims)
-        .values({ tokenHash, ...account, createdAt, expiresAt, confirmedAt: null })
+        .values({ tokenHash, ...account, label, createdAt, expiresAt, confirmedAt: null })
         .run();
       return null;
     });
@@ -45,6 +52,7 @@ export class AccountClaimRepository {
     if (!row) return null;
     return {
       account: { platform: row.platform, accountId: row.accountId },
+      label: row.label,
       expiresAt: row.expiresAt,
       confirmedAt: row.confirmedAt,
     };
@@ -53,9 +61,14 @@ export class AccountClaimRepository {
   /**
    * Gives the claim's account to `personId` and marks the claim confirmed at
    * `now`, in one transaction. When the person already holds the account,
-   * only marks the claim. Returns the account, or why it wrote nothing.
+   * only marks the claim. Returns the account and its label, or why it wrote
+   * nothing.
    */
-  confirm(tokenHash: string, personId: string, now: Date): { account: Account } | ConfirmRefusal {
+  confirm(
+    tokenHash: string,
+    personId: string,
+    now: Date,
+  ): { account: Account; label: string | null } | ConfirmRefusal {
     return this.db.transaction((tx) => {
       const row = tx
         .select()
@@ -65,25 +78,15 @@ export class AccountClaimRepository {
       if (!row) return { refused: "unknown" as const };
       if (row.confirmedAt) return { refused: "used" as const };
       if (row.expiresAt.getTime() <= now.getTime()) return { refused: "expired" as const };
-      const known = tx
-        .select({ id: identities.id })
-        .from(identities)
-        .where(eq(identities.id, personId))
-        .get();
-      if (!known) return { refused: "unknown-person" as const };
       const account = { platform: row.platform, accountId: row.accountId };
-      const holder = holderOf(tx, account);
-      if (holder !== null && holder !== personId) return { refused: "taken" as const, account };
-      if (holder === null) {
-        tx.insert(identityAccounts)
-          .values({ ...account, identityId: personId, createdAt: now })
-          .run();
-      }
+      const refused = insertAccountIn(tx, personId, account, now);
+      if (refused === "unknown") return { refused: "unknown-person" as const };
+      if (refused === "taken") return { refused: "taken" as const, account };
       tx.update(accountClaims)
         .set({ confirmedAt: now })
         .where(eq(accountClaims.tokenHash, tokenHash))
         .run();
-      return { account };
+      return { account, label: row.label };
     });
   }
 }
