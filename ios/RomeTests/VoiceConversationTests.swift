@@ -237,6 +237,36 @@ import Testing
         controller.end()
     }
 
+    @Test func aCallThatEndsWhileTheAudioCannotStartWaitsForTheApp() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call ends with the phone locked, and the audio cannot start yet.
+        audio.refusesResume = true
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.resumed == 0)
+        // The guardian comes back to the app: the audio starts.
+        audio.refusesResume = false
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
     @Test func aFirstConnectionKeepsTheFirstWordsAndAReconnectWaitsForReady() {
         var gate = MicrophoneGate()
         // The guardian may speak at once: their first words go out behind `start`.

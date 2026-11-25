@@ -126,25 +126,24 @@ final class VoiceConversation {
     }
 
     /// The app came to the front: an interruption that never said it ended
-    /// may be over. If the audio cannot start yet, as during a call the
-    /// guardian switched away from, it waits on for the end or the limit.
+    /// may be over.
     func cameToFront() {
         guard !done, interruption != nil else { return }
-        guard (try? audio.resume()) != nil else { return }
-        interruption?.cancel()
-        interruption = nil
+        resumeAudio()
     }
 
-    /// The guardian's call or Siri ended and the system lets the app go on.
+    /// The guardian's call or Siri ended, or the app came to the front. If
+    /// the audio cannot start yet, as during a call still on or with the phone
+    /// locked, the conversation waits on: the app coming to the front tries
+    /// again, and `interruptionLimit` ends it.
     func resumeAudio() {
         guard !done else { return }
+        guard (try? audio.resume()) != nil else {
+            if interruption == nil { interrupted() }
+            return
+        }
         interruption?.cancel()
         interruption = nil
-        do {
-            try audio.resume()
-        } catch {
-            finish(.interrupted)
-        }
     }
 
     /// While muted, no microphone audio leaves the phone. The microphone
