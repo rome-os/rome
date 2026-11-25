@@ -29,7 +29,8 @@ import {
 import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";
-import { settings } from "../../db/schema.js";
+import { guardianAuth, settings } from "../../db/schema.js";
+import { createCloudGuardian } from "../../access/guardian-auth-state.js";
 import { invitedEmailsSaved, memberContext } from "../../access/application/members.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
@@ -415,6 +416,27 @@ describe("/api/auth/verify", () => {
       validVisitorCookieHeader("lin@example.com"),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("lets in the guardian's seat email with no member invited, and refuses another email", async () => {
+    await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
+    try {
+      const host = buildHost(await stubDeps([]));
+      const guardian = await verifyRequest(
+        host,
+        "/api/settings",
+        validVisitorCookieHeader("Owner@Example.com"),
+      );
+      expect(guardian.status).toBe(204);
+      const other = await verifyRequest(
+        host,
+        "/api/settings",
+        validVisitorCookieHeader("lin@example.com"),
+      );
+      expect(other.status).toBe(403);
+    } finally {
+      testDb.db.delete(guardianAuth).run();
+    }
   });
 
   it("lets a dashboard-allowed visitor through cloud-email app APIs", async () => {

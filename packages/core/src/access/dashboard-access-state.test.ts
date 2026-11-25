@@ -18,6 +18,7 @@ describe("DashboardAccessState", () => {
     const state = new DashboardAccessState();
     expect(state.cloudEmails().size).toBe(0);
     expect(state.hasCloudEmailAccess()).toBe(false);
+    expect(state.hasSignInEmails()).toBe(false);
   });
 
   it("stores normalized cloud-email allow-lists", () => {
@@ -25,6 +26,7 @@ describe("DashboardAccessState", () => {
     state.setCloudEmailAccess(["Ada@Example.com", "bad email", "lin@example.com"]);
     expect([...state.cloudEmails()].sort()).toEqual(["ada@example.com", "lin@example.com"]);
     expect(state.hasCloudEmailAccess()).toBe(true);
+    expect(state.hasSignInEmails()).toBe(true);
     expect(state.isCloudEmailAllowed("ADA@example.com")).toBe(true);
     expect(state.isCloudEmailAllowed("grace@example.com")).toBe(false);
   });
@@ -76,6 +78,7 @@ describe("DashboardAccessState", () => {
       });
 
       expect(state.hasCloudEmailAccess()).toBe(false);
+      expect(state.hasSignInEmails()).toBe(true);
       expect(state.cloudEmails().size).toBe(0);
       expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
       expect(

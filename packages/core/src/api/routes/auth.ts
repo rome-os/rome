@@ -246,7 +246,7 @@ function dashboardAccessResult(
   viewer: RomeAppViewer | null,
   deps: ApiDeps,
 ): "allowed" | "unauthenticated" | "forbidden" | "not_configured" {
-  if (!deps.dashboardAccessState.hasCloudEmailAccess()) return "not_configured";
+  if (!deps.dashboardAccessState.hasSignInEmails()) return "not_configured";
   if (!viewer) return "unauthenticated";
   return deps.dashboardAccessState.isCloudEmailAllowed(viewer.email) ? "allowed" : "forbidden";
 }
@@ -487,7 +487,7 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    if (forwardedUri && deps.dashboardAccessState.hasCloudEmailAccess()) {
+    if (forwardedUri && deps.dashboardAccessState.hasSignInEmails()) {
       if (allowFullDashboardSession()) return c.body(null, 204);
       const result = dashboardAccessResult(getVisitorSession(), deps);
       if (result === "forbidden") {

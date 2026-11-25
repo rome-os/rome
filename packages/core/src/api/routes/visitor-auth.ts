@@ -265,7 +265,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
 
     let pendingEntry: PendingVisitorLoginDraft;
     if (scope === "dashboard") {
-      if (!deps.dashboardAccessState.hasCloudEmailAccess()) {
+      if (!deps.dashboardAccessState.hasSignInEmails()) {
         return c.json({ error: "dashboard_not_cloud_email_restricted" }, 404);
       }
       pendingEntry = {
@@ -370,7 +370,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
   // for it, and brings the code back to `/auth/visitor/native/complete`.
   app.post("/auth/visitor/native/start", (c) => {
     c.header("Cache-Control", "no-store");
-    if (!deps.dashboardAccessState.hasCloudEmailAccess()) {
+    if (!deps.dashboardAccessState.hasSignInEmails()) {
       return c.json({ error: "dashboard_not_cloud_email_restricted" }, 404);
     }
     const attempt = registerVisitorAttempt({ scope: "dashboard", next: "/" }, "native");

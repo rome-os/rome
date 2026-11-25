@@ -11,10 +11,11 @@ import { normalizeVisitorEmail } from "./visitor-email.js";
  * so the probe can't afford a DB round-trip. This state is loaded from the
  * members and the seat at startup and reloaded after each save of the invited
  * emails and each change of the guardian's seat. The members' emails say
- * whether anyone besides the guardian may open the dashboard. A sign-in with
- * a member's email or the seat's email is let in, since a sign-in with the
- * seat's email is the guardian's person. Another email the guardian's person
- * holds is not let in.
+ * whether anyone besides the guardian may open the dashboard, which keeps the
+ * guardian's chats private. The sign-in and session gates also open for the
+ * seat's email alone. A sign-in with a member's email or the seat's email is
+ * let in, since a sign-in with the seat's email is the guardian's person.
+ * Another email the guardian's person holds is not let in.
  */
 export class DashboardAccessState {
   private memberEmails: Set<string> = new Set();
@@ -28,6 +29,14 @@ export class DashboardAccessState {
   /** Whether at least one member is invited. */
   hasCloudEmailAccess(): boolean {
     return this.memberEmails.size > 0;
+  }
+
+  /**
+   * Whether some Rome Cloud sign-in can be let in: a member is invited or the
+   * guardian's seat has an email.
+   */
+  hasSignInEmails(): boolean {
+    return this.memberEmails.size > 0 || this.guardianEmail !== null;
   }
 
   /** Whether a Rome Cloud sign-in with `email` is a member's or the guardian's seat's. */
