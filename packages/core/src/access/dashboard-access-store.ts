@@ -16,6 +16,7 @@ import {
   DASHBOARD_ACCESS_SETTING_KEY,
   INVITED_EMAILS_DONE_KEY,
   readDashboardAccessRevision,
+  readInvitedEmailsDoneRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
@@ -92,12 +93,7 @@ export class DashboardAccessStore {
   }
 
   private saveWithinTx(tx: DrizzleTx, config: DashboardAccessConfig): VisitorAllowList {
-    const stored =
-      tx
-        .select({ value: settings.value })
-        .from(settings)
-        .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
-        .get()?.value ?? null;
+    const stored = settingValue(tx, DASHBOARD_ACCESS_SETTING_KEY);
     const revision = readDashboardAccessRevision(stored) + 1;
     const members = memberContextWithinTx(tx);
     invitedEmailsSavedWithinTx(members, config.cloudEmailAccess);
@@ -124,22 +120,34 @@ export class DashboardAccessStore {
   /**
    * Moves the stored revision past one Rome Cloud already holds, keeping the
    * members. Rome Cloud can hold a higher one after this instance's database
-   * was reset or restored from an older backup.
+   * was reset or restored from an older backup. Like a save, it stores the new
+   * revision as the one this build last wrote and the members' emails as the
+   * record's copy of the list, in one transaction, so the next startup reads
+   * no list for it. Only an older build's save that startup has not read yet
+   * keeps its list and stays to be read.
    */
   raisePast(floor: number): Promise<VisitorAllowList> {
-    return this.serialize(async () => {
-      const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-      const emails = await memberEmails(this.members);
-      const current = readDashboardAccessRevision(stored);
-      if (current > floor) return { emails, revision: current };
-      const revision = floor + 1;
-      await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-        ...asRecord(stored),
-        revision,
-        visitorAccounts: readVisitorAccounts(stored),
-      });
-      return { emails, revision };
-    });
+    // One synchronous body, so the transaction holds this raise's writes only.
+    return this.serialize(async () => this.db.transaction((tx) => this.raiseWithinTx(tx, floor)));
+  }
+
+  private raiseWithinTx(tx: DrizzleTx, floor: number): VisitorAllowList {
+    const stored = settingValue(tx, DASHBOARD_ACCESS_SETTING_KEY);
+    const emails = memberEmailsWithinTx(memberContextWithinTx(tx));
+    const current = readDashboardAccessRevision(stored);
+    if (current > floor) return { emails, revision: current };
+    const revision = floor + 1;
+    const record = { ...asRecord(stored), revision, visitorAccounts: readVisitorAccounts(stored) };
+    // A record above the revision this build last wrote or read holds an older
+    // build's save, which a failed backfill left unread.
+    const read = readInvitedEmailsDoneRevision(settingValue(tx, INVITED_EMAILS_DONE_KEY));
+    if (current <= read) {
+      putSetting(tx, INVITED_EMAILS_DONE_KEY, revision);
+      putSetting(tx, DASHBOARD_ACCESS_SETTING_KEY, { ...record, cloudEmailAccess: emails });
+    } else {
+      putSetting(tx, DASHBOARD_ACCESS_SETTING_KEY, record);
+    }
+    return { emails, revision };
   }
 
   /**
@@ -171,6 +179,11 @@ export class DashboardAccessStore {
     this.chain = result.catch(() => {});
     return result;
   }
+}
+
+function settingValue(tx: DrizzleTx, key: string): unknown {
+  return tx.select({ value: settings.value }).from(settings).where(eq(settings.key, key)).get()
+    ?.value;
 }
 
 function putSetting(tx: DrizzleTx, key: string, value: unknown): void {

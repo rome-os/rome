@@ -20,7 +20,13 @@ import {
 import { DashboardAccessState } from "../dashboard-access-state.js";
 import { DashboardAccessStore } from "../dashboard-access-store.js";
 import { backfillMembers } from "./backfill-members.js";
-import { listMembers, memberContext, roleOfAccount } from "./members.js";
+import {
+  guardianSeatRebound,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+  seatAccounts,
+} from "./members.js";
 
 const now = new Date("2026-11-25T00:00:00Z");
 
@@ -262,6 +268,72 @@ describe("backfillMembers", () => {
     await store.save({ cloudEmailAccess: ["lin@example.com"] });
     await backfillMembers(db);
     expect((await store.read()).emails).toEqual(["lin@example.com"]);
+  });
+
+  it("reads no list for a raise at the next startup", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    // Rome Cloud holds revision 10 after a restore of this database.
+    expect(await store.raisePast(10)).toEqual({
+      emails: ["ada@example.com", "lin@example.com"],
+      revision: 11,
+    });
+    const before = snapshot(db);
+    await backfillMembers(db);
+
+    expect(snapshot(db)).toEqual(before);
+    expect(await new SettingsRepository(db).get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+      revision: 11,
+      visitorAccounts: {},
+    });
+  });
+
+  it("does not make the guardian's old email a member after a raise, a rebind and a restart", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    // The older build's list holds the guardian's email.
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    await store.raisePast(10);
+
+    db.update(guardianAuth).set({ accountId: "acct-new", email: "new@example.com" }).run();
+    const ctx = memberContext(db);
+    await guardianSeatRebound(ctx, {
+      previous: seatAccounts({ email: "owner@example.com" }),
+      current: seatAccounts({ email: "new@example.com" }),
+    });
+    await backfillMembers(db);
+
+    const owner = { platform: "rome-cloud-email", accountId: "owner@example.com" };
+    expect(await roleOfAccount(ctx, owner)).toBeNull();
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "new@example.com" }),
+    ).toBe("guardian");
+  });
+
+  it("still reads an older build's unread save after a raise", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    // An older build saved the list after a rollback, and the startup after
+    // it failed to read it.
+    db.update(settings)
+      .set({ value: { cloudEmailAccess: ["kim@example.com"], revision: 4 } })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+      .run();
+    await store.raisePast(10);
+    await backfillMembers(db);
+
+    expect(await store.read()).toEqual({ emails: ["kim@example.com"], revision: 11 });
   });
 
   it("keeps a member removed by a save made before its first run", async () => {
