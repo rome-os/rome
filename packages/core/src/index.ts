@@ -265,7 +265,6 @@ import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
 import { GMAIL_SEND_ACTION, registerGmailActions } from "./connections/gmail/actions.js";
 import { OUTLOOK_SEND_ACTION, registerOutlookActions } from "./connections/outlook/actions.js";
-import { whoMayAsk } from "./apps/actions/who-may-ask.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
@@ -1913,16 +1912,10 @@ async function main() {
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
-    // The check system:read_devices and system:run_on_device pass, so the
-    // older names let in the same turns.
-    whoMayAsk: whoMayAsk((chatId) => concierge.ownerOfChat(chatId)),
   });
   registerTaskRunAction(actionRegistry, concierge);
-  registerReadPersonAction(actionRegistry, {
-    people: peopleRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
-  });
-  registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+  registerReadPersonAction(actionRegistry, { people: peopleRepo });
+  registerAgentTools(actionRegistry, {
     // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {
       routines: routinesRepo,
@@ -3010,9 +3003,7 @@ async function main() {
     };
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
-    apiDeps.features = [
-      phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
-    ];
+    apiDeps.features = [phoneBook(apiDeps)];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);
     }

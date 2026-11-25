@@ -20,12 +20,7 @@ beforeEach(async () => {
   const deps = await buildTestDeps(testDb.db);
   people = deps.peopleRepo;
   const registry = new ActionRegistryImpl();
-  registry.register(
-    listPeopleAction({
-      ...deps,
-      ownerOfChat: async (chatId) => (chatId === "visitor-chat" ? "visitor:visitor" : "guardian"),
-    }),
-  );
+  registry.register(listPeopleAction(deps));
   engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
     processRole: "main",
     workerWarmPoolSize: 0,
@@ -70,11 +65,8 @@ describe("core:list_people", () => {
     expect(await list({ level: "best-friends" })).toMatchObject({ status: "error" });
   });
 
-  it("refuses anyone but the guardian's agents", async () => {
-    expect(await list({}, { actor: visitor })).toMatchObject({ status: "error" });
-    expect(
-      await list({}, { channelContext: { channel: "webchat", threadId: "visitor-chat" } }),
-    ).toMatchObject({ status: "error" });
-    expect(await list({}, {})).toMatchObject({ status: "error" });
+  it("lists for a member's turn, and for one no one started", async () => {
+    expect(await list({}, { actor: visitor })).toMatchObject({ status: "ok" });
+    expect(await list({}, {})).toMatchObject({ status: "ok" });
   });
 });
