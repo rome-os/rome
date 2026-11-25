@@ -221,9 +221,6 @@ export type {
   RomeToolDefinition,
   RomeToolGroup,
   RomeToolResult,
-  RomeToolContent,
-  RomeToolText,
-  RomeToolImage,
   RomeTools,
 } from "./domain/rome-tools.js";
 export {
@@ -234,13 +231,6 @@ export {
   type Subagents,
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS, ROME_TOOL_GROUPS } from "./domain/rome-tools.js";
-export {
-  COMPUTER_USE_ACTION,
-  declaresComputerUse,
-  permitsComputerUse,
-  type AgentComputerUse,
-  type ComputerOperation,
-} from "./domain/computer-use.js";
 export {
   forkSessionTools,
   ROUTINE_PROPOSAL_TOOL,
@@ -262,7 +252,7 @@ export {
   type AgentInputReceipt,
   type SubmitOptions,
 } from "./application/agent-input-queue.js";
-export type { ComputerUseGrant, PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
+export type { PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
 export { sameActor } from "./domain/turn-facts.js";
 export {
   type Audience,

@@ -132,13 +132,6 @@ final class RPCServer: @unchecked Sendable {
         }
     }
 
-    func socketIntact() -> Bool {
-        guard listener >= 0, socketInode != 0 else { return true }
-        let path = stateDirectory.appendingPathComponent("helper.sock").path
-        var info = stat()
-        return lstat(path, &info) == 0 && info.st_uid == getuid() && info.st_ino == socketInode
-    }
-
     func stop() {
         if listener >= 0 { close(listener); listener = -1 }
         let path = stateDirectory.appendingPathComponent("helper.sock").path
@@ -306,12 +299,6 @@ final class RPCServer: @unchecked Sendable {
             var byte: UInt8 = 0
             _ = Darwin.write(fd, &byte, 1)
         }, expectDisconnect: false)
-        let intactServer = try RPCServer(directory: dir, onDisconnect: { _, _ in }, handler: { _, _ in ["id": "1", "ok": true, "result": [:]] })
-        try intactServer.start()
-        defer { intactServer.stop() }
-        try check(intactServer.socketIntact(), "Started RPCServer must report its helper.sock as intact.")
-        _ = unlink(dir.appendingPathComponent("helper.sock").path)
-        try check(!intactServer.socketIntact(), "Unlinking helper.sock must be detected by socketIntact().")
         return count
     }
     #endif
@@ -641,23 +628,7 @@ final class RPCServer: @unchecked Sendable {
                 let poll = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "rome.computer-use.focus-poll", qos: .userInitiated))
                 poll.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
                 // The serial dispatch source coalesces ticks during a slow AX read.
-                var socketCheckTicks = 0
-                let rpcServer = server
-                poll.setEventHandler { [weak self, weak native, weak rpcServer] in
-                    native?.pollStops()
-                    socketCheckTicks += 1
-                    if socketCheckTicks >= 10 {
-                        socketCheckTicks = 0
-                        if let rpcServer, !rpcServer.socketIntact() {
-                            DispatchQueue.main.async {
-                                guard let self, !self.shutdownScheduled else { return }
-                                self.shutdownScheduled = true
-                                try? self.engine?.beginShutdown(idleOnly: false)
-                                NSApp.terminate(nil)
-                            }
-                        }
-                    }
-                }
+                poll.setEventHandler { [weak native] in native?.pollStops() }
                 stopPoll = poll
                 poll.resume()
             }

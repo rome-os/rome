@@ -249,13 +249,7 @@ describe("device list for the folder picker", () => {
       listDevices: async () => ({
         items: [
           { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
-          { id: "pc", device_name: "   ", platform: 3 },
-          {
-            id: "revoked-mac",
-            device_name: "Old Mac",
-            platform: "macos",
-            revoked_at: "2026-10-01T00:00:00Z",
-          },
+          { id: "pc", platform: 3 },
         ],
       }),
     }));
@@ -272,23 +266,6 @@ describe("device list for the folder picker", () => {
     service.close();
   });
 
-  it("returns an empty list when Cloud is not configured", async () => {
-    const service = createNodeDevicesService(() => ({
-      disconnect() {},
-      getDevicesStatus: rs.fn(),
-      run: rs.fn(),
-      renameDevice: rs.fn(),
-      removeDevice: rs.fn(),
-      listDevices: async () => {
-        throw new CallerConfigurationError("not_configured", "secret");
-      },
-    }));
-    const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ devices: [] });
-    service.close();
-  });
-
   it("answers 503 when the caller cannot reach the list", async () => {
     const service = createNodeDevicesService(() => ({
       disconnect() {},
@@ -297,7 +274,7 @@ describe("device list for the folder picker", () => {
       renameDevice: rs.fn(),
       removeDevice: rs.fn(),
       listDevices: async () => {
-        throw new Error("cloud unreachable");
+        throw new CallerConfigurationError("not_configured", "secret");
       },
     }));
     const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");

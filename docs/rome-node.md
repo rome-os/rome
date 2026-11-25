@@ -250,7 +250,6 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `devices.rename` | Rename `{ deviceId, name }` in the account through Cloud |
 | `devices.remove` | Remove `{ deviceId }` from the account through Cloud |
 | `devices.status` | Check device reachability with read-only `system.info` requests |
-| `devices.gatewayConnection` | Read the current caller Gateway connection ID, or `null` while offline |
 | `devices.run` | Forward `{ deviceId, action, args }` to a device |
 | `devices.runBinary` | Forward `{ deviceId, action, args }` and input bytes to a device as a binary frame |
 | `files.copy` | Copy `{ direction, localPath, deviceId, remotePath }` between the daemon's computer and a device |
@@ -260,8 +259,8 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `events.subscribe` | Subscribe with `{ topic: "connection" }` or `{ topic: "node" }` |
 | `events.unsubscribe` | Remove the connection's subscription to that topic |
 
-Binary device methods use one binary WebSocket message in each direction, so
-bytes are never JSON or
+Every method except `devices.runBinary` uses text messages. `devices.runBinary`
+uses one binary WebSocket message in each direction, so bytes are never JSON or
 base64 encoded on the local hop either. The message is a 32-bit big-endian JSON
 length, the JSON-RPC message as UTF-8, and then the raw body. The request body
 is the action input. A successful reply carries the `ActionResponse` as `result`
@@ -596,11 +595,9 @@ removed from the account, so the device's connected or offline state is real. Tw
 independent choices apply on top of the connection, and both persist across restarts.
 
 - **Computer use** (on by default) decides whether Rome may
-  run actions on this computer, including programs, files, and Apple Silicon
-  macOS background-window control through the shared native helper. Turning
-  Computer use off keeps the connection but switches it to a limited one. That
-  connection is built without the executor, so no program, file, or window
-  control code is reachable from it. It answers `system.info` with
+  run programs and read files on this computer. Turning it off keeps the connection but
+  switches it to a limited one. That connection is built without the executor, so no
+  program or file code is reachable from it. It answers `system.info` with
   `computerUse: false` and an empty `actions` list. Every other request gets the error
   `computer_use_off` as a normal reply, so a caller does not wait for a timeout.
   Binary requests get an error frame, and `system.info` leaves out `transferVersion`, so
@@ -1035,196 +1032,43 @@ transfers and replies `busy` to more. Each transfer accepts frames only from the
 peer that opened it. Host frames from an earlier connection never go out on a
 replacement connection.
 
-## Native computer use on macOS
+## Screen control on macOS
 
-Desktop and the standalone Node host share the computer-use implementation in
-`@rome-os/node-core`. The signed `Rome Computer Use.app` owns window capture and
-native input. Core agents reach it through the same Gateway as other device actions.
-The Node archive includes the arm64 app under `dist/native/`. Calling it requires
-neither a Swift compiler nor a runtime download. The default Node host verifies
-and stages the bundled app under `~/Library/Application Support/Rome/ComputerUse/`.
-This restores npm-normalized executable bits at a stable authorization path.
-Explicit development app paths run directly. The native installer takes the
-service lock and preserves the old app, so it cannot replace a running helper.
-A different running implementation returns `helper_update_required`. Compatibility
-uses the signed source fingerprint, protocol, and architecture, rather than the
-signature timestamp or raw executable hash. The first platform is Apple Silicon
-macOS 14 or later. Both hosts use explicit background-window bindings.
-The implementation has no application allowlist. Application compatibility requires separate acceptance evidence.
+The host offers no screen action. On a macOS device, a caller controls the
+screen by running the system tools through `exec` and copying the screenshot
+back with `rome-node cp`.
 
-On the target Mac, run `rome-node computer permissions` to open the helper's local
-permission panel. Grant persistent Screen Recording and Accessibility access through its explicit buttons.
-Post-event access follows the Accessibility grant. Input Monitoring and a global event tap are not required.
-**Check window access** tests AX access and captures only the helper's own permission panel.
-The public panel offers no temporary screen-sharing picker.
-
-`rome-node computer status` starts or contacts the helper and reads the grants.
-Neither command contacts Cloud or authorizes a device. `system.info` only describes
-configured capabilities and never starts the helper or opens a permission dialog.
-Ordinary status and bind calls do not invoke permission-request APIs.
-
-If a new grant requires a fresh process, the local panel first stops input and capture.
-It then restarts only the helper once per authorization attempt, leaving Desktop and Node open.
-A failed capture with all required flags granted does not cause an automatic restart.
-
-Keep the app path, `com.rome.computer-use` bundle identifier, and real signing
-identity stable across development builds. The build script refuses ad-hoc signing.
-An Apple Development build and a Developer ID distribution build can have different
-designated requirements, so a grant to one does not promise access for the other.
-macOS can require consent after revocation or an upgrade, and can show launch disclosures.
-Rome cannot promise permanent prompt-free access. See Apple's
-[code identity documentation](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/AboutCS/AboutCS.html).
-
-### Background-window sessions
-
-To offer background-window control to paired instances in your account, start
-`rome-node connect` on the target Mac (optionally with `--cloud <url>`, `--name <name>`, or
-`--device-code`). It reuses the Node's existing device sign-in.
-Paired instances discover the available actions in `system.info`. This
-connection accepts ordinary Node requests and keeps the native window
-binding and local audit checks. Stop the connection with Ctrl+C.
-
-The capability prefix is `computer`, with `personal: true` and protocol version 1.
-The CLI's shared-turn guard applies to it. A computer-use session belongs to an authenticated caller and requires an opaque background-window reference.
-A computer-use session is separate from an agent session.
-A caller cannot reuse another caller's session or submit a PID as its target.
-Binding for full input requires the target application to own neither the system frontmost application nor the system key focus.
-A different non-key window in that foreground application can bind with `inputIsolation: "window_semantics"` and `transport: "ax_only"`.
-This fixed mode advertises only `click`, `press`, `setValue` and `selectText`, each requiring a fresh ref.
-Click is a single left AX press without coordinates. Text edits use explicit complete `setValue` assignments.
-Type, raw keys, pointer events, dragging, scrolling and raw AX actions are unavailable in that mode.
-The helper maps the application's focused AX window to its exact CG identity and checks it differs from the target.
-An unreadable window or target takeover ends the session. When an active semantic binding sees only one focus channel in the target application, it blocks input while fresh samples converge.
-If the mixed state persists for 350 ms from the first unresolved sample, the next mixed sample ends the session.
-The helper uses its own virtual cursor and discrete PID- and window-directed events.
-A caller may request `foregroundNavigationFallback: true` if the discovered window advertises it. The helper may then activate the window for one retry of a repeatable navigation click after two unchanged source reads. Omit the flag when the task must stay in the background. Both modes use the virtual pointer and leave subsequent focus changes to the user.
-
-| Action | Arguments | Result |
-| --- | --- | --- |
-| `computer.status` | None | Helper protocol, permissions, and capabilities |
-| `computer.windows` | None | Candidate windows with opaque `windowRef` values and capabilities |
-| `computer.bind` | Required `windowRef`, optional `requireSessionEnd`, `lease`, `foregroundNavigationFallback` | A background `sessionId` and any active lease. Ordinary Mac hosts enable the lease when the helper advertises support |
-| `computer.observe` | `sessionId`, optional `screenshot`, `full`, `baseVersion` | Full or delta AX records, refs, observation version and expiry, optional image metadata |
-| `computer.act` | `sessionId`, unique `actionId`, `observationId`, `stateVersion`, `action`, optional `ref`, `expect` and `navigation` | A dispatch receipt, with `effectVerified: false` |
-| `computer.verify` | `sessionId`, `actionId` | Independent `verified`, `not_verified`, or `unverifiable` evidence |
-| `computer.cancel` | `sessionId` | The native executor's first terminal cause |
-| `computer.end` | `sessionId` | First terminal cause and `stopConfirmed`. Requires `capabilities.background.sessionEnd` |
-| `computer.renew` | `sessionId` | Remaining time for a renewable lease returned by the binding |
-| `computer.preempt` | `windowRef`, `preemptToken`, optional `requireSessionEnd`, `lease`, `foregroundNavigationFallback` | An authorized replacement binding after confirmed stop. Requires `capabilities.background.windowPreemption` |
-| `computer.recover` | `actionId` | The caller's durable dispatch state, verification and stop confirmation. Changes no input state |
-
-Normal end closes admission immediately. `status: "stop_pending"` means the
-caller can check the same stop again. Use `computer.verify` before ending the
-session to check UI effects.
-
-If the helper advertises `durableWindowOccupancy`, a replacement using the same
-native state directory can read confirmed stop records. An unresolved claim on
-the exact window returns `window_stop_unconfirmed`. An unknown action outcome
-remains unknown, including after a confirmed session stop.
-
-The binding advertises `scope: "background"`, `realPointer: false` and `coordinateSpace: "window_image_pixels"`.
-Its full-input actions are `move`, `click`, `drag`, `scroll`, `key`, `type`, `press`, `setValue`, `selectText` and `performAction`.
-Use only actions advertised by the binding and the selected element.
-Coordinates use pixels in the latest bound-window image. Positive scroll deltas move down or right.
-`click` and `scroll` can target a ref without coordinates.
-`press`, `setValue`, `selectText` and `performAction` require a fresh element ref.
-
-`type` accepts up to 4096 UTF-16 units without using the clipboard.
-`setValue` accepts up to 16,384 UTF-16 units. Both reject NUL and malformed UTF-16.
-`selectText` selects one unique match, with optional `prefix`, `suffix` and `selectionType`.
-The selection type is `text`, `cursor_before` or `cursor_after`.
-`performAction` accepts an advertised raw AX action name. `AXRaise` is forbidden.
-Unicode replacement uses the target's selection and does not emulate IME composition or candidate windows.
-
-The eight-second dispatch budget can limit long text before the parser limit.
-
-Drag events follow the shared Bézier trajectory in window-local points.
-Cancellation cleanup releases at the last dispatched local point after another kernel and window identity check.
-It never reads or restores the system pointer.
-Legacy bindings without the window capability marker retain `setValue` only and its 180 UTF-16-unit limit.
-Capability lists describe implemented routes and do not establish every application's compatibility.
-
-The `delta` field contains `mode`, `lineageId`, `baseVersion`, `version`, `complete`, `added`, `changed` and `removed`.
-`stateVersion` equals `delta.version`. For a delta, `elements` contains only the added and changed records.
-A full response has a null base and all records in `added`.
-A missing or mismatched baseline, explicit `full: true` or partial traversal produces a full reset.
-Partial resets replace the cache. They do not present unvisited nodes as confirmed removals.
-The SDK returns `{ observation, changes, image }`, with materialized state in `observation` and the wire payload in `changes`.
-
-An action consumes observation authority while retaining the host's baseline for the next delta.
-A stopped session or changed helper instance clears that cache.
-Fresh partial observations can authorize their returned refs or valid coordinates when the binding advertises `partialObservations`.
-The native reader batches fresh AX attributes within 600 ms, 512 nodes, depth 32 (48 for regional observations) and a 64 KiB content budget.
-Unavailable optional attributes remain unknown and do not alone mean a node is missing.
-
-An optional `expect` declares an AX postcondition using `identifier`, `title`, `role`, `value` or `contains`.
-Independent verification requires exactly one match in a complete fresh tree.
-Unknown comparison attributes and truncated values cannot establish uniqueness.
-`setValue` and `selectText` also support independent value or selection readback.
-Verification does not advance the observation revision.
-Generic input without a checkable postcondition remains `unverifiable`. Internal virtual cursor state cannot verify a `move` effect.
-
-```sh
-rome-node device run <device-id> computer.windows
-rome-node device run <device-id> computer.bind --args '{"windowRef":"<listed-window-ref>"}'
-rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","screenshot":true,"full":true}' --output window.png
-rome-node device run <device-id> computer.act --args '{"sessionId":"<session-id>","actionId":"unique-action-id","observationId":"<observation-id>","stateVersion":1,"ref":"<element-ref-advertising-press>","action":{"type":"press"}}'
-rome-node device run <device-id> computer.verify --args '{"sessionId":"<session-id>","actionId":"unique-action-id"}'
-rome-node device run <device-id> computer.cancel --args '{"sessionId":"<session-id>"}'
+```json
+{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}
+{"command":"cliclick","args":["c:640,400"]}
+{"command":"cliclick","args":["t:hello"]}
+{"command":"osascript","args":["-e","tell application \"System Events\" to keystroke \"hello\""]}
 ```
 
-Use the observation's actual version and refs. Observations expire after 15 seconds.
-A refresh requires a new decision and action ID. An action ID has a durable intent
-before dispatch and cannot be replayed, including after a host restart. Timeout or
-connection loss can leave an unknown outcome. Later correct text cannot erase that
-history. Native execution keeps its lane until the worker finishes, while cancel
-uses an independent connection. Cancellation cannot retract an operation already sent.
+`screencapture -x` saves the screen without the shutter sound. Copy the file
+with `rome-node cp <device-id>:/tmp/rome-screen.png ./screen.png` to read it.
+`cliclick` clicks and types at screen coordinates, and Homebrew installs it.
+`osascript` with System Events types into the frontmost app without extra installs.
 
-The host stops its own sessions on disconnection, revocation, or shutdown. A new
-connection may bind a new session, but stopped sessions do not resume. The first
-native stop cause survives cleanup and late results. The helper's **Stop all computer use**
-button provides a local stop path. Target takeover, expiry, console lock, capture stop and identity failure also stop control.
-Input and focus changes in other applications do not stop the background session.
+A screenshot of a Retina display has twice as many pixels as the screen has
+points. `cliclick` and System Events take points, so divide the image
+coordinates by the display's scale factor before clicking.
 
-### Window images
-
-Capture uses ScreenCaptureKit and needs Screen Recording separately from Accessibility.
-A bound session keeps a one-frame-per-second stream for its exact window and the native sharing indicator.
-The stream has no audio, system cursor or recording file. Its frames are discarded.
-Stopping sharing stops the session. macOS owns the indicator's appearance and placement.
-Requested observations capture only the bound window, with at most 2048 by 1536 pixels and a 5 MiB PNG.
-Each image belongs to its observation and geometry. Coordinates remain local to that image.
-
-```sh
-rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","screenshot":true}' --output window.png
-```
-
-The image travels in the binary response body. JSON metadata includes `mimeType`,
-`width`, `height`, `byteLength`, and `sha256`. Text envelopes refuse image requests
-with `binary_transport_required`. Caller activity and host audit records retain operation metadata and
-input byte counts, rather than screenshots, AX text, or the value being written.
-The separate action ledger stores content hashes and sizes, not input values.
-
-Locked sessions refuse input. Minimized windows, other Spaces, multiple displays, keyboard layouts and IME lack general qualification.
-Complete development-Mac tasks cover AppKit, Electron pages and Chrome pages for selection, Unicode replacement, shortcuts, buttons, checkboxes and scrolling. AppKit also covers drag/release.
-Actual Core/Gateway tasks use Node and the Electron DeviceHost class with shared-helper identity checks.
-Native menus, popup buttons and combo boxes have no advertised pointer, keyboard or raw AX actions because tracking can acquire system key focus. Coordinate dispatch checks known menu bounds and a fresh application-restricted AX hit test.
-Distribution permission continuity requires separate evidence.
-These checks do not establish production Cloud or complete Desktop account and settings flows.
+macOS grants Screen Recording and Accessibility to the app that started the
+host, either the terminal running `rome-node connect` or the Rome desktop app.
+Grant both in System Settings → Privacy & Security on the Mac itself. Without
+Screen Recording, the screenshot leaves out other apps' windows. Without
+Accessibility, clicks and keystrokes fail. The first `osascript` call to System
+Events also asks for Automation permission. The Mac must stay awake and unlocked,
+because a locked screen shows only the lock screen.
 
 ## Failure and shutdown
-
-Capability discovery opens the caller's Gateway connection. A signed window
-call tied to an earlier caller connection returns `caller_connection_changed`.
-Other signed requests that arrive while offline return `gateway_unavailable`.
-Both failures carry `effectStatus: "not_dispatched"`. The daemon checks the
-connection before forwarding on either transport.
 
 The CLI daemon waits up to 60 seconds for an action response. Timeout and connection loss
 return `unknown_outcome`. The remote program may have started or completed.
 A local timeout does not cancel it. Never automatically repeat an operation after
-an unknown outcome. Exec has no offline queue, replay, cancellation, or remote task-status API.
-Computer-use window sessions have the explicit cancel and verify actions above.
+an unknown outcome. The protocol has no offline queue, replay, cancellation, or
+remote task-status API.
 
 The executor attempts to terminate its direct child processes on connection loss,
 revocation, supersession, or shutdown. It escalates to forced termination after

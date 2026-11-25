@@ -13,7 +13,6 @@ Browse by surface:
 - [`build.md`](build.md) — The generated runtime workspace and its closure boundary, the monorepo layout, and the first-party pre-pack step.
 - [`channels.md`](channels.md) — The server-owned setup protocol every channel connects through, and the rules that keep the connect flow generic.
 - [`notification-delivery.md`](notification-delivery.md) — How mobile push travels from an instance through the central Rome Cloud broker to the platform push service (APNs for iOS, FCM for Android), and the account-scoping, content-enforcement, and delivery invariants that hold.
-- [`computer-use.md`](computer-use.md) — The shared native window-control path for Desktop and Node hosts, its stable permission owner, and the boundaries between turn admission, dispatch and verification.
 - [`host-execution.md`](host-execution.md) — How system actions delegate privileged jobs to a Linux host service and preserve its authorization boundary.
 - [`concierge.md`](concierge.md) — How one Concierge talks in its main and topic chats, hands work to task chats, and sends each result, alert and digest to the chat that should hear it.
 - [`concierge-activity.md`](concierge-activity.md) — How Rome works out what each Concierge chat is doing from facts it holds, and tells only that chat's owner.

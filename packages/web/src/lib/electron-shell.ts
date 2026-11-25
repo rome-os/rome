@@ -55,8 +55,6 @@ export interface DesktopDeviceBridge {
   setEnabled(enabled: boolean): Promise<DesktopDeviceStatus>;
   /** Opens this computer's audit log in the app's local window. Older apps lack it. */
   openAuditLog?(): Promise<void>;
-  /** Opens the native screen-control permission panel. Older apps lack it. */
-  openComputerUsePermissions?(): Promise<void>;
   onStatus(callback: (status: DesktopDeviceStatus) => void): () => void;
 }
 
