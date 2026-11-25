@@ -15,7 +15,7 @@ import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
-import type { Admission } from "./chats/connected-accounts/admission.js";
+import type { Admission, MessageEntry } from "./chats/connected-accounts/admission.js";
 import {
   accountCodeAdmission,
   accountCodeReadBack,
@@ -172,6 +172,7 @@ import {
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { invitedEmailsSaved, memberContext } from "./access/application/members.js";
+import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -345,6 +346,8 @@ import { callerNotifyService } from "./app-host/caller-notify.js";
 import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
+import { entrance as entranceOf } from "./participation/entrance.js";
+import { unknownSenders } from "./participation/unknown-senders.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -378,6 +381,7 @@ import {
   getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
+import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
@@ -462,7 +466,11 @@ import {
 } from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
-import { type InboundRecording, inboundRecording } from "./connections/inbound-recording.js";
+import {
+  HEARD_FOR_MS,
+  type InboundRecording,
+  inboundRecording,
+} from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
 import type { MessagePageCursor } from "./webchat/repository.js";
@@ -770,6 +778,16 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
+  // What people say on a connection passes this (docs/domains/participation.md#entry).
+  const entrance = entranceOf({
+    enter: accountEntry({
+      db,
+      actsForGuardian: async (account) => {
+        const person = await peopleRepo.byAccount(account);
+        return person?.bondLevel === "guardian" && whoIs(account, person).delegate;
+      },
+    }),
+  });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
   // The platform a message's sender is on. A grant that recorded no account
   // still names its platform by its channel.
@@ -804,6 +822,11 @@ async function main() {
     if (!(await heardAccountCode(connectionId, connectionKind, message))) return false;
     return heardInChat(connectionId, connectionKind, message);
   };
+  const entryOf: MessageEntry = (connectionId, message) =>
+    entrance.message({
+      platform: senderPlatformOf(connectionId, message),
+      id: message.senderId,
+    });
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
@@ -2494,6 +2517,7 @@ async function main() {
     connections: {
       registry: connectionRegistry,
       admit,
+      entry: entryOf,
       channelOf,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -2551,6 +2575,17 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
+      // Nobody is told yet. Answering such a sender with the way to connect
+      // their account passes `tell` here.
+      onRecord: unknownSenders({
+        heardForMs: HEARD_FOR_MS,
+        isRomes: (account) =>
+          connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
+        isOwnAccount: (connectionId) => {
+          const kind = connectionKindOf(connectionRegistry)(connectionId);
+          return kind !== null && accountLinkOf(connectionRegistry)(kind) === "own_account";
+        },
+      }),
     },
     hookChannels,
   );
@@ -2630,6 +2665,7 @@ async function main() {
       {
         registry: connectionRegistry,
         admit,
+        entry: entryOf,
         readBack,
         channelOf,
         listening: accountListening,

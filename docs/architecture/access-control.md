@@ -23,12 +23,13 @@ Two policies decide reach, each held as its own setting:
 
 ## Entry
 
-Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team).
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)).
 
 ### Invariants
 
 - A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
-- The answer holds for what was asked about: one request or one connection. Nothing else keeps it.
+- A message a connection delivers passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once, before anything else hears it. The answer stays on the message's event. Nothing acts on it yet.
+- The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.
 - A live connection is asked about once, when it opens. One a member has open when they are removed stays open until it closes, a known limitation. Their next request or connection is refused.
 
