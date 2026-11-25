@@ -41,6 +41,7 @@ import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession, visitorActor } from "../../access/visitor-session.js";
 import { mayEnter } from "../../access/entry.js";
 import {
+  currentSessionActor,
   resolveSessionActorFromMaterial,
   sessionActorMaterial,
 } from "../../access/session-actor.js";
@@ -336,9 +337,9 @@ function assertAppIdIsNotSystem(c: Context, appId: string, verbMessage: string) 
 export function appsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const requireHostAccess = createMiddleware(async (c, next) => {
-    const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
+    const actor = await currentSessionActor();
     if (await mayEnter(actor, deps.dashboardAccessState)) return next();
-    return actor.kind === "visitor"
+    return actor?.kind === "visitor"
       ? c.json({ error: "Forbidden" }, 403)
       : c.json({ error: "Not authenticated" }, 401);
   });
