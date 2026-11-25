@@ -6,9 +6,11 @@ import {
   createConversation,
   LOOKING_AFTER_MS,
   SPOKEN_TURN_NOTE,
+  turnTimingFields,
   type ReplyEvent,
   type ReplyTurn,
 } from "./conversation.js";
+import type { VoiceTurnTiming } from "./timing.js";
 
 const RATE = 24_000;
 /** `ms` of audio at the speaker's rate. */
@@ -76,6 +78,7 @@ function setup() {
   const signals: AbortSignal[] = [];
   const turns: ReturnType<typeof scriptedTurn>[] = [];
   const said: { id: string; text: string }[] = [];
+  const timings: VoiceTurnTiming[] = [];
   let stops = 0;
   let failed: string | null = null;
   const speaker: SpeakerSession = {
@@ -102,6 +105,7 @@ function setup() {
     },
     schedule: clock.schedule,
     now: clock.now,
+    timed: (timing) => timings.push(timing),
   });
   conversation.attach(speaker);
   const states = () =>
@@ -128,6 +132,7 @@ function setup() {
     said,
     states,
     speak,
+    timings,
     stops: () => stops,
     failed: () => failed,
   };
@@ -508,6 +513,98 @@ describe("voice conversation", () => {
     await settled();
     expect(t.sent).toEqual(["deploy it", "wait stop"]);
     expect(t.signals[1]?.aborted).toBe(false);
+  });
+
+  it("times each step from the endpoint to the reply's first audio", async () => {
+    const t = setup();
+    t.conversation.heard("查一下", "天气");
+    t.clock.advance(600);
+    // The words settle with the endpoint, as the transcriber sends them.
+    t.conversation.heard("天气", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(300);
+    t.turns[0]?.push({ type: "tool_input_delta", toolUseId: "u1", tool: "say", content: "{" });
+    await settled();
+    t.clock.advance(900);
+    t.turns[0]?.push({ type: "said", text: "今天晴。明天下雨。" });
+    await settled();
+    t.clock.advance(200);
+    t.speak(0, 1000);
+    t.speak(1, 1000);
+    expect(t.timings).toEqual([]);
+    t.turns[0]?.end();
+    await settled();
+    expect(t.timings).toEqual([
+      {
+        outcome: "answered",
+        endpointAfterWords: 600,
+        steps: { sent: 0, agentStarted: 300, writing: 300, firstSentence: 1200, firstAudio: 1400 },
+        sentences: 2,
+      },
+    ]);
+  });
+
+  it("leaves out when writing began for a message that came whole, and logs each step as a field", async () => {
+    const t = setup();
+    t.conversation.heard("几点了", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(1500);
+    t.turns[0]?.push({ type: "said", text: "三点了。" });
+    await settled();
+    t.speak(0, 500);
+    t.turns[0]?.end();
+    await settled();
+    const timing = t.timings[0];
+    expect(timing?.steps).toEqual({
+      sent: 0,
+      agentStarted: 1500,
+      firstSentence: 1500,
+      firstAudio: 1500,
+    });
+    if (!timing) throw new Error("no timing");
+    expect(turnTimingFields(timing, { chatId: "c1" })).toEqual({
+      chatId: "c1",
+      outcome: "answered",
+      endpointAfterWords: 0,
+      sentences: 1,
+      sentMs: 0,
+      agentStartedMs: 1500,
+      firstSentenceMs: 1500,
+      firstAudioMs: 1500,
+    });
+  });
+
+  it("times a reply stopped after the looking line, and one the conversation ended", async () => {
+    const t = setup();
+    t.conversation.heard("check the build", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.speak(0, 700);
+    t.clock.advance(5000);
+    t.conversation.heard("never mind", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.timings).toEqual([
+      {
+        outcome: "stopped",
+        endpointAfterWords: 0,
+        steps: { sent: 0, lookingAudio: LOOKING_AFTER_MS },
+        sentences: 0,
+      },
+    ]);
+
+    t.clock.advance(400);
+    t.conversation.close();
+    expect(t.timings[1]).toEqual({
+      outcome: "closed",
+      endpointAfterWords: 0,
+      steps: { sent: 0 },
+      sentences: 0,
+    });
+    expect(t.timings).toHaveLength(2);
   });
 
   it("speaks the messages a private-text agent delivers, and points to the chat once for cards", async () => {

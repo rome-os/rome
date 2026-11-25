@@ -11,6 +11,7 @@ import type {
   VoiceConversationStopReason,
 } from "@rome/api-types/voice-conversation";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
+import { bareTool } from "../lib/tool-name.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerListener, SpeakerSession } from "../voice-output/speaker.js";
 import { enoughWords, isEcho, isLateEcho } from "./barge-in.js";
@@ -21,6 +22,7 @@ import {
   type ReplyLanguage,
   type SpeakableFilter,
 } from "./speakable.js";
+import { startTurnTimer, type TurnTimer, type VoiceTurnTiming } from "./timing.js";
 
 const log = createLogger("voice-conversation");
 
@@ -84,6 +86,8 @@ export interface ConversationDeps {
   /** Runs `fn` after `ms`, and returns the cancel. */
   schedule?: (ms: number, fn: () => void) => () => void;
   now?: () => number;
+  /** Takes how long each step of a turn took, once its reply is over. Logged unless set. */
+  timed?: (timing: VoiceTurnTiming) => void;
 }
 
 export interface Conversation {
@@ -110,12 +114,16 @@ interface Reply {
   quietOver: boolean;
   /** Aborts once the conversation moves on from this reply. */
   left: AbortController;
+  timer: TurnTimer;
 }
 
 /** A sentence said, until all its audio has gone to the client. */
 interface Queued {
   id: string;
   text: string;
+  of: Reply;
+  /** The line saying Rome is looking, not part of the reply. */
+  looking: boolean;
   /** Audio that came before the sentence's turn to play. */
   waiting: Uint8Array[];
   started: boolean;
@@ -129,11 +137,29 @@ const realSchedule = (ms: number, fn: () => void) => {
   return () => clearTimeout(timer);
 };
 
+const normalizeWords = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+
 const languageOf = (text: string): ReplyLanguage => (/\p{Script=Han}/u.test(text) ? "zh" : "en");
+
+/** A turn's timing as log fields, each step a field of its own, such as `firstAudioMs`. */
+export function turnTimingFields(
+  timing: VoiceTurnTiming,
+  context: Record<string, string> = {},
+): Record<string, string | number> {
+  const { steps, ...rest } = timing;
+  const fields: Record<string, string | number> = { ...context, ...rest };
+  for (const [step, ms] of Object.entries(steps)) fields[`${step}Ms`] = ms;
+  return fields;
+}
+
+/** Logs a turn's timing, with `context` such as its chat. */
+export const logTurnTiming = (timing: VoiceTurnTiming, context: Record<string, string> = {}) =>
+  log.info("voice turn timing", turnTimingFields(timing, context));
 
 export function createConversation(deps: ConversationDeps): Conversation {
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? Date.now;
+  const timed = deps.timed ?? ((timing: VoiceTurnTiming) => logTurnTiming(timing));
   let speaker: SpeakerSession | null = null;
   let closed = false;
   let state: VoiceConversationState = "listening";
@@ -151,6 +177,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
   let lateEcho: string[] | null = null;
   // The sentences Rome played again during such a turn: any of their words may come back.
   let lateAfter: Queued[] = [];
+  // When the turn's words last changed.
+  let lastWordsAt: number | null = null;
 
   let reply: Reply | null = null;
   let replies = 0;
@@ -174,9 +202,16 @@ export function createConversation(deps: ConversationDeps): Conversation {
     deps.message({ type: "state", state });
   };
 
+  const report = (to: Reply, outcome: Parameters<TurnTimer["finish"]>[0]) => {
+    const timing = to.timer.finish(outcome);
+    if (timing) timed(timing);
+  };
+
   // The state follows from what plays and what the agent still does.
   const update = () => {
     if (closed) return;
+    // All of the reply's audio has gone to the client.
+    if (reply?.ended && queue.length === 0) report(reply, "answered");
     const playing = now() < playsUntil;
     const working = reply !== null && (!reply.ended || queue.length > 0);
     setState(playing ? "speaking" : working ? "thinking" : "listening");
@@ -192,7 +227,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
         stopLooking = null;
         if (reply !== waitingFor || closed) return;
         waitingFor.quietOver = true;
-        say(waitingFor, LOOKING[waitingFor.language]);
+        say(waitingFor, LOOKING[waitingFor.language], true);
       });
     } else if (!quiet && stopLooking) {
       stopLooking();
@@ -216,6 +251,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
   // a sentence counts as said from its first audio, not from its turn to play.
   const playOf = (head: Queued, pcm: Uint8Array) => {
     if (pcm.byteLength === 0) return;
+    if (speaker) head.of.timer.mark(head.looking ? "lookingAudio" : "firstAudio");
     if (!head.sounded) {
       head.sounded = true;
       // Rome's words are kept while any of its audio may still be heard, however far
@@ -244,11 +280,24 @@ export function createConversation(deps: ConversationDeps): Conversation {
     update();
   };
 
-  const say = (to: Reply, text: string) => {
+  const say = (to: Reply, text: string, looking = false) => {
     if (!speaker || reply !== to) return;
     to.quietOver = true;
+    if (!looking) {
+      to.timer.mark("firstSentence");
+      to.timer.sentence();
+    }
     const id = `${replies}-${to.said++}`;
-    queue.push({ id, text, waiting: [], started: false, sounded: false, done: false });
+    queue.push({
+      id,
+      text,
+      of: to,
+      looking,
+      waiting: [],
+      started: false,
+      sounded: false,
+      done: false,
+    });
     speaker.say(id, text);
     pump();
   };
@@ -272,6 +321,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
   // Stops the reply: what is said and queued, and what the client still plays.
   const drop = () => {
+    if (reply) report(reply, "stopped");
     if (reply || queue.length > 0) speaker?.stop();
     reply?.left.abort();
     reply = null;
@@ -295,7 +345,10 @@ export function createConversation(deps: ConversationDeps): Conversation {
     let saidAny = false;
     for await (const event of turn.events()) {
       if (reply !== to) return;
+      to.timer.mark("agentStarted");
       if (event.type === "said") {
+        // A message comes whole once it is stored: when its writing began is
+        // known only from its input streaming in, which not every provider does.
         saidAny ||= event.text.trim() !== "";
         // A message ends its sentence.
         feed(to, `${event.text}\n`);
@@ -307,16 +360,21 @@ export function createConversation(deps: ConversationDeps): Conversation {
       }
       if (event.type === "turn_start") agent ??= event.agent;
       const own = !event.agent || !agent || event.agent === agent;
-      if (event.type === "text_delta" && own) {
+      if (event.type === "tool_input_delta" && own && bareTool(event.tool) === "say") {
+        // The agent is writing a message the guardian will hear once it is sent.
+        to.timer.mark("writing");
+      } else if (event.type === "text_delta" && own) {
         if (event.blockId) streamed.add(event.blockId);
         else streamedLoose = true;
         saidAny ||= event.content.trim() !== "";
+        if (saidAny) to.timer.mark("writing");
         feed(to, event.content);
       } else if (event.type === "text" && own) {
         const repeated = event.blockId ? streamed.has(event.blockId) : streamedLoose;
         streamedLoose = false;
         if (!repeated) {
           saidAny ||= event.content.trim() !== "";
+          if (saidAny) to.timer.mark("writing");
           feed(to, event.content);
         }
         // A block ends its sentence.
@@ -363,8 +421,11 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     heard(newSettled, newPending) {
       if (closed) return;
+      // Words only settling, as they do with the endpoint, are not new words.
+      const before = normalizeWords(`${settled}${pending}`);
       settled += newSettled;
       pending = newPending;
+      if (normalizeWords(`${settled}${pending}`) !== before) lastWordsAt = now();
       deps.message({ type: "heard", settled, pending });
       const words = `${settled}${pending}`;
       if (!begun && words.trim()) {
@@ -393,6 +454,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
       const suspect = maybeEcho;
       const late = lateEcho;
       const after = lateAfter.map((q) => q.text);
+      const wordsAt = lastWordsAt;
+      lastWordsAt = null;
       settled = "";
       pending = "";
       maybeEcho = false;
@@ -421,21 +484,25 @@ export function createConversation(deps: ConversationDeps): Conversation {
         ended: false,
         quietOver: false,
         left: new AbortController(),
+        timer: startTurnTimer(now, wordsAt),
       };
       reply = to;
       deps.message({ type: "turn", text });
       update();
       deps.send(text, to.left.signal).then(
-        (turn) =>
-          read(to, turn).catch((err: unknown) => {
+        (turn) => {
+          to.timer.mark("sent");
+          return read(to, turn).catch((err: unknown) => {
             // The reply still shows in the chat. Rome says what it has.
             log.warn("voice reply not read", {
               error: err instanceof Error ? err.message : String(err),
             });
             if (reply === to) finish(to);
-          }),
+          });
+        },
         (err: unknown) => {
           if (reply !== to || closed) return;
+          report(to, "refused");
           log.warn("voice turn not sent", {
             error: err instanceof Error ? err.message : String(err),
           });
@@ -446,6 +513,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     close() {
       if (closed) return;
+      if (reply) report(reply, "closed");
       closed = true;
       reply?.left.abort();
       reply = null;

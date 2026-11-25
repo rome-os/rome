@@ -32,7 +32,7 @@ import type { TranscriptionStream } from "../voice-input/transcriber.js";
 import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-input-source.js";
 import { readVoiceTerms } from "../voice-input/voice-terms.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
-import { createConversation, type ReplyTurn } from "./conversation.js";
+import { createConversation, logTurnTiming, type ReplyTurn } from "./conversation.js";
 
 const log = createLogger("voice-conversation");
 
@@ -156,6 +156,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
     },
     fail: (reason) => close({ type: "error", reason }),
+    // The chat, to join the agent's own timing of the same turn.
+    timed: (timing) => logTurnTiming(timing, chatId ? { chatId } : {}),
   });
 
   // Every listening session is a Rome Cloud session, so each one reports.
