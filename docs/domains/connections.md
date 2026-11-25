@@ -102,6 +102,13 @@ What someone ran on a platform's own command menu, such as a Discord slash comma
 - The connection puts on its platform the commands it is given, reports each one run, and delivers the answer it gets back, where the platform allows only to the person who ran it. Who may run a command, what it does and what the answer says are decided above the connection (zhangfan, 2026-11-24).
 - A command is not a message: it is not recorded in the chat, and it wakes no agent.
 
+## Private message
+
+What a connection delivers to one account of its platform, in answer to a chat or to one message in it, so that no other account can read it. Rome's Slack app shows it in that chat as Slack's "Only visible to you" message, in the thread of the message it answers when that message is in one. A Discord bot can do that only to answer a command, so it sends a direct message to the account instead.
+
+- The connection delivers the text it is given to the account it is named, and refuses when the platform cannot show that account a private message, as when the account takes no direct messages. It refuses a blank text. Who gets one and what it says are decided above the connection.
+- A private message is not recorded in the chat, and no receipt names it.
+
 ## Decided against
 
 - **Giving tools direct access to the Google or Microsoft grant.** It would let a tool send mail without the guardian approving the exact message. Gmail and Outlook access stay behind the read-only and approved-send operations.

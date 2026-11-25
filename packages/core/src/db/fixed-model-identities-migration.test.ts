@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { LEGACY_MODEL_SELECTIONS } from "@rome/api-types/models";
 
 const migration = readFileSync(
-  new URL("../../drizzle/system/0152_fixed_model_identities.sql", import.meta.url),
+  new URL("../../drizzle/system/0154_fixed_model_identities.sql", import.meta.url),
   "utf8",
 );
 

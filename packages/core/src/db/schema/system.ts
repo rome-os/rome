@@ -158,6 +158,57 @@ export const dismissedAccounts = sqliteTable(
 );
 
 /**
+ * The people Rome knows, one row each (docs/domains/identity.md#person).
+ * Separate from People's `persons`: nothing here grades a relationship or
+ * knows who is a member.
+ */
+export const identities = sqliteTable("identities", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  avatarUrl: text("avatar_url"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Which person each account belongs to (docs/domains/identity.md#account).
+ * Keyed by the account, so one account belongs to at most one person.
+ */
+export const identityAccounts = sqliteTable(
+  "identity_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    identityId: text("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId] }),
+    index("idx_identity_accounts_identity").on(table.identityId),
+  ],
+);
+
+/**
+ * The members: each person with a role in this Rome (docs/domains/access.md#member).
+ * Deleting the person deletes their row. The partial unique index holds the
+ * Rome to one guardian.
+ */
+export const members = sqliteTable(
+  "members",
+  {
+    identityId: text("identity_id")
+      .primaryKey()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["guardian", "member"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_members_one_guardian").on(table.role).where(sql`${table.role} = 'guardian'`),
+  ],
+);
+
+/**
  * What a platform says about an account: its display name, handle and avatar
  * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
  * account itself, the platform and the platform's own id. It has no id of its

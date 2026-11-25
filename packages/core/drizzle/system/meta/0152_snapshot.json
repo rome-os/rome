@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c2e170a-3063-4bf2-a4bf-3a24605cfed2",
+  "id": "c80e5c1d-7bbc-4e18-b2d1-98f42a4ef5b1",
   "prevId": "137d91dd-6053-4d70-90e9-baa8d4f54572",
   "tables": {
     "account_profiles": {
@@ -2091,6 +2091,112 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "identities": {
+      "name": "identities",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "identity_accounts": {
+      "name": "identity_accounts",
+      "columns": {
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identity_id": {
+          "name": "identity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_identity_accounts_identity": {
+          "name": "idx_identity_accounts_identity",
+          "columns": [
+            "identity_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "identity_accounts_identity_id_identities_id_fk": {
+          "name": "identity_accounts_identity_id_identities_id_fk",
+          "tableFrom": "identity_accounts",
+          "tableTo": "identities",
+          "columnsFrom": [
+            "identity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_accounts_platform_account_id_pk": {
+          "columns": [
+            "platform",
+            "account_id"
+          ],
+          "name": "identity_accounts_platform_account_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

@@ -47,7 +47,7 @@ Verify a change before you open a pull request:
 The full rules are in [`docs/authoring/prs.md`](docs/authoring/prs.md). In short:
 
 - The title is a [Conventional Commit](https://www.conventionalcommits.org/), such as `fix(web): keep the composer visible on phones`. Check it with `scripts/check-pr-title.sh "<title>"`. Squash-and-merge uses the title as the commit on `main`, and the release flow reads it.
-- The description is a short briefing under about 40 lines: Why, Scope, Merge danger, and Evidence always, plus a Sketch or Invariants when they help.
+- The description is a short briefing under about 40 lines: Why, Sketch, Scope, Merge danger, and Evidence.
 - It opens with the problem, not with the list of changed files.
 - Evidence lists the behaviors you verified, each with its observable outcome.
 - A change to what the dashboard or an app shows includes phone (390×844) and desktop (1280×900) screenshots.

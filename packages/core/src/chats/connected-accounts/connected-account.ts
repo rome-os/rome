@@ -25,6 +25,7 @@ import type {
 import type { AddressBooks } from "../accounts/account-fold.js";
 import type { Accounts } from "../accounts/accounts.js";
 import type { AccountMessages, Messages } from "../history/messages.js";
+import type { TalkPrivateMessaging } from "../../connections/types.js";
 
 /** Sending on a channel, as core's channels do it: the SDK's send port, typing
  *  indicator included, and a way to reach one account directly. */
@@ -37,6 +38,13 @@ export interface ChannelSend extends AppChannelSend {
    * Connection has no live talker (locked, awaiting re-authorization).
    */
   readonly direct: ChannelDirectMessaging | null;
+  /**
+   * Messages to one account in a chat that no other account reads, which
+   * Chats does not record. Null or absent where the channel cannot send them.
+   * It rejects as `direct` does when no Connection or live talker backs it,
+   * and refuses blank text as `SendRefused` with reason `empty`.
+   */
+  readonly privately?: TalkPrivateMessaging | null;
 }
 
 /**
