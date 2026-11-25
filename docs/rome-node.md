@@ -1077,10 +1077,10 @@ Rome cannot promise permanent prompt-free access. See Apple's
 
 ### Background-window sessions
 
-To offer background-window control to an instance, start
-`rome-node connect <instance-id>` on the target Mac.
-Use the instance's Gateway peer ID and the Node's existing device sign-in.
-The instance discovers the available actions in `system.info`. This
+To offer background-window control to paired instances in your account, start
+`rome-node connect` on the target Mac (optionally with `--cloud <url>`, `--name <name>`, or
+`--device-code`). It reuses the Node's existing device sign-in.
+Paired instances discover the available actions in `system.info`. This
 connection accepts ordinary Node requests and keeps the native window
 binding and local audit checks. Stop the connection with Ctrl+C.
 

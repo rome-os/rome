@@ -329,7 +329,7 @@ describe("queryPersonalData", () => {
       return answer.connection?.next ?? "";
     };
     // Synced three days ago: the window is short, the store is not current.
-    expect(lastHalfHour()).toContain('core:device_run and device "dev-1"');
+    expect(lastHalfHour()).toContain('system:run_on_device and deviceId "dev-1"');
     repo.ingest(
       APPLE_HEALTH,
       batch("fresh", {

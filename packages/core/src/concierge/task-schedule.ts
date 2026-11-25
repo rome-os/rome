@@ -9,6 +9,7 @@ import { Cron } from "croner";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineEngine } from "../routines/engine.js";
+import { TASK_SCHEDULE_KEY_PREFIX } from "../routines/synced-routine-key.js";
 import type { Routine, ScheduleTrigger } from "../routines/types.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import { createLogger } from "../logger.js";
@@ -20,7 +21,7 @@ const log = createLogger("concierge-task-schedule");
 export const CONCIERGE_TASK_RUN_ACTION = "core:concierge_task_run";
 
 /** The key of task `taskId`'s schedule routine. */
-export const taskScheduleKey = (chatId: string) => `concierge-task-schedule:${chatId}`;
+export const taskScheduleKey = (chatId: string) => `${TASK_SCHEDULE_KEY_PREFIX}${chatId}`;
 
 export const SCHEDULE_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export type ScheduleWeekday = (typeof SCHEDULE_WEEKDAYS)[number];

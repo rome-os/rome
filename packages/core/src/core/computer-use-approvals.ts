@@ -3,6 +3,23 @@ import { JWT_SECRET } from "../access/auth.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 
 const PREFIX = "computerUse.approval:";
+const DEV_JWT_SECRET = "rome-dev-secret-change-me";
+
+/**
+ * Protected device approvals (both instance-local and paired remote Macs) require an
+ * explicit ROME_JWT_SECRET of at least 32 characters that matches the effective JWT_SECRET.
+ */
+export function isProtectedApprovalSecret(
+  configuredSecret: string | undefined = process.env.ROME_JWT_SECRET,
+  effectiveSecret: string = JWT_SECRET,
+): boolean {
+  return Boolean(
+    configuredSecret &&
+      configuredSecret.length >= 32 &&
+      effectiveSecret === configuredSecret &&
+      effectiveSecret !== DEV_JWT_SECRET,
+  );
+}
 
 export function isComputerUseApprovalSetting(key: string): boolean {
   return key.startsWith(PREFIX);

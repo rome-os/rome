@@ -1595,6 +1595,16 @@
         }
       }
     },
+    "Connection to Rome lost. The voice conversation ended" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Rome 的连接断了，语音对话已结束"
+          }
+        }
+      }
+    },
     "Continue" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1741,6 +1751,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更早"
+          }
+        }
+      }
+    },
+    "End" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束"
           }
         }
       }
@@ -3103,6 +3123,16 @@
         }
       }
     },
+    "Listening" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在听"
+          }
+        }
+      }
+    },
     "Live access" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3619,6 +3649,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已移动或删除"
+          }
+        }
+      }
+    },
+    "Mute" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静音"
+          }
+        }
+      }
+    },
+    "Muted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已静音"
           }
         }
       }
@@ -5093,6 +5143,26 @@
         }
       }
     },
+    "Rome could not listen. The voice conversation ended" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 听不到，语音对话已结束"
+          }
+        }
+      }
+    },
+    "Rome could not speak. The voice conversation ended" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 说不出来，语音对话已结束"
+          }
+        }
+      }
+    },
     "Rome credits" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5723,6 +5793,16 @@
         }
       }
     },
+    "Speaking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在说"
+          }
+        }
+      }
+    },
     "Spreadsheet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6233,6 +6313,16 @@
         }
       }
     },
+    "The microphone could not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦克风没能打开"
+          }
+        }
+      }
+    },
     "The sign-in page did not come" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6263,12 +6353,72 @@
         }
       }
     },
+    "The voice conversation ended after an error" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出错了，语音对话已结束"
+          }
+        }
+      }
+    },
+    "The voice conversation ended when another app used the microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "别的应用用了麦克风，语音对话已结束"
+          }
+        }
+      }
+    },
+    "The voice conversation ended when Rome went to the background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 进入后台，语音对话已结束"
+          }
+        }
+      }
+    },
+    "The voice conversation reached its time limit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音对话到了时间上限，已结束"
+          }
+        }
+      }
+    },
     "Then" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "然后"
+          }
+        }
+      }
+    },
+    "Thinking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在想"
+          }
+        }
+      }
+    },
+    "This chat can't take a voice conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天不能语音对话"
           }
         }
       }
@@ -6853,6 +7003,16 @@
         }
       }
     },
+    "Unmute" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消静音"
+          }
+        }
+      }
+    },
     "Unpin" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7047,6 +7207,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "视频"
+          }
+        }
+      }
+    },
+    "Voice conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音对话"
+          }
+        }
+      }
+    },
+    "Voice conversation is not available right now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在用不了语音对话"
           }
         }
       }
