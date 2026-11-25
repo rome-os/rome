@@ -224,9 +224,7 @@ credential, and failure semantics.
 
 Import the shared local host from `/computer-use`.
 Desktop and the Node CLI use this implementation. When packaged for distribution,
-the signed native app is published in the optional Apple Silicon macOS package
-`@rome-os/node-core-darwin-arm64` under `dist/native/Rome Computer Use.app` so
-Linux, Windows, and Intel Mac installs skip the macOS binary. On first use, the default host verifies
+the signed native app is bundled under `dist/native/Rome Computer Use.app`. On first use, the default host verifies
 and copies those bundled bytes into the owner-only application state directory.
 It restores the Mach-O executable bits that npm normalizes, then verifies the
 signature again. No compiler, installer download, or postinstall script is needed.

@@ -42,8 +42,7 @@ nativeEnvironment.DEVELOPER_DIR = run("/usr/bin/xcode-select", ["-p"]).trim();
 const sdkPath = run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"]).trim();
 nativeEnvironment.SDKROOT = sdkPath;
 const requestedOutput = resolve(
-  option("--output") ??
-    resolve(root, "../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"),
+  option("--output") ?? resolve(root, "dist/native/Rome Computer Use.app"),
 );
 mkdirSync(dirname(requestedOutput), { recursive: true });
 const canonicalParent = realpathSync(dirname(requestedOutput));
@@ -71,20 +70,7 @@ if (!unsigned && (!identity || identity === "-"))
   throw new Error(
     "Pass --identity with a stable Apple code-signing identity. Ad-hoc signing cannot retain privacy permissions across builds.",
   );
-const packageManifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as {
-  version?: string;
-};
-const shortVersion = packageManifest.version?.match(/^(\d+(?:\.\d+)*)/)?.[1] ?? "0.1.0";
-function defaultBuildNumber(version: string): string {
-  const result = spawnSync("git", ["log", "-1", "--format=%ct"], {
-    cwd: root,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  const timestamp = result.status === 0 ? result.stdout.trim() : "";
-  return /^\d+$/.test(timestamp) ? `${version}.${timestamp}` : version;
-}
-const build = option("--build-number") ?? defaultBuildNumber(shortVersion);
+const build = option("--build-number") ?? "1";
 if (!/^\d+(?:\.\d+)*$/.test(build))
   throw new Error("--build-number must contain numeric version components.");
 // Keep locks outside published dist/native directories while still sharing one lock across aliases and checkouts.
@@ -214,7 +200,7 @@ writeFileSync(
 <key>CFBundleDisplayName</key><string>Rome Computer Use</string>
 <key>CFBundleExecutable</key><string>RomeComputerUse</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>${shortVersion}</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>${build}</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -229,7 +215,6 @@ writeFileSync(
   resolve(contents, "Resources/implementation.json"),
   JSON.stringify({
     protocolVersion: 1,
-    version: build,
     implementationSha256,
     architecture: process.arch,
     buildOptions,

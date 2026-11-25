@@ -23,10 +23,7 @@ const title = `Rome Background ${runID}.txt`,
 await writeFile(target, "", { flag: "wx", mode: 0o600 });
 const execute = promisify(execFile);
 const options = {
-  bundledAppPath: resolve(
-    repo,
-    "packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app",
-  ),
+  bundledAppPath: resolve(repo, "packages/rome-node-core/dist/native/Rome Computer Use.app"),
 };
 const a = createComputerUseHost(options),
   b = createComputerUseHost(options),

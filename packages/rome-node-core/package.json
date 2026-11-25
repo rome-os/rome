@@ -9,8 +9,7 @@
   },
   "files": [
     "bin",
-    "dist/**/*.js",
-    "dist/**/*.d.ts",
+    "dist",
     "README.md"
   ],
   "exports": {
@@ -53,16 +52,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "build:native": "node scripts/build-computer-use.ts --output '../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app'",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && ../../scripts/test-env.sh rstest --include 'src/**/*.test.ts'"
   },
   "dependencies": {
     "ws": "^8.18.0"
-  },
-  "optionalDependencies": {
-    "@rome-os/node-core-darwin-arm64": "workspace:*"
   },
   "devDependencies": {
     "@rstest/core": "^0.11.11",

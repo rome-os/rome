@@ -10,22 +10,10 @@ const run = promisify(execFile);
 const EXECUTABLE = "Contents/MacOS/RomeComputerUse";
 export interface ComputerUseApp {
   path: string;
-  version?: string;
   executableSha256: string;
   implementationSha256: string;
   architecture: "arm64";
   requirement: string;
-}
-
-const NUMERIC_VERSION = /^\d+(?:\.\d+)*$/;
-
-async function readBundleVersion(appPath: string, implementation: Record<string, unknown>) {
-  if (typeof implementation.version === "string" && NUMERIC_VERSION.test(implementation.version)) {
-    return implementation.version;
-  }
-  const plist = await readFile(join(appPath, "Contents/Info.plist"), "utf8").catch(() => null);
-  const match = plist?.match(/<key>CFBundleVersion<\/key>\s*<string>(\d+(?:\.\d+)*)<\/string>/);
-  return match?.[1];
 }
 
 /** npm normalizes non-bin executable modes, so an archive's app is verified before staging. */
@@ -117,10 +105,8 @@ export async function inspectComputerUseApp(path: string): Promise<ComputerUseAp
       "helper_architecture_mismatch",
       "The computer-use executable must be a macOS arm64 binary.",
     );
-  const version = await readBundleVersion(path, implementation);
   return {
     path,
-    ...(version ? { version } : {}),
     requirement,
     implementationSha256: implementation.implementationSha256,
     architecture: "arm64",
