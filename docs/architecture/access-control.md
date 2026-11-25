@@ -14,6 +14,7 @@ Two policies decide reach, each held as its own setting:
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
 - Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
+- A failed lookup of a session is a person Rome cannot tell, who never acts as the guardian. Who may write is the entry check's.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/people.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
@@ -30,6 +31,7 @@ Entry is the one question asked before anything from outside Rome runs: may this
 - A message a connection delivers passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once, before anything else hears it. The answer stays on the message's event, so an app's `channel-message` hook hears only what someone let in said, whether as a recorded message (`packages/core/src/sessions/messages-said.ts`) or from a channel (`packages/core/src/app-host/entered-channels.ts`).
 - The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.
+- A live connection is asked about once, when it opens. One a member has open when they are removed stays open until it closes, a known limitation. Their next request or connection is refused.
 
 ## Request flow
 
@@ -42,7 +44,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/people.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard, and so does `/ws/voice-conversation`. On `/ws/events` a dashboard admin gets every topic the guardian gets. Once their email leaves the allow-list, `/ws/events`, `/ws/node` and `/ws/voice-conversation` refuse their next request and close their open socket within 25 seconds. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, `/ws/node`, `/ws/voice-input`, and `/ws/voice-conversation` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` a dashboard admin gets every topic the guardian gets. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 
