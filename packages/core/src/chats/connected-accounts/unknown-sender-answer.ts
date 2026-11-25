@@ -43,10 +43,15 @@ export interface UnknownSenderAnswerDeps {
  * visible reply otherwise or when the platform refuses the private message:
  * the link carries no secret.
  *
- * At most one answer goes to an account in 24 hours, and at most one to a chat
- * in 10 minutes. The record is kept in memory, so a restart forgets it and one
- * more answer may be sent. With no public origin nothing is sent. The returned
- * function never rejects: a failed send is logged and not tried again.
+ * At most one answer goes to an account in 24 hours. A visible answer also
+ * waits for 10 minutes after the last visible answer in the same chat, so a
+ * shared chat does not fill with them; a direct message counts as a chat too.
+ * A private answer adds nothing to the chat and is not held back by it. When
+ * the chat limit holds a visible answer back, nothing is sent and the account
+ * keeps its 24 hours, so a later message from it is answered. The record is
+ * kept in memory, so a restart forgets it and one more answer may be sent.
+ * With no public origin nothing is sent. The returned function never rejects:
+ * a failed send is logged and not tried again.
  */
 export function answerUnknownSenders(
   deps: UnknownSenderAnswerDeps,
@@ -68,23 +73,30 @@ export function answerUnknownSenders(
     const at = now();
     const account = `${message.sender.platform}\n${message.sender.id}`;
     const chat = `${message.connectionId}\n${message.chatId}`;
-    if (accounts.recent(account, at) || chats.recent(chat, at)) return;
-    // Taken before sending, so a second message arriving during the send is
-    // not answered too.
+    if (accounts.recent(account, at)) return;
+    // Each limit is taken before its send, so a second message arriving during
+    // the send is not answered too.
     accounts.take(account, at);
-    chats.take(chat, at);
 
     const text = unknownSenderAnswer(`${origin}${CONNECT_ACCOUNT_PATH}`);
     try {
       const connection = deps.registry.get(message.connectionId);
       const reply = { replyToMessageId: message.platformMessageId };
+      const visibly = async () => {
+        const visibleAt = now();
+        if (chats.recent(chat, visibleAt)) {
+          accounts.release(account);
+          return;
+        }
+        chats.take(chat, visibleAt);
+        await sendThrough(connection, message.chatId, { text, ...reply });
+      };
       const privately =
         message.addressing === "direct"
           ? undefined
           : connection.withTalker((talker) =>
               talker.privateMessaging?.sendOnlyTo(message.chatId, message.sender.id, text, reply),
             );
-      const visibly = () => sendThrough(connection, message.chatId, { text, ...reply });
       if (!privately) {
         await visibly();
       } else {
@@ -115,6 +127,11 @@ class Answered {
   recent(key: string, now: number): boolean {
     const at = this.at.get(key);
     return at !== undefined && now - at < this.windowMs;
+  }
+
+  /** Forgets `key`, for an answer that was taken but never sent. */
+  release(key: string): void {
+    this.at.delete(key);
   }
 
   take(key: string, now: number): void {

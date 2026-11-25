@@ -123,7 +123,7 @@ describe("answerUnknownSenders", () => {
     expect(sent).toHaveLength(2);
   });
 
-  it("answers one of two accounts in a shared chat within 10 minutes", async () => {
+  it("answers visibly once in a shared chat in 10 minutes, and keeps the second account's slot", async () => {
     const { tell, sent, advance } = harness();
     const shared = { chatId: "C1" as ChatId, addressing: "mention" as const };
     await tell(message({ ...shared, senderId: "T1/U1" }));
@@ -133,6 +133,47 @@ describe("answerUnknownSenders", () => {
     advance(MINUTE);
     await tell(message({ ...shared, senderId: "T1/U2", messageId: 3 }));
     expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual({
+      chatId: "C1",
+      text: unknownSenderAnswer(LINK),
+      replyToMessageId: "1.2",
+    });
+  });
+
+  it("answers two accounts privately in one shared chat within 10 minutes", async () => {
+    const { tell, sent, advance } = harness({ privately: true });
+    const shared = { chatId: "C1" as ChatId, addressing: "mention" as const };
+    await tell(message({ ...shared, senderId: "T1/U1" }));
+    advance(MINUTE);
+    await tell(message({ ...shared, senderId: "T1/U2", messageId: 2 }));
+    expect(sent.map((s) => s.onlyTo)).toEqual(["T1/U1", "T1/U2"]);
+  });
+
+  it("answers a shared chat visibly once when two messages arrive together", async () => {
+    const { tell, sent } = harness();
+    const shared = { chatId: "C1" as ChatId, addressing: "mention" as const };
+    await Promise.all([
+      tell(message({ ...shared, senderId: "T1/U1" })),
+      tell(message({ ...shared, senderId: "T1/U2", messageId: 2 })),
+      tell(message({ ...shared, senderId: "T1/U1", messageId: 3 })),
+    ]);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("falls back to a visible reply only when the chat limit allows", async () => {
+    const { tell, sent, advance } = harness({
+      privately: true,
+      refuses: new PrivateMessageRefused("closed", "direct messages closed"),
+    });
+    const shared = { chatId: "C1" as ChatId, addressing: "mention" as const };
+    await tell(message({ ...shared, senderId: "T1/U1" }));
+    advance(MINUTE);
+    await tell(message({ ...shared, senderId: "T1/U2", messageId: 2 }));
+    expect(sent).toHaveLength(1);
+    advance(9 * MINUTE);
+    await tell(message({ ...shared, senderId: "T1/U2", messageId: 3 }));
+    expect(sent).toHaveLength(2);
+    expect(sent.every((s) => s.onlyTo === undefined)).toBe(true);
   });
 
   it("answers only the sender in a shared chat where the kind offers it", async () => {
