@@ -435,6 +435,9 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
             send: (chatId, text, inputId, signal) =>
               webchatRuntime.sendSpoken(chatId, text, signal, inputId),
+            ...(deps.phoneWatching
+              ? { follow: deps.phoneWatching.watch.bind(deps.phoneWatching) }
+              : {}),
             usage: deps.transcriptionUsage ?? null,
           })
         : null;
