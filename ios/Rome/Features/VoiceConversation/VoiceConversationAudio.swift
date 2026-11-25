@@ -195,8 +195,9 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
 
     func resume() throws {
         guard running, let onChunk else { return }
-        paused = false
+        // Still in a call, this throws, and the engine stays paused.
         try AVAudioSession.sharedInstance().setActive(true)
+        paused = false
         player.stop()
         reply.reset()
         capture?.flush()

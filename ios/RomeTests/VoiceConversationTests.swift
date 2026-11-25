@@ -208,6 +208,35 @@ import Testing
         controller.end()
     }
 
+    @Test func comingBackToTheAppDuringTheCallKeepsItPaused() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call goes on: the audio cannot start, and the conversation waits.
+        audio.refusesResume = true
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(audio.resumed == 0)
+        // The call ends.
+        audio.refusesResume = false
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
     @Test func aConversationRomeNeverAnsweredEndsAtOnceAndSaysSo() async {
         let audio = FakeAudio(allowed: true)
         let controller = VoiceConversationController(makeAudio: { audio })
@@ -216,22 +245,6 @@ import Testing
         await waitUntil { !controller.active }
         #expect(!controller.active)
         #expect(controller.notice == .connectionLost)
-    }
-
-    @Test func aDroppedConnectionIsCalledAgainForThirtySecondsFromTheFirstDrop() {
-        var reconnect = VoiceReconnect()
-        let start = ContinuousClock.now
-        // `#expect` cannot call a mutating method: each answer is read first.
-        let first = reconnect.lost(at: start)
-        let late = reconnect.lost(at: start + .seconds(29))
-        let over = reconnect.lost(at: start + .seconds(30))
-        #expect(first && late && !over)
-        // Rome answered again: the next drop gets the whole window.
-        reconnect.recovered()
-        let again = reconnect.lost(at: start + .seconds(40))
-        let againLate = reconnect.lost(at: start + .seconds(69))
-        let againOver = reconnect.lost(at: start + .seconds(71))
-        #expect(again && againLate && !againOver)
     }
 
     @Test func theGuardiansEndLeavesNoLine() async {
@@ -335,7 +348,12 @@ private final class FakeAudio: VoiceConversationAudio {
     func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws { started = true }
     func play(_ chunk: Data, sampleRate: Int) {}
     func clear() {}
-    func resume() throws { resumed += 1 }
+    /// The system still keeps the audio, as during a call.
+    var refusesResume = false
+    func resume() throws {
+        if refusesResume { throw VoiceAudioError.noInput }
+        resumed += 1
+    }
     func close() { closed = true }
 }
 
