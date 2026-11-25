@@ -4612,7 +4612,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : [];
     const turnPrompt =
       skippedCardIds.length > 0
-        ? "(The guardian skipped your open card and replied in chat instead. " +
+        ? "(They skipped your open card and replied in chat instead. " +
           `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
