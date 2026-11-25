@@ -2,19 +2,20 @@ import { trace } from "@opentelemetry/api";
 import type { PolicyContext } from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../../../types.js";
 import type { PoliciesRepository } from "../../../db/repositories/policies.js";
-import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { ConnectionKindOfChannel } from "../../../db/repositories/channel-records.js";
 
 export type { PolicyContext } from "@rome-os/app-runtime";
 
-type MatchedScope = "sender_specific" | "thread" | "sender_tier" | "channel" | "global" | "default";
-
-const DEFAULT_TRUSTED_LEVELS = ["guardian"];
+type MatchedScope = "sender_specific" | "thread" | "channel" | "global" | "default";
 
 const DEFAULT_ALLOW: PolicyRule = { action: "allow" };
 const DEFAULT_SENTINEL_REVIEW: PolicyRule = { action: "sentinel_review" };
 
-function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: MatchedScope): void {
+function recordPolicyDecision(
+  context: { channel: string },
+  rule: PolicyRule,
+  scope: MatchedScope,
+): void {
   // Emit as a span event on whatever parent span is active (typically
   // `action:message_handler`). Using an event rather than a dedicated span
   // keeps the decision inline with the surrounding action's timeline while
@@ -25,28 +26,28 @@ function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: M
     "policy.decision": rule.action,
     "policy.matched_scope": scope,
     "policy.channel": context.channel,
-    "policy.bond_level": context.bondLevel,
   });
 }
 
-/** What a policy decision is made from: the policies the guardian set, the
- *  trusted bond levels, and the connection kind of each channel. */
+/** What a policy decision is made from: the policies the guardian set, and
+ *  the connection kind of each channel. */
 export interface PolicyInput {
   policies: readonly Policy[];
-  trustedLevels: readonly string[];
   connectionKindOf: ConnectionKindOfChannel;
 }
 
 /**
- * The rule that applies to a message, from most specific to most general:
- * sender_specific → thread → sender tier → channel → global. The first
- * matching policy wins. With none, a trusted bond level is allowed and any
- * other goes to the sentinel.
+ * The rule of the policy that applies to a message, from most specific to most
+ * general: sender_specific → thread → channel → global. The first matching
+ * policy wins, and null means none matches. A policy stored for a bond level
+ * matches nothing: who may start something is decided on the way in.
  */
-export function decidePolicy(input: PolicyInput, context: PolicyContext): PolicyRule {
+export function matchingPolicy(
+  input: PolicyInput,
+  context: Omit<PolicyContext, "bondLevel" | "sender"> & { sender: { id: string } | null },
+): PolicyRule | null {
   const senderSpecific: Policy[] = [];
   const threadSpecific: Policy[] = [];
-  const senderTier: Policy[] = [];
   const channel: Policy[] = [];
   const global: Policy[] = [];
 
@@ -59,7 +60,6 @@ export function decidePolicy(input: PolicyInput, context: PolicyContext): Policy
         threadSpecific.push(policy);
         break;
       case "sender":
-        senderTier.push(policy);
         break;
       case "channel":
         channel.push(policy);
@@ -97,15 +97,6 @@ export function decidePolicy(input: PolicyInput, context: PolicyContext): Policy
     }
   }
 
-  for (const policy of senderTier) {
-    const scope = policy.scope as Extract<PolicyScope, { type: "sender" }>;
-    if (scope.bondLevel === context.bondLevel && policy.rules.length > 0) {
-      const rule = policy.rules[0];
-      recordPolicyDecision(context, rule, "sender_tier");
-      return rule;
-    }
-  }
-
   // A policy on a later channel's own name wins; one on its connection kind covers
   // it otherwise, as People keys an account by connection kind. Most installs have
   // no channel policy, so the connection kind is only looked up when one exists.
@@ -132,30 +123,27 @@ export function decidePolicy(input: PolicyInput, context: PolicyContext): Policy
     }
   }
 
-  const rule = input.trustedLevels.includes(context.bondLevel)
-    ? DEFAULT_ALLOW
-    : DEFAULT_SENTINEL_REVIEW;
-  recordPolicyDecision(context, rule, "default");
-  return rule;
+  return null;
 }
 
+/** @deprecated Read by no app of Rome's. Kept for one release, as the SDK
+ *  publishes its type. */
 export class PolicyEngine {
   constructor(
     private policiesRepo: PoliciesRepository,
-    private settingsRepo: SettingsRepository,
     private connectionKindOf: ConnectionKindOfChannel,
   ) {}
 
-  /** {@link decidePolicy} on the stored policies and trusted bond levels. */
+  /** {@link matchingPolicy} on the stored policies. With none, the guardian is
+   *  allowed and anyone else answers `sentinel_review`. */
   async evaluate(context: PolicyContext): Promise<PolicyRule> {
-    return decidePolicy(
-      {
-        policies: await this.policiesRepo.findAll(),
-        trustedLevels:
-          (await this.settingsRepo.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_LEVELS,
-        connectionKindOf: this.connectionKindOf,
-      },
+    const matched = matchingPolicy(
+      { policies: await this.policiesRepo.findAll(), connectionKindOf: this.connectionKindOf },
       context,
     );
+    if (matched) return matched;
+    const rule = context.bondLevel === "guardian" ? DEFAULT_ALLOW : DEFAULT_SENTINEL_REVIEW;
+    recordPolicyDecision(context, rule, "default");
+    return rule;
   }
 }

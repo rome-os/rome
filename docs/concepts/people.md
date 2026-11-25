@@ -162,10 +162,9 @@ A bond level is the trust tier assigned to a [person](#person). It determines ho
 
 **Contracts:**
 
-- Bond level drives the default routing for a sender's messages: trusted levels route direct to the main agent, and everyone else goes through [sentinel](messaging.md#sentinel) triage. By default only the guardian is trusted. Which levels count as trusted is configurable.
-- [Policies](messaging.md#policies) can override the default routing per sender, thread, or channel.
+- Bond level does not decide whose message wakes an agent. [Entry](../domains/participation.md#entry) does.
 - The guardian tier is fixed as the highest-trust level.
 
 **Not to be confused with:**
 
-- **[Policy](messaging.md#policies)** — a bond level is an attribute of a person. A policy is a routing rule that may key on bond level (among other things).
+- **[Policy](messaging.md#policies)** — a bond level is an attribute of a person. A policy is about one person, thread or account, or every message, and never reads it.

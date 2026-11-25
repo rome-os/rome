@@ -30,9 +30,9 @@ The moment a message is judged to need the agent and the agent starts a turn. Th
 
 ## Wake gate
 
-The check that decides whether a message wakes the agent. It looks at where the message was said and who said it, never at the text, and answers *wake*, *quiet*, *block* or *review*. On *review*, the sentinel reads the message and ignores it, answers it itself, or wakes the agent.
+The check that decides whether a message from someone [let in](#entry) wakes the agent. It looks at where the message was said and how it addressed the agent, never at the text, and answers *wake*, *quiet* or *block*.
 
-- By default a chat switched off wakes nobody, a policy that blocks the sender or the chat wins over every setting, a sender below the bond levels the agent replies to stays quiet, and a trusted sender or one a policy allows wakes the agent. Anyone else goes to review.
+- A chat switched off wakes nobody, and a policy that blocks the sender or the chat wakes nobody. Any other message wakes the agent, unless a rule of the chat below keeps it quiet. A sender's bond level changes nothing.
 - A chat that wakes the agent only on a mention stays quiet on a message addressed to nobody. Another bot's message stays quiet unless the chat takes bots' messages, or takes them when they mention the account and this one does. A message that mentions only others stays quiet unless the chat answers those. A rule a kind of connection does not offer runs at the value the kind fixes, else at its default ([Chat rule](chats.md#chat-rule)).
 - Another bot's message never stops a turn.
 - A message that wakes nobody shows no typing, and stays in the record: a message the reply rule, the bot rule or a mention of others keeps quiet is recorded like any other. A chat switched off is not heard at all, and none of its messages are recorded.

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import { PolicyEngine, type PolicyContext } from "./policy-engine.js";
 import { PoliciesRepository } from "../../../db/repositories/policies.js";
-import { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PolicyRule, PolicyScope } from "../../../types.js";
 import {
   createTestDb,
@@ -13,9 +12,9 @@ import {
 } from "../../../test/helpers.js";
 
 // PolicyEngine over real repositories on in-memory SQLite (edge-only fakes,
-// #763): policies and the trustedBondLevels setting are DB rows, so evaluate()
-// runs against the same persistence — including the priority ordering
-// findAll() applies — that the production engine reads.
+// #763): policies are DB rows, so evaluate() runs against the same persistence —
+// including the priority ordering findAll() applies — that the production
+// engine reads.
 
 function makeContext(overrides?: Partial<PolicyContext>): PolicyContext {
   return {
@@ -32,14 +31,12 @@ const LATER_TELEGRAM = "9b2f4c1e-telegram-bot";
 describe("PolicyEngine", () => {
   let testDb: TestDb;
   let policiesRepo: PoliciesRepository;
-  let settingsRepo: SettingsRepository;
   let engine: PolicyEngine;
 
   beforeEach(() => {
     testDb = createTestDb();
     policiesRepo = new PoliciesRepository(testDb.db);
-    settingsRepo = new SettingsRepository(testDb.db);
-    engine = new PolicyEngine(policiesRepo, settingsRepo, identityConnectionKindOf);
+    engine = new PolicyEngine(policiesRepo, identityConnectionKindOf);
   });
 
   afterEach(() => {
@@ -76,12 +73,12 @@ describe("PolicyEngine", () => {
     expect(result).toEqual({ action: "allow" });
   });
 
-  it("evaluate() falls back to sender-tier policy", async () => {
+  it("evaluate() matches no policy stored for a bond level", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
-    await seedPolicy({ type: "sender", bondLevel: "acquaintance" }, "require_approval", 30);
+    await seedPolicy({ type: "sender", bondLevel: "acquaintance" }, "allow", 30);
 
     const result = await engine.evaluate(makeContext({ sender: null }));
-    expect(result).toEqual({ action: "require_approval" });
+    expect(result).toEqual({ action: "block" });
   });
 
   it("evaluate() falls back to channel policy", async () => {
@@ -92,7 +89,7 @@ describe("PolicyEngine", () => {
   });
 
   it("evaluate() applies a service's channel policy to its later channels", async () => {
-    engine = new PolicyEngine(policiesRepo, settingsRepo, (name) =>
+    engine = new PolicyEngine(policiesRepo, (name) =>
       name === LATER_TELEGRAM ? "telegram" : name,
     );
     await seedPolicy({ type: "channel", channel: "telegram" }, "block", 20);
@@ -111,7 +108,7 @@ describe("PolicyEngine", () => {
     expect(result).toEqual({ action: "block" });
   });
 
-  it('evaluate() returns "allow" when no policies match and bond level is trusted', async () => {
+  it('evaluate() returns "allow" when no policies match and the sender is the guardian', async () => {
     const result = await engine.evaluate(makeContext({ bondLevel: "guardian" }));
     expect(result).toEqual({ action: "allow" });
   });
@@ -161,18 +158,6 @@ describe("PolicyEngine", () => {
     // Default when untrusted and no policies
     const result = await engine.evaluate(makeContext({ bondLevel: "other" }));
     expect(result.action).toBe("sentinel_review");
-  });
-
-  it("evaluate() honors the trustedBondLevels setting on the default path", async () => {
-    await settingsRepo.set("trustedBondLevels", ["other"]);
-
-    expect(await engine.evaluate(makeContext({ bondLevel: "other" }))).toEqual({
-      action: "allow",
-    });
-    // The stored setting replaces the built-in trusted list entirely.
-    expect(await engine.evaluate(makeContext({ bondLevel: "acquaintance" }))).toEqual({
-      action: "sentinel_review",
-    });
   });
 
   // Policy decision span-event emission

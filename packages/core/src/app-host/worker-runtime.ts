@@ -177,11 +177,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
     chatSettings: (chat) => appChatSettings.get(chat),
-    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
   });
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,

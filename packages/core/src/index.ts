@@ -1050,7 +1050,7 @@ async function main() {
     }),
   });
 
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
   // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
@@ -2028,7 +2028,6 @@ async function main() {
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
     chatSettings: (chat) => appChatSettings.get(chat),
-    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
   });

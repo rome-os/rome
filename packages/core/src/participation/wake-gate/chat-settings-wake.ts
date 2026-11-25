@@ -1,5 +1,5 @@
 import type { PolicyInput } from "./policy/policy-engine.js";
-import { decidePolicy } from "./policy/policy-engine.js";
+import { matchingPolicy } from "./policy/policy-engine.js";
 import type { Addressed } from "../addressing.js";
 import type { WakeGate, WakeMessage } from "./index.js";
 
@@ -15,8 +15,6 @@ export interface ChatWakeSettings extends PolicyInput {
   botMessages: "ignore" | "mentions" | "all";
   /** Whether a message that mentions only others may wake the agent. */
   whenOthersMentioned: "ignore" | "respond";
-  /** The bond levels the agent replies to. Anyone else stays quiet. */
-  replyToLevels: readonly string[];
 }
 
 /**
@@ -24,9 +22,8 @@ export interface ChatWakeSettings extends PolicyInput {
  * off stays quiet, so does another bot's message the chat does not take, a
  * message that mentions only others where the chat ignores those, and one
  * addressed to nobody in a chat that wakes only on a mention. Then a policy
- * block blocks, a sender below the reply-to levels
- * stays quiet, a trusted sender or a policy allow wakes the agent, and anyone
- * else goes to review. A stranger reads as bond level `other`.
+ * block blocks, and any other message wakes the agent: its sender was let in
+ * before the gate was asked (../entry.ts).
  */
 export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
   return (message, sender) => {
@@ -36,18 +33,13 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
       if (settings.botMessages === "mentions" && message.addressing !== "mention") return "quiet";
     }
     if (addressingRuleKeepsQuiet(message, settings)) return "quiet";
-    const bondLevel = sender.person?.bondLevel ?? "other";
-    const policy = decidePolicy(settings, {
+    const policy = matchingPolicy(settings, {
       channel: message.channel,
       sender: sender.person,
-      bondLevel,
       threadName: message.threadName,
       threadType: message.place === "direct" ? "private" : "group",
     });
-    if (policy.action === "block") return "block";
-    if (!settings.replyToLevels.includes(bondLevel)) return "quiet";
-    if (settings.trustedLevels.includes(bondLevel) || policy.action === "allow") return "wake";
-    return "review";
+    return policy?.action === "block" ? "block" : "wake";
   };
 }
 
