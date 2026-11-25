@@ -5,7 +5,6 @@
 // working. Vocabulary: docs/domains/people.md.
 
 import type { Action } from "@rome-os/app-runtime";
-import type { OwnerOfChat } from "../actions/guardian-only.js";
 import { listPeopleAction } from "./actions/list-people.js";
 import type { PhoneBookDeps } from "./deps.js";
 import { phoneBookRoutes } from "./http/index.js";
@@ -23,6 +22,6 @@ export interface PhoneBook {
   actions: Action[];
 }
 
-export function phoneBook(deps: PhoneBookDeps & { ownerOfChat: OwnerOfChat }): PhoneBook {
+export function phoneBook(deps: PhoneBookDeps): PhoneBook {
   return { routes: phoneBookRoutes(deps), actions: [listPeopleAction(deps)] };
 }
