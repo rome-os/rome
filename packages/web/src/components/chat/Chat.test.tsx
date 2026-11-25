@@ -3296,6 +3296,16 @@ describe("Chat draft", () => {
 });
 
 describe("Chat voice conversation words", () => {
+  it("brings the newest message into view when a conversation starts in a chat scrolled up", async () => {
+    stickToBottom.isAtBottom = false;
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.start).not.toBeNull());
+    stickToBottom.scrollToBottom.mockClear();
+
+    act(() => conciergeVoice.start?.());
+    await waitFor(() => expect(stickToBottom.scrollToBottom).toHaveBeenCalledWith("auto"));
+  });
+
   it("grows the guardian's unsent words at the end, then shows the sent message in their place", async () => {
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
     await waitFor(() => expect(conciergeVoice.heard).not.toBeNull());

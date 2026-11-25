@@ -1163,7 +1163,11 @@ export function Chat({
   // owner's private history, so there it starts with none picked. Turns are
   // picked on the chat itself, so a reply chain in focus closes first.
   const closeChain = chain.close;
-  const startVoiceInChat = useCallback(() => void closeChain(), [closeChain]);
+  // Then to the newest message, where the guardian's words grow.
+  const startVoiceInChat = useCallback(
+    () => void closeChain().then(() => scrollToBottom("auto")),
+    [closeChain, scrollToBottom],
+  );
   const enterShareMode = useCallback(() => {
     void closeChain();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
