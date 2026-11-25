@@ -125,6 +125,8 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { VoiceHeardBubble } from "@/components/chat/VoiceHeardBubble";
+import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
 import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
@@ -1161,6 +1163,11 @@ export function Chat({
   // owner's private history, so there it starts with none picked. Turns are
   // picked on the chat itself, so a reply chain in focus closes first.
   const closeChain = chain.close;
+  // Then to the newest message, where the guardian's words grow.
+  const startVoiceInChat = useCallback(
+    () => void closeChain().then(() => scrollToBottom("auto")),
+    [closeChain, scrollToBottom],
+  );
   const enterShareMode = useCallback(() => {
     void closeChain();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
@@ -2211,6 +2218,45 @@ export function Chat({
     ],
   );
 
+  // A voice conversation's words not sent yet, which grow at the end of the
+  // transcript. Once Rome sends the turn, it shows as the message it was sent
+  // as, so the stored message takes its place when the chat loads it.
+  const [voiceHeard, setVoiceHeard] = useState("");
+  const showVoiceTurn = useCallback((text: string, inputId: string) => {
+    const sessionId = mainSessionIdRef.current;
+    setVoiceHeard("");
+    if (!sessionId) return;
+    const localIds = localOptimisticMessageIdsRef.current.get(sessionId) ?? new Set<string>();
+    localIds.add(inputId);
+    localOptimisticMessageIdsRef.current.set(sessionId, localIds);
+    const message: ChatMessage = {
+      id: inputId,
+      sessionId,
+      turnId: null,
+      inputState: "submitted",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: text }]),
+      createdAt: new Date().toISOString(),
+      sender: viewerSenderRef.current,
+    };
+    setMessages((prev) => {
+      const next = new Map(prev);
+      next.set(sessionId, mergeChatMessage(next.get(sessionId) ?? [], message));
+      return next;
+    });
+  }, []);
+
+  // A chat that refused the voice conversation's turn stored nothing: the
+  // chat loads again without the message that showed it as sent.
+  const voiceStopped = useCallback(
+    (reason: ConversationStopReason) => {
+      const sessionId = mainSessionIdRef.current;
+      if (reason !== "chat-refused" || !sessionId) return;
+      void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+    },
+    [loadMessages],
+  );
+
   // A draft's session is created once, shared by its first send and a voice
   // conversation started in it, so the two never make two chats.
   const pendingSessionRef = useRef<Promise<string> | null>(null);
@@ -2555,7 +2601,8 @@ export function Chat({
   const conciergeEmpty =
     concierge &&
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
-    !displayedStreaming;
+    !displayedStreaming &&
+    !voiceHeard;
   // A pinned chat always says so in its last row, with one way back, an empty
   // one too. The default is the guardian's: a visitor never sees it.
   const pinnedHint =
@@ -3207,7 +3254,12 @@ export function Chat({
                               fork={forkable}
                               variant={variant}
                               unreadFrom={unread?.firstId ?? null}
-                              tail={pinnedHint}
+                              tail={
+                                <>
+                                  {voiceHeard ? <VoiceHeardBubble text={voiceHeard} /> : null}
+                                  {pinnedHint}
+                                </>
+                              }
                             />
                           </div>
                         )
@@ -3387,6 +3439,11 @@ export function Chat({
                       <ConciergeComposer
                         ref={composerRef}
                         chatId={mainSessionId}
+                        onVoiceHeard={setVoiceHeard}
+                        onVoiceTurn={showVoiceTurn}
+                        onVoiceStopped={voiceStopped}
+                        // The conversation talks in the chat itself, so a reply chain in focus closes first.
+                        onVoiceStart={startVoiceInChat}
                         startChat={startSession ? startConversationChat : undefined}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}

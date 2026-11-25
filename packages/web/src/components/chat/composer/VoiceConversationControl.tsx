@@ -175,19 +175,15 @@ export function VoiceConversationCapsule({
 }
 
 /**
- * The words under the capsule: the sentence Rome says, or, faint, what Rome
- * has heard of the guardian and not sent yet. Up to three lines, the newest
- * kept in view. Shows only; the chat gets the turn once Rome hears it end.
+ * The words under the capsule: the sentence Rome says. Up to three lines, the
+ * newest kept in view.
  */
-export function VoiceConversationText({ text, unsent }: { text: string; unsent?: boolean }) {
+export function VoiceConversationText({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
     <div
-      data-voice-conversation-text={unsent ? "unsent" : "caption"}
-      className={cn(
-        "mx-auto mb-2 flex max-h-[4.3em] max-w-prose flex-col justify-end overflow-hidden px-4 text-center text-ui",
-        unsent ? "text-muted-foreground" : "text-foreground",
-      )}
+      data-voice-conversation-text
+      className="mx-auto mb-2 flex max-h-[4.3em] max-w-prose flex-col justify-end overflow-hidden px-4 text-center text-foreground text-ui"
     >
       <p className="break-words">{text}</p>
     </div>

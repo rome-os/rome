@@ -17,6 +17,7 @@ const conversation = rs.hoisted(() => ({
     onEnded(reason: string | null, unsent: string): void;
     onHeard?(text: string): void;
     onCaption?(text: string): void;
+    onTurn?(text: string, inputId: string): void;
   },
   muted: [] as boolean[],
   ended: 0,
@@ -59,7 +60,13 @@ afterEach(() => {
 function renderComposer(
   available: boolean,
   ref = createRef<ChatComposerHandle>(),
-  chat: { chatId: string | null; startChat?: () => Promise<string> } = { chatId: "concierge" },
+  chat: {
+    chatId: string | null;
+    startChat?: () => Promise<string>;
+    onVoiceStart?: () => void;
+    onVoiceHeard?: (text: string) => void;
+    onVoiceTurn?: (text: string, inputId: string) => void;
+  } = { chatId: "concierge" },
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://rome.test").pathname;
@@ -147,26 +154,38 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(screen.getByRole("button", { name: "Voice conversation" })).toBeTruthy();
   });
 
-  it("shows the words not sent yet while listening, and Rome's sentence while its audio plays", async () => {
-    renderComposer(true);
+  it("hands the chat the words not sent yet and each sent turn, and shows Rome's sentence while its audio plays", async () => {
+    const heard: string[] = [];
+    const turns: Array<[string, string]> = [];
+    renderComposer(true, undefined, {
+      chatId: "concierge",
+      onVoiceHeard: (text) => heard.push(text),
+      onVoiceTurn: (text, inputId) => turns.push([text, inputId]),
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
     const shown = () => document.querySelector("[data-voice-conversation-text]");
     expect(shown()).toBeNull();
 
+    // The guardian's words grow in the chat, not under the capsule.
     act(() => conversation.handlers?.onHeard?.("Book a table for"));
-    expect(shown()?.getAttribute("data-voice-conversation-text")).toBe("unsent");
-    expect(shown()?.textContent).toBe("Book a table for");
-
-    // The turn is sent: the words leave the capsule for the chat.
-    act(() => conversation.handlers?.onHeard?.(""));
+    expect(heard.at(-1)).toBe("Book a table for");
     expect(shown()).toBeNull();
+
+    act(() => {
+      conversation.handlers?.onHeard?.("");
+      conversation.handlers?.onTurn?.("Book a table for four", "spoken-1");
+    });
+    expect(heard.at(-1)).toBe("");
+    expect(turns).toEqual([["Book a table for four", "spoken-1"]]);
 
     act(() => {
       conversation.handlers?.onState("speaking");
       conversation.handlers?.onCaption?.("For how many?");
     });
-    expect(shown()?.getAttribute("data-voice-conversation-text")).toBe("caption");
     expect(shown()?.textContent).toBe("For how many?");
+    // While Rome's sentence shows, what is heard may be its own voice: the chat gets none of it.
+    act(() => conversation.handlers?.onHeard?.("for how"));
+    expect(heard.at(-1)).toBe("");
 
     // Rome says listening while its audio still plays here: the sentence stays until it ends.
     act(() => conversation.handlers?.onState("listening"));
@@ -201,6 +220,30 @@ describe("voice conversation in the Concierge's message field", () => {
     renderComposer(true);
     const reopened = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
     expect(reopened.value).toBe("Also remind me at seven");
+  });
+
+  it("tells the chat a conversation starts, as the click starts it", async () => {
+    const order: string[] = [];
+    renderComposer(true, undefined, {
+      chatId: "concierge",
+      onVoiceStart: () => order.push("chat"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    order.push(`started ${conversation.started.length}`);
+    expect(order).toEqual(["chat", "started 1"]);
+  });
+
+  it("takes the words not sent yet out of the chat when the composer goes away", async () => {
+    const heard: string[] = [];
+    const { unmount } = renderComposer(true, undefined, {
+      chatId: "concierge",
+      onVoiceHeard: (text) => heard.push(text),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    act(() => conversation.handlers?.onHeard?.("Book a"));
+    expect(heard.at(-1)).toBe("Book a");
+    unmount();
+    expect(heard.at(-1)).toBe("");
   });
 
   it("ends the conversation when the host hides the composer without unmounting it", async () => {
