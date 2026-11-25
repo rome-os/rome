@@ -1,6 +1,6 @@
-// The phone book: the guardian's edits to people and accounts, and the
-// directory of accounts. It serves the dashboard and apps through http/ and
-// agents through actions/, both over the same use cases. Nothing but the wiring
+// The phone book: the people listing and the directory of accounts. It serves
+// the dashboard through http/ and agents through actions/, both over the same
+// use cases. Nothing but the wiring
 // imports it, so leaving it out leaves who-is-this and the message path
 // working. Vocabulary: docs/domains/people.md.
 

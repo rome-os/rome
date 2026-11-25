@@ -152,7 +152,7 @@ describe("the agents address book", () => {
   });
 });
 
-describe("a dot on the People page", () => {
+describe("a dot in the people listing", () => {
   let testDb: TestDb;
   let deps: TestDeps;
 
@@ -197,7 +197,7 @@ describe("a dot on the People page", () => {
   });
 });
 
-describe("another account's agent on the People page", () => {
+describe("another account's agent in the people listing", () => {
   let testDb: TestDb;
   let deps: TestDeps;
 

@@ -125,6 +125,8 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { VoiceHeardBubble } from "@/components/chat/VoiceHeardBubble";
+import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
 import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
@@ -1161,6 +1163,11 @@ export function Chat({
   // owner's private history, so there it starts with none picked. Turns are
   // picked on the chat itself, so a reply chain in focus closes first.
   const closeChain = chain.close;
+  // Then to the newest message, where the guardian's words grow.
+  const startVoiceInChat = useCallback(
+    () => void closeChain().then(() => scrollToBottom("auto")),
+    [closeChain, scrollToBottom],
+  );
   const enterShareMode = useCallback(() => {
     void closeChain();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
@@ -2211,6 +2218,80 @@ export function Chat({
     ],
   );
 
+  // A voice conversation's words not sent yet, which grow at the end of the
+  // transcript. Once Rome sends the turn, it shows as the message it was sent
+  // as, so the stored message takes its place when the chat loads it.
+  const [voiceHeard, setVoiceHeard] = useState("");
+  const showVoiceTurn = useCallback((text: string, inputId: string) => {
+    const sessionId = mainSessionIdRef.current;
+    setVoiceHeard("");
+    if (!sessionId) return;
+    const localIds = localOptimisticMessageIdsRef.current.get(sessionId) ?? new Set<string>();
+    localIds.add(inputId);
+    localOptimisticMessageIdsRef.current.set(sessionId, localIds);
+    const message: ChatMessage = {
+      id: inputId,
+      sessionId,
+      turnId: null,
+      inputState: "submitted",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: text }]),
+      createdAt: new Date().toISOString(),
+      sender: viewerSenderRef.current,
+    };
+    setMessages((prev) => {
+      const next = new Map(prev);
+      next.set(sessionId, mergeChatMessage(next.get(sessionId) ?? [], message));
+      return next;
+    });
+  }, []);
+
+  // A chat that refused the voice conversation's turn stored nothing: the
+  // chat loads again without the message that showed it as sent.
+  const voiceStopped = useCallback(
+    (reason: ConversationStopReason) => {
+      const sessionId = mainSessionIdRef.current;
+      if (reason !== "chat-refused" || !sessionId) return;
+      void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+    },
+    [loadMessages],
+  );
+
+  // A draft's session is created once, shared by its first send and a voice
+  // conversation started in it, so the two never make two chats.
+  const pendingSessionRef = useRef<Promise<string> | null>(null);
+  const ensureSession = useCallback((create: () => Promise<string>) => {
+    if (mainSessionIdRef.current) return Promise.resolve(mainSessionIdRef.current);
+    pendingSessionRef.current ??= create().finally(() => {
+      pendingSessionRef.current = null;
+    });
+    return pendingSessionRef.current;
+  }, []);
+  const adoptSession = useCallback(
+    (id: string, agentMention: AgentMention | null = null) => {
+      if (mainSessionIdRef.current === id) return;
+      // The refs normally follow the render that adopts the session. A turn
+      // can start before that render, and its stream reads them to decide
+      // which session's end counts as read and which may move the workspace.
+      mainSessionIdRef.current = id;
+      setCreatedAgentMention(agentMention);
+      setCreatedSessionId(id);
+      onSessionCreated?.(id);
+      notifySessionsChanged();
+    },
+    [onSessionCreated, notifySessionsChanged],
+  );
+
+  // A voice conversation started in a draft creates its session, as the
+  // draft's first send would, and talks in it. A draft left meanwhile stays
+  // left: the chat is made, but nothing moves to it.
+  const startConversationChat = useCallback(async () => {
+    if (!startSession) throw new Error("This draft cannot start a chat");
+    const id = await ensureSession(startSession);
+    if (isMountedRef.current) adoptSession(id);
+    return id;
+  }, [startSession, ensureSession, adoptSession]);
+
   // Send a turn into the active session. The composer owns the input state
   // (text/uploads/options); this handler builds the POST and delegates the
   // turn lifecycle to runTurnLifecycle.
@@ -2224,21 +2305,26 @@ export function Chat({
         if (creatingSessionRef.current) return;
         creatingSessionRef.current = true;
         try {
-          sendingSessionId = startSession
-            ? await startSession()
-            : (
-                await createSession({
-                  name: t("sidebar.newChat"),
-                  personaId: snapshot.personaId,
-                  projectPath: snapshot.projectPath,
-                  largeModelSelection: snapshot.largeModelSelection,
-                  reasoningEffort: snapshot.reasoningEffort,
-                  agentName: snapshot.agentMention?.agentName,
-                  deviceFolder: snapshot.deviceFolder
-                    ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
-                    : undefined,
-                })
-              ).id;
+          sendingSessionId = await ensureSession(async () =>
+            startSession
+              ? startSession()
+              : (
+                  await createSession({
+                    name: t("sidebar.newChat"),
+                    personaId: snapshot.personaId,
+                    projectPath: snapshot.projectPath,
+                    largeModelSelection: snapshot.largeModelSelection,
+                    reasoningEffort: snapshot.reasoningEffort,
+                    agentName: snapshot.agentMention?.agentName,
+                    deviceFolder: snapshot.deviceFolder
+                      ? {
+                          deviceId: snapshot.deviceFolder.deviceId,
+                          path: snapshot.deviceFolder.path,
+                        }
+                      : undefined,
+                  })
+                ).id,
+          );
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
@@ -2255,14 +2341,7 @@ export function Chat({
         } finally {
           creatingSessionRef.current = false;
         }
-        // The refs normally follow the render that adopts the session. The turn
-        // below starts before that render, and its stream reads them to decide
-        // which session's end counts as read and which may move the workspace.
-        mainSessionIdRef.current = sendingSessionId;
-        setCreatedAgentMention(snapshot.agentMention ?? null);
-        setCreatedSessionId(sendingSessionId);
-        onSessionCreated?.(sendingSessionId);
-        notifySessionsChanged();
+        adoptSession(sendingSessionId, snapshot.agentMention ?? null);
       }
       const authorizedSend =
         controls.userSubmitted && selectedComputerUse?.sessionId === sendingSessionId
@@ -2373,9 +2452,9 @@ export function Chat({
       runTurnLifecycle,
       workspaceContextRegistry,
       t,
-      onSessionCreated,
       startSession,
-      notifySessionsChanged,
+      ensureSession,
+      adoptSession,
       concierge,
       chain.focus,
       queryClient,
@@ -2522,7 +2601,8 @@ export function Chat({
   const conciergeEmpty =
     concierge &&
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
-    !displayedStreaming;
+    !displayedStreaming &&
+    !voiceHeard;
   // A pinned chat always says so in its last row, with one way back, an empty
   // one too. The default is the guardian's: a visitor never sees it.
   const pinnedHint =
@@ -3174,7 +3254,12 @@ export function Chat({
                               fork={forkable}
                               variant={variant}
                               unreadFrom={unread?.firstId ?? null}
-                              tail={pinnedHint}
+                              tail={
+                                <>
+                                  {voiceHeard ? <VoiceHeardBubble text={voiceHeard} /> : null}
+                                  {pinnedHint}
+                                </>
+                              }
                             />
                           </div>
                         )
@@ -3354,6 +3439,12 @@ export function Chat({
                       <ConciergeComposer
                         ref={composerRef}
                         chatId={mainSessionId}
+                        onVoiceHeard={setVoiceHeard}
+                        onVoiceTurn={showVoiceTurn}
+                        onVoiceStopped={voiceStopped}
+                        // The conversation talks in the chat itself, so a reply chain in focus closes first.
+                        onVoiceStart={startVoiceInChat}
+                        startChat={startSession ? startConversationChat : undefined}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}

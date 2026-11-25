@@ -31,7 +31,6 @@ const ROUTES = [
   "/settings/advanced",
   "/chat",
   "/apps",
-  "/people",
   "/sessions",
   "/routines",
   "/sessions/events",

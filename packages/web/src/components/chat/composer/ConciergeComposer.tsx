@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -67,6 +68,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceConversation } from "./use-voice-conversation";
+import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
 import { spokenInsertion, useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
@@ -100,6 +102,16 @@ export interface ConciergeComposerProps {
   placeholder?: string;
   /** The chat whose draft the field keeps. */
   chatId?: string | null;
+  /** What a voice conversation has heard of the guardian and not sent yet, empty once sent. */
+  onVoiceHeard?: (text: string) => void;
+  /** A voice conversation sent the guardian's turn as the message `inputId`. */
+  onVoiceTurn?: (text: string, inputId: string) => void;
+  /** A voice conversation ended on its own, for `reason`. */
+  onVoiceStopped?: (reason: ConversationStopReason) => void;
+  /** The guardian starts a voice conversation. */
+  onVoiceStart?: () => void;
+  /** Creates the chat a draft's voice conversation talks in, and answers its id. */
+  startChat?: () => Promise<string>;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -124,6 +136,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       chatName,
       placeholder,
       chatId,
+      onVoiceHeard,
+      onVoiceTurn,
+      onVoiceStopped,
+      onVoiceStart,
+      startChat,
       modelSelection,
       onSend,
     },
@@ -197,6 +214,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     // above the box, and its mute and end take the place of send.
     const conversation = useVoiceConversation({
       chatId,
+      onTurn: onVoiceTurn,
+      onStopped: onVoiceStopped,
+      startChat,
       // Words the conversation ended before sending wait in the field, for the
       // guardian to send or not. They are saved as the draft at once, as the
       // field may be going away with the chat.
@@ -206,6 +226,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setInputText(next);
       },
     });
+    // The guardian's words not sent yet, for the chat to show as they grow.
+    // Hidden while Rome's sentence shows: what is heard then may be its own voice.
+    const voiceHeard = conversation.active && !conversation.caption ? conversation.heard : "";
+    // A composer going away, as when the chat is archived, takes the words with it.
+    useEffect(() => {
+      onVoiceHeard?.(voiceHeard);
+      return () => onVoiceHeard?.("");
+    }, [voiceHeard, onVoiceHeard]);
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -415,12 +443,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               muted={conversation.muted}
               level={conversation.level}
             />
-            {/* Rome's sentence while its audio plays here; otherwise the guardian's words not sent yet. */}
-            {conversation.caption ? (
-              <VoiceConversationText text={conversation.caption} />
-            ) : (
-              <VoiceConversationText text={conversation.heard} unsent />
-            )}
+            {/* Rome's sentence while its audio plays here. The guardian's words grow in the chat. */}
+            <VoiceConversationText text={conversation.caption} />
           </>
         ) : null}
         {conversation.asking || conversation.stopped ? (
@@ -707,7 +731,12 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
             {conversation.available && !conversation.active && !voice.active && !uploadInFlight ? (
-              <VoiceConversationButton onStart={conversation.start} />
+              <VoiceConversationButton
+                onStart={() => {
+                  onVoiceStart?.();
+                  conversation.start();
+                }}
+              />
             ) : null}
             {conversation.active ? (
               <>

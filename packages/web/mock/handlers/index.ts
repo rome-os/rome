@@ -2238,7 +2238,7 @@ export const handlers = [
   ...liveEventsHandlers,
   ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
-  // dir and the memory dir a person's dossier links into.
+  // dir and the memory dir.
   ...projectFileHandlers,
   ...memoryFileHandlers,
 ];

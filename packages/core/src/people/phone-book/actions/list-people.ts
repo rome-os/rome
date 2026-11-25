@@ -1,5 +1,5 @@
-// The phone book for agents: the same listing the People page reads, through
-// the same use case.
+// The phone book for agents: the same listing `GET /api/people` answers,
+// through the same use case.
 
 import type { Action } from "@rome-os/app-runtime";
 import { PERSON_BOND_LEVELS, parsePersonFilterLevel } from "@rome/api-types/people";

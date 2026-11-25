@@ -54,8 +54,8 @@ function chatRuleFields(
 // connection with no state renders "Not connected" however unlocked its
 // capabilities claim to be. Each entry below therefore carries the working
 // state its ceremony would have left, or the Connections page would contradict
-// the surfaces these fixtures feed — the People page's WhatsApp contacts, and
-// the configured Discord and Telegram conversations below.
+// the surfaces these fixtures feed: the WhatsApp contacts, and the configured
+// Discord and Telegram conversations below.
 export const connections: { connections: ApiConnection[] } = {
   connections: [
     {
@@ -186,7 +186,7 @@ export const connections: { connections: ApiConnection[] } = {
       ...chatRuleFields(CHAT_RULES.telegram),
     },
     {
-      // The channel behind the People page's WhatsApp section: the address-book
+      // The channel behind the WhatsApp contacts: the address-book
       // mirror those contacts come from only exists while a session is linked,
       // so dropping this entry would leave the two surfaces disagreeing about
       // whether WhatsApp is connected at all.

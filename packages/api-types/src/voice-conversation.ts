@@ -67,7 +67,7 @@ export const VOICE_CONVERSATION_ALIVE_INTERVAL_MS = 1_000;
  * - `ready`: listening has started. The audio Rome sends has this rate.
  * - `state`: the conversation's state changed.
  * - `heard`: the guardian's turn so far: `settled` text and the unsettled `pending` tail.
- * - `turn`: the guardian finished a turn, and Rome sent `text` to the chat.
+ * - `turn`: the guardian finished a turn, and Rome sent `text` to the chat as the message `inputId`.
  * - `caption`: the next sentence of the reply, sent before its audio. Plain text, never HTML: show it as text.
  * - `clear`: the guardian spoke over the reply: drop the audio not played yet.
  * - `alive`: every `VOICE_CONVERSATION_ALIVE_INTERVAL_MS`.
@@ -77,7 +77,7 @@ export const voiceConversationServerMessageSchema = z.discriminatedUnion("type",
   z.object({ type: z.literal("ready"), sampleRate: z.number().int() }),
   z.object({ type: z.literal("state"), state: voiceConversationStateSchema }),
   z.object({ type: z.literal("heard"), settled: z.string(), pending: z.string() }),
-  z.object({ type: z.literal("turn"), text: z.string() }),
+  z.object({ type: z.literal("turn"), text: z.string(), inputId: z.string() }),
   z.object({ type: z.literal("caption"), text: z.string() }),
   z.object({ type: z.literal("clear") }),
   z.object({ type: z.literal("alive") }),

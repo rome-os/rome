@@ -8,7 +8,7 @@ import { contactEmailSuggestions, EMAIL_CHANNEL } from "@/lib/contact-emails";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
-import { useAccountSearch } from "@/pages/people/use-roster";
+import { useAccountSearch } from "@/hooks/use-account-search";
 
 /**
  * The email field of an access allow-list, completing from the contacts list

@@ -10,6 +10,7 @@ import type {
   VoiceConversationState,
   VoiceConversationStopReason,
 } from "@rome/api-types/voice-conversation";
+import { randomUUID } from "node:crypto";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { SpeakerListener, SpeakerSession } from "../voice-output/speaker.js";
@@ -70,11 +71,12 @@ export interface ReplyTurn {
 
 export interface ConversationDeps {
   /**
-   * Sends the guardian's turn to the chat, and resolves with the turn that
-   * answers it. Rejects when the chat refuses it. `signal` aborts once the
-   * conversation no longer waits for that turn, so the send lets go of what it holds.
+   * Sends the guardian's turn to the chat as the message `inputId`, and
+   * resolves with the turn that answers it. Rejects when the chat refuses it.
+   * `signal` aborts once the conversation no longer waits for that turn, so
+   * the send lets go of what it holds.
    */
-  send(text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  send(text: string, inputId: string, signal: AbortSignal): Promise<ReplyTurn>;
   /** A text frame to the client. */
   message(message: VoiceConversationServerMessage): void;
   /** Reply audio to the client, in the order to play it. */
@@ -423,9 +425,11 @@ export function createConversation(deps: ConversationDeps): Conversation {
         left: new AbortController(),
       };
       reply = to;
-      deps.message({ type: "turn", text });
+      // The client shows the turn as this message until the chat has it.
+      const inputId = randomUUID();
+      deps.message({ type: "turn", text, inputId });
       update();
-      deps.send(text, to.left.signal).then(
+      deps.send(text, inputId, to.left.signal).then(
         (turn) =>
           read(to, turn).catch((err: unknown) => {
             // The reply still shows in the chat. Rome says what it has.

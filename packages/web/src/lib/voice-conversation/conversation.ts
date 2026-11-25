@@ -40,6 +40,8 @@ export interface ConversationHandlers {
   onAsking?(asking: boolean): void;
   /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
   onHeard?(text: string): void;
+  /** Rome sent the guardian's turn to the chat as the message `inputId`. */
+  onTurn?(text: string, inputId: string): void;
   /**
    * The reply's sentence playing now, as its audio starts. Empty once the
    * reply's audio has played here, or the guardian speaks over it.
@@ -99,9 +101,13 @@ const browserDeps: ConversationDeps = {
   createPlayer: createPcmPlayer,
 };
 
-/** Starts a voice conversation in `chatId`. Call it from the guardian's click, so the reply may play. */
+/**
+ * Starts a voice conversation in `chat`: a chat's id, or, for a draft, what
+ * creates the chat and answers its id. Call it from the guardian's click, so
+ * the reply may play.
+ */
 export function startVoiceConversation(
-  chatId: string,
+  chat: string | (() => Promise<string>),
   handlers: ConversationHandlers,
   deps: ConversationDeps = browserDeps,
 ): VoiceConversation {
@@ -174,11 +180,12 @@ export function startVoiceConversation(
     }, player.ahead() * 1000);
   };
   // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
-  const turnSent = () => {
+  const turnSent = (text: string, inputId: string) => {
     unsent = "";
     clearCaptions();
     handlers.onHeard?.("");
     handlers.onCaption?.("");
+    handlers.onTurn?.(text, inputId);
   };
   // The guardian spoke over the reply: what has not played goes, and its words
   // with it. What Rome hears now is the guardian's.
@@ -231,13 +238,22 @@ export function startVoiceConversation(
         handlers.onAsking?.(true);
       },
     )
-    .then((opened) => {
+    .then(async (opened) => {
       if (asking) handlers.onAsking?.(false);
       if (done) {
         opened.close();
         return;
       }
       microphone = opened;
+      // A draft's chat is created once the microphone is on, so a refused microphone leaves no empty chat.
+      let chatId: string;
+      try {
+        chatId = typeof chat === "string" ? chat : await chat();
+      } catch {
+        finish("chat-refused");
+        return;
+      }
+      if (done) return;
       socket = deps.openSocket();
       heardFromRome(OPEN_LIMIT_MS);
       socket.onopen = () => {
@@ -262,7 +278,7 @@ export function startVoiceConversation(
         if (data.type === "ready") sampleRate = data.sampleRate;
         else if (data.type === "state") stateChanged(data.state);
         else if (data.type === "heard") heardSoFar(`${data.settled}${data.pending}`);
-        else if (data.type === "turn") turnSent();
+        else if (data.type === "turn") turnSent(data.text, data.inputId);
         else if (data.type === "caption") captionNext(data.text);
         else if (data.type === "clear") dropUnplayed();
         else if (data.type === "ended") finish(null);

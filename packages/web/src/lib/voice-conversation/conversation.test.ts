@@ -36,7 +36,7 @@ function fakeSocket() {
   return socket;
 }
 
-function setup(refuse?: string) {
+function setup(refuse?: string, chat: string | (() => Promise<string>) = "concierge") {
   const socket = fakeSocket();
   let onAudio: (chunk: ArrayBuffer) => void = () => {};
   const played: Array<[number, number]> = [];
@@ -76,8 +76,9 @@ function setup(refuse?: string) {
   const unsent: string[] = [];
   const heard: string[] = [];
   const captions: string[] = [];
+  const turns: Array<[string, string]> = [];
   const conversation = startVoiceConversation(
-    "concierge",
+    chat,
     {
       onState: (s) => states.push(s),
       onEnded: (r, words) => {
@@ -86,6 +87,7 @@ function setup(refuse?: string) {
       },
       onHeard: (text) => heard.push(text),
       onCaption: (text) => captions.push(text),
+      onTurn: (text, inputId) => turns.push([text, inputId]),
     },
     deps,
   );
@@ -97,6 +99,7 @@ function setup(refuse?: string) {
     unsent,
     heard,
     captions,
+    turns,
     setAhead: (seconds: number) => {
       ahead = seconds;
     },
@@ -141,8 +144,9 @@ describe("a voice conversation in the browser", () => {
       c.socket.say({ type: "ready", sampleRate: 24000 });
       const audio = () => c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       c.socket.say({ type: "heard", settled: "Book a ", pending: "table" });
-      c.socket.say({ type: "turn", text: "Book a table" });
+      c.socket.say({ type: "turn", text: "Book a table", inputId: "spoken-1" });
       expect(c.heard).toEqual(["Book a table", ""]);
+      expect(c.turns).toEqual([["Book a table", "spoken-1"]]);
       expect(c.captions).toEqual([""]);
 
       // A caption waits for its sentence's audio, still being made.
@@ -216,13 +220,42 @@ describe("a voice conversation in the browser", () => {
       c.socket.say({ type: "caption", text: "Bye." });
       c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       c.socket.say({ type: "caption", text: "See you." });
-      c.socket.say({ type: "turn", text: "Wait" });
+      c.socket.say({ type: "turn", text: "Wait", inputId: "spoken-2" });
       c.socket.onmessage?.({ data: new ArrayBuffer(480) });
       rs.advanceTimersByTime(1_000);
       expect(c.captions).toEqual([""]);
     } finally {
       rs.useRealTimers();
     }
+  });
+
+  it("creates a draft's chat once the microphone is on, then starts in it", async () => {
+    const order: string[] = [];
+    const c = setup(undefined, async () => {
+      order.push("chat");
+      return "topic-1";
+    });
+    await settle();
+    c.socket.open();
+    expect(order).toEqual(["chat"]);
+    expect(c.socket.text()).toEqual([{ type: "start", chatId: "topic-1", sampleRate: 16000 }]);
+
+    const refusedMic = setup("NotAllowedError", async () => {
+      order.push("refused");
+      return "topic-2";
+    });
+    await settle();
+    expect(refusedMic.ended).toEqual(["microphone-blocked"]);
+    expect(order).toEqual(["chat"]);
+  });
+
+  it("ends as refused when a draft's chat cannot be created", async () => {
+    const c = setup(undefined, async () => {
+      throw new Error("no");
+    });
+    await settle();
+    expect(c.ended).toEqual(["chat-refused"]);
+    expect(c.micClosed()).toBe(true);
   });
 
   it("sends no audio while muted", async () => {

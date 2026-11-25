@@ -3878,12 +3878,17 @@ describe("Webchat API", () => {
   };
 
   it("hands a spoken input the turn that answers it, in the guardian's chats only", async () => {
+    const SPOKEN_INPUT = "5f0c2a8e-3b1d-4c6e-9a7f-2d4b6c8e0a1f";
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     const { runtime } = createWebchatRuntime(deps);
     const id = await conciergeTopic();
     expect(await runtime.canSendSpoken(id)).toBe(true);
-    const reply = await runtime.sendSpoken(id, "你好");
+    const reply = await runtime.sendSpoken(id, "你好", undefined, SPOKEN_INPUT);
     expect(reply.events).toEqual(expect.any(Function));
+    // The spoken input is stored as the message the conversation named.
+    expect(
+      (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user").map((m) => m.id),
+    ).toEqual([SPOKEN_INPUT]);
 
     // A task chat, or any chat but a Concierge one, takes no voice conversation.
     const task = await runtime.startChat({}, "guardian");

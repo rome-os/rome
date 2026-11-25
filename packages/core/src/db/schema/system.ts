@@ -135,7 +135,7 @@ export const links = sqliteTable(
   (table) => [
     // One account belongs to exactly one person. Held in the database rather
     // than checked before each write: two concurrent placements of the same
-    // waiting sender both read "unlinked" and both insert, and the People page
+    // waiting sender both read "unlinked" and both insert, and the people listing
     // would then show that account under two people at once.
     uniqueIndex("idx_links_account").on(table.platform, table.accountId),
   ],
@@ -186,8 +186,7 @@ export const accountProfiles = sqliteTable(
 // and kept current by the ongoing `contacts.*` / `chats.*` / `messages.upsert`
 // events. Deliberately separate from the curated `persons` graph: a WhatsApp
 // account can have thousands of contacts, so they live here as a browsable
-// address book and are promoted to a `persons` row only on guardian action
-// (via the `POST /api/people` + `POST /api/people/:id/accounts` flow). The
+// address book, and only a contact that becomes a person gets a `persons` row. The
 // bridge key is the JID: a private contact's `jid` equals the `channelUserId`
 // inbound messages map to, so a promoted contact is recognized on its next
 // message with no extra wiring.

@@ -1141,9 +1141,15 @@ export interface WebchatRuntime {
    * the turn that answers it, or, for an agent whose text is private, the
    * messages that turn adds to the chat. Throws the route's error, and also for
    * a chat the guardian may not open or a send that started no turn. Once
-   * `signal` aborts, it lets go of what it gathered and rejects.
+   * `signal` aborts, it lets go of what it gathered and rejects. `inputId`
+   * names the stored message, as a composer's send does.
    */
-  sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
+  sendSpoken(
+    chatId: string,
+    text: string,
+    signal?: AbortSignal,
+    inputId?: string,
+  ): Promise<ReplyTurn>;
   /** Whether `sendSpoken` would take a turn for `chatId`: one the ambient session actor may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
@@ -6164,7 +6170,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     },
     canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
-    async sendSpoken(chatId, text, signal) {
+    async sendSpoken(chatId, text, signal, inputId = randomUUID()) {
       const refusal = await spokenRefusal(chatId);
       if (refusal) throw new Error(refusal);
       // An agent whose text is private answers with the messages its tools add,
@@ -6181,7 +6187,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       try {
         const sent = await handleChatSend(
           chatId,
-          { inputId: randomUUID(), text, spoken: true, priority: "now" },
+          { inputId, text, spoken: true, priority: "now" },
           { onTurn: (turn) => (started.turn = turn) },
         );
         if (sent.status >= 400) throw new Error(routeError(sent));
