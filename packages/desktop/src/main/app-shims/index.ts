@@ -183,9 +183,7 @@ export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFil
       }
     }
     if (!record || !trusted) {
-      log.warn(
-        `Refused ${shim.bundleId} (pid ${shim.pid}): not an app Rome put on the Desktop`,
-      );
+      log.warn(`Refused ${shim.bundleId} (pid ${shim.pid}): not an app Rome put on the Desktop`);
       shim.quit();
       return;
     }
