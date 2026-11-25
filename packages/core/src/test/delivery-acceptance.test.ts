@@ -132,6 +132,7 @@ describe("a delivery settles once Chats has the message on record", () => {
           },
         },
         onRecord: unknownSenders({
+          heardForMs: 60_000,
           isRomes: (account) => account.id === ROME.id,
           isOwnAccount: () => true,
           ...(opts.tell ? { tell: opts.tell } : {}),
