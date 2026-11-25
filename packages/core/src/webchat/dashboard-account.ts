@@ -75,7 +75,8 @@ export async function readerOwner(
  * An action may write only into a chat its caller may open, as the dashboard's
  * own routes allow: another person's Concierge or task chat is not found. A
  * person Rome cannot tell opens no one's. A send with no actor and no chat is
- * Rome's own work, and goes through.
+ * Rome's own work, and goes through. The fire of a routine that acts for no one
+ * has no actor, so its sends are Rome's own work too.
  */
 export async function refuseAnotherOwnersChat(
   webchatRepo: WebChatRepository,
