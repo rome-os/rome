@@ -17,7 +17,6 @@ import type {
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
-  SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
 import { existsSync, readFileSync } from "node:fs";
@@ -55,7 +54,7 @@ export type WakeGate = (
     mentionsOthers?: boolean;
   },
   sender: { person: { id: string; bondLevel: BondLevel } | null },
-) => "wake" | "quiet" | "block" | "review";
+) => "wake" | "quiet" | "block";
 
 /** The wake gate for a chat, built from its current settings. */
 export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
@@ -64,7 +63,6 @@ export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
   sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
-  sentinelLogRepo: SentinelLogRepository;
   approvalsRepo: ApprovalsRepository;
   wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
@@ -89,11 +87,6 @@ interface MessageContext {
   threadName?: string;
   threadType?: string;
   person: PersonRecord | null;
-}
-
-export interface SentinelDecision {
-  action: "replied" | "ignored" | "escalated";
-  response?: string;
 }
 
 type CollectedAgentResult =
@@ -161,35 +154,6 @@ function getRuntimeThreadPath(): string | undefined {
   return typeof threadPath === "string" && threadPath.trim() ? threadPath : undefined;
 }
 
-/**
- * What Rome knows about a message's sender: their person's notes, or their
- * name and bond level when the guardian keeps none, or that they are a
- * stranger. Sentinel reads it with each message it triages. The agents that
- * answer read a person's notes themselves, with `core:read_person`.
- */
-export function buildSenderInfo(
-  ctx: Pick<MessageContext, "person"> & {
-    resolveProfilePath(filePath: string): string;
-    strangerPersonId: string;
-  },
-): string {
-  if (!ctx.person || ctx.person.id === ctx.strangerPersonId) {
-    return "stranger (no person mapping yet)";
-  }
-
-  // Notes live at the stored profile path, or by the person's id when none
-  // is stored, as core's `personProfilePath` places them.
-  const profilePath = ctx.person.profilePath || `memory/relationship/${ctx.person.id}.md`;
-  return (
-    readMarkdownContext(ctx.resolveProfilePath(profilePath)) ??
-    [
-      `Mapped person: ${ctx.person.displayName}`,
-      `Bond level: ${ctx.person.bondLevel}`,
-      "No notes on this sender yet.",
-    ].join("\n")
-  );
-}
-
 export function buildMessageContext(
   ctx: MessageContext & {
     resolveProfilePath(filePath: string): string;
@@ -216,39 +180,6 @@ export function buildMessageContext(
     "",
     readContext("memory/relationship/GUARDIAN.md") ?? "Guardian profile unavailable.",
   ].join("\n");
-}
-
-export function parseSentinelDecision(raw: string): SentinelDecision {
-  const trimmed = raw.trim();
-  if (!trimmed) return { action: "escalated" };
-
-  const directReply = trimmed.match(/^\s*REPLY\s*:\s*([\s\S]*)$/i);
-  const directTerminal = trimmed.match(/^\s*(ESCALATE|IGNORE)\s*$/i);
-  const labeled = trimmed.match(/(?:^|\n)\s*Decision\s*:\s*(REPLY|ESCALATE|IGNORE)\b/i);
-  const match = directReply ?? directTerminal ?? labeled;
-  if (!match) return { action: "escalated" };
-
-  const decision = directReply ? "REPLY" : match[1].toUpperCase();
-  if (decision === "ESCALATE") return { action: "escalated" };
-  if (decision === "IGNORE") return { action: "ignored" };
-
-  const explicitResponse = trimmed.match(/(?:^|\n)\s*(?:Response|Reply)\s*:\s*([\s\S]*)$/i);
-  const rawResponse = (explicitResponse?.[1] ?? directReply?.[1] ?? "").trim();
-  const conflictingDecision = rawResponse.match(/(?:^|\s)decision\s*:/i);
-  if (conflictingDecision) return { action: "escalated" };
-  const conflictingTerminal = rawResponse.match(/(?:^|\n)\s*(?:ESCALATE|IGNORE)\s*(?:\n|$)/i);
-  if (conflictingTerminal) return { action: "escalated" };
-
-  const internalLabelIndex = rawResponse.search(
-    /(?:^|\s)(?:analysis|reason(?:ing)?|rationale)\s*:/i,
-  );
-  const response = (
-    internalLabelIndex >= 0 ? rawResponse.slice(0, internalLabelIndex) : rawResponse
-  ).trim();
-  if (!response) {
-    return { action: "escalated" };
-  }
-  return { action: "replied", response };
 }
 
 /** Who the envoy is told a reply goes to: the answered message's sender. */
@@ -430,10 +361,10 @@ async function resolveAgent<F extends string | null>(
 }
 
 // ---------------------------------------------------------------------------
-// Trusted path: main agent -> envoy check -> send / approval gate
+// The agent's turn: target agent -> envoy check -> send / approval gate
 // ---------------------------------------------------------------------------
 
-async function handleTrustedMessage(
+async function runTurnAndReply(
   deps: MessageHandlerRuntimeDeps,
   args: Record<string, unknown>,
   channelThreadKey: string,
@@ -450,7 +381,7 @@ async function handleTrustedMessage(
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
   const threadPath = getRuntimeThreadPath();
 
-  log.info("running agent (trusted path)", {
+  log.info("running agent", {
     channel,
     channelUserId,
     bondLevel,
@@ -485,8 +416,7 @@ async function handleTrustedMessage(
         projectName:
           typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined,
         // Carry the sender's bond level so the core login gate can scope the
-        // guardian-only "no AI tool configured" notice to the guardian (other
-        // trusted senders reach this same path).
+        // guardian-only "no AI tool configured" notice to the guardian.
         senderBondLevel: bondLevel,
       },
       contextSuffix,
@@ -615,106 +545,6 @@ async function handleTrustedMessage(
 }
 
 // ---------------------------------------------------------------------------
-// Untrusted path: sentinel -> reply / ignore / escalate
-// ---------------------------------------------------------------------------
-
-async function handleUntrustedMessage(
-  deps: MessageHandlerRuntimeDeps,
-  args: Record<string, unknown>,
-  channelThreadKey: string,
-  contextSuffix: string,
-  chatId: string,
-  targetAgent: string,
-  senderInfo: string,
-): Promise<ActionResult> {
-  const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
-    string,
-    string
-  >;
-  const bondLevel = (args.bondLevel as string) ?? "other";
-  const workingDir =
-    typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
-  log.info("running sentinel (untrusted path)", { channel, channelUserId, bondLevel, displayName });
-
-  const sentinelResult = await collectAgentResult(
-    deps.agentRunner,
-    {
-      agentName: "sentinel",
-      // The sender's own notes go on each message: the sentinel's session is
-      // the chat's, where many people speak, and it reads no one else's.
-      prompt: `<sender>\n${senderInfo}\n</sender>\n\nTriage this message from ${displayName} (${bondLevel}):\n\n${text}`,
-      // One sentinel session per sender: each message carries its sender's
-      // notes, and a session shared by a group would carry every sender's
-      // notes into the next stranger's triage.
-      channelThreadKey: `sentinel:${channelThreadKey}:${channelUserId}`,
-      contextSuffix,
-      workingDir,
-    },
-    deps.emitAgentMessage,
-    "sentinel",
-  );
-
-  if (!sentinelResult.success) {
-    log.warn("sentinel failed; escalating to trusted path", {
-      channel,
-      channelUserId,
-      error: sentinelResult.error,
-    });
-    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
-    return handleTrustedMessage(
-      deps,
-      { ...args, bondLevel },
-      channelThreadKey,
-      contextSuffix,
-      chatId,
-      targetAgent,
-    );
-  }
-
-  const sentinelOutput = sentinelResult.content;
-  const decision = parseSentinelDecision(sentinelOutput);
-  log.info("sentinel decision", { action: decision.action, channel, channelUserId });
-
-  await deps.sentinelLogRepo.create({
-    messageId: messageId ?? "",
-    channel,
-    channelUserId,
-    displayName,
-    threadId,
-    text,
-    action: decision.action,
-    response: decision.response,
-  });
-
-  if (decision.action === "replied" && decision.response) {
-    await sendAnswer(deps, {
-      channel,
-      threadId,
-      text: decision.response,
-      channelUserId,
-      replyToMessageId: messageId,
-      romeSessionId: chatId,
-      knownToProvider: false,
-    });
-    return { status: "ok", data: { action: "sentinel_replied" } };
-  }
-
-  if (decision.action === "escalated") {
-    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
-    return handleTrustedMessage(
-      deps,
-      { ...args, bondLevel },
-      channelThreadKey,
-      contextSuffix,
-      chatId,
-      targetAgent,
-    );
-  }
-
-  return { status: "ok", data: { action: "sentinel_ignored" } };
-}
-
-// ---------------------------------------------------------------------------
 // Factory: createMessageHandlerAction
 // ---------------------------------------------------------------------------
 
@@ -778,7 +608,7 @@ export function createMessageHandlerAction(
         // The hook asked the wake gate already when the host recorded the
         // message with People's answer; otherwise ask it here.
         const wake =
-          args.wake === "wake" || args.wake === "review"
+          args.wake === "wake"
             ? args.wake
             : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
                 {
@@ -861,7 +691,7 @@ export function createMessageHandlerAction(
         // the agent was away. Waking the agent makes it the turn's prompt.
         const recorded =
           typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
-        if (wake === "quiet") {
+        if (wake !== "wake") {
           const stored = recorded
             ? { inserted: true }
             : await conversations.addMessage({
@@ -905,15 +735,14 @@ export function createMessageHandlerAction(
           person && person.id !== deps.strangerPersonId ? person.displayName : null;
         const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
 
-        const triggersTargetAgent = wake === "wake";
-        if (recorded && triggersTargetAgent) {
+        if (recorded) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
         }
         const stored = recorded
           ? { inserted: true }
           : await conversations.addMessage({
               sessionId: conversation.id,
-              role: triggersTargetAgent ? "user" : "notification",
+              role: "user",
               content: messageContent,
               platformMessageId,
               senderId: channelUserId,
@@ -932,29 +761,13 @@ export function createMessageHandlerAction(
           wake,
         });
 
-        if (triggersTargetAgent) {
-          return handleTrustedMessage(
-            deps,
-            enrichedArgs,
-            channelThreadKey,
-            contextSuffix,
-            conversation.id,
-            targetAgent,
-          );
-        }
-
-        return handleUntrustedMessage(
+        return runTurnAndReply(
           deps,
           enrichedArgs,
           channelThreadKey,
           contextSuffix,
           conversation.id,
           targetAgent,
-          buildSenderInfo({
-            person: person as PersonRecord | null,
-            resolveProfilePath: deps.resolveProfilePath,
-            strangerPersonId: deps.strangerPersonId,
-          }),
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
