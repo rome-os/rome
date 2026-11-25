@@ -255,6 +255,7 @@ import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
 import { GMAIL_SEND_ACTION, registerGmailActions } from "./connections/gmail/actions.js";
 import { OUTLOOK_SEND_ACTION, registerOutlookActions } from "./connections/outlook/actions.js";
+import { whoMayAsk } from "./apps/actions/who-may-ask.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
@@ -1909,6 +1910,9 @@ async function main() {
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+    // The check system:read_devices and system:run_on_device pass, so the
+    // older names let in the same turns.
+    whoMayAsk: whoMayAsk((chatId) => concierge.ownerOfChat(chatId)),
   });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {

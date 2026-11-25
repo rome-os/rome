@@ -65,6 +65,13 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+// What the mocked Concierge composer was handed for a voice conversation's words.
+const conciergeVoice = rs.hoisted(() => ({
+  heard: null as null | ((text: string) => void),
+  turn: null as null | ((text: string, inputId: string) => void),
+  stopped: null as null | ((reason: "chat-refused") => void),
+  start: null as null | (() => void),
+}));
 // The chats a voice conversation started in the mocked Concierge composer talks in.
 const conciergeVoiceChats = rs.hoisted(() => [] as string[]);
 import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
@@ -252,7 +259,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     onOpenStoredTrace,
     unreadFrom,
     contentRef,
+    tail,
   }: {
+    tail?: ReactNode;
     unreadFrom?: string | null;
     contentRef: (node: HTMLElement | null) => void;
     onOpenStoredTrace: (target: unknown) => void;
@@ -329,6 +338,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
+      {tail}
       {rows
         .filter((row) => row.kind === "trace")
         .map((row) => (
@@ -469,11 +479,19 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onStop?: () => void;
       chatName?: string | null;
       placeholder?: string;
+      onVoiceHeard?: (text: string) => void;
+      onVoiceTurn?: (text: string, inputId: string) => void;
+      onVoiceStopped?: (reason: "chat-refused") => void;
+      onVoiceStart?: () => void;
       startChat?: () => Promise<string>;
     },
     ref,
   ) {
     const draft = useReplyDraft();
+    conciergeVoice.heard = props.onVoiceHeard ?? null;
+    conciergeVoice.turn = props.onVoiceTurn ?? null;
+    conciergeVoice.stopped = props.onVoiceStopped ?? null;
+    conciergeVoice.start = props.onVoiceStart ?? null;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
@@ -3277,6 +3295,46 @@ describe("Chat draft", () => {
   });
 });
 
+describe("Chat voice conversation words", () => {
+  it("brings the newest message into view when a conversation starts in a chat scrolled up", async () => {
+    stickToBottom.isAtBottom = false;
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.start).not.toBeNull());
+    stickToBottom.scrollToBottom.mockClear();
+
+    act(() => conciergeVoice.start?.());
+    await waitFor(() => expect(stickToBottom.scrollToBottom).toHaveBeenCalledWith("auto"));
+  });
+
+  it("grows the guardian's unsent words at the end, then shows the sent message in their place", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.heard).not.toBeNull());
+    const growing = () => document.querySelector("[data-voice-heard]");
+
+    act(() => conciergeVoice.heard?.("Book a"));
+    expect(growing()?.textContent).toBe("Book a");
+    act(() => conciergeVoice.heard?.("Book a table for four"));
+    expect(growing()?.textContent).toBe("Book a table for four");
+
+    // Sent: the bubble becomes the message it was sent as, once, with no gap between.
+    act(() => conciergeVoice.turn?.("Book a table for four", "spoken-1"));
+    expect(growing()).toBeNull();
+    const rows = screen.getAllByTestId("user-row");
+    expect(rows.map((row) => row.getAttribute("data-timeline-anchor"))).toEqual(["spoken-1"]);
+    expect(screen.getByTestId("user-text").textContent).toContain("Book a table for four");
+  });
+
+  it("loads the chat again without a turn the chat refused, as it was never stored", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.turn).not.toBeNull());
+    act(() => conciergeVoice.turn?.("Book a table", "spoken-1"));
+    expect(screen.getAllByTestId("user-row")).toHaveLength(1);
+
+    act(() => conciergeVoice.stopped?.("chat-refused"));
+    await waitFor(() => expect(screen.queryAllByTestId("user-row")).toHaveLength(0));
+  });
+});
+
 describe("Chat topic draft with a voice conversation", () => {
   afterEach(() => {
     conciergeVoiceChats.length = 0;
@@ -4374,6 +4432,29 @@ describe("Chat Concierge jump to a message", () => {
       fireEvent.click(row.querySelector('button[aria-label="message.share"]')!);
       await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
       expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-2");
+    });
+
+    it("closes the chain when a voice conversation starts, so the words grow in sight", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+
+      act(() => conciergeVoice.start?.());
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
     });
 
     it("sends implicitly in the chain and restores the placeholder on close", async () => {

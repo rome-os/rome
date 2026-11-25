@@ -27,7 +27,6 @@ import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-sta
 import { isGuardianSession } from "../../access/session-actor.js";
 import { linkCode } from "../../people/link-code/index.js";
 import { phoneBook } from "../../people/phone-book/index.js";
-import { personHistory } from "../../people/person-history/index.js";
 import { feishu } from "../../connections/kinds/feishu/index.js";
 import { discordApp, romeCloudDiscordApp } from "../../connections/kinds/discord-app/index.js";
 import { linkedin } from "../../connections/kinds/linkedin/index.js";
@@ -51,7 +50,7 @@ export const OUTSIDER = { accountId: "acct-outsider", email: "outsider@team-veri
 
 /** The daemon's mount lists in `src/index.ts`, by factory name. `mountDrift`
  *  compares them with what this file mounts. */
-export const MOUNTED_FEATURES = ["linkCode", "phoneBook", "personHistory"] as const;
+export const MOUNTED_FEATURES = ["linkCode", "phoneBook"] as const;
 export const MOUNTED_KINDS = ["feishu", "discordApp", "linkedin"] as const;
 
 export interface InstanceOptions {
@@ -140,7 +139,6 @@ function features(deps: ApiDeps): Feature[] {
       ...deps,
       ownerOfChat: (chatId) => ownerOfChat((id) => deps.webchatRepo.getSession(id), chatId),
     } as Parameters<typeof phoneBook>[0]),
-    personHistory(deps as Parameters<typeof personHistory>[0]),
   ];
 }
 

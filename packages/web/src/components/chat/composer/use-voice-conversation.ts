@@ -12,17 +12,27 @@ import {
  * A voice conversation in `chatId`, run from the composer. The composer offers
  * it only where `available` holds; Rome checks the chat again when it starts.
  * A draft with `startChat` offers it too: starting creates the chat.
+ * `onTurn` hears of each turn Rome sends to the chat, and the message it is.
  * `onUnsent` gets the guardian's words a conversation ended before sending.
+ * `onStopped` hears why a conversation ended on its own.
  */
 export function useVoiceConversation({
   chatId,
   startChat,
+  onTurn,
   onUnsent,
+  onStopped,
 }: {
   chatId: string | null | undefined;
   startChat?: () => Promise<string>;
+  onTurn?: (text: string, inputId: string) => void;
   onUnsent?: (text: string) => void;
+  onStopped?: (reason: ConversationStopReason) => void;
 }) {
+  const onStoppedRef = useRef(onStopped);
+  onStoppedRef.current = onStopped;
+  const onTurnRef = useRef(onTurn);
+  onTurnRef.current = onTurn;
   const onUnsentRef = useRef(onUnsent);
   onUnsentRef.current = onUnsent;
   const info = useVoiceConversationInfo();
@@ -51,6 +61,7 @@ export function useVoiceConversation({
       onAsking: setAsking,
       onHeard: setHeard,
       onCaption: setCaption,
+      onTurn: (text, inputId) => onTurnRef.current?.(text, inputId),
       onEnded: (reason, unsent) => {
         conversationRef.current = null;
         setActive(false);
@@ -59,6 +70,7 @@ export function useVoiceConversation({
         mutedRef.current = false;
         setStopped(reason);
         if (unsent) onUnsentRef.current?.(unsent);
+        if (reason) onStoppedRef.current?.(reason);
       },
     });
   }, [chatId, startChat]);

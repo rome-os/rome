@@ -73,6 +73,7 @@ function setup() {
   const messages: VoiceConversationServerMessage[] = [];
   const played: number[] = [];
   const sent: string[] = [];
+  const inputIds: string[] = [];
   const signals: AbortSignal[] = [];
   const turns: ReturnType<typeof scriptedTurn>[] = [];
   const said: { id: string; text: string }[] = [];
@@ -88,8 +89,9 @@ function setup() {
     close: () => {},
   };
   const conversation = createConversation({
-    send: async (text, signal) => {
+    send: async (text, inputId, signal) => {
       sent.push(text);
+      inputIds.push(inputId);
       signals.push(signal);
       const turn = scriptedTurn();
       turns.push(turn);
@@ -123,6 +125,7 @@ function setup() {
     messages,
     played,
     sent,
+    inputIds,
     signals,
     turns,
     said,
@@ -144,6 +147,11 @@ describe("voice conversation", () => {
     t.conversation.endpoint();
     await settled();
     expect(t.sent).toEqual(["帮我看一下PR 的状态。"]);
+    // The client learns which message the turn became, so it can show it until the chat has it.
+    expect(t.messages.filter((m) => m.type === "turn")).toEqual([
+      { type: "turn", text: "帮我看一下PR 的状态。", inputId: t.inputIds[0] },
+    ]);
+    expect(t.inputIds[0]).toEqual(expect.any(String));
     expect(t.states()).toEqual(["thinking"]);
 
     t.turns[0]?.push(

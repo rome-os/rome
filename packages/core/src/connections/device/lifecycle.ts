@@ -5,11 +5,13 @@
 // origins a removal leaves with no install, through `turnOriginOff`. Concept:
 // docs/domains/connections.md#device-connection.
 
+import type { DeviceList } from "@rome/api-types/devices";
 import type { DeviceManageResult } from "../../desktops/node-devices.js";
 import type { DeviceConnectionsRepository } from "./repository.js";
 
 interface DeviceService {
   removeDevice(deviceId: string): Promise<DeviceManageResult>;
+  listDevices(): Promise<DeviceList | null>;
 }
 
 export interface DeviceLifecycleDeps {
@@ -23,10 +25,22 @@ export function withDeviceLifecycle<S extends DeviceService>(
   service: S,
   deps: DeviceLifecycleDeps,
 ): S {
+  const listed = async (deviceId: string) =>
+    (await service.listDevices())?.devices.some((device) => device.id === deviceId);
   return {
     ...service,
+    /** A removal whose answer was lost counts as done when Cloud listed the
+     *  device before and lists it no more. */
     async removeDevice(deviceId: string) {
-      const result = await service.removeDevice(deviceId);
+      const before = await listed(deviceId);
+      let result = await service.removeDevice(deviceId);
+      if (
+        !result.ok &&
+        result.code === "unavailable" &&
+        before &&
+        (await listed(deviceId)) === false
+      )
+        result = { ok: true };
       if (result.ok) {
         const { orphanedOrigins } = deps.connections().removeDevice(deviceId);
         for (const origin of orphanedOrigins) deps.turnOriginOff(origin);
