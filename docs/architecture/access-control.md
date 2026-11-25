@@ -27,8 +27,9 @@ Entry is the one question asked before anything from outside Rome runs: may this
 ### Invariants
 
 - A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
-- The answer holds for the moment of the call. Nothing keeps it.
+- The answer holds for what was asked about: one request or one connection. Nothing else keeps it.
 - A person Rome cannot tell never enters.
+- A live connection is asked about once, when it opens. One a member has open when they are removed stays open until it closes, a known limitation. Their next request or connection is refused.
 
 ## Request flow
 
@@ -41,7 +42,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/people.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard, and so does `/ws/voice-conversation`. On `/ws/events` a dashboard admin gets every topic the guardian gets. Once their email leaves the allow-list, `/ws/events`, `/ws/node` and `/ws/voice-conversation` refuse their next request and close their open socket within 25 seconds. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, `/ws/node`, `/ws/voice-input`, and `/ws/voice-conversation` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` a dashboard admin gets every topic the guardian gets. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 
