@@ -23,7 +23,7 @@ import {
   UnknownAccountCodeError,
 } from "../../identity/application/account-codes.js";
 import { AccountTakenError } from "../../identity/identity.js";
-import { accountCodesIn, normalizedAccountCode } from "../../lib/account-code-shape.js";
+import { accountCodesIn, normalizedAccountCode } from "../../identity/account-code-shape.js";
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
 import type { Admission, ReadBack } from "./admission.js";

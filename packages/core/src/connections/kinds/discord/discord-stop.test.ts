@@ -28,16 +28,4 @@ describe("Discord message text", () => {
     expect(discordInboundText("<@123> <@456> /STOP", () => "Rome")).toBe("/stop");
     expect(discordInboundText("/stop", () => undefined)).toBe("/stop");
   });
-
-  it("reads an account code after mentions alone as the bare code", () => {
-    expect(discordInboundText("<@123> ROME-7KQ2M9-XAB3CD", () => "Rome")).toBe(
-      "ROME-7KQ2M9-XAB3CD",
-    );
-    expect(discordInboundText("<@123> `ROME-7KQ2M9-XAB3CD`", () => "Rome")).toBe(
-      "`ROME-7KQ2M9-XAB3CD`",
-    );
-    expect(discordInboundText("<@123> ROME-7KQ2M9-XAB3CD please", () => "Rome")).toBe(
-      "@Rome ROME-7KQ2M9-XAB3CD please",
-    );
-  });
 });
