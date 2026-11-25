@@ -14,7 +14,8 @@ Develop:
   rome upgrade    Bump app.yaml version by major, minor, or patch
 
 Dev and build read app.yaml (web.displayName, web.navLabel, web.entry)
-and emit dist/ with manifest.json + assets/.
+and emit dist/ with manifest.json + assets/. An app.yaml with no web
+section builds without a web bundle; dev requires one.
 
 Rome App Store:
   rome login      Log in to the Rome App Store and store credentials
