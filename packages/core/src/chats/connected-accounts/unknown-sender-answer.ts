@@ -2,6 +2,7 @@
 // account. Vocabulary: docs/domains/participation.md#entry.
 
 import type { ConnectionRegistry } from "../../connections/registry.js";
+import { PrivateMessageRefused } from "../../connections/types.js";
 import { createLogger } from "../../logger.js";
 import type { UnknownSenderMessage } from "../../participation/unknown-senders.js";
 import { sendThrough } from "./connection-ports.js";
@@ -39,7 +40,8 @@ export interface UnknownSenderAnswerDeps {
  * Builds the `tell` that answers a sender nobody holds with the link to the
  * connect page, in the chat the message came from. In a shared chat the answer
  * goes to the sender alone where the connection's kind offers that, and is a
- * visible reply otherwise: the link carries no secret.
+ * visible reply otherwise or when the platform refuses the private message:
+ * the link carries no secret.
  *
  * At most one answer goes to an account in 24 hours, and at most one to a chat
  * in 10 minutes. The record is kept in memory, so a restart forgets it and one
@@ -82,7 +84,17 @@ export function answerUnknownSenders(
           : connection.withTalker((talker) =>
               talker.privateMessaging?.sendOnlyTo(message.chatId, message.sender.id, text, reply),
             );
-      await (privately ?? sendThrough(connection, message.chatId, { text, ...reply }));
+      const visibly = () => sendThrough(connection, message.chatId, { text, ...reply });
+      if (!privately) {
+        await visibly();
+      } else {
+        try {
+          await privately;
+        } catch (error) {
+          if (!(error instanceof PrivateMessageRefused)) throw error;
+          await visibly();
+        }
+      }
     } catch (error) {
       log.warn("could not answer a sender nobody holds", {
         messageId: message.messageId,

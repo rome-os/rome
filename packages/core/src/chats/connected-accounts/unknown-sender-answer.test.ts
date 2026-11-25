@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, OutgoingMessage } from "@rome-os/app-runtime";
-import type { Connection } from "../../connections/types.js";
+import { type Connection, PrivateMessageRefused } from "../../connections/types.js";
 import type { UnknownSenderMessage } from "../../participation/unknown-senders.js";
 import {
   ANSWERED_KEPT,
@@ -20,7 +20,15 @@ interface Sent {
   onlyTo?: string;
 }
 
-function harness(options: { privately?: boolean; origin?: string | null; fails?: boolean } = {}) {
+function harness(
+  options: {
+    privately?: boolean;
+    origin?: string | null;
+    fails?: boolean;
+    /** What the private send throws instead of sending. */
+    refuses?: Error;
+  } = {},
+) {
   const sent: Sent[] = [];
   let clock = 0;
   const talker = {
@@ -42,6 +50,7 @@ function harness(options: { privately?: boolean; origin?: string | null; fails?:
               text: string,
               opts?: { replyToMessageId?: string },
             ) {
+              if (options.refuses) throw options.refuses;
               sent.push({
                 chatId,
                 text,
@@ -132,6 +141,25 @@ describe("answerUnknownSenders", () => {
     expect(sent).toEqual([
       { chatId: "C1", text: unknownSenderAnswer(LINK), onlyTo: "T1/U9", replyToMessageId: "1.2" },
     ]);
+  });
+
+  it("answers visibly once when the private answer is refused", async () => {
+    const { tell, sent } = harness({
+      privately: true,
+      refuses: new PrivateMessageRefused("T1/U9", "direct messages closed"),
+    });
+    await tell(message({ chatId: "C1" as ChatId, addressing: "mention" }));
+    expect(sent).toEqual([
+      { chatId: "C1", text: unknownSenderAnswer(LINK), replyToMessageId: "1.2" },
+    ]);
+  });
+
+  it("does not answer visibly when the private answer fails for another reason", async () => {
+    const { tell, sent } = harness({ privately: true, refuses: new Error("network") });
+    await expect(
+      tell(message({ chatId: "C1" as ChatId, addressing: "mention" })),
+    ).resolves.toBeUndefined();
+    expect(sent).toEqual([]);
   });
 
   it("answers a direct message as an ordinary reply even where the kind sends privately", async () => {
