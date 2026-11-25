@@ -29,8 +29,13 @@ export type ConversationStopReason = z.infer<typeof conversationStopReasonSchema
 export interface ConversationHandlers {
   /** Rome's state changed: listening, thinking or speaking. */
   onState(state: VoiceConversationState): void;
-  /** Called once, last. `reason` is null when the guardian ended it. */
-  onEnded(reason: ConversationStopReason | null): void;
+  /**
+   * Called once, last. `reason` is null when the guardian ended it. `unsent`
+   * is what Rome heard of the guardian's turn and never sent, as the turn had
+   * not ended. It is empty when the turn began while Rome spoke or just after,
+   * when it may be Rome's own voice, unless Rome stopped speaking for it.
+   */
+  onEnded(reason: ConversationStopReason | null, unsent: string): void;
   /** True while the browser asks the guardian for the microphone, false once answered. */
   onAsking?(asking: boolean): void;
   /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
@@ -74,6 +79,9 @@ const QUIET_LIMIT_MS = VOICE_CONVERSATION_ALIVE_INTERVAL_MS * 3;
 // this long before the quiet limit applies.
 const OPEN_LIMIT_MS = 10_000;
 
+// Rome's own voice can still be heard this long after its audio, as Rome allows on its side.
+const ECHO_TAIL_MS = 2_000;
+
 // The socket states `WebSocket.CONNECTING` and `WebSocket.OPEN`, without needing the global.
 const CONNECTING = 0;
 const OPEN = 1;
@@ -108,6 +116,17 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  // What Rome heard of the guardian's turn so far, and whether it may be Rome's own voice.
+  let unsent = "";
+  let mayBeEcho = false;
+  let speaking = false;
+  // Until when what is heard may be Rome's own voice, once it stops speaking.
+  let echoUntil = 0;
+  const heardSoFar = (text: string) => {
+    if (!unsent.trim()) mayBeEcho = speaking || Date.now() < echoUntil;
+    unsent = text;
+    handlers.onHeard?.(text);
+  };
   // Each caption waits for its sentence's first audio, then for the audio
   // queued before it. The last one stays until the audio queued here has
   // played: Rome's state follows the audio it sent, which can be well ahead
@@ -145,6 +164,8 @@ export function startVoiceConversation(
   };
   // Rome thinks between sentences too; only once it listens has the reply ended.
   const stateChanged = (state: VoiceConversationState) => {
+    if (speaking && state !== "speaking") echoUntil = Date.now() + ECHO_TAIL_MS;
+    speaking = state === "speaking";
     handlers.onState(state);
     if (state !== "listening") return;
     waitingCaption = null;
@@ -156,14 +177,17 @@ export function startVoiceConversation(
   };
   // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
   const turnSent = (text: string, inputId: string) => {
+    unsent = "";
     clearCaptions();
     handlers.onHeard?.("");
     handlers.onCaption?.("");
     handlers.onTurn?.(text, inputId);
   };
-  // The guardian spoke over the reply: what has not played goes, and its words with it.
+  // The guardian spoke over the reply: what has not played goes, and its words
+  // with it. What Rome hears now is the guardian's.
   const dropUnplayed = () => {
     player.clear();
+    mayBeEcho = false;
     clearCaptions();
     handlers.onCaption?.("");
   };
@@ -185,7 +209,7 @@ export function startVoiceConversation(
   const finish = (reason: ConversationStopReason | null) => {
     if (done) return;
     teardown();
-    handlers.onEnded(reason);
+    handlers.onEnded(reason, mayBeEcho ? "" : unsent.trim());
   };
   function lost() {
     finish("connection-lost");
@@ -240,7 +264,7 @@ export function startVoiceConversation(
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
         else if (data.type === "state") stateChanged(data.state);
-        else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
+        else if (data.type === "heard") heardSoFar(`${data.settled}${data.pending}`);
         else if (data.type === "turn") turnSent(data.text, data.inputId);
         else if (data.type === "caption") captionNext(data.text);
         else if (data.type === "clear") dropUnplayed();

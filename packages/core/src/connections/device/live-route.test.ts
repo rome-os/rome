@@ -53,7 +53,7 @@ describe("the live route", () => {
     report("dev-other", [health(true)]);
     const pointer = routes().forSource("apple_health", { askingDeviceId: "dev-asking" });
     expect(pointer).toMatchObject({ id: "dev-asking:apple_health", state: "off" });
-    expect(connectStep(pointer)).toContain('connect_account and kind "apple_health"');
+    expect(connectStep(pointer)).toContain('connect_service and kind "apple_health"');
     expect(routes().forOperation("health.stats", { askingDeviceId: "dev-asking" })).toMatchObject({
       connection: { device: { id: "dev-asking" } },
     });

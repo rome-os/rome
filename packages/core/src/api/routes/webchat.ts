@@ -695,7 +695,7 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
     {
       componentId: "connect-card",
-      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+      emittedBy: (tool) => tool === "connect_service" || tool.endsWith("__connect_service"),
     },
     {
       componentId: LOCATION_CARD_ID,
