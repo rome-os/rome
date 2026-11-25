@@ -48,6 +48,7 @@ import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./instance/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
+import { guardianAuth } from "./db/schema.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
 import { createRomeCloudAgentsClient } from "./connections/integrations/rome-cloud-agents.js";
@@ -1516,6 +1517,8 @@ async function main() {
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
+      guardianEmail: async () =>
+        (await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1))[0]?.email,
     }),
     webchatRepo,
     sessionRepository,

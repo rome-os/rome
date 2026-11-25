@@ -4479,6 +4479,15 @@ describe("Concierge chat", () => {
           ),
       },
     });
+    const unnamed = createConciergeOwners({
+      settingsRepo: { get: async () => null },
+      visitorProfiles: { getMany: async () => new Map() },
+      guardianEmail: async () => "eric@example.com",
+    });
+    expect(await unnamed.profileOf("guardian")).toEqual({
+      role: "guardian",
+      email: "eric@example.com",
+    });
     const annMain = mainChatIdOf("visitor:acct-ann");
     const service = new ConciergeService({
       settingsRepo: { get: async () => null },

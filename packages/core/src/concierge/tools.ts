@@ -1338,7 +1338,8 @@ export async function buildConciergeTools(
           const running = service.dashboard.chats.isRunning(chatId);
           const plan = running ? service.dashboard.chats.turnPlan(chatId) : null;
           // A message keeps its writer's name, except the guardian's.
-          const guardian = (await service.owners.profileOf(GUARDIAN_OWNER)).name ?? "guardian";
+          const profile = await service.owners.profileOf(GUARDIAN_OWNER);
+          const guardian = profile.name ?? profile.email ?? profile.role;
           const writerOf = (message: SaidMessage) =>
             message.senderName ??
             (message.saidBy?.account.id === GUARDIAN_OWNER ? guardian : undefined);
