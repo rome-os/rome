@@ -30,7 +30,8 @@ export type SessionActor =
       kind: "guardian";
       /** Canonical guardian seat id (`guardian_auth.user_id`), not the raw JWT
        * subject — cloud logins mint the session with the Rome Cloud accountId,
-       * so the JWT subject is not stable across login methods. */
+       * so the JWT subject is not stable across login methods. From
+       * {@link readSessionActor} alone, the JWT subject. */
       userId: string;
       /** Rome Cloud account the seat is bound to, when cloud-bound. */
       accountId?: string;
