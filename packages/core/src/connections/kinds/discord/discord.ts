@@ -22,6 +22,7 @@ import type {
   RESTOptions,
 } from "discord.js";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+import { looksLikeAccountCode } from "../../../lib/account-code-shape.js";
 import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import {
   filterConnectionApiResponseHeaders,
@@ -157,9 +158,9 @@ const USER_MENTION = /<@!?([^\s>&]+)>/g;
  * The text of an inbound message as a person sees it: each user mention
  * shows as `@name`, Rome's own accounts included, so the text is the same
  * whichever of Rome's accounts heard it. A mention whose name the message
- * does not carry stays as typed. A `/stop` after mentions alone reads as the
- * bare command, so its rule matches it; whom it addresses is Participation's
- * to work out from the mentions.
+ * does not carry stays as typed. A command after mentions alone, `/stop` or
+ * an account code, reads as the bare command, so its rule matches it; whom it
+ * addresses is Participation's to work out from the mentions.
  */
 export function discordInboundText(
   content: string,
@@ -167,6 +168,7 @@ export function discordInboundText(
 ): string {
   const command = withoutMentions(content);
   if (isStopCommand(command)) return "/stop";
+  if (looksLikeAccountCode(command)) return command;
   return content
     .replace(USER_MENTION, (token, id: string) => {
       const name = nameOf(id)?.trim();

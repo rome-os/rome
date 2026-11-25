@@ -103,6 +103,7 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
   };
   const deps = {
     webchatRepo: repo,
+    voidAccountCodesIn: async () => undefined,
     appCatalog: { get: () => undefined },
     agentLoader: { find: () => agent, list: () => [agent] },
     agentTurnStreamRegistry: { onSessionChange: () => () => {}, listBySession: () => [] },
@@ -373,14 +374,19 @@ describe("webchat task actor admission without a database or provider", () => {
     );
   });
 
-  it("refuses a forged actor in an external HTTP body", async () => {
-    const s = harness();
-    const response = await s.routes.request("/chat/sessions/target/turns", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, actor: guardian, taskActor: guardian }),
-    });
+  it("ignores a forged actor in an external HTTP body", async () => {
+    const s = harness("visitor:v");
+    const response = await runWithSessionActor(visitor, () =>
+      s.routes.request("/chat/sessions/target/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, actor: guardian, taskActor: guardian, sender: guardian }),
+      }),
+    );
     expect(response.status).toBe(200);
-    expect(s.submit.mock.calls[0]![1]).not.toHaveProperty("actor");
+    expect(s.submit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ actor: visitor }),
+    );
   });
 });
