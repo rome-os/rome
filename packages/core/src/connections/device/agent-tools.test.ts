@@ -244,6 +244,26 @@ describe("the Devices page's tools", () => {
       expect(data.checkedAt).toBe(stale.checkedAt);
       expect(reads).toBe(2);
     });
+
+    it("says it could not read the devices in time when the first read outlasts the deadline", async () => {
+      // A cold service reads Rome Cloud's list before it checks any device.
+      answers = [
+        () => new Promise<DevicesStatus>((resolve) => setTimeout(() => resolve(status), 24_000)),
+      ];
+      let settled = false;
+      const read = callTool(readDevices, deps, {}).finally(() => {
+        settled = true;
+      });
+
+      await rs.advanceTimersByTimeAsync(20_000);
+
+      expect(settled).toBe(true);
+      expect(await read).toEqual({
+        status: "error",
+        error: expect.stringMatching(/^devices_unavailable:/),
+      });
+      expect(reads).toBe(1);
+    });
   });
 
   describe("running on a device", () => {

@@ -40,6 +40,11 @@ export const readDevices = agentTool({
   input: z.object({}),
   run: async (_input, { deps, turn }) => {
     const status = await freshStatus(deps);
+    if (!status) {
+      return toolError(
+        "devices_unavailable: Rome could not read the devices in time. Tell the guardian, and try again in a minute.",
+      );
+    }
     const reach = describeDevices(
       deps.connections.list(),
       (deps.now ?? Date.now)(),
@@ -170,11 +175,16 @@ const LAST_POLL_MS = 4_000;
 /** The devices' status checked in the last 10 s, as the Devices page has it
  *  by polling. A read answers once, so it waits for the check its read
  *  started; when none comes in time it answers the last one, whose
- *  `checkedAt` says how old it is. */
-async function freshStatus(deps: DeviceToolDeps): Promise<DevicesStatus> {
+ *  `checkedAt` says how old it is. Null when not even a first status comes
+ *  within the wait. */
+async function freshStatus(deps: DeviceToolDeps): Promise<DevicesStatus | null> {
   const now = deps.now ?? Date.now;
   const deadline = now() + WAIT_FOR_CHECK_MS;
-  let status = await deps.devices.getStatus();
+  // A service with no snapshot reads Rome Cloud's list before it checks any
+  // device, so even the first read can outlast the wait.
+  const first = await within(deps.devices.getStatus(), WAIT_FOR_CHECK_MS);
+  if (!first) return null;
+  let status = first;
   let wait = FIRST_POLL_MS;
   while (now() - Date.parse(status.checkedAt) >= FRESH_FOR_MS && now() < deadline) {
     const pause = Math.min(wait, deadline - now());
