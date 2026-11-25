@@ -30,6 +30,7 @@ final class VoiceConversation {
     private var retry: Task<Void, Never>?
     /// Ends the conversation once the reconnect window is over, however the calls go.
     private var deadline: Task<Void, Never>?
+    private var window = ReconnectWindow()
     private var online = true
     /// Rome said `ready` on some socket: only then is a drop called again.
     private var established = false
@@ -85,13 +86,7 @@ final class VoiceConversation {
     private func lost() {
         guard !done else { return }
         guard established else { return finish(.connectionLost) }
-        if deadline == nil {
-            deadline = Task { [weak self] in
-                try? await Task.sleep(for: VoiceConversationWire.reconnectWindow)
-                guard !Task.isCancelled else { return }
-                self?.finish(.connectionLost)
-            }
-        }
+        if window.dropped() { startDeadline() }
         quiet?.cancel()
         sender.close(sending: nil)
         task = nil
@@ -102,6 +97,16 @@ final class VoiceConversation {
             try? await Task.sleep(for: VoiceConversationWire.reconnectEvery)
             guard !Task.isCancelled else { return }
             self?.callAgain()
+        }
+    }
+
+    /// Ends the conversation `reconnectWindow` from now unless Rome answers again.
+    private func startDeadline() {
+        deadline?.cancel()
+        deadline = Task { [weak self] in
+            try? await Task.sleep(for: VoiceConversationWire.reconnectWindow)
+            guard !Task.isCancelled else { return }
+            self?.finish(.connectionLost)
         }
     }
 
@@ -117,6 +122,10 @@ final class VoiceConversation {
     /// After `interruptionLimit` with neither, the conversation ends.
     func interrupted() {
         guard !done else { return }
+        // The app may be suspended through a call: the reconnect window waits for its end.
+        window.pause()
+        deadline?.cancel()
+        deadline = nil
         interruption?.cancel()
         interruption = Task { [weak self] in
             try? await Task.sleep(for: VoiceConversationWire.interruptionLimit)
@@ -144,6 +153,12 @@ final class VoiceConversation {
         }
         interruption?.cancel()
         interruption = nil
+        // A connection that dropped during the pause gets a whole window from now.
+        if window.resumed(connected: task != nil) {
+            startDeadline()
+            retry?.cancel()
+            callAgain()
+        }
     }
 
     /// While muted, no microphone audio leaves the phone. The microphone
@@ -243,6 +258,7 @@ final class VoiceConversation {
             replyRate = rate
             established = true
             sender.ready()
+            window.recovered()
             deadline?.cancel()
             deadline = nil
         case .state(let state): handlers.onState(state)
@@ -312,5 +328,39 @@ struct MicrophoneGate {
 
     mutating func ready() {
         open = true
+    }
+}
+
+/// When the reconnect window runs: from the first drop until Rome answers
+/// again, but never while a call or Siri pauses the conversation. A drop the
+/// audio finds when it resumes gets a whole window from then.
+struct ReconnectWindow {
+    private(set) var running = false
+    private(set) var paused = false
+
+    /// The connection dropped. True when the window starts now.
+    mutating func dropped() -> Bool {
+        guard !running, !paused else { return false }
+        running = true
+        return true
+    }
+
+    /// A call or Siri took the audio: the window stops.
+    mutating func pause() {
+        paused = true
+        running = false
+    }
+
+    /// The audio is back. True when the window starts now, with the connection still down.
+    mutating func resumed(connected: Bool) -> Bool {
+        paused = false
+        guard !connected, !running else { return false }
+        running = true
+        return true
+    }
+
+    /// Rome answered again.
+    mutating func recovered() {
+        running = false
     }
 }

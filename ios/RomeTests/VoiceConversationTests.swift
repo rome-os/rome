@@ -267,6 +267,26 @@ import Testing
         controller.end()
     }
 
+    @Test func aCallPausesTheReconnectWindowAndItsEndGivesAWholeOne() {
+        var window = ReconnectWindow()
+        // A drop starts the window, once.
+        let first = window.dropped()
+        let again = window.dropped()
+        #expect(first && !again)
+        // A call: the window stops, and a drop meanwhile starts none.
+        window.pause()
+        let duringCall = window.dropped()
+        #expect(!duringCall && !window.running)
+        // The call ends with the connection still down: a whole window from now.
+        let afterCall = window.resumed(connected: false)
+        #expect(afterCall && window.running)
+        // Rome answers again; a call that ends with the connection up starts none.
+        window.recovered()
+        window.pause()
+        let connected = window.resumed(connected: true)
+        #expect(!connected && !window.running)
+    }
+
     @Test func aFirstConnectionKeepsTheFirstWordsAndAReconnectWaitsForReady() {
         var gate = MicrophoneGate()
         // The guardian may speak at once: their first words go out behind `start`.
