@@ -7,6 +7,7 @@ final class Admission: @unchecked Sendable {
     private var hasBinding = false
     private var reason: String?
     private var exiting = false
+    private var onStop: (@Sendable () -> Void)?
 
     func begin() throws {
         try lock.withLock {
@@ -31,18 +32,35 @@ final class Admission: @unchecked Sendable {
 
     var needsAccessCheck: Bool { lock.withLock { reason == nil && (active || hasBinding) } }
 
-    func stop(_ reason: String = "session_stopped") -> [String: Any] {
-        lock.withLock {
-            self.reason = self.reason ?? reason
-            return statusLocked()
+    func updateBindings(_ hasBinding: Bool) {
+        lock.withLock { self.hasBinding = hasBinding }
+    }
+
+    func whenStopped(_ handler: @escaping @Sendable () -> Void) {
+        let stopped = lock.withLock {
+            onStop = handler
+            return reason != nil
         }
+        if stopped { handler() }
+    }
+
+    func stop(_ reason: String = "session_stopped") -> [String: Any] {
+        seal(reason, exiting: false)
     }
 
     func terminate(_ reason: String = "session_stopped") {
-        lock.withLock {
+        _ = seal(reason, exiting: true)
+    }
+
+    private func seal(_ reason: String, exiting: Bool) -> [String: Any] {
+        let (status, handler) = lock.withLock {
+            let handler = self.reason == nil ? onStop : nil
             self.reason = self.reason ?? reason
-            exiting = true
+            self.exiting = self.exiting || exiting
+            return (statusLocked(), handler)
         }
+        handler?()
+        return status
     }
 
     var terminating: Bool { lock.withLock { exiting } }
@@ -52,7 +70,7 @@ final class Admission: @unchecked Sendable {
     }
 
     private func statusLocked() -> [String: Any] {
-        var status: [String: Any] = ["stop": reason == nil ? "running" : active ? "cancel_requested" : "stop_confirmed"]
+        var status: [String: Any] = ["stop": reason == nil ? "running" : (active || hasBinding) ? "cancel_requested" : "stop_confirmed"]
         status["reason"] = reason
         return status
     }
@@ -325,10 +343,24 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     defer { accessWatchdog?.cancel() }
 
     let worker = DispatchQueue(label: "rome.computer-use.window", qos: .userInitiated)
-    let windows = Windows(instance: instance, access: access, live: {
+    let windows = Windows(worker: worker, access: access, live: {
         try connection.verify()
         try admission.check()
+    }, onRevocation: { hasBinding, label in
+        admission.updateBindings(hasBinding)
+        if let desktop { DispatchQueue.main.async { desktop.updateBinding(label) } }
     })
+    admission.whenStopped { [weak windows] in
+        worker.async { [weak windows] in
+            windows?.stopAll()
+            admission.updateBindings(false)
+            if let desktop { DispatchQueue.main.async { desktop.updateBinding(nil) } }
+        }
+    }
+    defer {
+        _ = admission.stop()
+        worker.sync { windows.stopAll() }
+    }
 
     while true {
         let request: Request
@@ -353,10 +385,10 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 var status = admission.status()
                 status["instance"] = instance
                 try connection.send(Wire.reply(request.id, result: status))
-            case "cancel":
+            case "cancel", "stop":
                 let state = admission.stop()
                 try connection.send(Wire.reply(request.id, result: state))
-            case "windows", "bind", "observe", "act":
+            case "windows", "bind", "unbind", "observe", "act":
                 guard let desktop else { throw Failure("desktop_disabled") }
                 try connection.verify()
                 try admission.begin()
@@ -373,14 +405,22 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                         case "bind":
                             guard let window = args?.window, window != 0 else { throw Failure("invalid_request") }
                             result = try windows.bind(window)
+                        case "unbind":
+                            guard let id = args?.binding else { throw Failure("invalid_request") }
+                            result = try windows.unbind(id)
                         case "observe":
                             guard let id = args?.binding else { throw Failure("invalid_request") }
                             (result, image) = try windows.observe(id, screenshot: args?.screenshot ?? false)
                         default:
-                            guard let id = args?.binding, let ref = args?.element, let action = args?.action else {
+                            guard let args, let id = args.binding, let action = args.action else {
                                 throw Failure("invalid_request")
                             }
-                            result = try windows.act(id, element: ref, action: action, input: args?.value)
+                            if let input = try WindowInput(action: action, args: args) {
+                                result = try windows.input(id, input)
+                            } else {
+                                guard let ref = args.element else { throw Failure("invalid_request") }
+                                result = try windows.act(id, element: ref, action: action, input: args.value)
+                            }
                         }
                         response = try Wire.reply(request.id, result: result, image: image)
                     } catch {

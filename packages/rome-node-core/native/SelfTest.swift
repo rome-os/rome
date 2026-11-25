@@ -1,5 +1,6 @@
 #if SELF_TEST_BUILD
 import CoreGraphics
+import CoreMedia
 import CryptoKit
 import Darwin
 import Darwin.libproc
@@ -13,6 +14,8 @@ final class SelfTest {
         let test = SelfTest()
         try test.identity()
         try test.windows()
+        try test.bindings()
+        try test.input()
         try test.consent()
         try test.frames()
         try test.admission()
@@ -89,6 +92,252 @@ final class SelfTest {
         try rejects("screen_recording_permission_required") { try access.recording(granted: false, required: false) }
     }
 
+    private final class EndedBindings: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ids: [String] = []
+
+        func record(_ id: String) { lock.withLock { ids.append(id) } }
+
+        func drain() -> [String] {
+            lock.withLock {
+                defer { ids.removeAll() }
+                return ids
+            }
+        }
+    }
+
+    private final class TestCapture: ControlCapture {
+        private let output: ScreenControlCapture.Output
+        private(set) var startCount = 0
+        private(set) var stopCount = 0
+        private(set) var isActive = false
+        let starts: Bool
+
+        init(starts: Bool, onEnd: @escaping @Sendable () -> Void) {
+            self.starts = starts
+            output = ScreenControlCapture.Output(onEnd: onEnd)
+        }
+
+        func start(check: () throws -> Void) throws {
+            startCount += 1
+            try check()
+            guard starts else { throw Failure("capture_failed") }
+            isActive = output.didStart()
+        }
+
+        func whileActive<T>(_ body: () throws -> T) throws -> T {
+            guard isActive else { throw Failure("binding_unavailable") }
+            return try body()
+        }
+
+        func stop() {
+            stopCount += 1
+            isActive = false
+            _ = output.end(notify: false)
+        }
+
+        func systemStop() {
+            isActive = false
+            _ = output.end(notify: true)
+        }
+    }
+
+    private func bindings() throws {
+        let config = try ScreenControlCapture.configuration(rect: CGRect(x: 0, y: 0, width: 1600, height: 1200), pixelScale: 2)
+        try expect(CMTimeCompare(config.minimumFrameInterval, CMTime(value: 1, timescale: 1)) == 0, "control stream is one fps")
+        try expect(config.width == 640 && config.height == 480 && config.queueDepth == 3, "control stream caps frame size and queue")
+        try expect(!config.showsCursor && !config.capturesAudio && config.ignoreShadowsSingleWindow, "control stream settings")
+        if #available(macOS 14.2, *) { try expect(!config.includeChildWindows, "control excludes child windows") }
+        if #available(macOS 15.0, *) { try expect(!config.captureMicrophone, "control excludes microphone audio") }
+        try rejects("capture_limit") {
+            _ = try ScreenControlCapture.configuration(rect: .zero, pixelScale: 2)
+        }
+
+        let ended = EndedBindings()
+        let early = ScreenControlCapture.Output { ended.record("early") }
+        try expect(!early.end(notify: true) && early.hasEnded, "stream can end before start completes")
+        try expect(!early.didStart() && early.latestFrame == nil, "late start cannot restore an ended stream")
+        _ = early.end(notify: true)
+        try rejects("binding_unavailable") { try early.whileActive { throw Failure("unexpected dispatch") } }
+        try expect(ended.drain() == ["early"], "a stream notifies revocation once")
+
+        var registry = WindowBindings<Int>()
+        var captures: [TestCapture] = []
+        func bind(_ window: CGWindowID, starts: Bool = true, check: () throws -> Void = {}) throws -> String {
+            try registry.bind(window: window, label: "Window \(window)", context: Int(window), makeCapture: { onEnd in
+                let capture = TestCapture(starts: starts, onEnd: onEnd)
+                captures.append(capture)
+                return capture
+            }, onEnd: { ended.record($0) }, check: check)
+        }
+
+        try expect(registry.label == nil && !registry.hasBinding, "zero bindings")
+        try rejects("screen_recording_permission_required") {
+            _ = try bind(1) { throw Failure("screen_recording_permission_required") }
+        }
+        try expect(captures.isEmpty, "permission check precedes capture creation")
+        try rejects("capture_failed") { _ = try bind(1, starts: false) }
+        try expect(captures[0].startCount == 1 && captures[0].stopCount == 1 && !registry.hasBinding, "failed start releases stream and ownership")
+
+        let first = try bind(1)
+        try expect(UUID(uuidString: first) != nil && registry.label == "Window 1" && registry.hasBinding, "one binding shows its label")
+        try rejects("window_already_bound") { _ = try bind(1) }
+        try expect(captures.count == 2 && captures[1].isActive, "duplicate bind leaves original stream running")
+        let second = try bind(2)
+        try expect(first != second && registry.label == "2 active windows", "distinct bindings coexist")
+        var firstBinding = try registry.current(first)
+        firstBinding.context = 10
+        registry.update(firstBinding)
+        try expect(try registry.current(first).context == 10 && registry.current(second).context == 2, "bindings own independent state")
+        try registry.unbind(first)
+        try expect(captures[1].stopCount == 1 && captures[2].isActive && registry.label == "Window 2", "unbind stops only the named stream")
+        try rejects("binding_not_found") { try registry.unbind(first) }
+        try expect(ended.drain().isEmpty, "intentional stop does not signal system revocation")
+
+        let rebound = try bind(1)
+        try expect(rebound != first, "released window receives a fresh binding")
+        captures[2].systemStop()
+        captures[2].systemStop()
+        try rejects("binding_unavailable") { _ = try registry.current(second) }
+        let revoked = ended.drain()
+        try expect(revoked == [second], "system stop posts revocation for only its binding")
+        revoked.forEach { registry.remove($0) }
+        try expect(try registry.current(rebound).capture.isActive, "system stop leaves other streams active")
+        let other = try bind(2)
+        captures[4].systemStop()
+        for id in ended.drain() { registry.remove(id) }
+        try rejects("binding_not_found") { try registry.unbind(other) }
+        try expect(registry.label == "Window 1", "callback removes binding without an RPC")
+
+        _ = try bind(2)
+        registry.stopAll()
+        try expect(!registry.hasBinding && registry.label == nil, "stop clears all binding state")
+        try expect(captures[3].stopCount == 1 && captures[5].stopCount == 1, "stop ends every active stream once")
+        try rejects("binding_unavailable") { _ = try registry.current(rebound) }
+        let fresh = try bind(1)
+        registry.remove(rebound)
+        try expect(try registry.current(fresh).capture.isActive, "stale callback cannot revoke a newer binding")
+        registry.stopAll()
+    }
+
+    private func input() throws {
+        let bounds = CGRect(x: -200, y: 50, width: 120, height: 100)
+        let point = CGPoint(x: -190, y: 70)
+        try expect(try WindowInput.global(CGPoint(x: 10, y: 20), in: bounds) == point, "negative monitor origin uses logical points")
+        for outside in [CGPoint(x: -1, y: 0), CGPoint(x: 120, y: 2), CGPoint(x: 2, y: 100),
+                        CGPoint(x: CGFloat.nan, y: 0), CGPoint(x: 0, y: CGFloat.infinity)] {
+            try rejects("window_coordinate_out_of_bounds") { _ = try WindowInput.global(outside, in: bounds) }
+        }
+
+        let pid: pid_t = getpid() == 42 ? 43 : 42
+        let target = WindowRow(id: 7, pid: pid, bounds: bounds)
+        func row(_ id: CGWindowID, _ pid: pid_t, _ bounds: CGRect, layer: Int32 = 0,
+                 owner: String = "Other App", alpha: Double = 1) -> [String: Any] {
+            [kCGWindowNumber as String: id, kCGWindowOwnerPID as String: pid,
+             kCGWindowLayer as String: layer, kCGWindowBounds as String: bounds.dictionaryRepresentation,
+             kCGWindowOwnerName as String: owner, kCGWindowAlpha as String: alpha]
+        }
+        let expected = row(target.id, pid, bounds)
+        let helper = row(8, getpid(), bounds)
+        let adjacent = row(9, pid, CGRect(x: -140, y: 50, width: 50, height: 100))
+        let cursor = row(10, 99, bounds, layer: CGWindowLevelForKey(.cursorWindow), owner: "Window Server")
+        func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target) throws {
+            try WindowInput.verifyStack(rows, target: target, point: point) { $0 == 99 }
+        }
+        try verify([cursor, adjacent, expected, helper], at: point)
+        try verify([expected, adjacent, helper])
+        try rejects("window_coordinate_out_of_bounds") { try verify([expected], at: CGPoint(x: -70, y: 70)) }
+        try rejects("window_occluded") { try verify([helper, expected], at: point) }
+        try rejects("window_occluded") { try verify([adjacent, expected]) }
+        try rejects("window_unavailable") { try verify([adjacent], at: point) }
+        try rejects("window_unavailable") { try verify([expected, expected], at: point) }
+        try rejects("window_unavailable") { try verify([row(7, getpid(), bounds)], at: point) }
+        try rejects("window_unavailable") { try verify([row(7, pid, bounds, alpha: 0)], at: point) }
+        try rejects("window_unavailable") { try verify([row(7, pid, bounds.offsetBy(dx: 2, dy: 0))], at: point) }
+        try rejects("window_unavailable") { try verify([helper], at: point, target: WindowRow(id: 8, pid: getpid(), bounds: bounds)) }
+
+        func action(_ name: String, _ args: [String: Any]) throws -> WindowInput {
+            var args = args
+            args["action"] = name
+            let data = try JSONSerialization.data(withJSONObject: ["v": 1, "id": "test", "method": "act", "params": args])
+            guard let params = try Wire.request(data).params, let input = try WindowInput(action: name, args: params) else {
+                throw Failure("self-test: input request")
+            }
+            return input
+        }
+
+        var events: [CGEvent] = []
+        var checks: [CGPoint?] = []
+        var lookup: (String, CGEventFlags) -> (CGKeyCode, CGEventFlags)? = { _, _ in nil }
+        func run(_ action: WindowInput, limit: Int = .max) throws {
+            events.removeAll()
+            checks.removeAll()
+            try action.execute(window: target.id, locate: { try WindowInput.global($0, in: bounds) },
+                               lookupKey: lookup) { point, batch in
+                guard checks.count < limit else { throw Failure("session_stopped") }
+                checks.append(point)
+                events += batch
+            }
+        }
+        try run(action("click", ["x": 10, "y": 20, "button": "middle", "clickCount": 3, "modifiers": ["command", "shift"]]))
+        try expect(events.map(\.type) == Array(repeating: [.otherMouseDown, .otherMouseUp], count: 3).flatMap { $0 },
+                   "middle triple-click has three down/up pairs")
+        try expect(events.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2, 3, 3], "click counts advance per pair")
+        try expect(events.allSatisfy { $0.location == point && $0.flags.contains([.maskCommand, .maskShift]) &&
+                   $0.getIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent) == Int64(target.id) },
+                   "click flags and recipient fields")
+        try run(action("move", ["x": 10, "y": 20]))
+        try expect(events.map(\.type) == [.mouseMoved] && checks == [point], "move validates and posts one event")
+        let drag = try action("drag", ["x": 10, "y": 20, "toX": 20, "toY": 40, "steps": 2, "button": "right"])
+        try run(drag)
+        try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged, .rightMouseDragged, .rightMouseUp],
+                   "drag emits a down, interpolated steps and an up")
+        try expect(events[1].location == CGPoint(x: -185, y: 80) && events[3].location == CGPoint(x: -180, y: 90),
+                   "drag hits midpoint and exact endpoint")
+        try rejects("session_stopped") { try run(drag, limit: 3) }
+        try expect(events.map(\.type) == [.rightMouseDown, .rightMouseDragged], "stopped drag emits no further events")
+        try rejects("window_coordinate_out_of_bounds") {
+            try run(action("drag", ["x": 10, "y": 20, "toX": 120, "toY": 40]))
+        }
+        try expect(events.isEmpty && checks.isEmpty, "invalid drag destination fails before sending")
+        try run(action("scroll", ["x": 10, "y": 20, "deltaX": -5, "deltaY": 12]))
+        try expect(events.count == 1 && events[0].type == .scrollWheel && events[0].location == point &&
+                   events[0].getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == -12 &&
+                   events[0].getIntegerValueField(.scrollWheelEventPointDeltaAxis2) == 5, "scroll direction uses pixel units")
+
+        try run(action("key_press", ["key": "f12", "modifiers": ["control", "option"]]))
+        try expect(events.map(\.type) == [.keyDown, .keyUp] && checks == [nil] && events.allSatisfy {
+            $0.getIntegerValueField(.keyboardEventKeycode) == 111 && $0.flags.contains([.maskControl, .maskAlternate])
+        }, "named key emits a pair with modifiers")
+        lookup = { name, flags in name == "q" ? (12, flags) : nil }
+        try run(action("key_press", ["key": "q", "modifiers": ["command"]]))
+        try expect(events.first?.getIntegerValueField(.keyboardEventKeycode) == 12, "character shortcut uses layout key code")
+        try rejects("key_unavailable") { try run(action("key_press", ["key": "🪴", "modifiers": ["command"]])) }
+        try run(action("key_press", ["key": "🪴"]))
+        try expect(events.map(\.type) == [.keyDown, .keyUp], "unmapped unmodified character uses Unicode")
+        let text = String(repeating: "a", count: 15) + "🪴" + String(repeating: "b", count: 16)
+        let chunks = WindowInput.unicodeChunks(text)
+        try expect(chunks.map(\.count) == [15, 16, 2] && chunks.flatMap { $0 } == Array(text.utf16),
+                   "Unicode chunks preserve surrogate pairs and order")
+        try run(action("type_text", ["text": text]))
+        try expect(events.count == chunks.count * 2 && checks == [nil, nil, nil], "each text chunk revalidates once")
+        try rejects("session_stopped") { try run(action("type_text", ["text": text]), limit: 1) }
+        try expect(events.count == 2, "stopped text never sends later chunks")
+
+        for (name, args): (String, [String: Any]) in [
+            ("click", ["x": 1, "y": 2, "clickCount": 4]),
+            ("click", ["x": 1, "y": 2, "button": "unknown"]),
+            ("drag", ["x": 1, "y": 2, "toX": 3, "toY": 4, "steps": 61]),
+            ("scroll", ["x": 1, "y": 2, "deltaX": 2001, "deltaY": 0]),
+            ("move", ["x": 1, "y": 2, "modifiers": ["shift", "shift"]]),
+            ("key_press", ["key": "unknown"]),
+            ("type_text", ["text": ""]),
+            ("type_text", ["text": String(repeating: "a", count: 16_385)]),
+        ] {
+            try rejects("invalid_value") { _ = try action(name, args) }
+        }
+    }
+
     private func consent() throws {
         let prompt = CGRect(x: 140, y: 260, width: 320, height: 220)
         let helper: pid_t = 42
@@ -162,6 +411,19 @@ final class SelfTest {
         unlock.mouseDown(at: 5.5, clickCount: 1, enabled: true)
         try expect(unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
                    "a single click past the double-click interval approves consent")
+
+        unlock = ConsentUnlock()
+        try expect(!unlock.update(focused: true, at: 0), "consent starts locked before typing")
+        for timestamp in stride(from: 0.25, through: 1.25, by: 0.25) {
+            let enabled = unlock.update(focused: true, at: timestamp)
+            try expect(!enabled, "key presses keep consent locked past one focused second")
+            unlock.keyDown(enabled: enabled)
+        }
+        try expect(!unlock.update(focused: true, at: 1.25), "the last key press restarts the delay")
+        try expect(!unlock.update(focused: true, at: 2.24), "typing requires a full quiet second")
+        try expect(unlock.update(focused: true, at: 2.25), "one focused second without typing unlocks consent")
+        unlock.keyDown(enabled: true)
+        try expect(unlock.update(focused: true, at: 2.3), "keyboard navigation remains available after unlocking")
     }
 
     private func decode(_ data: Data) throws -> ([String: Any], Data) {
@@ -221,6 +483,20 @@ final class SelfTest {
         gate.finish(hasBinding: false)
         try expect(gate.status()["stop"] as? String == "stop_confirmed", "confirm once slot retires")
         try rejects("session_stopped") { try gate.begin() }
+
+        let idle = Admission()
+        let ended = EndedBindings()
+        idle.updateBindings(true)
+        idle.whenStopped { ended.record("cleanup") }
+        try expect(idle.stop()["stop"] as? String == "cancel_requested", "stop waits for idle bindings to clear")
+        idle.terminate("local_stop")
+        try expect(ended.drain() == ["cleanup"] && idle.terminating, "stop and terminate schedule one cleanup")
+        idle.updateBindings(false)
+        try expect(idle.status()["stop"] as? String == "stop_confirmed", "stop confirms once bindings clear")
+        let early = Admission()
+        _ = early.stop()
+        early.whenStopped { ended.record("late observer") }
+        try expect(ended.drain() == ["late observer"], "cleanup observes a stop that happened before registration")
     }
 
     private func transport() throws {
@@ -531,8 +807,11 @@ final class SelfTest {
             try expect(result?["pid"] as? Int32 == pid, "handshake pid")
             try expect(proof == mac(["helper", String(host.pid), String(pid), nonceText, instance]), "helper proof")
             try expect(proof != mac(["host", String(host.pid), nonceText]), "proofs are role separated")
-            let disabled = try rpc("windows")
-            try expect((disabled["error"] as? [String: String])?["code"] == "desktop_disabled", "test helper cannot contact desktop")
+            for method in ["windows", "bind", "unbind", "observe", "act"] {
+                let disabled = try rpc(method)
+                try expect((disabled["error"] as? [String: String])?["code"] == "desktop_disabled",
+                           "test helper cannot contact desktop via \(method)")
+            }
             if mode == .localStop {
                 try expect(kill(pid, SIGUSR1) == 0, "send local stop signal")
                 var stopped = false
@@ -543,8 +822,10 @@ final class SelfTest {
                     usleep(10_000)
                 }
                 try expect(stopped, "local stop closes admission")
-                let cancel = try rpc("cancel")["result"] as? [String: Any]
-                try expect(cancel?["stop"] as? String == "stop_confirmed", "cancel is idempotent")
+                for method in ["cancel", "stop"] {
+                    let stop = try rpc(method)["result"] as? [String: Any]
+                    try expect(stop?["stop"] as? String == "stop_confirmed", "\(method) is idempotent")
+                }
             } else if mode == .terminate {
                 try expect(kill(pid, SIGTERM) == 0, "send terminate signal")
                 var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)

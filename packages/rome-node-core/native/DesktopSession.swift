@@ -3,7 +3,17 @@ import Darwin.libproc
 import Foundation
 
 enum ConsentOcclusion {
+    private static let windowServerPath = canonicalPath("/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer")
     static let alertLevel = Int(CGWindowLevelForKey(.screenSaverWindow)) - 1
+
+    static func isWindowServer(_ pid: pid_t) -> Bool {
+        guard let path = windowServerPath else { return false }
+        // A process name alone does not authenticate the Window Server.
+        var bytes = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = proc_pidpath(pid, &bytes, UInt32(bytes.count))
+        guard length > 0 else { return false }
+        return String(decoding: bytes.prefix(Int(length)), as: UTF8.self) == path
+    }
 
     static func bounds(_ row: [String: Any]) -> CGRect? {
         guard let dictionary = row[kCGWindowBounds as String] as? [String: Any],
@@ -58,6 +68,10 @@ struct ConsentUnlock {
         pendingClick = (clickCount, interval)
     }
 
+    mutating func keyDown(enabled: Bool) {
+        if !enabled { reset() }
+    }
+
     mutating func accept(currentClickCount: Int?, doubleClickInterval: TimeInterval) -> Bool {
         let singleClick = pendingClick.map { click in
             click.count == 1 && (click.interval ?? .infinity) > doubleClickInterval
@@ -74,7 +88,6 @@ struct ConsentUnlock {
 final class DesktopSession: NSObject {
     private enum ConsentVisibility { case untrusted, clear, raised }
 
-    private static let windowServerPath = canonicalPath("/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer")
     private let admission: Admission
     private var unlock = ConsentUnlock()
     private var statusItem: NSStatusItem?
@@ -109,7 +122,7 @@ final class DesktopSession: NSObject {
         alert.alertStyle = .warning
         alert.messageText = "Allow a computer use session?"
         alert.informativeText = """
-            \(host) requests access to list your open windows and read and control any one of them at a time until you stop the session.
+            \(host) requests access to list your open windows and read and control any of them until you stop the session.
             Choose Stop Computer Use in the Rome Computer Use menu bar item to stop at any time.
 
             Executable: \(String(reflecting: peer.identity.executable))
@@ -139,13 +152,17 @@ final class DesktopSession: NSObject {
             self.unlock.reset()
             allow.isEnabled = false
         }
-        guard let mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { event in
+        guard let inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown], handler: { event in
             MainActor.assumeIsolated {
-                self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: allow.isEnabled)
+                if event.type == .leftMouseDown {
+                    self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: allow.isEnabled)
+                } else {
+                    self.unlock.keyDown(enabled: allow.isEnabled)
+                }
             }
             return event
         }) else { return false }
-        defer { NSEvent.removeMonitor(mouseMonitor) }
+        defer { NSEvent.removeMonitor(inputMonitor) }
 
         let raise: @MainActor @Sendable () -> Void = {
             // AppKit can assign the modal-panel level when it presents the alert.
@@ -229,21 +246,12 @@ final class DesktopSession: NSObject {
                   let layer = (reference[kCGWindowLayer as String] as? NSNumber)?.intValue,
                   ConsentOcclusion.bounds(reference) == bounds,
                   ConsentOcclusion.clear(alertBounds: bounds, above: ordered.dropLast(), helperPID: helperPID,
-                                         isWindowServer: Self.isWindowServer) else { return .untrusted }
+                                         isWindowServer: ConsentOcclusion.isWindowServer) else { return .untrusted }
             checked = true
             raised = raised && layer == ConsentOcclusion.alertLevel
         }
         guard checked else { return .untrusted }
         return raised ? .raised : .clear
-    }
-
-    private static func isWindowServer(_ pid: pid_t) -> Bool {
-        guard let path = windowServerPath else { return false }
-        // A process name alone does not authenticate the Window Server.
-        var bytes = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        let length = proc_pidpath(pid, &bytes, UInt32(bytes.count))
-        guard length > 0 else { return false }
-        return String(decoding: bytes.prefix(Int(length)), as: UTF8.self) == path
     }
 
     private func showStatus(host: String) -> Bool {
@@ -267,7 +275,6 @@ final class DesktopSession: NSObject {
     }
 
     @objc private func stopSession() {
-        _ = admission.stop("local_stop")
         admission.terminate("local_stop")
     }
 

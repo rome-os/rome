@@ -117,15 +117,16 @@ After verifying the host's kernel identity and HMAC, the helper displays the
 requesting process name, PID, canonical executable path and signing summary
 in a local confirmation dialog. **Deny** is the default. **Allow Session**
 becomes available after the dialog stays focused and clear for one second.
-An overlapping window above the dialog from another process ends confirmation,
+A left mouse press or key press during that delay restarts it. An overlapping window above the dialog from another process ends confirmation,
 except for the system cursor. The helper checks again before accepting approval.
 
 **Allow Session** lets the host list eligible open windows and their titles.
-The host can switch which window it reads and controls throughout the session.
-The persistent **Rome Computer Use** menu bar item shows the host and the
-current window. Choose **Stop Computer Use** there to end the session at any time.
-The helper limits observation and actions to one bound window and checks the
-Accessibility root and element membership before dispatch.
+The authenticated host can hold bindings to several distinct windows at once.
+Each binding limits observation and actions to its own window. The helper
+checks the Accessibility root and element membership before dispatch.
+The **Rome Computer Use** menu bar item shows the host and either no binding,
+the window title and app, or the number of bound windows.
+**Stop Computer Use** clears every binding and ends the session.
 
 ## Frames
 
@@ -154,9 +155,11 @@ requests. A framing or request error without a usable ID uses JSON `null`.
 | `status` | | `instance`, `stop` and optional `reason` |
 | `windows` | Optional `application` | `windows` array of eligible windows |
 | `bind` | Numeric `window` | `binding` UUID and `window` record |
+| `unbind` | `binding` UUID | `binding`, `released:true` |
 | `observe` | `binding`, optional Boolean `screenshot` | `binding`, `tree`, `truncated`, `refTTLms`, optional `screenshot` |
-| `act` | `binding`, `element` ref, `action`, optional `value` | `binding`, `dispatched:true` |
-| `cancel` | | `stop` and `reason` |
+| `act` (Accessibility) | `binding`, `element` ref, `action`, optional `value` | `binding`, `dispatched:true` |
+| `act` (input) | `binding`, `action`, and the fields in the input table | `binding`, `dispatched:true` |
+| `stop`, `cancel` | | `stop` and `reason` |
 
 Window records have a numeric `window` ID, `appName`, `bundleName`,
 `bundleId`, `title` and `bounds` as `[x,y,width,height]` in desktop points.
@@ -164,8 +167,14 @@ The application filter matches any of the three app names case-insensitively.
 The title serves as display text. The helper requires a unique public AX
 window root and Core Graphics row with the same PID and exact bounds.
 Ambiguous, minimized, offscreen, and unresolvable windows are ineligible.
-Discovery is bounded and can return a partial list. A bind attempt discards
-the current binding and its refs.
+Discovery is bounded and can return a partial list. A window ID has at most
+one active binding in the helper. Trying to bind it again returns
+`window_already_bound` and leaves its binding and refs intact. Bindings for
+different windows keep separate refs and capture streams. The host can pass
+distinct binding UUIDs to its callers over the same authenticated connection.
+`unbind` releases the named binding and stops its stream. It returns
+`binding_not_found` for an unknown, revoked, or released binding.
+A later bind of that window returns a fresh UUID.
 
 Tree nodes have `ref`, `role`, `actions`, `children` and optional `title`,
 `description` and `value`. A ref stays stable while a node remains present
@@ -176,17 +185,80 @@ for a checkbox, or a number within the slider's range. Increment and decrement
 operate on AX scroll bars. The helper checks membership and capabilities again
 before dispatch. Secure text fields withhold values and value actions.
 
+### Input actions
+
+Send these actions through `act` with the binding UUID and action name.
+For example, click 40 points from the left and 20 points from the top.
+
+```json
+{"v":1,"id":"r2","method":"act","params":{"binding":"<uuid>","action":"click","x":40,"y":20}}
+```
+
+| Action | Required fields | Optional fields |
+| --- | --- | --- |
+| `click` | `x`, `y` | `button` (default `left`), `clickCount` (1–3, default 1), `modifiers` |
+| `move` | `x`, `y` | `modifiers` |
+| `drag` | `x`, `y`, `toX`, `toY` | `button` (default `left`), `steps` (1–60, default 12), `modifiers` |
+| `scroll` | `x`, `y`, `deltaX`, `deltaY` | `modifiers` |
+| `key_press` | `key` | `modifiers` |
+| `type_text` | `text` | |
+
+Pointer coordinates use logical points from the current window's top-left
+corner. Both drag endpoints and all intermediate points must lie inside the
+window. The left and top edges are inclusive. The right and bottom edges are
+exclusive. Buttons are `left`, `right`, and `middle`. Supply modifiers as an
+array of distinct names from `command`, `control`, `option`, and `shift`.
+Scroll deltas use pixels, with positive values scrolling right or down.
+Each delta is finite, within −2000 to 2000, and rounded to the nearest
+integer. At least one rounded delta must be nonzero.
+
+Named keys are case-insensitive. Use `return`, `enter`, `tab`, `escape`,
+`backspace`, `delete` (forward delete), `space`, `up`, `down`, `left`,
+`right`, `home`, `end`, `page_up`, `page_down`, or `f1` through `f12`.
+A single character of up to 16 UTF-16 units uses the current keyboard layout.
+Unmapped characters can use Unicode input when no modifiers are supplied.
+`type_text` accepts 1–16384 UTF-8 bytes and sends the text in Unicode chunks
+without splitting surrogate pairs.
+
+Before dispatch, the helper checks the host, console, capture, and target
+process identity. It activates the target app when needed and verifies that
+the bound window has focus. Pointer input checks the topmost window at the
+event coordinates. Keyboard input checks the full window for overlap.
+A window that obscures the target can block input even if both share a PID.
+The helper sends the events to the verified PID. Each stage of a drag and
+each text chunk receives a fresh check. A failure can leave earlier events
+dispatched. A successful `dispatched:true` confirms event submission. The
+target application decides how to handle those events.
+
+### Capture
+
+`bind` requires Screen Recording permission and starts a desktop-independent
+ScreenCaptureKit stream for the verified window. The helper waits for a
+complete frame before it returns the binding. Each stream runs at up to
+one frame per second with a maximum frame size of 640 × 480 pixels. macOS
+uses the stream to show its purple screen-sharing indicator during control.
+The helper retains the latest complete stream frame for preview consumers.
+
+If the user stops sharing in the macOS indicator, or ScreenCaptureKit reports
+an unexpected stream end, the helper immediately invalidates that stream's
+binding. Later calls require a fresh bind. Any other binding whose stream
+still runs remains active. If macOS stops every stream, every binding is
+revoked.
+
 The optional screenshot descriptor is
 `{"mimeType":"image/png","width":640,"height":480,"bytes":12345}`. The binary
 length equals `bytes`, and the PNG dimensions equal `width` and `height`.
 Each dimension is at most 2048 pixels, with at most 3145728 pixels in total.
-A screenshot uses a desktop-independent filter for the single bound window.
+`observe(screenshot: true)` takes a separate single-frame screenshot at up to
+the wire size limit. Its desktop-independent filter covers the requested
+binding's window.
 
 ## Stop and failures
 
-One slot serves `windows`, `bind`, `observe` and `act`. An overlapping
-request for that slot gets `busy`. `status` and `cancel` use the socket
-reader and can reply out of order while a window operation is busy.
+One serial window worker serves `windows`, `bind`, `unbind`, `observe` and
+`act`. An overlapping request for that slot gets `busy` even when the
+requests target different windows. `status`, `stop` and `cancel` use the
+socket reader and can reply out of order while a window operation is busy.
 `kill -USR1 HELPER_PID` provides a local stop, and `SIGTERM` seals admission
 and exits. **Stop Computer Use** also seals admission and exits. Locking the
 screen, session switching, sleep and the console guard seal
@@ -194,11 +266,11 @@ admission. The console guard uses public session fields, display state and
 visible window levels. It runs during window operations and once per second
 while a slot or binding is active.
 
-Cancel permanently seals this helper's admission. `cancel_requested` means
-an admitted operation still occupies the slot. `stop_confirmed` means the
-slot has drained. An AX call that crossed the final check can still reach its
-destination. A dispatched call can finish after cancellation. No stop status
-represents OS rollback.
+`stop` and `cancel` permanently seal admission and stop every binding's
+stream. `cancel_requested` means an admitted operation or binding cleanup
+is still pending. `stop_confirmed` means the slot has drained, the bindings
+have cleared, and the helper has requested all stream stops. A call or event
+batch that crossed the final check can still reach its destination.
 
 | Code | Meaning |
 | --- | --- |
@@ -208,14 +280,20 @@ represents OS rollback.
 | `consent_denied` | The local user declined or the consent window expired or was interrupted |
 | `desktop_disabled` | Compile-only helper |
 | `console_unavailable`, `accessibility_permission_required` | Unavailable graphical session or missing Accessibility grant |
-| `screen_recording_permission_required` | Missing grant for the requested capture, or loss of a grant seen by this helper |
+| `screen_recording_permission_required` | Missing grant for binding or capture, or loss of a grant seen by this helper |
 | `session_stopped`, `busy` | Admission is closed or the window slot is occupied |
 | `window_unavailable`, `process_identity_changed` | The helper cannot verify the window, its process, or the host process |
-| `binding_unavailable`, `element_unavailable` | Missing binding, stale ref or a node outside the window |
+| `window_already_bound` | An active binding owns the requested window |
+| `binding_not_found` | `unbind` did not find an active binding with that UUID |
+| `binding_unavailable`, `element_unavailable` | Missing or revoked binding, stale ref or a node outside the window |
+| `window_coordinate_out_of_bounds` | A pointer coordinate lies outside the window or the desktop displays |
+| `window_focus_unavailable`, `window_occluded` | The helper cannot verify focus on the target or another window blocks input |
+| `key_unavailable` | The keyboard layout cannot supply the character for a shortcut with modifiers |
 | `action_unavailable`, `invalid_value`, `action_rejected` | The action, input or target rejected the request |
 | `action_outcome_unknown` | An AX timeout after dispatch. Observe the window before deciding what to do next. |
 | `capture_failed`, `capture_limit` | Capture failed or exceeded a limit |
 | `internal_error` | Unclassified internal failure |
 
 System Settings supplies Accessibility and Screen Recording permissions.
-The helper uses preflight checks without opening permission prompts.
+The helper checks permissions without opening prompts. The host can guide
+the user to System Settings when a permission is missing.

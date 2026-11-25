@@ -89,9 +89,86 @@ private func boundsOfRoot(_ root: AXUIElement) -> CGRect? {
     return validBounds(bounds) ? bounds : nil
 }
 
-private func validBounds(_ bounds: CGRect) -> Bool {
-    [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy(\.isFinite) &&
+func validBounds(_ bounds: CGRect) -> Bool {
+    [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, bounds.width, bounds.height].allSatisfy(\.isFinite) &&
         bounds.width > 0 && bounds.height > 0
+}
+
+// The window worker owns both indexes. Capture delegates invalidate their stream
+// before they enqueue removal, so a queued operation cannot use an ended stream.
+struct WindowBindings<Context> {
+    struct Binding {
+        let id: String
+        let window: CGWindowID
+        let label: String
+        let capture: any ControlCapture
+        var context: Context
+    }
+
+    private var bindings: [String: Binding] = [:]
+    private var owners: [CGWindowID: String] = [:]
+
+    var hasBinding: Bool { !bindings.isEmpty }
+    var label: String? {
+        bindings.count > 1 ? "\(bindings.count) active windows" : bindings.values.first?.label
+    }
+
+    mutating func requireAvailable(_ window: CGWindowID) throws {
+        guard let id = owners[window] else { return }
+        if bindings[id]?.capture.isActive == true { throw Failure("window_already_bound") }
+        remove(id)
+    }
+
+    mutating func bind(window: CGWindowID, label: String, context: Context,
+                       makeCapture: (@escaping @Sendable () -> Void) throws -> any ControlCapture,
+                       onEnd: @escaping @Sendable (String) -> Void, check: () throws -> Void) throws -> String {
+        try requireAvailable(window)
+        try check()
+        let id = UUID().uuidString
+        let capture = try makeCapture { onEnd(id) }
+        do {
+            try capture.start(check: check)
+            try check()
+            guard capture.isActive else { throw Failure("capture_failed") }
+        } catch {
+            capture.stop()
+            throw error
+        }
+        bindings[id] = Binding(id: id, window: window, label: label, capture: capture, context: context)
+        owners[window] = id
+        return id
+    }
+
+    mutating func current(_ id: String) throws -> Binding {
+        guard let value = bindings[id], value.capture.isActive else {
+            remove(id)
+            throw Failure("binding_unavailable")
+        }
+        return value
+    }
+
+    mutating func update(_ value: Binding) { bindings[value.id] = value }
+
+    mutating func unbind(_ id: String) throws {
+        guard let value = bindings[id], value.capture.isActive else {
+            remove(id)
+            throw Failure("binding_not_found")
+        }
+        remove(id)
+    }
+
+    mutating func remove(_ id: String) {
+        guard let value = bindings.removeValue(forKey: id) else { return }
+        owners.removeValue(forKey: value.window)
+        value.capture.stop()
+    }
+
+    mutating func stopAll() {
+        let previous = bindings
+        bindings.removeAll()
+        owners.removeAll()
+        for value in previous.values { value.capture.stop() }
+    }
 }
 
 // The serial window worker owns all mutable window state.
@@ -103,27 +180,40 @@ final class Windows: @unchecked Sendable {
         let app: NSRunningApplication
     }
 
-    private struct Binding {
-        let id = UUID().uuidString
-        let instance: String
+    private struct Context {
         let match: Match
-        let label: String
         var refs: [String: AXUIElement] = [:]
         var expires: TimeInterval = 0
     }
 
-    // Only the window worker reads or writes the binding.
-    private var binding: Binding?
-    var hasBinding: Bool { binding != nil }
-    var bindingLabel: String? { binding?.label }
-    let instance: String
+    private typealias Binding = WindowBindings<Context>.Binding
+    private var bindings = WindowBindings<Context>()
+    var hasBinding: Bool { bindings.hasBinding }
+    var bindingLabel: String? { bindings.label }
     let access: DesktopAccess
     let live: () throws -> Void
+    private let worker: DispatchQueue
+    private let onRevocation: @Sendable (Bool, String?) -> Void
 
-    init(instance: String, access: DesktopAccess, live: @escaping () throws -> Void) {
-        self.instance = instance
+    init(worker: DispatchQueue, access: DesktopAccess, live: @escaping () throws -> Void,
+         onRevocation: @escaping @Sendable (Bool, String?) -> Void) {
+        self.worker = worker
         self.access = access
         self.live = live
+        self.onRevocation = onRevocation
+    }
+
+    func stopAll() { bindings.stopAll() }
+
+    private func captureEnded(_ id: String) {
+        bindings.remove(id)
+        onRevocation(hasBinding, bindingLabel)
+    }
+
+    func unbind(_ id: String) throws -> [String: Any] {
+        try live()
+        try bindings.unbind(id)
+        return ["binding": id, "released": true]
     }
 
     static func onScreen() -> [[String: Any]]? {
@@ -151,7 +241,7 @@ final class Windows: @unchecked Sendable {
     private func matches(_ rows: [WindowRow], pid: pid_t, deadline: TimeInterval) -> [Match] {
         guard let identity = try? ProcessIdentity.read(pid), identity.uid == getuid(),
               let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
-              app.activationPolicy == .regular, app.bundleIdentifier != nil,
+              app.activationPolicy == .regular, let bundleID = app.bundleIdentifier, bundleID != "com.apple.loginwindow",
               let executable = app.executableURL?.path, canonicalPath(executable) == identity.executable else { return [] }
 
         let axApp = AXUIElementCreateApplication(pid)
@@ -182,7 +272,7 @@ final class Windows: @unchecked Sendable {
                 "bundleId": String((match.app.bundleIdentifier ?? "").unicodeScalars.prefix(128)),
                 "bundleName": String((match.app.bundleURL?.deletingPathExtension().lastPathComponent ?? "").unicodeScalars.prefix(128)),
                 "title": text(match.root, kAXTitleAttribute) ?? "",
-                "bounds": [bounds.minX, bounds.minY, bounds.width, bounds.height]]
+                "bounds": [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, bounds.width, bounds.height]]
     }
 
     func list(application: String?) throws -> [String: Any] {
@@ -209,8 +299,10 @@ final class Windows: @unchecked Sendable {
     }
 
     func bind(_ id: CGWindowID) throws -> [String: Any] {
-        binding = nil
+        try live()
+        try bindings.requireAvailable(id)
         let rows = try rows()
+        try requireRecording()
         guard let row = rows.first(where: { $0.id == id }),
               let match = matches(rows, pid: row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
                 .first(where: { $0.row.id == id }) else { throw Failure("window_unavailable") }
@@ -218,34 +310,61 @@ final class Windows: @unchecked Sendable {
         let app = metadata["appName"] as? String ?? match.identity.executable
         let title = metadata["title"] as? String ?? ""
         let label = title.isEmpty ? app : "\(app) — \(title)"
-        let value = Binding(instance: instance, match: match, label: "Window \(id): \(label)")
+        let filter = try captureFilter(for: match, check: live)
+        let binding = try bindings.bind(window: id, label: label, context: Context(match: match), makeCapture: {
+            try ScreenControlCapture(filter: filter, onEnd: $0)
+        }, onEnd: { [weak self, worker] id in
+            guard let self else { return }
+            worker.async { self.captureEnded(id) }
+        }, check: { [self] in
+            try checkCaptureAccess(match)
+        })
+        do {
+            _ = try revalidate(bindings.current(binding))
+        } catch {
+            bindings.remove(binding)
+            throw error
+        }
+        return ["binding": binding, "window": metadata]
+    }
+
+    private func requireRecording() throws {
+        try access.recording(granted: CGPreflightScreenCaptureAccess(), required: true)
+    }
+
+    private func checkCaptureAccess(_ match: Match) throws {
         try live()
-        binding = value
-        return ["binding": value.id, "window": metadata]
+        try access.check()
+        try requireRecording()
+        try match.identity.verify()
+    }
+
+    private func sameWindow(_ previous: Match) throws -> Match {
+        let rows = try rows()
+        try previous.identity.verify()
+        guard let match = matches(rows, pid: previous.row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
+                .first(where: { $0.row.id == previous.row.id }),
+              match.identity == previous.identity, CFEqual(match.root, previous.root) else {
+            throw Failure("window_unavailable")
+        }
+        return match
+    }
+
+    private func checkLive(_ binding: Binding) throws {
+        try live()
+        guard binding.capture.isActive else { throw Failure("binding_unavailable") }
     }
 
     private func revalidate(_ value: Binding) throws -> Match {
-        let previous = value.match
         do {
-            let rows = try rows()
-            try previous.identity.verify()
-            guard value.instance == instance,
-                  let match = matches(rows, pid: previous.row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
-                    .first(where: { $0.row.id == previous.row.id }),
-                  match.identity == previous.identity, CFEqual(match.root, previous.root) else {
-                throw Failure("window_unavailable")
-            }
-            try live()
+            try checkLive(value)
+            let match = try sameWindow(value.context.match)
+            try checkLive(value)
             return match
         } catch {
-            binding = nil
+            bindings.remove(value.id)
             throw error
         }
-    }
-
-    private func current(_ id: String) throws -> Binding {
-        guard let binding, binding.id == id else { throw Failure("binding_unavailable") }
-        return binding
     }
 
     private func belongs(_ node: AXUIElement, to match: Match) -> Bool {
@@ -294,15 +413,15 @@ final class Windows: @unchecked Sendable {
     }
 
     func observe(_ id: String, screenshot: Bool) throws -> ([String: Any], Wire.Image?) {
-        var value = try current(id)
+        var value = try bindings.current(id)
         let match = try revalidate(value)
         let deadline = ProcessInfo.processInfo.systemUptime + 0.6
-        let previous = value.expires > ProcessInfo.processInfo.systemUptime ? value.refs : [:]
+        let previous = value.context.expires > ProcessInfo.processInfo.systemUptime ? value.context.refs : [:]
         var refs: [String: AXUIElement] = [:]
         var truncated = false
 
         func visit(_ node: AXUIElement, depth: Int) throws -> [String: Any]? {
-            try live()
+            try checkLive(value)
             guard depth <= 12, refs.count < 96, ProcessInfo.processInfo.systemUptime < deadline else {
                 truncated = true
                 return nil
@@ -332,16 +451,16 @@ final class Windows: @unchecked Sendable {
         guard let tree = try visit(match.root, depth: 0) else { throw Failure("window_unavailable") }
         let image = screenshot ? try capture(value) : nil
         _ = try revalidate(value)
-        value.refs = refs
-        value.expires = ProcessInfo.processInfo.systemUptime + 15
-        binding = value
+        value.context.refs = refs
+        value.context.expires = ProcessInfo.processInfo.systemUptime + 15
+        bindings.update(value)
         return (["binding": id, "tree": tree, "truncated": truncated, "refTTLms": 15_000], image)
     }
 
     func act(_ id: String, element ref: String, action: String, input: Request.Value?) throws -> [String: Any] {
-        let value = try current(id)
+        let value = try bindings.current(id)
         let match = try revalidate(value)
-        guard value.expires > ProcessInfo.processInfo.systemUptime, let node = value.refs[ref],
+        guard value.context.expires > ProcessInfo.processInfo.systemUptime, let node = value.context.refs[ref],
               belongs(node, to: match), let role = text(node, kAXRoleAttribute) else { throw Failure("element_unavailable") }
         guard actions(node, role: role).contains(action) else { throw Failure("action_unavailable") }
 
@@ -361,36 +480,127 @@ final class Windows: @unchecked Sendable {
         }
 
         let latest = try revalidate(value)
-        guard value.expires > ProcessInfo.processInfo.systemUptime,
+        guard value.context.expires > ProcessInfo.processInfo.systemUptime,
               belongs(node, to: latest), actions(node, role: role).contains(action),
               text(node, kAXRoleAttribute) == role else { throw Failure("element_unavailable") }
         try access.check()
-        try live()
-        let status: AXError
-        if let property {
-            status = AXUIElementSetAttributeValue(node, kAXValueAttribute as CFString, property)
-        } else {
+        let status = try value.capture.whileActive {
+            try live()
+            if let property {
+                return AXUIElementSetAttributeValue(node, kAXValueAttribute as CFString, property)
+            }
             let name = action == "press" ? kAXPressAction : action == "increment" ? kAXIncrementAction : kAXDecrementAction
-            status = AXUIElementPerformAction(node, name as CFString)
+            return AXUIElementPerformAction(node, name as CFString)
         }
         if status == .cannotComplete { throw Failure("action_outcome_unknown") }
         guard status == .success else { throw Failure("action_rejected") }
         return ["binding": id, "dispatched": true]
     }
 
-    private func capture(_ value: Binding) throws -> Wire.Image {
-        try access.recording(granted: CGPreflightScreenCaptureAccess(), required: true)
-        let content: SCShareableContent = try captureCall {
+    func input(_ id: String, _ action: WindowInput) throws -> [String: Any] {
+        let value = try bindings.current(id)
+        let match = try revalidate(value)
+        let row = match.row
+        let app = AXUIElementCreateApplication(row.pid)
+        AXUIElementSetMessagingTimeout(app, 0.06)
+
+        func frontmost() -> Bool {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == row.pid
+        }
+
+        func focused() -> Bool {
+            guard frontmost(), let root = attribute(app, kAXFocusedWindowAttribute),
+                  CFGetTypeID(root) == AXUIElementGetTypeID() else { return false }
+            return CFEqual(root, match.root)
+        }
+
+        func checkTarget() throws {
+            try match.identity.verify()
+            try requireRecording()
+            try checkLive(value)
+        }
+
+        func changeFocus(_ change: () -> Void) throws {
+            try access.check()
+            try match.identity.verify()
+            try value.capture.whileActive {
+                try live()
+                change()
+            }
+        }
+
+        func focus() throws {
+            guard !focused() else { return }
+            let deadline = DispatchTime.now() + .milliseconds(750)
+            func waitFor(_ ready: () -> Bool) throws {
+                while !ready() {
+                    try checkTarget()
+                    try access.check()
+                    guard DispatchTime.now() < deadline else { throw Failure("window_focus_unavailable") }
+                    Thread.sleep(forTimeInterval: 0.025)
+                }
+            }
+
+            if !frontmost() {
+                try changeFocus { _ = match.app.activate() }
+                try waitFor(frontmost)
+            }
+            if !focused() {
+                try changeFocus { _ = AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue) }
+                try changeFocus { _ = AXUIElementPerformAction(match.root, kAXRaiseAction as CFString) }
+                try waitFor(focused)
+            }
+        }
+
+        var shouldFocus = true
+        try action.execute(window: row.id, locate: { try WindowInput.global($0, in: row.bounds) },
+                           lookupKey: { name, flags in
+            DispatchQueue.main.sync { WindowInput.physicalKey(name, flags: flags) }
+        }) { point, events in
+            try checkTarget()
+            if shouldFocus {
+                try focus()
+                shouldFocus = false
+            }
+            guard let rows = Self.onScreen() else { throw Failure("console_unavailable") }
+            try access.check(rows: rows)
+            if let point {
+                var count: UInt32 = 0
+                guard CGGetDisplaysWithPoint(point, 0, nil, &count) == .success, count > 0 else {
+                    throw Failure("window_coordinate_out_of_bounds")
+                }
+            }
+            try WindowInput.verifyStack(rows, target: row, point: point, isWindowServer: ConsentOcclusion.isWindowServer)
+            guard focused() else { throw Failure("window_focus_unavailable") }
+            try match.identity.verify()
+            try requireRecording()
+            try value.capture.whileActive {
+                try live()
+                for event in events { event.postToPid(row.pid) }
+            }
+        }
+        return ["binding": id, "dispatched": true]
+    }
+
+    private func captureFilter(for previous: Match, check: () throws -> Void) throws -> SCContentFilter {
+        try check()
+        let content: SCShareableContent = try captureCall(check: check) {
             SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true, completionHandler: $0)
         }
-        let match = try revalidate(value)
+        let match = try sameWindow(previous)
         let windows = content.windows.filter {
             $0.windowID == match.row.id && $0.owningApplication?.processID == match.identity.pid &&
                 $0.isOnScreen && $0.frame == match.row.bounds
         }
         guard windows.count == 1, let window = windows.first else { throw Failure("window_unavailable") }
+        try checkCaptureAccess(match)
+        return SCContentFilter(desktopIndependentWindow: window)
+    }
 
-        let filter = SCContentFilter(desktopIndependentWindow: window)
+    private func capture(_ value: Binding) throws -> Wire.Image {
+        try requireRecording()
+        let filter = try captureFilter(for: value.context.match) { try checkLive(value) }
+        try checkLive(value)
         let config = SCStreamConfiguration()
         let rect = filter.contentRect
         guard validBounds(rect) else { throw Failure("capture_limit") }
@@ -401,13 +611,13 @@ final class Windows: @unchecked Sendable {
         try Wire.Image.checkSize(config.width, config.height)
         config.showsCursor = false
         config.ignoreShadowsSingleWindow = true
-        try access.recording(granted: CGPreflightScreenCaptureAccess(), required: true)
-        try live()
-        let image: CGImage = try captureCall {
+        if #available(macOS 14.2, *) { config.includeChildWindows = false }
+        try requireRecording()
+        let image: CGImage = try captureCall(check: { try checkLive(value) }) {
             SCScreenshotManager.captureImage(contentFilter: filter, configuration: config, completionHandler: $0)
         }
-        try live()
-        try access.recording(granted: CGPreflightScreenCaptureAccess(), required: true)
+        try checkLive(value)
+        try requireRecording()
         try Wire.Image.checkSize(image.width, image.height)
         let png = NSMutableData()
         guard let writer = CGImageDestinationCreateWithData(png as CFMutableData, UTType.png.identifier as CFString, 1, nil)
@@ -417,12 +627,12 @@ final class Windows: @unchecked Sendable {
         return try Wire.Image(png: png as Data, width: image.width, height: image.height)
     }
 
-    private func captureCall<T>(_ start: (@escaping @Sendable (T?, Error?) -> Void) -> Void) throws -> T {
+    private func captureCall<T>(check: () throws -> Void, _ start: (@escaping @Sendable (T?, Error?) -> Void) -> Void) throws -> T {
         let result = CaptureResult<T>()
         start { value, _ in result.complete(value) }
         let deadline = DispatchTime.now() + .seconds(3)
         while result.ready.wait(timeout: .now() + .milliseconds(50)) == .timedOut {
-            try live()
+            try check()
             guard DispatchTime.now() < deadline else { throw Failure("capture_failed") }
         }
         guard let value = result.value else { throw Failure("capture_failed") }

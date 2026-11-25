@@ -18,6 +18,18 @@ struct Request: Decodable {
         let element: String?
         let action: String?
         let value: Value?
+        let x: Double?
+        let y: Double?
+        let toX: Double?
+        let toY: Double?
+        let button: String?
+        let clickCount: Int?
+        let steps: Int?
+        let deltaX: Double?
+        let deltaY: Double?
+        let modifiers: [String]?
+        let key: String?
+        let text: String?
     }
 
     enum Value: Decodable {
