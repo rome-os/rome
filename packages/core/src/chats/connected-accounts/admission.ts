@@ -9,6 +9,7 @@ import type { ChannelMessage } from "@rome-os/app-runtime";
 import { DeliveryRefused } from "../../connections/types.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 import { createLogger } from "../../logger.js";
+import type { Entry } from "../../participation/entry.js";
 
 const log = createLogger("channel-admission");
 
@@ -33,8 +34,8 @@ export class AdmissionTimedOut extends DeliveryRefused {
   }
 }
 
-/** Whom a message from one Connection is let in as, or nothing. */
-export type MessageEntry = (connectionId: string, message: ChannelMessage) => Promise<unknown>;
+/** Whether a message from one Connection is let in, and as whom. */
+export type MessageEntry = (connectionId: string, message: ChannelMessage) => Promise<Entry>;
 
 export interface OrderedAdmissionOptions {
   admissionTimeoutMs?: number;
@@ -61,7 +62,7 @@ export class OrderedAdmission {
     private readonly entry?: MessageEntry,
   ) {}
 
-  /** Hands `message` to `hear` once it is admitted, with whom it was let in as,
+  /** Hands `message` to `hear` once it is admitted, with the entry's answer,
    *  asked once, after admission. Resolves when `hear` has
    *  finished, or at once for a message admission refuses; rejects with
    *  {@link AdmissionTimedOut} when admission runs past its time. The
@@ -69,7 +70,7 @@ export class OrderedAdmission {
   async deliver(
     connection: { id: string; connectionKind: string },
     message: ChannelMessage,
-    hear: (message: ChannelMessage, person: unknown) => Promise<unknown>,
+    hear: (message: ChannelMessage, entry: Entry | undefined) => Promise<unknown>,
   ): Promise<void> {
     if (!this.admit && !this.entry) {
       await hear(message, undefined);
@@ -80,7 +81,7 @@ export class OrderedAdmission {
     // conversation is released once they start, not once they finish.
     const started = await this.admissions.runExclusive(key, async () => {
       const admitted = await this.admitWithin(connection, message);
-      return admitted && { handled: hear(message, admitted.person) };
+      return admitted && { handled: hear(message, admitted.entry) };
     });
     if (started) await started.handled;
   }
@@ -88,7 +89,7 @@ export class OrderedAdmission {
   private async admitWithin(
     connection: { id: string; connectionKind: string },
     message: ChannelMessage,
-  ): Promise<{ person: unknown } | null> {
+  ): Promise<{ entry: Entry | undefined } | null> {
     const timeoutMs = this.options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<never>((_resolve, reject) => {
@@ -105,7 +106,7 @@ export class OrderedAdmission {
     const admitting = async () => {
       const admit = this.admit;
       if (admit && !(await admit(connection.id, connection.connectionKind, message))) return null;
-      return { person: await this.entry?.(connection.id, message) };
+      return { entry: await this.entry?.(connection.id, message) };
     };
     try {
       return await Promise.race([admitting(), timedOut]);

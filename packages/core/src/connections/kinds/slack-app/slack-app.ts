@@ -151,12 +151,12 @@ function withinRead(ts: string, read: TalkHistoryRead): boolean {
 
 /**
  * The connection's `Message` for `kept`, a message as the connection reads
- * it, said to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * it, said to the bot account `receivedBy`, through an app when `viaApp`. Platform facts only: Rome works out whom it
  * addresses (docs/domains/connections.md#message). The app hears a group only
  * when it is mentioned, so a mention lists the bot's account; no other account
  * a message mentions is listed.
  */
-export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
+export function messageOf(kept: ChannelMessage, receivedBy: string, viaApp = false): Message {
   const direct = kept.thread?.kind === "dm";
   return {
     id: kept.messageId,
@@ -171,6 +171,7 @@ export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
       accountId: kept.senderId,
       ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
       ...(kept.senderUsername !== undefined ? { handle: kept.senderUsername } : {}),
+      ...(viaApp ? { viaApp } : {}),
     },
     content: { text: kept.text, attachments: kept.attachments },
     receivedBy,
@@ -339,7 +340,11 @@ export class SlackAppAdapter {
     if (!this.handler) return { status: 500 };
     try {
       await this.handler(
-        messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)),
+        messageOf(
+          message,
+          slackSenderId(this.config.teamId, this.config.botUserId),
+          event.bot_id !== undefined,
+        ),
       );
     } catch (error) {
       if (error instanceof RecordingStopped) {
