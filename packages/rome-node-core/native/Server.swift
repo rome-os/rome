@@ -227,10 +227,12 @@ final class Connection: @unchecked Sendable {
         }
     }
 
-    func next() throws -> Request {
+    func nextBody() throws -> Data {
         let lengths = try Wire.lengths(readBytes(fd, count: 8), request: true)
-        return try Wire.request(readBytes(fd, count: lengths.0))
+        return try readBytes(fd, count: lengths.0)
     }
+
+    func next() throws -> Request { try Wire.request(nextBody()) }
 
     func sendNow(_ frame: Data) throws {
         try verify()
@@ -263,19 +265,72 @@ final class Connection: @unchecked Sendable {
     }
 }
 
+struct ConsentPrompt: Sendable {
+    let locale: HelperLocale
+    let mode: ConsentMode
+    let label: String
+    let controller: ControllerClaim?
+}
+
+struct SessionAuthorization: Sendable {
+    let prompt: ConsentPrompt
+    var persistent: TrustedKeyRecord?
+    var enrolled = false
+
+    var label: String { persistent?.label ?? prompt.label }
+
+    var result: [String: Any] {
+        var result: [String: Any] = ["auth": persistent == nil ? "session" : "persistent", "locale": prompt.locale.rawValue]
+        if let controller = prompt.controller {
+            result["label"] = label
+            result["scope"] = controller.scope.rawValue
+            result["fingerprint"] = controller.key.fingerprint
+            result["enrolled"] = enrolled
+        }
+        return result
+    }
+
+    func checkTrust(_ store: any TrustedKeyStore) throws {
+        if let persistent, try store.lookup(publicKey: persistent.publicKey) != persistent {
+            throw Failure("key_revoked")
+        }
+    }
+}
+
 // A provider must stop waiting when canContinue returns false.
-typealias ConsentProvider = @Sendable (_ peer: Peer, _ canContinue: @escaping @Sendable () -> Bool) -> Bool
+typealias ConsentProvider = @Sendable (_ prompt: ConsentPrompt, _ canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision
+
+private func authorize(_ prompt: ConsentPrompt, store: any TrustedKeyStore, consent: ConsentProvider,
+                       canContinue: @escaping @Sendable () -> Bool) throws -> SessionAuthorization {
+    var authorization = SessionAuthorization(prompt: prompt)
+    guard canContinue() else { throw Failure("consent_denied") }
+    if let controller = prompt.controller,
+       let record = try store.lookup(publicKey: controller.key.base64), record.scope == controller.scope {
+        authorization.persistent = record
+        return authorization
+    }
+    let decision = consent(prompt, canContinue)
+    guard decision != .deny, prompt.mode.choices.contains(decision), canContinue() else {
+        throw Failure("consent_denied")
+    }
+    if decision == .allowPersistent, let controller = prompt.controller {
+        let enrollment = try store.enroll(TrustedKeyRecord(key: controller.key, label: controller.label, scope: controller.scope))
+        authorization.persistent = enrollment.record
+        authorization.enrolled = enrollment.enrolled
+    }
+    return authorization
+}
 
 func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
-           admission: Admission, desktop: DesktopSession?, consent: ConsentProvider) throws {
+           admission: Admission, desktop: DesktopSession?, store: any TrustedKeyStore, consent: ConsentProvider) throws {
     defer { listener.removeSocket() }
     let (fd, peer) = try listener.acceptHost(host, admission: admission, signed: desktop != nil)
     let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
     defer { connection.end() }
 
     let watchdogQueue = DispatchQueue(label: "rome.computer-use.watchdog", qos: .userInitiated)
-    func watch(_ check: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
-        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+    func watch(on queue: DispatchQueue = watchdogQueue, _ check: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.setEventHandler(handler: check)
         timer.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
         timer.resume()
@@ -283,7 +338,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     }
 
     let handshakeDeadline = DispatchTime.now() + .seconds(5)
-    let first: Request = try {
+    let helloData: Data = try {
         let timer = watch {
             if DispatchTime.now() >= handshakeDeadline { connection.end() }
             else { try? connection.verify() }
@@ -293,20 +348,86 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
             // Drain the deadline check before entering the consent phase.
             watchdogQueue.sync {}
         }
-        return try connection.next()
+        return try connection.nextBody()
     }()
 
     guard DispatchTime.now() < handshakeDeadline else { throw Failure("connection_closed") }
-    guard first.v == 1, first.method == "handshake",
+    guard let first = try? Wire.request(helloData) else {
+        try connection.sendNow(Wire.failure(nil, "invalid_request"))
+        return
+    }
+    guard first.v == 1, ["handshake", "hello"].contains(first.method),
           let rawNonce = first.params?.nonce, let nonce = Data(base64Encoded: rawNonce),
           let rawProof = first.params?.proof, let proof = Data(base64Encoded: rawProof),
           handshake.verifyHost(proof, nonce: nonce) else {
         try connection.sendNow(Wire.failure(first.id, "authentication_failed"))
         return
     }
+    let hello: Hello
+    do { hello = try Hello(helloData, preferred: Locale.preferredLanguages) }
+    catch {
+        try connection.sendNow(Wire.failure(first.id, "invalid_request"))
+        return
+    }
     let instance = UUID().uuidString
     let helper = getpid()
-    let helperProof = handshake.helperProof(helper: helper, nonce: nonce, instance: instance)
+    let helperProof = handshake.helperProof(helper: helper, nonce: nonce, instance: instance).base64EncodedString()
+    let identification: [String: Any] = [
+        "instance": instance, "pid": helper, "proof": helperProof, "helperPid": helper, "helperProof": helperProof,
+    ]
+    let authorizedID: String
+    if let controller = hello.controller {
+        let challenge = ControllerChallenge(instance: instance, helper: helper, host: host.pid, controller: controller, mode: hello.mode)
+        var reply = identification
+        reply["status"] = "challenge_required"
+        reply["challenge"] = challenge.base64
+        reply["fingerprint"] = controller.key.fingerprint
+        reply["locale"] = hello.locale.rawValue
+        try connection.sendNow(Wire.reply(first.id, result: reply))
+
+        func awaitSignature() throws -> String? {
+            let timer = watch {
+                if DispatchTime.now() >= challenge.expires { connection.end("auth_failed") }
+                else { try? connection.verify() }
+            }
+            defer {
+                timer.cancel()
+                watchdogQueue.sync {}
+            }
+            while true {
+                let request: Request
+                do { request = try connection.next() }
+                catch let failure as Failure where failure.code == "invalid_request" {
+                    try connection.sendNow(Wire.failure(nil, "auth_required"))
+                    continue
+                }
+                switch request.method {
+                case "authorize":
+                    // The first authorize leaves this loop, regardless of its outcome.
+                    guard request.v == 1, challenge.verifies(request.params?.signature) else {
+                        try connection.sendNow(Wire.failure(request.id, "auth_failed"))
+                        return nil
+                    }
+                    return request.id
+                case "stop" where request.v == 1:
+                    try connection.sendNow(Wire.reply(request.id, result: admission.stop()))
+                    return nil
+                default:
+                    try connection.sendNow(Wire.failure(request.id, "auth_required"))
+                }
+            }
+        }
+
+        guard let id = try awaitSignature() else { return }
+        authorizedID = id
+    } else {
+        authorizedID = first.id
+    }
+
+    let executable = URL(fileURLWithPath: peer.identity.executable).lastPathComponent
+    let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode,
+                               label: hello.controller?.label ?? sanitizeLabel(executable) ?? hello.locale[.source],
+                               controller: hello.controller)
     let consentDeadline = DispatchTime.now() + .seconds(60)
     let canContinue: @Sendable () -> Bool = {
         do {
@@ -319,16 +440,39 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
             return false
         }
     }
-    guard canContinue(), consent(peer, canContinue), canContinue() else {
-        _ = admission.stop("consent_denied")
-        try? sendBytes(fd, Wire.failure(first.id, "consent_denied"))
+    let authorization: SessionAuthorization
+    do {
+        authorization = try authorize(prompt, store: store, consent: consent, canContinue: canContinue)
+        guard canContinue() else { throw Failure("consent_denied") }
+        if let desktop {
+            guard DispatchQueue.main.sync(execute: { desktop.showStatus(authorization) }) else {
+                throw Failure("consent_denied")
+            }
+        }
+        guard canContinue() else { throw Failure("consent_denied") }
+        try authorization.checkTrust(store)
+    } catch {
+        let reason = (error as? Failure)?.code ?? "key_store_unavailable"
+        _ = admission.stop(reason)
+        try? sendBytes(fd, Wire.failure(authorizedID, reason))
         return
     }
-    try connection.sendNow(Wire.reply(first.id, result: [
-        "instance": instance, "pid": helper, "proof": helperProof.base64EncodedString(),
-    ]))
+    let result = hello.controller == nil ? identification.merging(authorization.result) { _, value in value } : authorization.result
+    try connection.sendNow(Wire.reply(authorizedID, result: result))
     let watchdog = watch { try? connection.verify() }
     defer { watchdog.cancel() }
+
+    let checkTrust: @Sendable () throws -> Void = {
+        do { try authorization.checkTrust(store) }
+        catch {
+            connection.end((error as? Failure)?.code ?? "key_store_unavailable")
+            throw error
+        }
+    }
+    // Keychain I/O must not delay peer identity or socket checks.
+    let trustWatchdog = authorization.persistent != nil
+        ? watch(on: DispatchQueue.global(qos: .userInitiated)) { try? checkTrust() } : nil
+    defer { trustWatchdog?.cancel() }
 
     let access = DesktopAccess()
     // A console scan can block without delaying the transport watchdog.
@@ -346,15 +490,17 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     let windows = Windows(worker: worker, access: access, live: {
         try connection.verify()
         try admission.check()
-    }, onRevocation: { hasBinding, label in
-        admission.updateBindings(hasBinding)
-        if let desktop { DispatchQueue.main.async { desktop.updateBinding(label) } }
+        try checkTrust()
+        try admission.check()
+    }, onRevocation: { count in
+        admission.updateBindings(count != 0)
+        if let desktop { DispatchQueue.main.async { desktop.updateBinding(count) } }
     })
     admission.whenStopped { [weak windows] in
         worker.async { [weak windows] in
             windows?.stopAll()
             admission.updateBindings(false)
-            if let desktop { DispatchQueue.main.async { desktop.updateBinding(nil) } }
+            if let desktop { DispatchQueue.main.async { desktop.updateBinding(0) } }
         }
     }
     defer {
@@ -379,6 +525,12 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         }
 
         do {
+            if request.method == "authorize" {
+                _ = admission.stop("auth_failed")
+                try connection.send(Wire.failure(request.id, "auth_failed"))
+                connection.flush()
+                return
+            }
             guard request.v == 1 else { throw Failure("unsupported_version") }
             switch request.method {
             case "status":
@@ -393,7 +545,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 try connection.verify()
                 try admission.begin()
                 worker.async {
-                    let previousLabel = windows.bindingLabel
+                    let previousCount = windows.bindingCount
                     let response: Data?
                     do {
                         let args = request.params
@@ -426,9 +578,9 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                     } catch {
                         response = try? Wire.failure(request.id, (error as? Failure)?.code ?? "internal_error")
                     }
-                    let label = windows.bindingLabel
-                    if label != previousLabel { DispatchQueue.main.async { desktop.updateBinding(label) } }
-                    admission.finish(hasBinding: windows.hasBinding)
+                    let count = windows.bindingCount
+                    if count != previousCount { DispatchQueue.main.async { desktop.updateBinding(count) } }
+                    admission.finish(hasBinding: count != 0)
                     if let response { try? connection.send(response) }
                 }
             default:

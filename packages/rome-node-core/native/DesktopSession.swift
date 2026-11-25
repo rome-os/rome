@@ -42,10 +42,12 @@ struct ConsentUnlock {
     private var focusedSince: TimeInterval?
     private var lastMouseDown: TimeInterval?
     private var pendingClick: (count: Int, interval: TimeInterval?)?
+    private var pendingKey = false
 
     mutating func reset() {
         focusedSince = nil
         pendingClick = nil
+        pendingKey = false
     }
 
     mutating func update(focused: Bool, at uptime: TimeInterval) -> Bool {
@@ -66,17 +68,33 @@ struct ConsentUnlock {
             return
         }
         pendingClick = (clickCount, interval)
+        pendingKey = false
     }
 
-    mutating func keyDown(enabled: Bool) {
-        if !enabled { reset() }
+    mutating func keyDown(enabled: Bool, isRepeat: Bool = false) {
+        if enabled && !isRepeat {
+            pendingClick = nil
+            pendingKey = true
+        } else {
+            reset()
+        }
     }
 
     mutating func accept(currentClickCount: Int?, doubleClickInterval: TimeInterval) -> Bool {
         let singleClick = pendingClick.map { click in
             click.count == 1 && (click.interval ?? .infinity) > doubleClickInterval
-        } ?? (currentClickCount == nil)
+        } ?? (pendingKey && currentClickCount == nil)
         guard singleClick, (currentClickCount ?? 1) == 1 else {
+            reset()
+            return false
+        }
+        pendingClick = nil
+        pendingKey = false
+        return true
+    }
+
+    mutating func revalidate(clear: Bool, focused: Bool, eligible: Bool, at uptime: TimeInterval) -> Bool {
+        guard clear, focused, eligible, let focusedSince, uptime - focusedSince >= 1 else {
             reset()
             return false
         }
@@ -85,18 +103,24 @@ struct ConsentUnlock {
 }
 
 @MainActor
-final class DesktopSession: NSObject {
+final class DesktopSession: NSObject, NSMenuDelegate {
     private enum ConsentVisibility { case untrusted, clear, raised }
 
     private let admission: Admission
+    private let store: any TrustedKeyStore
     private var unlock = ConsentUnlock()
+    private var answer: ((NSButton) -> Void)?
     private var statusItem: NSStatusItem?
     private var windowItem: NSMenuItem?
+    private var authorization: SessionAuthorization?
+    private var revocationItems: [NSMenuItem] = []
+    private var revocationFailed = false
     private var workspaceObservers: [NSObjectProtocol] = []
     private var lockObserver: NSObjectProtocol?
 
-    init(admission: Admission) {
+    init(admission: Admission, store: any TrustedKeyStore) {
         self.admission = admission
+        self.store = store
         super.init()
         let unavailable: @Sendable (Notification) -> Void = { _ in
             _ = admission.stop("console_unavailable")
@@ -110,32 +134,34 @@ final class DesktopSession: NSObject {
             forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: nil, using: unavailable)
     }
 
-    func confirm(_ peer: Peer, canContinue: @escaping @Sendable () -> Bool) -> Bool {
-        guard let signature = peer.signingSummary else { return false }
+    func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision {
         let eligible: @MainActor @Sendable () -> Bool = {
             canContinue() && DesktopAccess.consoleAvailable(Windows.onScreen())
         }
-        guard eligible() else { return false }
-        let name = URL(fileURLWithPath: peer.identity.executable).lastPathComponent
-        let host = "\(String(reflecting: name)) (PID \(peer.identity.pid))"
+        guard eligible() else { return .deny }
+        let locale = prompt.locale
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Allow a computer use session?"
-        alert.informativeText = """
-            \(host) requests access to list your open windows and read and control any of them until you stop the session.
-            Choose Stop Computer Use in the Rome Computer Use menu bar item to stop at any time.
-
-            Executable: \(String(reflecting: peer.identity.executable))
-            Signing identifier: \(signature)
-            """
-        let deny = alert.addButton(withTitle: "Deny")
-        let allow = alert.addButton(withTitle: "Allow Session")
+        alert.messageText = locale[.title]
+        var details = [locale[.access]]
+        if prompt.mode.choices.contains(.allowPersistent) { details.append(locale[.persistentAccess]) }
+        if let controller = prompt.controller {
+            details.append(locale[controller.scope == .local ? .localRisk : .remoteRisk])
+            details.append("\(locale[.fingerprint])\n\(locale.keyFingerprint(controller.key.fingerprint))")
+        }
+        details.append("\(locale[.source])\n\(locale.sourceLabel(prompt.label))")
+        alert.informativeText = details.joined(separator: "\n\n")
+        let deny = alert.addButton(withTitle: locale[.deny])
+        deny.tag = ConsentDecision.deny.rawValue
+        let allows = prompt.mode.choices.dropFirst().map { choice in
+            let button = alert.addButton(withTitle: locale[choice == .allowSession ? .allowSession : .allowPersistent])
+            button.tag = choice.rawValue
+            button.keyEquivalent = ""
+            button.isEnabled = false
+            return button
+        }
         deny.keyEquivalent = "\r"
-        allow.keyEquivalent = ""
-        allow.isEnabled = false
-        deny.tag = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        allow.tag = NSApplication.ModalResponse.alertSecondButtonReturn.rawValue
-        for button in [deny, allow] {
+        for button in [deny] + allows {
             button.target = self
             button.action = #selector(answerConsent)
         }
@@ -148,20 +174,51 @@ final class DesktopSession: NSObject {
 
         let app = NSApplication.shared
         unlock = ConsentUnlock()
+        let enable: @MainActor @Sendable (Bool) -> Void = { enabled in
+            allows.forEach { $0.isEnabled = enabled }
+        }
         let reset: @MainActor @Sendable () -> Void = {
             self.unlock.reset()
-            allow.isEnabled = false
+            enable(false)
         }
+        let revalidate: @MainActor () -> Bool = {
+            self.unlock.revalidate(clear: Self.visibility(window) == .raised,
+                                   focused: window.isKeyWindow && app.isActive, eligible: eligible(),
+                                   at: ProcessInfo.processInfo.systemUptime)
+        }
+        answer = { sender in
+            guard sender.isEnabled else { return }
+            if sender !== deny {
+                // AppKit can deliver a control action after currentEvent has changed.
+                let clickCount = app.currentEvent.flatMap { event in
+                    event.type == .leftMouseDown || event.type == .leftMouseUp ? event.clickCount : nil
+                }
+                guard revalidate() else {
+                    reset()
+                    app.abortModal()
+                    return
+                }
+                guard self.unlock.accept(currentClickCount: clickCount, doubleClickInterval: NSEvent.doubleClickInterval) else {
+                    reset()
+                    return
+                }
+            }
+            app.stopModal(withCode: .init(rawValue: sender.tag))
+        }
+        defer { answer = nil }
+
         guard let inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown], handler: { event in
             MainActor.assumeIsolated {
+                let enabled = allows.allSatisfy(\.isEnabled)
                 if event.type == .leftMouseDown {
-                    self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: allow.isEnabled)
+                    self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: enabled)
                 } else {
-                    self.unlock.keyDown(enabled: allow.isEnabled)
+                    self.unlock.keyDown(enabled: enabled, isRepeat: event.isARepeat)
+                    if event.isARepeat { enable(false) }
                 }
             }
             return event
-        }) else { return false }
+        }) else { return .deny }
         defer { NSEvent.removeMonitor(inputMonitor) }
 
         let raise: @MainActor @Sendable () -> Void = {
@@ -192,38 +249,25 @@ final class DesktopSession: NSObject {
                     app.abortModal()
                     return
                 }
-                allow.isEnabled = self.unlock.update(focused: visibility == .raised && window.isKeyWindow && app.isActive,
-                                                     at: ProcessInfo.processInfo.systemUptime)
+                enable(self.unlock.update(focused: visibility == .raised && window.isKeyWindow && app.isActive,
+                                          at: ProcessInfo.processInfo.systemUptime))
             }
         }
         RunLoop.main.add(timer, forMode: .modalPanel)
         app.activate(ignoringOtherApps: true)
         // Keep the alert ordered on screen until the acceptance checks finish.
-        let accepted = withExtendedLifetime(alert) {
+        return withExtendedLifetime(alert) {
             let response = app.runModal(for: window)
             timer.invalidate()
-            let accepted = response == .alertSecondButtonReturn && allow.isEnabled && eligible() &&
-                Self.visibility(window) == .raised && window.isKeyWindow && app.isActive
-            window.orderOut(nil)
-            return accepted
+            defer { window.orderOut(nil) }
+            guard let decision = ConsentDecision(rawValue: response.rawValue), decision != .deny,
+                  allows.contains(where: { $0.tag == decision.rawValue && $0.isEnabled }), revalidate() else { return .deny }
+            return decision
         }
-        return accepted && showStatus(host: host)
     }
 
     @objc private func answerConsent(_ sender: NSButton) {
-        guard sender.isEnabled else { return }
-        let app = NSApplication.shared
-        if sender.tag == NSApplication.ModalResponse.alertSecondButtonReturn.rawValue {
-            // AppKit can deliver a control action after currentEvent has changed.
-            let clickCount = app.currentEvent.flatMap { event in
-                event.type == .leftMouseDown || event.type == .leftMouseUp ? event.clickCount : nil
-            }
-            guard unlock.accept(currentClickCount: clickCount, doubleClickInterval: NSEvent.doubleClickInterval) else {
-                sender.isEnabled = false
-                return
-            }
-        }
-        app.stopModal(withCode: .init(rawValue: sender.tag))
+        answer?(sender)
     }
 
     private static func visibility(_ window: NSWindow) -> ConsentVisibility {
@@ -254,24 +298,77 @@ final class DesktopSession: NSObject {
         return raised ? .raised : .clear
     }
 
-    private func showStatus(host: String) -> Bool {
+    func showStatus(_ authorization: SessionAuthorization) -> Bool {
+        guard DesktopAccess.consoleAvailable(Windows.onScreen()) else { return false }
+        self.authorization = authorization
+        let locale = authorization.prompt.locale
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
         guard let button = item.button else { return false }
-        button.title = "Rome Computer Use"
+        button.title = locale[.menuTitle]
 
         let menu = NSMenu()
-        menu.addItem(withTitle: host, action: nil, keyEquivalent: "")
-        windowItem = menu.addItem(withTitle: "No window bound", action: nil, keyEquivalent: "")
+        menu.delegate = self
+        menu.addItem(withTitle: locale.sourceLabel(authorization.label), action: nil, keyEquivalent: "")
+        if let fingerprint = authorization.prompt.controller?.key.fingerprint {
+            menu.addItem(withTitle: locale.keyFingerprint(fingerprint), action: nil, keyEquivalent: "")
+        }
+        windowItem = menu.addItem(withTitle: locale[.noWindows], action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-        let stop = menu.addItem(withTitle: "Stop Computer Use", action: #selector(stopSession), keyEquivalent: "")
+        let stop = menu.addItem(withTitle: locale[.stop], action: #selector(stopSession), keyEquivalent: "")
         stop.target = self
         item.menu = menu
         return true
     }
 
-    func updateBinding(_ label: String?) {
-        windowItem?.title = label ?? "No window bound"
+    func updateBinding(_ count: Int) {
+        guard let locale = authorization?.prompt.locale else { return }
+        switch count {
+        case 0: windowItem?.title = locale[.noWindows]
+        case 1: windowItem?.title = locale[.oneWindow]
+        default: windowItem?.title = String(format: locale[.multipleWindows], Int32(count))
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let authorization else { return }
+        let locale = authorization.prompt.locale
+        revocationItems.forEach { menu.removeItem($0) }
+        revocationItems.removeAll()
+        if let record = authorization.persistent {
+            let title = String(format: locale[.revokeCurrent], locale.sourceLabel(record.label), locale.keyFingerprint(record.fingerprint))
+            revocationItems.append(menu.addItem(withTitle: title, action: #selector(revokeCurrent), keyEquivalent: ""))
+        }
+        if (try? store.list().isEmpty) == false {
+            revocationItems.append(menu.addItem(withTitle: locale[.revokeAll], action: #selector(revokeAll), keyEquivalent: ""))
+        }
+        if revocationFailed {
+            revocationItems.append(menu.addItem(withTitle: locale[.keyStoreError], action: nil, keyEquivalent: ""))
+        }
+        revocationItems.forEach { $0.target = self }
+    }
+
+    @objc private func revokeCurrent() {
+        guard let record = authorization?.persistent else { return }
+        revoke { try store.revoke(.publicKey(record.publicKey)) }
+    }
+
+    @objc private func revokeAll() {
+        revoke { try store.revokeAll() }
+    }
+
+    private func revoke(_ remove: () throws -> Void) {
+        let persistent = authorization?.persistent != nil
+        // Seal window admission before touching Keychain. The stop handler only enqueues cleanup.
+        if persistent { _ = admission.stop("key_revoked") }
+        do {
+            try remove()
+            revocationFailed = false
+        } catch {
+            revocationFailed = true
+            FileHandle.standardError.write(Data("\((error as? Failure)?.code ?? "key_store_unavailable")\n".utf8))
+        }
+        if persistent { admission.terminate("key_revoked") }
     }
 
     @objc private func stopSession() {

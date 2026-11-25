@@ -166,8 +166,8 @@ func withPublication(_ output: URL, _ stageApp: (URL) throws -> Void) throws {
     }
 }
 
-func build(_ output: URL, selfTest: Bool, identity: String?) throws {
-    guard selfTest ? identity == nil : identity != nil && identity != "-" && identity != "" else {
+func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?) throws {
+    guard selfTest ? identity == nil && profile == nil : identity != nil && identity != "-" && identity != "" else {
         throw BuildError("Choose either --self-test-build or an Apple code-signing --identity.")
     }
     try withPublication(output) { app in
@@ -183,7 +183,26 @@ func build(_ output: URL, selfTest: Bool, identity: String?) throws {
         if selfTest { args += ["-D", "SELF_TEST_BUILD"] }
         try run("/usr/bin/xcrun", args + sources + ["-o", executable(app).path])
         if let identity {
-            try run("/usr/bin/codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", identity, app.path])
+            var signing = ["--force", "--options", "runtime", "--timestamp", "--sign", identity]
+            if let profile {
+                let embedded = app.appendingPathComponent("Contents/embedded.provisionprofile")
+                try files.copyItem(at: URL(fileURLWithPath: profile), to: embedded)
+                let stage = app.deletingLastPathComponent()
+                let decoded = stage.appendingPathComponent("profile.plist")
+                try run("/usr/bin/security", ["cms", "-D", "-i", embedded.path, "-o", decoded.path])
+                let key = "com.apple.application-identifier"
+                guard let entitlements = try plist(decoded)["Entitlements"] as? [String: Any],
+                      let appID = entitlements[key] as? String,
+                      let separator = appID.firstIndex(of: "."), separator != appID.startIndex,
+                      String(appID[appID.index(after: separator)...]) == bundleID else {
+                    throw BuildError("The provisioning profile needs an explicit App ID for \(bundleID).")
+                }
+                let path = stage.appendingPathComponent("entitlements.plist")
+                let data = try PropertyListSerialization.data(fromPropertyList: [key: appID], format: .xml, options: 0)
+                try data.write(to: path)
+                signing += ["--entitlements", path.path]
+            }
+            try run("/usr/bin/codesign", signing + [app.path])
         }
         try validate(app, signed: !selfTest)
     }
@@ -315,7 +334,7 @@ func main() throws {
     while let option = args.first {
         args.removeFirst()
         if ["--self-test-build", "--release"].contains(option), flags.insert(option).inserted { continue }
-        guard ["--app", "--source", "--identity"].contains(option), options[option] == nil,
+        guard ["--app", "--source", "--identity", "--provisioning-profile"].contains(option), options[option] == nil,
               let value = args.first, !value.hasPrefix("--") else { throw BuildError("Invalid option \(option).") }
         options[option] = value
         args.removeFirst()
@@ -324,8 +343,9 @@ func main() throws {
         repository.appendingPathComponent(".scratch/rome-node-native/\(appName)", isDirectory: true)
     let buildOptions = Set(options.keys).subtracting(["--app"])
     switch command {
-    case "build" where buildOptions.isSubset(of: ["--identity"]) && flags.isSubset(of: ["--self-test-build"]):
-        try build(output, selfTest: flags.contains("--self-test-build"), identity: options["--identity"])
+    case "build" where buildOptions.isSubset(of: ["--identity", "--provisioning-profile"]) && flags.isSubset(of: ["--self-test-build"]):
+        try build(output, selfTest: flags.contains("--self-test-build"), identity: options["--identity"],
+                  profile: options["--provisioning-profile"])
         print(output.path)
     case "verify" where buildOptions.isEmpty && flags.isSubset(of: ["--release"]):
         try validate(output, release: flags.contains("--release"))

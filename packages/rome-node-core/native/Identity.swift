@@ -80,7 +80,6 @@ struct ProcessIdentity: Equatable {
 struct Peer {
     let identity: ProcessIdentity
     let audit: Data
-    let signingSummary: String?
 
     static func authenticate(_ fd: Int32, expecting expected: ProcessIdentity, signed: Bool) throws -> Self {
         var uid: uid_t = 0, gid: gid_t = 0, pid: pid_t = 0
@@ -100,7 +99,6 @@ struct Peer {
         try expected.verify()
         // Keep the token from authentication as a snapshot of the admitted peer.
         let audit = withUnsafeBytes(of: token) { Data($0) }
-        var signingSummary: String?
         if signed {
             var code: SecCode?
             var staticCode: SecStaticCode?
@@ -112,14 +110,12 @@ struct Peer {
                   SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation),
                                                 &rawInfo) == errSecSuccess,
                   let info = rawInfo as? [String: Any],
-                  let identifier = info[kSecCodeInfoIdentifier as String] as? String else {
+                  info[kSecCodeInfoIdentifier as String] is String else {
                 throw Failure("peer_rejected")
             }
-            let team = info[kSecCodeInfoTeamIdentifier as String] as? String
-            signingSummary = "\(String(reflecting: identifier))\nTeam ID: \(team ?? "Unavailable")"
             try expected.verify()
         }
-        return Self(identity: expected, audit: audit, signingSummary: signingSummary)
+        return Self(identity: expected, audit: audit)
     }
 }
 

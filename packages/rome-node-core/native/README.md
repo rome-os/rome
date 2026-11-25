@@ -17,11 +17,21 @@ swift "$script" verify --release
 ```
 
 The last command must fail for the compile-only bundle. That build accepts
-`--self-test` and runs a test socket with desktop access disabled. The release
-gate requires a production bundle with a valid Developer ID Application
-signature and a stapled notarization ticket.
+`--self-test` and runs test sockets with desktop access disabled, simulated
+consent, and an in-memory key store. The release gate requires a production
+bundle with a valid Developer ID Application signature and a stapled
+notarization ticket.
 
 Build a production bundle with `build --identity 'Apple signing identity'`.
+For controller keys, also pass `--provisioning-profile PATH` with a macOS
+provisioning profile for the explicit App ID of `com.rome.computer-use`.
+The script embeds the profile and signs the helper with its application
+identifier. The macOS data protection Keychain uses that identifier to
+restrict access to the key store. Sign with the same App ID across releases
+to retain the keys. A build without the profile supports session approval
+without a controller. Controller authorization and key management commands
+fail with `key_store_unavailable` when the Keychain cannot grant access.
+
 The default output is under `.scratch/rome-node-native/`. Use `--app PATH` to
 select an output named `Rome Computer Use.app`. Use
 `install --source PATH --app PATH` to stage a signed bundle at another path.
@@ -56,11 +66,12 @@ path so macOS can retain permissions across upgrades.
    with `LOCAL_PEERTOKEN`. It matches the audit token's PID version against
    the kernel process record. A native host can apply the same kernel checks
    to the helper.
-5. Send `handshake` with a fresh 32-byte random `nonce` and the host `proof`.
-   Encode both as standard Base64. The request requires only the host PID.
-   After the local user allows the session, use the returned PID and instance
-   to verify the helper proof with a constant-time MAC comparison. Send
-   additional requests only after successful verification.
+5. Send `hello` with a fresh 32-byte random `nonce` and the host `proof`.
+   Encode both as standard Base64. The host can send `handshake` as an alias.
+   Use the returned `helperPid` and `instance` to verify `helperProof` with a
+   constant-time MAC comparison. The reply also includes the original `pid`
+   and `proof` fields with the same values. Verify the proof before sending
+   any further requests.
 
 The helper takes an exclusive `flock` on the pinned directory inode. It opens
 `bootstrap.json` without following symlinks and verifies its owner, type, mode,
@@ -81,13 +92,11 @@ following fields as UTF-8, joined by one LF byte with no final newline.
 | 5 | | Standard Base64 nonce |
 | 6 | | Returned `instance` UUID |
 
-The helper waits up to 10 seconds for the declared host to connect and up to
-5 seconds for the handshake request. After verifying the host proof and computing
-the helper proof, a production helper waits up to 60 seconds for the local user
-to approve. Allow for both time limits when waiting for the handshake response.
-The helper sends `consent_denied` on denial, dialog coverage, timeout, lock,
-stop signal or disconnect whenever the socket can still carry the reply.
-Admission closes and the helper exits in each case.
+The helper waits up to 10 seconds for the declared host and 5 seconds for
+`hello`. Each challenge and each consent dialog has its own 60-second
+deadline. A consent denial, obscured dialog, dialog timeout, lock, stop
+signal or disconnect ends the session. The helper sends `consent_denied`
+when the socket can still carry the reply.
 
 A socket or directory replacement, peer identity change or transport loss
 seals admission and ends the helper. The helper samples the kernel process
@@ -103,6 +112,114 @@ The test server checks kernel peer identity and HMAC with desktop access disable
 and uses an injected consent decision. A Node 24 client verifies the wire
 contract using the helper PID from the response.
 
+### Authorization modes
+
+`hello` accepts optional `locale`, `consentMode`, and `controller` fields.
+With no controller, the helper asks for permission to start a single
+session. Its successful reply includes `auth: "session"` and the resolved
+`locale` alongside the helper proof.
+
+A controller object has three fields.
+
+| Field | Value |
+| --- | --- |
+| `publicKey` | Canonical standard Base64 of the raw 32-byte Ed25519 public key |
+| `label` | A display name for the source. The helper removes control and direction markers, collapses whitespace, and keeps up to 64 characters. |
+| `scope` | `remote` or `local`, according to where the caller keeps the private key |
+
+The helper rejects an invalid controller, an empty sanitized label, an
+unknown mode, or a mode that requires a missing controller with
+`invalid_request`.
+
+| `consentMode` | Controller required | Dialog choices |
+| --- | --- | --- |
+| `session_only` (default) | No | Deny, Allow This Session |
+| `persistent_only` | Yes | Deny, Always Allow This Source |
+| `session_or_persistent` | Yes | Deny, Allow This Session, Always Allow This Source |
+
+With a controller, the successful `hello` reply contains
+`status: "challenge_required"`, `instance`, `helperPid`, `helperProof`,
+`challenge`, `fingerprint`, and `locale`. The challenge is 32 random bytes in
+standard Base64. Send `authorize` with a `signature` field containing a
+64-byte Ed25519 signature in standard Base64. Sign these fields in UTF-8,
+joined by one LF byte with no final newline.
+
+```text
+rome-computer-use-auth-v1
+<instance>
+<decimal helperPid>
+<decimal hostPid>
+<challengeBase64>
+<publicKeyBase64>
+<scope>
+<consentMode>
+```
+
+Use the literal `session_only` in the signature when the request omits the
+mode. The helper keeps the sanitized label and resolved locale with the
+challenge for the same connection. It consumes the challenge on the first
+`authorize` and closes the connection on an invalid or repeated signature.
+An unused challenge expires and closes the connection. Before
+authorization succeeds, the helper accepts only `authorize` and `stop`.
+All other methods return `auth_required`. Wait for each reply before
+sending the next request.
+
+After a valid signature, a key already authorized for the same scope starts
+a persistent session without a dialog. This applies to all three modes.
+The helper uses the stored label. A new key or a scope change requires a
+dialog with the choices for the requested mode. Session approval leaves
+the Keychain untouched. Persistent approval saves the key and scope before
+granting access. A Keychain write failure ends the session.
+
+The `authorize` reply includes `auth` (`session` or `persistent`),
+`fingerprint`, `enrolled`, `label`, `scope`, and `locale`. The
+`enrolled` field is true when the helper saves a new or changed grant.
+
+### Language and source identity
+
+The helper uses built-in text for the consent dialog and menu bar. It
+accepts English (`en`), Japanese (`ja`), simplified Chinese (`zh-Hans`),
+and traditional Chinese (`zh-Hant`). It matches language tags without
+regard to case. It maps `zh`, `zh-CN`, `zh-SG`, and `zh-Hans` tags to
+`zh-Hans`. It maps `zh-TW`, `zh-HK`, `zh-MO`, and `zh-Hant` tags to
+`zh-Hant`. It also accepts regional tags such as `en-US` and `ja-JP`.
+If the requested tag has no match, the helper tries system preferred
+languages in order, then uses `en`. The caller supplies a source label.
+The helper writes all warnings and computes the fingerprint itself.
+
+The short fingerprint is the first six bytes of SHA-256 of the raw public
+key. It uses uppercase hexadecimal in three groups of four characters,
+such as `A7F3-91C2-4B8E`. The helper matches grants by the full public key.
+The short fingerprint helps the local user compare the key with the source.
+
+### Manage trusted keys
+
+The helper stores up to 32 public keys and their grants in the macOS data
+protection Keychain. The item uses service
+`com.rome.computer-use.authorized-keys`, account `v1`, and an accessibility
+class that makes it available after the first unlock on that device.
+Neither the helper nor the Keychain item needs the controller's private key.
+
+During a session, open the menu bar item to stop computer use, revoke the
+current persistent source and stop, or revoke all stored keys. Revoking all
+keys leaves a session-only grant active. A persistent session ends when its
+grant disappears or changes. The helper checks the grant while idle and
+before window operations.
+
+Run these commands on the executable inside the signed app bundle.
+
+```sh
+helper="/path/to/Rome Computer Use.app/Contents/MacOS/RomeComputerUse"
+"$helper" --list-keys
+"$helper" --revoke-key A7F3-91C2-4B8E
+"$helper" --revoke-keys
+```
+
+`--list-keys` prints JSON with `fingerprint`, `label`, `scope`, and
+`enrolledAt` in Unix seconds. `--revoke-key` takes the uppercase short
+fingerprint and refuses an ambiguous match. `--revoke-keys` removes every
+grant. New persistent grants require approval in the consent dialog.
+
 ## Threat model
 
 macOS grants Accessibility and Screen Recording to the helper as a separate
@@ -113,19 +230,24 @@ identify the code making the request, and a process running as the same user
 can create bootstrap files of its own.
 
 The per-launch secret and HMAC bind the Unix socket handshake to its host.
-After verifying the host's kernel identity and HMAC, the helper displays the
-requesting process name, PID, canonical executable path and signing summary
-in a local confirmation dialog. **Deny** is the default. **Allow Session**
-becomes available after the dialog stays focused and clear for one second.
-A left mouse press or key press during that delay restarts it. An overlapping window above the dialog from another process ends confirmation,
-except for the system cursor. The helper checks again before accepting approval.
+The Ed25519 signature proves possession of the controller key. The scope is
+the caller's claim about where it keeps that key. For `remote`, compare the
+fingerprint with the one on the remote host before approving. For `local`,
+any process running as the same user that can read the private key can
+control the Mac unattended until the grant is revoked.
 
-**Allow Session** lets the host list eligible open windows and their titles.
+**Deny** is the default. Approval buttons unlock together when the dialog
+stays focused and clear for one second. A left mouse press or key press
+during that delay restarts it. An overlapping window from another process
+above the dialog ends confirmation, except for the system cursor. The
+helper checks focus, visibility and eligibility again before approval.
+
+An authorized host can list eligible open windows and their titles.
 The authenticated host can hold bindings to several distinct windows at once.
 Each binding limits observation and actions to its own window. The helper
 checks the Accessibility root and element membership before dispatch.
-The **Rome Computer Use** menu bar item shows the host and either no binding,
-the window title and app, or the number of bound windows.
+The **Rome Computer Use** menu bar item shows the source label, its key
+fingerprint when present, and the number of bound windows.
 **Stop Computer Use** clears every binding and ends the session.
 
 ## Frames
@@ -151,7 +273,8 @@ requests. A framing or request error without a usable ID uses JSON `null`.
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `handshake` | `nonce`, `proof` | `instance` UUID, numeric `pid`, Base64 `proof` |
+| `hello`, `handshake` | `nonce`, `proof`, optional `locale`, `consentMode`, `controller` | Helper proof and a session grant or controller challenge |
+| `authorize` | `signature` | Session or persistent grant |
 | `status` | | `instance`, `stop` and optional `reason` |
 | `windows` | Optional `application` | `windows` array of eligible windows |
 | `bind` | Numeric `window` | `binding` UUID and `window` record |
@@ -287,7 +410,9 @@ batch that crossed the final check can still reach its destination.
 | `invalid_frame`, `frame_limit` | The transport cannot use the frame. The helper closes the connection. |
 | `invalid_request`, `unsupported_version`, `method_unavailable` | Invalid request shape, version or method |
 | `authentication_failed`, `connection_closed` | Failed handshake or a connection that lost its authority |
+| `auth_required`, `auth_failed` | Controller authorization is pending, or proof failed and the connection closes |
 | `consent_denied` | The local user declined or the consent window expired or was interrupted |
+| `key_store_unavailable`, `trusted_key_limit` | Keychain access failed or the grant list is full |
 | `desktop_disabled` | Compile-only helper |
 | `console_unavailable`, `accessibility_permission_required` | Unavailable graphical session or missing Accessibility grant |
 | `screen_recording_permission_required` | Missing grant for binding or capture, or loss of a grant seen by this helper |

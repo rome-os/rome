@@ -22,7 +22,7 @@ func signedApp() -> Bool {
 }
 
 @MainActor
-func launch(path: String, desktop: Bool, testConsent: ConsentProvider? = nil) throws -> Never {
+func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent: ConsentProvider? = nil) throws -> Never {
     let state = try StateDirectory(path)
     // Serialize bootstrap consumption and socket ownership on the pinned directory inode.
     guard flock(state.fd, LOCK_EX | LOCK_NB) == 0 else { throw Failure("state_directory_busy") }
@@ -47,21 +47,21 @@ func launch(path: String, desktop: Bool, testConsent: ConsentProvider? = nil) th
     let consent: ConsentProvider
     if let app {
         guard app.setActivationPolicy(.accessory) else { throw Failure("console_unavailable") }
-        let ui = DesktopSession(admission: admission)
+        let ui = DesktopSession(admission: admission, store: store)
         session = ui
-        consent = { peer, canContinue in
-            DispatchQueue.main.sync { ui.confirm(peer, canContinue: canContinue) }
+        consent = { prompt, canContinue in
+            DispatchQueue.main.sync { ui.confirm(prompt, canContinue: canContinue) }
         }
     } else {
         session = nil
-        consent = testConsent ?? { _, _ in false }
+        consent = testConsent ?? { _, _ in .deny }
     }
 
     DispatchQueue.global(qos: .userInitiated).async {
         let code: Int32
         do {
             try serve(listener: Listener(state: state), host: host, handshake: handshake,
-                      admission: admission, desktop: session, consent: consent)
+                      admission: admission, desktop: session, store: store, consent: consent)
             code = 0
         } catch {
             let reason = (error as? Failure)?.code ?? "internal_error"
@@ -77,6 +77,20 @@ func launch(path: String, desktop: Bool, testConsent: ConsentProvider? = nil) th
     dispatchMain()
 }
 
+func manageKeys(_ arguments: [String], store: any TrustedKeyStore) throws -> Data? {
+    switch arguments.first {
+    case "--list-keys" where arguments.count == 1:
+        return try JSONSerialization.data(withJSONObject: store.list().map(\.summary), options: [.sortedKeys])
+    case "--revoke-keys" where arguments.count == 1:
+        try store.revokeAll()
+    case "--revoke-key" where arguments.count == 2:
+        try store.revoke(fingerprint: arguments[1])
+    default:
+        throw Failure("invalid_request")
+    }
+    return nil
+}
+
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     #if SELF_TEST_BUILD
@@ -86,7 +100,7 @@ do {
     }
     if arguments.count == 3, arguments[0] == "--self-test-server" {
         try MainActor.assumeIsolated {
-            try launch(path: arguments[1], desktop: false,
+            try launch(path: arguments[1], desktop: false, store: MemoryTrustedKeyStore(),
                        testConsent: SelfTest.consentProvider(arguments[2], path: arguments[1]))
         }
     }
@@ -99,9 +113,15 @@ do {
     }
     throw Failure("desktop_disabled")
     #else
-    guard arguments.count == 2, arguments[0] == "--serve" else { throw Failure("invalid_request") }
     guard signedApp() else { throw Failure("desktop_disabled") }
-    try MainActor.assumeIsolated { try launch(path: arguments[1], desktop: true) }
+    let store = KeychainTrustedKeyStore()
+    if arguments.count == 2, arguments[0] == "--serve" {
+        try MainActor.assumeIsolated { try launch(path: arguments[1], desktop: true, store: store) }
+    }
+    if var output = try manageKeys(arguments, store: store) {
+        output.append(0x0a)
+        try FileHandle.standardOutput.write(contentsOf: output)
+    }
     #endif
 } catch {
     FileHandle.standardError.write(Data("\((error as? Failure)?.code ?? String(describing: error))\n".utf8))

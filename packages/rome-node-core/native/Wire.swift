@@ -8,9 +8,27 @@ struct Request: Decodable {
     let method: String
     let params: Parameters?
 
+    private enum CodingKeys: String, CodingKey {
+        case v, id, method, params
+    }
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        v = try fields.decode(Int.self, forKey: .v)
+        id = try fields.decode(String.self, forKey: .id)
+        method = try fields.decode(String.self, forKey: .method)
+        if method == "authorize" {
+            // Preserve the request ID so an invalid proof consumes the challenge and receives auth_failed.
+            params = try? fields.decode(Parameters.self, forKey: .params)
+        } else {
+            params = try fields.decodeIfPresent(Parameters.self, forKey: .params)
+        }
+    }
+
     struct Parameters: Decodable {
         let nonce: String?
         let proof: String?
+        let signature: String?
         let application: String?
         let window: UInt32?
         let binding: String?
@@ -47,6 +65,101 @@ struct Request: Decodable {
                 throw Failure("invalid_request")
             }
         }
+    }
+}
+
+enum ConsentDecision: Int, Sendable {
+    case deny = 1000, allowSession, allowPersistent
+}
+
+enum ConsentMode: String, Decodable, Sendable {
+    case sessionOnly = "session_only"
+    case persistentOnly = "persistent_only"
+    case sessionOrPersistent = "session_or_persistent"
+
+    var choices: [ConsentDecision] {
+        switch self {
+        case .sessionOnly: [.deny, .allowSession]
+        case .persistentOnly: [.deny, .allowPersistent]
+        case .sessionOrPersistent: [.deny, .allowSession, .allowPersistent]
+        }
+    }
+}
+
+struct ControllerClaim: Sendable {
+    let key: ControllerKey
+    let label: String
+    let scope: ControllerScope
+}
+
+struct Hello {
+    let locale: HelperLocale
+    let mode: ConsentMode
+    let controller: ControllerClaim?
+
+    private struct Envelope: Decodable {
+        let params: Options
+    }
+
+    private struct Options: Decodable {
+        struct Controller: Decodable {
+            let publicKey: String
+            let label: String
+            let scope: ControllerScope
+        }
+
+        let locale: String?
+        let mode: ConsentMode
+        let controller: Controller?
+
+        private enum CodingKeys: String, CodingKey {
+            case locale, consentMode, controller
+        }
+
+        init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            locale = try fields.decodeIfPresent(String.self, forKey: .locale)
+            mode = try fields.contains(.consentMode) ? fields.decode(ConsentMode.self, forKey: .consentMode) : .sessionOnly
+            controller = try fields.contains(.controller) ? fields.decode(Controller.self, forKey: .controller) : nil
+        }
+    }
+
+    init(_ data: Data, preferred: [String]) throws {
+        guard let options = (try? JSONDecoder().decode(Envelope.self, from: data))?.params else {
+            throw Failure("invalid_request")
+        }
+        locale = resolveLocale(requested: options.locale, preferred: preferred)
+        mode = options.mode
+        if let claim = options.controller, let label = sanitizeLabel(claim.label) {
+            controller = try ControllerClaim(key: ControllerKey(claim.publicKey), label: label, scope: claim.scope)
+        } else {
+            guard options.controller == nil, mode == .sessionOnly else { throw Failure("invalid_request") }
+            controller = nil
+        }
+    }
+}
+
+struct ControllerChallenge: Sendable {
+    let base64: String
+    let expires: DispatchTime
+    private let key: ControllerKey
+    private let payload: Data
+
+    init(instance: String, helper: pid_t, host: pid_t, controller: ControllerClaim, mode: ConsentMode,
+         now: DispatchTime = .now()) {
+        base64 = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
+        expires = now + .seconds(60)
+        key = controller.key
+        payload = Data([
+            "rome-computer-use-auth-v1", instance, String(helper), String(host),
+            base64, controller.key.base64, controller.scope.rawValue, mode.rawValue,
+        ].joined(separator: "\n").utf8)
+    }
+
+    func verifies(_ signature: String?, now: DispatchTime = .now()) -> Bool {
+        guard now < expires, let signature, let bytes = Data(base64Encoded: signature),
+              bytes.count == 64, bytes.base64EncodedString() == signature else { return false }
+        return key.signingKey.isValidSignature(bytes, for: payload)
     }
 }
 

@@ -100,7 +100,6 @@ struct WindowBindings<Context> {
     struct Binding {
         let id: String
         let window: CGWindowID
-        let label: String
         let capture: any ControlCapture
         var context: Context
     }
@@ -108,10 +107,7 @@ struct WindowBindings<Context> {
     private var bindings: [String: Binding] = [:]
     private var owners: [CGWindowID: String] = [:]
 
-    var hasBinding: Bool { !bindings.isEmpty }
-    var label: String? {
-        bindings.count > 1 ? "\(bindings.count) active windows" : bindings.values.first?.label
-    }
+    var count: Int { bindings.count }
 
     mutating func requireAvailable(_ window: CGWindowID) throws {
         guard let id = owners[window] else { return }
@@ -119,7 +115,7 @@ struct WindowBindings<Context> {
         remove(id)
     }
 
-    mutating func bind(window: CGWindowID, label: String, context: Context,
+    mutating func bind(window: CGWindowID, context: Context,
                        makeCapture: (@escaping @Sendable () -> Void) throws -> any ControlCapture,
                        onEnd: @escaping @Sendable (String) -> Void, check: () throws -> Void) throws -> String {
         try requireAvailable(window)
@@ -134,7 +130,7 @@ struct WindowBindings<Context> {
             capture.stop()
             throw error
         }
-        bindings[id] = Binding(id: id, window: window, label: label, capture: capture, context: context)
+        bindings[id] = Binding(id: id, window: window, capture: capture, context: context)
         owners[window] = id
         return id
     }
@@ -188,15 +184,14 @@ final class Windows: @unchecked Sendable {
 
     private typealias Binding = WindowBindings<Context>.Binding
     private var bindings = WindowBindings<Context>()
-    var hasBinding: Bool { bindings.hasBinding }
-    var bindingLabel: String? { bindings.label }
+    var bindingCount: Int { bindings.count }
     let access: DesktopAccess
     let live: () throws -> Void
     private let worker: DispatchQueue
-    private let onRevocation: @Sendable (Bool, String?) -> Void
+    private let onRevocation: @Sendable (Int) -> Void
 
     init(worker: DispatchQueue, access: DesktopAccess, live: @escaping () throws -> Void,
-         onRevocation: @escaping @Sendable (Bool, String?) -> Void) {
+         onRevocation: @escaping @Sendable (Int) -> Void) {
         self.worker = worker
         self.access = access
         self.live = live
@@ -207,7 +202,7 @@ final class Windows: @unchecked Sendable {
 
     private func captureEnded(_ id: String) {
         bindings.remove(id)
-        onRevocation(hasBinding, bindingLabel)
+        onRevocation(bindingCount)
     }
 
     func unbind(_ id: String) throws -> [String: Any] {
@@ -313,11 +308,8 @@ final class Windows: @unchecked Sendable {
               let match = matches(rows, pid: row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
                 .first(where: { $0.row.id == id }) else { throw Failure("window_unavailable") }
         let metadata = metadata(match)
-        let app = metadata["appName"] as? String ?? match.identity.executable
-        let title = metadata["title"] as? String ?? ""
-        let label = title.isEmpty ? app : "\(app) — \(title)"
         let filter = try captureFilter(for: match, check: live)
-        let binding = try bindings.bind(window: id, label: label, context: Context(match: match), makeCapture: {
+        let binding = try bindings.bind(window: id, context: Context(match: match), makeCapture: {
             try ScreenControlCapture(filter: filter, onEnd: $0)
         }, onEnd: { [weak self, worker] id in
             guard let self else { return }

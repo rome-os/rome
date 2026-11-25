@@ -18,6 +18,7 @@ final class SelfTest {
         try test.bindings()
         try test.input()
         try test.consent()
+        try test.authorizationOptions()
         try test.frames()
         try test.admission()
         try test.transport()
@@ -203,33 +204,33 @@ final class SelfTest {
         var registry = WindowBindings<Int>()
         var captures: [TestCapture] = []
         func bind(_ window: CGWindowID, starts: Bool = true, check: () throws -> Void = {}) throws -> String {
-            try registry.bind(window: window, label: "Window \(window)", context: Int(window), makeCapture: { onEnd in
+            try registry.bind(window: window, context: Int(window), makeCapture: { onEnd in
                 let capture = TestCapture(starts: starts, onEnd: onEnd)
                 captures.append(capture)
                 return capture
             }, onEnd: { ended.record($0) }, check: check)
         }
 
-        try expect(registry.label == nil && !registry.hasBinding, "zero bindings")
+        try expect(registry.count == 0, "zero bindings")
         try rejects("screen_recording_permission_required") {
             _ = try bind(1) { throw Failure("screen_recording_permission_required") }
         }
         try expect(captures.isEmpty, "permission check precedes capture creation")
         try rejects("capture_failed") { _ = try bind(1, starts: false) }
-        try expect(captures[0].startCount == 1 && captures[0].stopCount == 1 && !registry.hasBinding, "failed start releases stream and ownership")
+        try expect(captures[0].startCount == 1 && captures[0].stopCount == 1 && registry.count == 0, "failed start releases stream and ownership")
 
         let first = try bind(1)
-        try expect(UUID(uuidString: first) != nil && registry.label == "Window 1" && registry.hasBinding, "one binding shows its label")
+        try expect(UUID(uuidString: first) != nil && registry.count == 1, "one binding is active")
         try rejects("window_already_bound") { _ = try bind(1) }
         try expect(captures.count == 2 && captures[1].isActive, "duplicate bind leaves original stream running")
         let second = try bind(2)
-        try expect(first != second && registry.label == "2 active windows", "distinct bindings coexist")
+        try expect(first != second && registry.count == 2, "distinct bindings coexist")
         var firstBinding = try registry.current(first)
         firstBinding.context = 10
         registry.update(firstBinding)
         try expect(try registry.current(first).context == 10 && registry.current(second).context == 2, "bindings own independent state")
         try registry.unbind(first)
-        try expect(captures[1].stopCount == 1 && captures[2].isActive && registry.label == "Window 2", "unbind stops only the named stream")
+        try expect(captures[1].stopCount == 1 && captures[2].isActive && registry.count == 1, "unbind stops only the named stream")
         try rejects("binding_not_found") { try registry.unbind(first) }
         try expect(ended.drain().isEmpty, "intentional stop does not signal system revocation")
 
@@ -246,11 +247,11 @@ final class SelfTest {
         captures[4].systemStop()
         for id in ended.drain() { registry.remove(id) }
         try rejects("binding_not_found") { try registry.unbind(other) }
-        try expect(registry.label == "Window 1", "callback removes binding without an RPC")
+        try expect(registry.count == 1, "callback removes binding without an RPC")
 
         _ = try bind(2)
         registry.stopAll()
-        try expect(!registry.hasBinding && registry.label == nil, "stop clears all binding state")
+        try expect(registry.count == 0, "stop clears all binding state")
         try expect(captures[3].stopCount == 1 && captures[5].stopCount == 1, "stop ends every active stream once")
         try rejects("binding_unavailable") { _ = try registry.current(rebound) }
         let fresh = try bind(1)
@@ -488,6 +489,101 @@ final class SelfTest {
         try expect(unlock.update(focused: true, at: 2.25), "one focused second without typing unlocks consent")
         unlock.keyDown(enabled: true)
         try expect(unlock.update(focused: true, at: 2.3), "keyboard navigation remains available after unlocking")
+
+        for choice in ConsentMode.sessionOrPersistent.choices.dropFirst() {
+            var shared = ConsentUnlock()
+            try expect(!shared.update(focused: true, at: 0), "\(choice) starts locked")
+            shared.mouseDown(at: 0.99, clickCount: 1, enabled: false)
+            try expect(!shared.update(focused: true, at: 1), "a locked click restarts both choices")
+            try expect(shared.update(focused: true, at: 2), "\(choice) shares the full quiet second")
+            shared.keyDown(enabled: true, isRepeat: true)
+            try expect(!shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "a held key cannot approve")
+            try expect(!shared.update(focused: true, at: 2.25), "a repeat relocks both choices")
+            try expect(shared.update(focused: true, at: 3.25), "both choices unlock after a quiet second")
+            shared.keyDown(enabled: true)
+            try expect(shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "fresh keyboard approval works")
+            try expect(shared.revalidate(clear: true, focused: true, eligible: true, at: 3.25), "approval still qualifies")
+            shared.mouseDown(at: 3.5, clickCount: 2, enabled: true)
+            try expect(!shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "\(choice) rejects a double-click")
+            try expect(!shared.update(focused: true, at: 4) && shared.update(focused: true, at: 5),
+                       "double-click rejection relocks both choices")
+            var uptime = 5.0
+            for (clear, focused, eligible) in [(false, true, true), (true, false, true), (true, true, false)] {
+                try expect(!shared.revalidate(clear: clear, focused: focused, eligible: eligible, at: uptime),
+                           "approval rechecks visibility, focus and eligibility")
+                try expect(!shared.update(focused: true, at: uptime), "failed recheck relocks all approval choices")
+                uptime += 1
+                try expect(shared.update(focused: true, at: uptime), "approval can be checked again after refocusing")
+            }
+        }
+    }
+
+    private func authorizationOptions() throws {
+        for (tag, locale) in [
+            ("zh-CN", HelperLocale.zhHans), ("zh-SG", .zhHans), ("zh-Hans-CN", .zhHans), ("zh", .zhHans),
+            ("zh-TW", .zhHant), ("zh-HK", .zhHant), ("zh-MO", .zhHant), ("ZH-hANT-TW", .zhHant),
+            ("en-US", .en), ("ja-JP", .ja),
+        ] {
+            try expect(resolveLocale(requested: tag, preferred: []) == locale, "resolve \(tag)")
+        }
+        for tag in ["fr", "english", "ja--JP", "zh-CN\nInjected", "ja_JP", ""] {
+            try expect(resolveLocale(requested: tag, preferred: ["fr", "zh-TW", "ja"]) == .zhHant,
+                       "unrecognized locale falls back to preferred languages")
+        }
+        try expect(resolveLocale(requested: nil, preferred: ["ja-JP"]) == .ja, "omitted locale uses system preference")
+        try expect(resolveLocale(requested: "fr", preferred: ["de"]) == .en, "English is the final fallback")
+        for locale in HelperLocale.allCases {
+            for text in HelperLocale.Text.allCases {
+                try expect(!locale[text].isEmpty, "\(locale.rawValue) translates \(text)")
+            }
+        }
+        try expect(sanitizeLabel("  Desk\u{0000}\u{0007}\n\t  \u{202E}\u{2066}\u{061C}取引\u{200F}\u{2069}  ") == "Desk 取引",
+                   "remove control and bidi scalars and collapse whitespace")
+        try expect(sanitizeLabel(String(repeating: "界", count: 70)) == String(repeating: "界", count: 64),
+                   "labels are limited to 64 characters")
+        try expect(sanitizeLabel(" \t\n\u{202E}\u{200B}\u{0301}") == nil, "invisible labels are rejected")
+        try expect(sanitizeLabel(String(repeating: "x", count: 63) + " a") == String(repeating: "x", count: 63),
+                   "clipping leaves no trailing space")
+        let combining = try require(sanitizeLabel("a" + String(repeating: "\u{0301}", count: 300)), "combining label")
+        try expect(combining.unicodeScalars.count == 256 && sanitizeLabel(combining) == combining,
+                   "a single grapheme has bounded storage and idempotent sanitation")
+
+        let encoded = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+        let key = try ControllerKey(encoded)
+        try expect(key.fingerprint == "21FE-31DF-A154" && ControllerKey.validFingerprint(key.fingerprint),
+                   "short fingerprint matches the first six SHA-256 bytes")
+        try expect(try ControllerKey(encoded).fingerprint == key.fingerprint, "fingerprinting is deterministic")
+        for malformed in ["630d-CD29-66C4", "630D-CD29-66C", "630DCD2966C4", "ZZZZ-AAAA-BBBB"] {
+            try expect(!ControllerKey.validFingerprint(malformed), "fingerprint syntax rejects \(malformed)")
+        }
+        for encoded in [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "JuiVj8KyJ7BFw/SJ8u+Y8NXfrAXTxjM5sTgCiG1T/IU=", "xxdqcD1N2E+6PAt2DRBnDyogU/osOczGTsf9d5KsA3o=",
+            "7P///////////////////////////////////////38=", "7f///////////////////////////////////////38=",
+        ] {
+            try rejects("invalid_request") { _ = try ControllerKey(encoded) }
+        }
+        try expect(ConsentMode.sessionOnly.choices == [.deny, .allowSession], "session-only choices")
+        try expect(ConsentMode.persistentOnly.choices == [.deny, .allowPersistent], "persistent-only choices")
+        try expect(ConsentMode.sessionOrPersistent.choices == [.deny, .allowSession, .allowPersistent],
+                   "both approval choices follow deny")
+
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let claim = ControllerClaim(key: try ControllerKey(privateKey.publicKey.rawRepresentation.base64EncodedString()),
+                                    label: "Controller", scope: .remote)
+        let start = DispatchTime(uptimeNanoseconds: 1)
+        let challenge = ControllerChallenge(instance: "instance", helper: 123, host: 456, controller: claim,
+                                            mode: .sessionOnly, now: start)
+        let message = Data(["rome-computer-use-auth-v1", "instance", "123", "456", challenge.base64,
+                            claim.key.base64, "remote", "session_only"].joined(separator: "\n").utf8)
+        let signature = try privateKey.signature(for: message).base64EncodedString()
+        try expect(challenge.verifies(signature, now: start + .seconds(59)), "proof works before expiration")
+        try expect(!challenge.verifies(signature, now: start + .seconds(60)), "proof expires at the deadline")
+    }
+
+    private func require<T>(_ value: T?, _ message: String) throws -> T {
+        guard let value else { throw Failure("self-test: \(message)") }
+        return value
     }
 
     private func decode(_ data: Data) throws -> ([String: Any], Data) {
@@ -602,6 +698,297 @@ final class SelfTest {
         try runServer(path, socket: socket, mode: .consentTerminate)
         try runServer(path, socket: socket, mode: .consentStop)
         try execConnection(path, executable: me.executable)
+        try controllerTransport(path)
+    }
+
+    private final class ConsentProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var received: [ConsentPrompt] = []
+
+        var prompts: [ConsentPrompt] { lock.withLock { received } }
+
+        func provider(_ decision: ConsentDecision) -> ConsentProvider {
+            { prompt, _ in
+                self.lock.withLock { self.received.append(prompt) }
+                return decision
+            }
+        }
+    }
+
+    private func withControllerSocket(_ path: String, store: MemoryTrustedKeyStore, consent: @escaping ConsentProvider,
+                                      _ test: (Int32, Admission, SymmetricKey) throws -> Void) throws {
+        let listener = try Listener(state: StateDirectory(path))
+        defer { listener.removeSocket() }
+        let host = try ProcessIdentity.read(getpid())
+        let key = SymmetricKey(size: .bits256)
+        let admission = Admission()
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw Failure("self-test: controller socket") }
+        let done = DispatchGroup()
+        defer {
+            _ = shutdown(fd, SHUT_RDWR)
+            close(fd)
+            admission.terminate()
+            _ = done.wait(timeout: .now() + .seconds(3))
+        }
+        var noSignal: Int32 = 1
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        try expect(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal))) == 0 &&
+                   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout))) == 0,
+                   "controller fixture has a bounded read")
+        try expect(try socketAddress(path + "/helper.sock", { connect(fd, $0, $1) }) == 0, "connect controller socket")
+        done.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { done.leave() }
+            do {
+                try serve(listener: listener, host: host, handshake: Handshake(key: key, host: host.pid),
+                          admission: admission, desktop: nil, store: store, consent: consent)
+            } catch {
+                _ = admission.stop((error as? Failure)?.code ?? "internal_error")
+            }
+        }
+        try test(fd, admission, key)
+        _ = shutdown(fd, SHUT_RDWR)
+        try expect(done.wait(timeout: .now() + .seconds(3)) == .success, "controller helper drains after disconnect")
+    }
+
+    private func controllerTransport(_ path: String) throws {
+        let store = MemoryTrustedKeyStore()
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
+        let fingerprint = try ControllerKey(publicKey).fingerprint
+        let controller = ["publicKey": publicKey, "label": "  Desk\n\u{202E} Controller  ", "scope": "remote"]
+        let mode = ConsentMode.sessionOrPersistent
+        var replay: String?
+        var priorChallenge: String?
+
+        func rpc(_ fd: Int32, _ method: String, _ params: [String: Any] = [:]) throws -> [String: Any] {
+            try sendBytes(fd, Wire.frame(["v": 1, "id": method, "method": method, "params": params]))
+            let header = try readBytes(fd, count: 8)
+            let (length, binary) = try Wire.lengths(header, request: false)
+            let (reply, _) = try decode(header + readBytes(fd, count: length))
+            try expect(binary == 0 && reply["id"] as? String == method, "\(method) reply matches its request")
+            return reply
+        }
+
+        func result(_ reply: [String: Any]) throws -> [String: Any] {
+            try expect(reply["ok"] as? Bool == true, "successful controller RPC")
+            return try require(reply["result"] as? [String: Any], "controller result")
+        }
+
+        func failed(_ reply: [String: Any], _ code: String) throws {
+            try expect(reply["ok"] as? Bool == false && (reply["error"] as? [String: String])?["code"] == code,
+                       "controller RPC fails with \(code)")
+        }
+
+        func closed(_ fd: Int32) throws {
+            var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            var byte: UInt8 = 0
+            try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0, "controller socket closes")
+        }
+
+        func hello(_ fd: Int32, _ key: SymmetricKey, _ options: [String: Any]) throws -> [String: Any] {
+            let nonce = Curve25519.Signing.PrivateKey().rawRepresentation.base64EncodedString()
+            let host = String(getpid())
+            let hostMessage = Data(["rome-computer-use-v1", "host", host, nonce].joined(separator: "\n").utf8)
+            let mac = Data(HMAC<SHA256>.authenticationCode(for: hostMessage, using: key)).base64EncodedString()
+            let params = options.merging(["nonce": nonce, "proof": mac]) { _, proven in proven }
+            let reply = try rpc(fd, "hello", params)
+            if let result = reply["result"] as? [String: Any] {
+                let pid = try require(result["helperPid"] as? pid_t, "helper PID")
+                let instance = try require(result["instance"] as? String, "instance")
+                let proof = try require(result["helperProof"] as? String, "helper proof")
+                let message = Data(["rome-computer-use-v1", "helper", host, String(pid), nonce, instance].joined(separator: "\n").utf8)
+                let expected = Data(HMAC<SHA256>.authenticationCode(for: message, using: key)).base64EncodedString()
+                try expect(pid == getpid() && proof == expected && result["proof"] as? String == proof, "verify the helper HMAC")
+            }
+            return reply
+        }
+
+        func challenge(_ fd: Int32, _ key: SymmetricKey, _ consentMode: ConsentMode = .sessionOrPersistent,
+                       claim: [String: String]? = nil) throws -> [String: Any] {
+            let reply = try result(hello(fd, key, ["controller": claim ?? controller, "consentMode": consentMode.rawValue, "locale": "zh-CN"]))
+            let encoded = try require(reply["challenge"] as? String, "challenge")
+            try expect(reply["status"] as? String == "challenge_required" && reply["locale"] as? String == "zh-Hans",
+                       "hello requests proof of possession in the resolved locale")
+            try expect(Data(base64Encoded: encoded)?.count == 32 && encoded != priorChallenge &&
+                       reply["fingerprint"] as? String == fingerprint, "each challenge has 32 fresh bytes and a fingerprint")
+            priorChallenge = encoded
+            return reply
+        }
+
+        func sign(_ reply: [String: Any], mode: ConsentMode = .sessionOrPersistent, scope: String = "remote",
+                  signer: Curve25519.Signing.PrivateKey? = nil) throws -> Data {
+            let instance = try require(reply["instance"] as? String, "sign the helper instance")
+            let pid = try require(reply["helperPid"] as? pid_t, "sign the helper PID")
+            let nonce = try require(reply["challenge"] as? String, "sign the challenge")
+            let message = Data(["rome-computer-use-auth-v1", instance, String(pid), String(getpid()),
+                                nonce, publicKey, scope, mode.rawValue].joined(separator: "\n").utf8)
+            return try (signer ?? privateKey).signature(for: message)
+        }
+
+        func answer(_ fd: Int32, _ signature: Data) throws -> [String: Any] {
+            try rpc(fd, "authorize", ["signature": signature.base64EncodedString()])
+        }
+
+        func granted(_ reply: [String: Any], auth: String, enrolled: Bool, scope: String = "remote") throws {
+            let grant = try result(reply)
+            try expect(grant["auth"] as? String == auth && grant["enrolled"] as? Bool == enrolled &&
+                       grant["label"] as? String == "Desk Controller" && grant["scope"] as? String == scope &&
+                       grant["fingerprint"] as? String == fingerprint && grant["locale"] as? String == "zh-Hans",
+                       "controller grant records its source, scope and locale")
+        }
+
+        let legacy = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: legacy.provider(.allowSession)) { fd, _, key in
+            let grant = try result(hello(fd, key, ["locale": "ja-JP"]))
+            try expect(grant["auth"] as? String == "session" && grant["locale"] as? String == "ja" &&
+                       grant["challenge"] == nil, "hello without a controller directly grants a session")
+        }
+        try expect(legacy.prompts.count == 1 && legacy.prompts.first?.controller == nil &&
+                   legacy.prompts.first?.mode == .sessionOnly, "legacy hello uses session-only consent")
+
+        let invalid = ConsentProbe()
+        for options: [String: Any] in [
+            ["consentMode": "persistent_only"], ["consentMode": "session_or_persistent"],
+            ["controller": controller, "consentMode": "always"], ["controller": NSNull()],
+            ["controller": controller, "consentMode": NSNull()], ["locale": 8],
+            ["controller": controller.merging(["publicKey": "AAAA"]) { _, new in new }],
+            ["controller": controller.merging(["scope": "other"]) { _, new in new }],
+            ["controller": controller.merging(["label": "\n\u{202E}"]) { _, new in new }],
+        ] {
+            try withControllerSocket(path, store: store, consent: invalid.provider(.allowPersistent)) { fd, _, key in
+                try failed(hello(fd, key, options), "invalid_request")
+                try closed(fd)
+            }
+        }
+        try expect(invalid.prompts.isEmpty && store.list().isEmpty, "invalid hellos never prompt or enroll")
+
+        let denied = ConsentProbe()
+        for scenario in ["tampered", "wrong-key", "wrong-mode", "wrong-scope", "malformed"] {
+            try withControllerSocket(path, store: store, consent: denied.provider(.allowPersistent)) { fd, _, key in
+                let pending = try challenge(fd, key)
+                var signature: Data
+                switch scenario {
+                case "wrong-key": signature = try sign(pending, signer: .init())
+                case "wrong-mode": signature = try sign(pending, mode: .sessionOnly)
+                case "wrong-scope": signature = try sign(pending, scope: "local")
+                case "malformed": signature = Data(count: 63)
+                default:
+                    signature = try sign(pending)
+                    signature[0] ^= 1
+                    for method in ["windows", "bind", "unbind", "observe", "act", "input", "status", "cancel", "hello"] {
+                        try failed(rpc(fd, method), "auth_required")
+                    }
+                    try expect(denied.prompts.isEmpty, "preauthorization calls never prompt")
+                }
+                try failed(answer(fd, signature), "auth_failed")
+                try closed(fd)
+            }
+        }
+        try withControllerSocket(path, store: store, consent: denied.provider(.allowPersistent)) { fd, _, key in
+            _ = try challenge(fd, key)
+            try failed(rpc(fd, "authorize", ["signature": 1]), "auth_failed")
+            try closed(fd)
+        }
+        try withControllerSocket(path, store: store, consent: denied.provider(.allowPersistent)) { fd, _, key in
+            _ = try challenge(fd, key)
+            try expect(try result(rpc(fd, "stop"))["stop"] as? String == "stop_confirmed", "pending authorization accepts stop")
+            try closed(fd)
+        }
+        try expect(denied.prompts.isEmpty && store.list().isEmpty, "failed or stopped proofs never prompt or enroll")
+
+        let ephemeral = ConsentProbe()
+        for choice in [ConsentMode.sessionOnly, .sessionOrPersistent] {
+            try withControllerSocket(path, store: store, consent: ephemeral.provider(.allowSession)) { fd, _, key in
+                let pending = try challenge(fd, key, choice)
+                let signature = try sign(pending, mode: choice)
+                try granted(answer(fd, signature), auth: "session", enrolled: false)
+                try failed(rpc(fd, "windows"), "desktop_disabled")
+                try failed(answer(fd, signature), "auth_failed")
+                replay = signature.base64EncodedString()
+                try closed(fd)
+            }
+        }
+        try expect(ephemeral.prompts.map(\.mode) == [.sessionOnly, .sessionOrPersistent] && store.list().isEmpty,
+                   "session approval never enrolls and a new connection prompts again")
+        try withControllerSocket(path, store: store, consent: denied.provider(.allowPersistent)) { fd, _, key in
+            _ = try challenge(fd, key)
+            try failed(rpc(fd, "authorize", ["signature": try require(replay, "previous signature")]), "auth_failed")
+            try closed(fd)
+        }
+        try expect(denied.prompts.isEmpty, "a proof replayed on a new connection never prompts")
+
+        let incompatible = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: incompatible.provider(.allowSession)) { fd, _, key in
+            let pending = try challenge(fd, key, .persistentOnly)
+            try failed(answer(fd, sign(pending, mode: .persistentOnly)), "consent_denied")
+            try closed(fd)
+        }
+        try expect(incompatible.prompts.first?.mode == .persistentOnly && store.list().isEmpty,
+                   "a provider cannot return a choice missing from the dialog")
+
+        let enrollment = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: enrollment.provider(.allowPersistent)) { fd, _, key in
+            let pending = try challenge(fd, key, .persistentOnly)
+            try granted(answer(fd, sign(pending, mode: .persistentOnly)), auth: "persistent", enrolled: true)
+        }
+        let enrolled = try require(store.lookup(publicKey: publicKey), "saved record")
+        try expect(enrollment.prompts.count == 1 && enrolled.label == "Desk Controller" && enrolled.scope == .remote,
+                   "the first persistent approval stores the sanitized claim")
+        let summary = try require(manageKeys(["--list-keys"], store: store), "key list output")
+        let entries = try require(JSONSerialization.jsonObject(with: summary) as? [[String: Any]], "key list JSON")
+        try expect(entries.count == 1 && Set(entries[0].keys) == Set(["fingerprint", "label", "scope", "enrolledAt"]),
+                   "key list only exposes summary fields")
+        try rejects("invalid_request") { _ = try manageKeys(["--revoke-key", "invalid"], store: store) }
+        try rejects("invalid_request") { _ = try manageKeys(["--enroll-key", publicKey], store: store) }
+
+        let silent = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: silent.provider(.deny)) { fd, admission, key in
+            let renamed = controller.merging(["label": "Supplied display name"]) { _, new in new }
+            let pending = try challenge(fd, key, .sessionOnly, claim: renamed)
+            try granted(answer(fd, sign(pending, mode: .sessionOnly)), auth: "persistent", enrolled: false)
+            try expect(silent.prompts.isEmpty, "matching key and scope bypass the consent provider")
+            try expect(store.list() == [enrolled], "using a matching key preserves its original label and timestamp")
+            _ = try manageKeys(["--revoke-key", fingerprint], store: store)
+            try closed(fd)
+            try expect(admission.status()["reason"] as? String == "key_revoked", "revoking the key stops an active persistent session")
+        }
+        let afterRevocation = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: afterRevocation.provider(.deny)) { fd, _, key in
+            try failed(answer(fd, sign(challenge(fd, key))), "consent_denied")
+            try closed(fd)
+        }
+        try expect(afterRevocation.prompts.count == 1 && store.list().isEmpty, "the revoked key prompts again")
+
+        let scopeChange = ConsentProbe()
+        let local = controller.merging(["scope": "local"]) { _, new in new }
+        _ = try store.enroll(enrolled)
+        try withControllerSocket(path, store: store, consent: scopeChange.provider(.allowPersistent)) { fd, admission, key in
+            let pending = try challenge(fd, key, mode, claim: local)
+            try granted(answer(fd, sign(pending, scope: "local")), auth: "persistent", enrolled: true, scope: "local")
+            try expect(scopeChange.prompts.first?.controller?.scope == .local && store.list().first?.scope == .local,
+                       "a scope change requires explicit approval and replaces the record")
+            _ = try manageKeys(["--revoke-keys"], store: store)
+            try closed(fd)
+            try expect(admission.status()["reason"] as? String == "key_revoked", "revoke all stops a persistent session")
+        }
+        try withControllerSocket(path, store: store, consent: afterRevocation.provider(.deny)) { fd, _, key in
+            try failed(answer(fd, sign(challenge(fd, key, mode, claim: local), scope: "local")), "consent_denied")
+            try closed(fd)
+        }
+        try expect(afterRevocation.prompts.count == 2 && store.list().isEmpty, "all revoked keys require consent")
+
+        for _ in 0..<32 {
+            let rawKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+            let other = try ControllerKey(rawKey.base64EncodedString())
+            _ = try store.enroll(TrustedKeyRecord(key: other, label: "Other", scope: .local))
+        }
+        try withControllerSocket(path, store: store, consent: enrollment.provider(.allowPersistent)) { fd, _, key in
+            try failed(answer(fd, sign(challenge(fd, key))), "trusted_key_limit")
+            try closed(fd)
+        }
+        try expect(store.list().count == 32, "a failed persistent write closes the session without changing the store")
     }
 
     private func execConnection(_ path: String, executable: String) throws {
@@ -730,14 +1117,14 @@ final class SelfTest {
 
     static func consentProvider(_ mode: String, path: String) throws -> ConsentProvider {
         switch mode {
-        case "allow": return { _, _ in true }
-        case "deny": return { _, _ in false }
+        case "allow": return { _, _ in .allowSession }
+        case "deny": return { _, _ in .deny }
         case "unexpected": return { _, _ in exit(99) }
         case "wait":
             return { _, canContinue in
-                if !FileManager.default.createFile(atPath: path + "/consent-waiting", contents: Data()) { return false }
+                if !FileManager.default.createFile(atPath: path + "/consent-waiting", contents: Data()) { return .deny }
                 while canContinue() { usleep(10_000) }
-                return true
+                return .allowSession
             }
         default: throw Failure("self-test: invalid consent fixture")
         }
