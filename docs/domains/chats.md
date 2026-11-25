@@ -272,13 +272,13 @@ The dashboard's list of a person's chats, beside the rail. Every dashboard perso
 
 ## Chat rule
 
-One thing a guardian can set on a chat, for each of Rome's accounts in it. There are seven: whether the chat is switched on, the [reply rule](#reply-rule), whether another bot's message wakes the agent, whether a message addressed only to others does, whether replies open a thread, which agent answers, and when the chat's session starts afresh.
+One thing a guardian can set on a chat, for each of Rome's accounts in it. There are eight: whether the chat is switched on, the [reply rule](#reply-rule), whether another bot's message wakes the agent, whether a message addressed only to others does, the [answers rule](#answers-rule), whether replies open a thread, which agent answers, and when the chat's session starts afresh.
 
 - Core owns the set, the value each rule takes when nobody set it, what the guardian stored, and the one wake gate that applies them ([Participation](participation.md#wake-gate)).
 - A kind of connection only says which rules its chats offer the guardian, and may fix the value of a rule it does not offer. It cannot add a rule.
 - A chat runs on the kind's fixed value, else the guardian's choice where the kind offers the rule, else the default. A choice stored for a rule the kind does not offer is ignored.
 - A direct message offers only when its session starts afresh, and every message in it wakes the agent.
-- An official app offers no chat rule, so every one is at its default: the account's own agent answers, only when addressed.
+- An official app offers no chat rule. Rome's Slack app fixes the [answers rule](#answers-rule) at everyone, and every other rule runs at its default: the account's own agent answers, only when addressed.
 - The dashboard shows a connection's chat rules on that connection's page, and only the rules its kind offers.
 
 ## Reply rule
@@ -289,6 +289,14 @@ A [chat rule](#chat-rule) saying when an account's agent is woken: on every mess
 - "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
 - A chat with an assistant has one reply rule, every message, and the guardian cannot change it.
+
+## Answers rule
+
+A [chat rule](#chat-rule) saying whom an account's agent answers in a chat: the people the guardian's settings let wake it, or everyone. It is stored as `known_people`, the default, and `everyone`.
+
+- In a chat that answers everyone, anyone whose message addresses Rome's account wakes the agent, whatever People knows of them, and the agent's messages into that chat go out unchecked ([Participation](participation.md#send-gate)). A policy that blocks the sender or the chat still wins, and the other chat rules still apply.
+- It decides who wakes the agent and what goes out to the chat, nothing more. What the agent does for someone who woke it is not changed by it: only the guardian may ask the Concierge for a task.
+- No kind offers it to the guardian. A kind fixes it where its chats are meant for everyone in them, as Rome's Slack app does.
 
 ## Message
 

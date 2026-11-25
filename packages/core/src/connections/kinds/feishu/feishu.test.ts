@@ -143,6 +143,7 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
       mode: "mention",
       botMessages: "ignore",
       whenOthersMentioned: "ignore",
+      answers: "known_people",
     },
     replies: { placement: "thread" },
     routing: { agentName: null },

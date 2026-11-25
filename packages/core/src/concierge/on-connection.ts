@@ -120,45 +120,16 @@ const ON_CONNECTION: PlaceSetup = {
   withoutDefer: true,
 };
 
-/** What the guardian alone may do on a connection, in the words of
- *  {@link CONNECTION_PROMPT}, and how an account that serves its workspace
- *  words it, where anyone it hears acts with the guardian's access
- *  (participation/guardian-access). */
-const GUARDIAN_ONLY_WORDS: readonly (readonly [string, string])[] = [
-  [
-    "Only the guardian may ask for one; tell anyone else that the guardian can.",
-    "Anyone in this workspace may ask for one.",
-  ],
-  [" Only the guardian's messages take one.", ""],
-];
-
-/** The Concierge's setup on an account that serves its workspace: as on any
- *  connection, with its instructions giving anyone there the guardian's
- *  access. */
-const ON_WORKSPACE: PlaceSetup = {
-  ...ON_CONNECTION,
-  systemPromptPrefix: GUARDIAN_ONLY_WORDS.reduce(
-    (prompt, [guardianOnly, anyone]) => prompt.replace(guardianOnly, anyone),
-    CONNECTION_PROMPT,
-  ),
-};
-
 /**
  * How the place a session serves changes the Concierge there, the one answer
  * every part reads: its actions, its own tools and its instructions. Null for any other agent, and for
- * the Concierge on the dashboard or in a place nothing names. `servesWorkspace`
- * tells whether the account a place is on serves its whole workspace; absent,
- * none does.
+ * the Concierge on the dashboard or in a place nothing names.
  */
 export function conciergePlaceSetup(
   agentName: string,
-  thread:
-    | (Pick<ThreadContext, "channel"> & Partial<Pick<ThreadContext, "connectionId">>)
-    | undefined,
-  servesWorkspace?: (thread: Pick<ThreadContext, "channel" | "connectionId">) => boolean,
+  thread: Pick<ThreadContext, "channel"> | undefined,
 ): PlaceSetup | null {
-  if (!isConciergeAgent(agentName) || thread === undefined || thread.channel === WEBCHAT_CHANNEL) {
-    return null;
-  }
-  return servesWorkspace?.(thread) ? ON_WORKSPACE : ON_CONNECTION;
+  return isConciergeAgent(agentName) && thread !== undefined && thread.channel !== WEBCHAT_CHANNEL
+    ? ON_CONNECTION
+    : null;
 }

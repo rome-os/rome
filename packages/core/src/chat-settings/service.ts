@@ -55,6 +55,9 @@ function setField(settings: ChatSettingsOverrides, field: ChatSettingField, valu
       (settings.activation ??= {}).whenOthersMentioned =
         value as ChatSettings["activation"]["whenOthersMentioned"];
       return;
+    case "activation.answers":
+      (settings.activation ??= {}).answers = value as ChatSettings["activation"]["answers"];
+      return;
     case "replies.placement":
       (settings.replies ??= {}).placement = value as ChatSettings["replies"]["placement"];
       return;
@@ -79,6 +82,9 @@ function clearField(settings: ChatSettingsOverrides, field: ChatSettingField): v
       break;
     case "activation.whenOthersMentioned":
       if (settings.activation) delete settings.activation.whenOthersMentioned;
+      break;
+    case "activation.answers":
+      if (settings.activation) delete settings.activation.answers;
       break;
     case "replies.placement":
       if (settings.replies) delete settings.replies.placement;
@@ -139,7 +145,7 @@ function assertKnownSetShape(value: PartialChatSettings): void {
   }
   const groups: Record<string, readonly string[] | null> = {
     enabled: null,
-    activation: ["mode", "botMessages", "whenOthersMentioned"],
+    activation: ["mode", "botMessages", "whenOthersMentioned", "answers"],
     replies: ["placement"],
     routing: ["agentName"],
     session: ["reset"],
@@ -172,6 +178,7 @@ function assertValue(field: ChatSettingField, value: unknown): void {
     "activation.mode": ["mention", "all"],
     "activation.botMessages": ["ignore", "mentions", "all"],
     "activation.whenOthersMentioned": ["ignore", "respond"],
+    "activation.answers": ["known_people", "everyone"],
     "replies.placement": ["thread", "inline"],
     "routing.agentName": [null],
   };

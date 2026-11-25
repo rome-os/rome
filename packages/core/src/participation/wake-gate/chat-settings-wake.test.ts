@@ -27,6 +27,7 @@ function decide(row: {
   mentionsOthers?: boolean;
   botMessages?: ChatWakeSettings["botMessages"];
   whenOthersMentioned?: ChatWakeSettings["whenOthersMentioned"];
+  answers?: ChatWakeSettings["answers"];
   trusted?: readonly string[];
   replyTo?: readonly string[];
 }): WakeDecision {
@@ -35,6 +36,7 @@ function decide(row: {
     replyRule: row.replyRule ?? "mention",
     botMessages: row.botMessages ?? "ignore",
     whenOthersMentioned: row.whenOthersMentioned ?? "ignore",
+    answers: row.answers ?? "known_people",
     trustedLevels: row.trusted ?? ["guardian"],
     replyToLevels: row.replyTo ?? ["guardian"],
     policies: row.policy ? [globalPolicy(row.policy)] : [],
@@ -160,7 +162,35 @@ describe("chatSettingsWake", () => {
       whenOthersMentioned: "respond",
       wake: "wake",
     },
-  ] as const)("$sender, policy $policy, enabled $enabled, reply rule $replyRule, $addressing, bot $fromBot/$botMessages, others $mentionsOthers/$whenOthersMentioned, trusted $trusted, reply to $replyTo → $wake", ({
+
+    // A chat that answers everyone wakes on anyone who addresses Rome's account.
+    { sender: "stranger", answers: "everyone", addressing: "mention", wake: "wake" },
+    { sender: "acquaintance", answers: "everyone", addressing: "direct", wake: "wake" },
+    { sender: "stranger", answers: "known_people", addressing: "mention", wake: "quiet" },
+    // It still stays quiet on a message addressed to nobody or to others,
+    // on a bot the chat does not take, and a block still wins.
+    {
+      sender: "stranger",
+      answers: "everyone",
+      addressing: "ambient",
+      replyRule: "all",
+      wake: "quiet",
+    },
+    {
+      sender: "stranger",
+      answers: "everyone",
+      addressing: "mention",
+      fromBot: true,
+      wake: "quiet",
+    },
+    {
+      sender: "stranger",
+      answers: "everyone",
+      addressing: "mention",
+      policy: "block",
+      wake: "block",
+    },
+  ] as const)("$sender, policy $policy, enabled $enabled, reply rule $replyRule, $addressing, bot $fromBot/$botMessages, others $mentionsOthers/$whenOthersMentioned, trusted $trusted, reply to $replyTo, answers $answers → $wake", ({
     wake,
     ...row
   }) => {
@@ -186,6 +216,7 @@ describe("chatSettingsWake", () => {
         replyRule: "mention",
         botMessages: "ignore",
         whenOthersMentioned: "ignore",
+        answers: "known_people",
         trustedLevels: ["guardian"],
         replyToLevels: ["guardian", "inner-circle", "other"],
         policies,
@@ -202,52 +233,13 @@ describe("chatSettingsWake", () => {
     expect(gate([blockDevChat])({ ...message, place: "direct" }, { person: null })).toBe("review");
   });
 
-  describe("on an account that serves its workspace", () => {
-    const gate = (policies: Policy[] = []) =>
-      chatSettingsWake({
-        enabled: true,
-        replyRule: "mention",
-        botMessages: "ignore",
-        whenOthersMentioned: "ignore",
-        trustedLevels: ["guardian"],
-        replyToLevels: ["guardian"],
-        policies,
-        connectionKindOf: (channel) => channel,
-        servesWorkspace: true,
-      });
-    const member = { person: { id: "person-other", bondLevel: "other" as const } };
-
-    it.each([
-      "mention",
-      "direct",
-      "reply",
-      "bot_thread",
-    ] as const)("wakes the agent on a %s from anyone", (addressing) => {
-      expect(gate()({ ...message, addressing }, member)).toBe("wake");
-      expect(gate()({ ...message, addressing }, { person: null })).toBe("wake");
-    });
-
-    it("keeps a message addressed to nobody quiet", () => {
-      expect(gate()({ ...message, addressing: "ambient" }, member)).toBe("quiet");
-    });
-
-    it("keeps another bot's mention quiet", () => {
-      expect(gate()({ ...message, addressing: "mention", fromBot: true }, member)).toBe("quiet");
-    });
-
-    it("blocks a sender a policy blocks", () => {
-      expect(gate([globalPolicy("block")])({ ...message, addressing: "mention" }, member)).toBe(
-        "block",
-      );
-    });
-  });
-
   it("answers the same message from the same sender the same way every time", () => {
     const gate = chatSettingsWake({
       enabled: true,
       replyRule: "mention",
       botMessages: "ignore",
       whenOthersMentioned: "ignore",
+      answers: "known_people",
       trustedLevels: ["guardian"],
       replyToLevels: ["guardian", "other"],
       policies: [],

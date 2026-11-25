@@ -151,7 +151,12 @@ describe("GET /connections", () => {
       severalAccounts: false,
       chatRules: ["session.reset"],
       chatRuleDefaults: expect.objectContaining({
-        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+        activation: {
+          mode: "all",
+          botMessages: "all",
+          whenOthersMentioned: "respond",
+          answers: "known_people",
+        },
       }),
     });
 
@@ -261,7 +266,12 @@ describe("GET /connections", () => {
       // A kind that declares no chat rules offers the session reset alone.
       chatRules: ["session.reset"],
       chatRuleDefaults: expect.objectContaining({
-        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+        activation: {
+          mode: "all",
+          botMessages: "all",
+          whenOthersMentioned: "respond",
+          answers: "known_people",
+        },
       }),
     });
   });

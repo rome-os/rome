@@ -16,7 +16,12 @@ const UNLINKED_ID = "discord-user-888";
 function makeSettings() {
   const effective: ChatSettings = {
     enabled: true,
-    activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+    activation: {
+      mode: "mention",
+      botMessages: "ignore",
+      whenOthersMentioned: "ignore",
+      answers: "known_people",
+    },
     replies: { placement: "thread" },
     routing: { agentName: null },
     session: { reset: { mode: "idle", idleMinutes: 10_080 } },

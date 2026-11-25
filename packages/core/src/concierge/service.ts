@@ -281,10 +281,6 @@ export interface ConciergeDeps {
       recipient: ConnectionRecipient;
     },
   ) => Promise<ConnectionSaid>;
-  /** Whether a sender on `channel` may act with the guardian's access there,
-   *  given whether they are the guardian (participation/guardian-access).
-   *  Absent, only the guardian may. */
-  guardianAccess?: (channel: string, guardian: boolean) => boolean;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
   defaults?: Pick<DefaultProviders, "current"> & Partial<Pick<DefaultProviders, "signedIn">>;
@@ -1234,12 +1230,6 @@ export class ConciergeService {
     return outcome;
   }
 
-  /** Whether a sender on `channel` may act with the guardian's access there,
-   *  given whether they are the guardian. */
-  actsWithGuardianAccess(channel: string, guardian: boolean): boolean {
-    return this.deps.guardianAccess?.(channel, guardian) ?? guardian;
-  }
-
   /**
    * Task `taskId`'s result was said, as by `say` naming it. Saying it settles
    * nothing: the news stays until a report that carried it runs to its end.
@@ -1279,7 +1269,7 @@ export class ConciergeService {
       turn.channel === "webchat" ||
       !chatId ||
       !messageKey ||
-      !this.actsWithGuardianAccess(turn.channel, turn.senderBondLevel === "guardian")
+      turn.senderBondLevel !== "guardian"
     ) {
       return null;
     }

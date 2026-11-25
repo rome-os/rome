@@ -39,6 +39,7 @@ type SendGate = (request: {
     place: "direct" | "group";
     sameChatAsWake: boolean;
     onlyGuardianReads: boolean;
+    answers?: "known_people" | "everyone";
   };
   recipient: { bondLevel: BondLevel } | null;
   author: { agentName: string };
@@ -48,6 +49,12 @@ export interface ConnectionSayDeps {
   gate: SendGate;
   /** The connection that carries `channel`, or null when none does. */
   connectionOf: (channel: string) => string | null;
+  /** The chat's rule on whom the agent answers (docs/domains/chats.md#answers-rule).
+   *  Absent, every chat reads as `known_people`. */
+  answers?: (chat: {
+    connectionId: string;
+    chatId: string;
+  }) => Promise<"known_people" | "everyone">;
   /** Envoy's verdict on `text` as a reply to `recipient`. */
   envoy: (input: {
     text: string;
@@ -92,6 +99,7 @@ export async function sayOnConnection(
   const { chat, text, recipient, place } = input;
   const connectionId = deps.connectionOf(chat.channel);
   if (!connectionId) throw new Error("This chat's account cannot send.");
+  const answers = await deps.answers?.({ connectionId, chatId: chat.threadId });
   const decision = deps.gate({
     destination: {
       connectionId,
@@ -99,6 +107,7 @@ export async function sayOnConnection(
       place,
       sameChatAsWake: true,
       onlyGuardianReads: place === "direct" && recipient.bondLevel === "guardian",
+      ...(answers ? { answers } : {}),
     },
     recipient: { bondLevel: recipient.bondLevel },
     author: { agentName: "core:concierge" },

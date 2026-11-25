@@ -297,10 +297,9 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     // A new workspace answers as the guardian's Concierge from its first
     // message (docs/adrs/channels-and-connectors-are-one-connection.md).
     startsWithConcierge: true,
-    // Rome's app serves the whole workspace it is installed in.
-    servesWorkspace: true,
-    // An official app offers no chat rules: every chat runs at the defaults.
-    chatRules: { offers: [] },
+    // An official app offers no chat rules. Its chats answer everyone who
+    // addresses the agent; every other rule runs at its default.
+    chatRules: { offers: [], fixed: { "activation.answers": "everyone" } },
     // A task chat sends, reads and searches Slack through the connector's
     // proxy, which makes its calls through this connection's talker with the
     // bot grant.

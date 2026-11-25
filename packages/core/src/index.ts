@@ -346,9 +346,7 @@ import { ApprovalHandler, executionRequester } from "./apps/actions/approval-han
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
-import { guardedSend, workspaceSend } from "./participation/send-gate/index.js";
-import { actsWithGuardianAccess } from "./participation/guardian-access.js";
-import { servesWorkspaceIn } from "./connections/serves-workspace.js";
+import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -1410,21 +1408,8 @@ async function main() {
     const id = channelRecords.byId(channel)?.connectionId;
     return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
   };
-  // Whether the account behind a connection, a channel or a place serves its
-  // whole workspace (docs/domains/participation.md#workspace-account).
-  const servesWorkspace = servesWorkspaceIn(connectionRegistry);
-  const channelServesWorkspace = (channel: string) => {
-    const id = channelRecords.byId(channel)?.connectionId;
-    return !!id && servesWorkspace(id);
-  };
-  const placeServesWorkspace = (place: { channel: string; connectionId?: string }) =>
-    place.connectionId
-      ? servesWorkspace(place.connectionId)
-      : channelServesWorkspace(place.channel);
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
-    guardianAccess: (channel, guardian) =>
-      actsWithGuardianAccess({ servesWorkspace: channelServesWorkspace(channel), guardian }),
     settingsRepo,
     reactInChat: async (chat, messageId, emoji) => {
       const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
@@ -1439,8 +1424,11 @@ async function main() {
     sayInChat: (chat, message) =>
       sayOnConnection(
         {
-          gate: workspaceSend(servesWorkspace, guardedSend),
+          gate: guardedSend,
           connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+          answers: async ({ connectionId, chatId }) =>
+            (await chatSettings.get({ connectionId, chatId: chatId as ChatId })).effective
+              .activation.answers,
           envoy: async (input) => {
             let verdict: unknown;
             for await (const event of agentRunner.run({
@@ -1618,8 +1606,7 @@ async function main() {
             modelAccounts.read().openai?.account,
           ),
       }),
-      placeSetup: (agentName, thread) =>
-        conciergePlaceSetup(agentName, thread, placeServesWorkspace),
+      placeSetup: conciergePlaceSetup,
       chatInstructions: taskChatInstructions({ webchatRepo }),
       ownAccountName: ownAccountNames(connectionRegistry),
       sessionTracing: romeSessionTracing,
@@ -2058,7 +2045,6 @@ async function main() {
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
-    servesWorkspace,
   });
   // Only the Concierge writes in a Concierge chat. An app's action sending
   // there, as a task chat's agent or a routine may, wakes the Concierge with
@@ -2109,7 +2095,7 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: workspaceSend(servesWorkspace, guardedSend),
+    sendGate: guardedSend,
     wakeGateFor,
     routinesRepo,
     routineEngine,

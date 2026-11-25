@@ -42,4 +42,20 @@ describe("guardedSend", () => {
     };
     expect(guardedSend(request({ bondLevel: "guardian" }, destination))).toBe("send");
   });
+
+  it("sends into a chat that answers everyone unchecked, whoever the message answers", () => {
+    const destination = (answers?: "known_people" | "everyone") => ({
+      connectionId: "connection:slack_app",
+      chatId: "C1",
+      place: "group" as const,
+      sameChatAsWake: false,
+      onlyGuardianReads: false,
+      ...(answers ? { answers } : {}),
+    });
+    for (const recipient of [{ bondLevel: "other" as const }, null]) {
+      expect(guardedSend(request(recipient, destination("everyone")))).toBe("send");
+      expect(guardedSend(request(recipient, destination("known_people")))).toBe("check");
+      expect(guardedSend(request(recipient, destination()))).toBe("check");
+    }
+  });
 });

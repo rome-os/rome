@@ -18,6 +18,10 @@ export interface SendRequest {
     sameChatAsWake: boolean;
     /** Nobody but the guardian can read the message there. */
     onlyGuardianReads: boolean;
+    /** The destination chat's rule on whom the agent answers
+     *  (docs/domains/chats.md#answers-rule). Absent where the caller did not
+     *  read it, which reads as `known_people`. */
+    answers?: "known_people" | "everyone";
   };
   /** People's answer for the sender of the message this one answers, or null
    *  when it is nobody. Others in the chat may read it too: the gate is not told. */
@@ -39,4 +43,3 @@ export type SendDecision = "send" | "check" | "ask_guardian" | "refuse";
 export type SendGate = (request: SendRequest) => SendDecision;
 
 export { guardedSend } from "./guarded-send.js";
-export { workspaceSend } from "./workspace-send.js";

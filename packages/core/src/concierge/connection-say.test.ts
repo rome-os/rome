@@ -47,6 +47,20 @@ const say = (d: ConnectionSayDeps, bondLevel: "guardian" | "acquaintance") =>
   });
 
 describe("what the Concierge says in a chat on a connection", () => {
+  it("tells the send gate the destination chat's rule on whom the agent answers", async () => {
+    const asked: unknown[] = [];
+    const d = deps({
+      answers: async (destination) => {
+        asked.push(destination);
+        return "everyone";
+      },
+      gate: ({ destination }) => (destination.answers === "everyone" ? "send" : "check"),
+    });
+    expect(await say(d.all, "acquaintance")).toEqual({ sent: "800000000000000009" });
+    expect(asked).toEqual([{ connectionId: "conn-1", chatId: "900" }]);
+    expect(d.envoys).toEqual([]);
+  });
+
   it("sends what answers the guardian at once, quoting the message, and puts it on record", async () => {
     const d = deps();
     expect(await say(d.all, "guardian")).toEqual({ sent: "800000000000000009" });

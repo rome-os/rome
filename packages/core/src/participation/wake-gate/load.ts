@@ -12,9 +12,6 @@ export interface WakeGateLoaderDeps {
   bondLevelsSetting(key: "trustedBondLevels" | "replyToBondLevels"): Promise<string[] | null>;
   policies(): Promise<Policy[]>;
   connectionKindOf: ConnectionKindOfChannel;
-  /** Whether the account behind a connection serves its whole workspace.
-   *  Absent, none does. */
-  servesWorkspace?: (connectionId: string) => boolean;
 }
 
 /** Builds each chat's wake gate from its current settings. Both bond-level
@@ -33,14 +30,13 @@ export function wakeGateLoader(deps: WakeGateLoaderDeps): WakeGateFor {
       replyToLevels: replyTo ?? DEFAULT_LEVELS,
       policies,
       connectionKindOf: deps.connectionKindOf,
-      servesWorkspace: deps.servesWorkspace?.(chat.connectionId) === true,
     });
   };
 }
 
 type ChatRules = Pick<
   ChatWakeSettings,
-  "enabled" | "replyRule" | "botMessages" | "whenOthersMentioned"
+  "enabled" | "replyRule" | "botMessages" | "whenOthersMentioned" | "answers"
 >;
 
 /** The chat rules the wake gate applies. Core has already resolved each to
@@ -52,5 +48,6 @@ export function chatRules({ effective }: ChatSettingsSnapshot): ChatRules {
     replyRule: effective.activation.mode,
     botMessages: effective.activation.botMessages,
     whenOthersMentioned: effective.activation.whenOthersMentioned,
+    answers: effective.activation.answers,
   };
 }

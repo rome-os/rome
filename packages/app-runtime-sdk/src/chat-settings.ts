@@ -5,6 +5,7 @@ export const CONVERSATION_SETTING_FIELDS = [
   "activation.mode",
   "activation.botMessages",
   "activation.whenOthersMentioned",
+  "activation.answers",
   "replies.placement",
   "routing.agentName",
   "session.reset",
@@ -23,6 +24,10 @@ export interface ChatSettings {
     mode: "mention" | "all";
     botMessages: "ignore" | "mentions" | "all";
     whenOthersMentioned: "ignore" | "respond";
+    /** Whom the agent answers in the chat: the people the guardian's
+     *  settings let wake it (`known_people`), or anyone who addresses it
+     *  (`everyone`), whose messages it may also send to the chat unchecked. */
+    answers: "known_people" | "everyone";
   };
   replies: { placement: "thread" | "inline" };
   routing: { agentName: string | null };

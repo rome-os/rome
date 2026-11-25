@@ -263,6 +263,7 @@ function before(kind: string, place: "direct" | "group", stored: ChatSettingsOve
       whenOthersMentioned: has("activation.whenOthersMentioned")
         ? effective.activation.whenOthersMentioned
         : "respond",
+      answers: "known_people",
     },
   };
 }
@@ -273,6 +274,7 @@ const VALUES: { [R in ChatRuleName]: readonly ChatRules[R][] } = {
   "activation.mode": ["mention", "all"],
   "activation.botMessages": ["ignore", "mentions", "all"],
   "activation.whenOthersMentioned": ["ignore", "respond"],
+  "activation.answers": ["known_people", "everyone"],
   "replies.placement": ["thread", "inline"],
   "routing.agentName": [null, "helper"],
   "session.reset": [{ mode: "none" }, { mode: "idle", idleMinutes: 30 }],
@@ -320,12 +322,19 @@ describe("chat rules", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("offers no chat rules for the official Slack and Discord apps, so their chats run at the defaults", () => {
+  it("offers no chat rules for the official Slack and Discord apps, and only Slack's chats answer everyone", () => {
+    expect(everyKind().get("slack_app")?.chatRules).toEqual({
+      offers: [],
+      fixed: { "activation.answers": "everyone" },
+    });
+    expect(everyKind().get("discord_app")?.chatRules).toEqual({ offers: [] });
     for (const kind of ["slack_app", "discord_app"]) {
       const rules = everyKind().get(kind)?.chatRules;
-      expect(rules).toEqual({ offers: [] });
       for (const place of ["direct", "group"] as const) {
         expect(chatRulesOf(rules!, place).offers).toEqual([]);
+        expect(effectiveChatRules(chatRulesOf(rules!, place), {})["activation.answers"]).toBe(
+          kind === "slack_app" ? "everyone" : "known_people",
+        );
       }
     }
   });
@@ -406,6 +415,10 @@ const RULE_CASES: { [R in ChatRuleName]: readonly RuleCase<R>[] } = {
   "activation.whenOthersMentioned": [
     { value: "ignore", message: { addressing: "ambient", mentionsOthers: true }, wake: "quiet" },
     { value: "respond", message: { mentionsOthers: true }, wake: "wake" },
+  ],
+  "activation.answers": [
+    { value: "known_people", message: { addressing: "mention" }, wake: "wake" },
+    { value: "everyone", message: { addressing: "mention" }, wake: "wake" },
   ],
   "replies.placement": [{ value: "inline" }, { value: "thread" }],
   "routing.agentName": [{ value: "helper" }, { value: null }],

@@ -113,6 +113,7 @@ function* allSettings(): Generator<ChatWakeSettings> {
           replyRule,
           botMessages,
           whenOthersMentioned,
+          answers: "known_people",
           trustedLevels: ["guardian"],
           replyToLevels: ["guardian"],
           policies: [],

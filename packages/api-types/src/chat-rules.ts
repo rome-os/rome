@@ -22,6 +22,9 @@ export interface ChatRules {
   "activation.botMessages": ChatSettings["activation"]["botMessages"];
   /** Whether a message addressed only to others wakes the agent. */
   "activation.whenOthersMentioned": ChatSettings["activation"]["whenOthersMentioned"];
+  /** Whom the agent answers: the people the guardian's settings let wake it
+   *  (`known_people`), or anyone who addresses it (`everyone`). */
+  "activation.answers": ChatSettings["activation"]["answers"];
   /** Whether a reply opens a thread or goes inline. */
   "replies.placement": ChatSettings["replies"]["placement"];
   /** The agent that answers, or null for the account's agent. */
@@ -58,7 +61,8 @@ export const SESSION_RESET_ONLY_CHAT_RULES: KindChatRules = {
   fixed: WAKES_ON_EVERY_MESSAGE,
 };
 
-/** A self-created Discord bot offers every chat rule. */
+/** A self-created Discord bot offers every chat rule but whom the agent
+ *  answers, which stays at its default. */
 export const DISCORD_CHAT_RULES: KindChatRules = {
   offers: [
     "enabled",
@@ -103,6 +107,7 @@ export function chatRuleDefaults(): ChatRules {
     "activation.mode": "mention",
     "activation.botMessages": "ignore",
     "activation.whenOthersMentioned": "ignore",
+    "activation.answers": "known_people",
     "replies.placement": "thread",
     "routing.agentName": null,
     "session.reset": structuredClone(DEFAULT_SESSION_RESET),
@@ -119,6 +124,7 @@ export function storedRuleValue<R extends ChatRuleName>(
     "activation.mode": stored.activation?.mode,
     "activation.botMessages": stored.activation?.botMessages,
     "activation.whenOthersMentioned": stored.activation?.whenOthersMentioned,
+    "activation.answers": stored.activation?.answers,
     "replies.placement": stored.replies?.placement,
     "routing.agentName": stored.routing?.agentName,
     "session.reset": stored.session?.reset,
@@ -155,6 +161,7 @@ export function asChatSettings(rules: ChatRules): ChatSettings {
       mode: rules["activation.mode"],
       botMessages: rules["activation.botMessages"],
       whenOthersMentioned: rules["activation.whenOthersMentioned"],
+      answers: rules["activation.answers"],
     },
     replies: { placement: rules["replies.placement"] },
     routing: { agentName: rules["routing.agentName"] },
