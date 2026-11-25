@@ -255,6 +255,33 @@ describe("members", () => {
       expect(db.select().from(identities).all()).toHaveLength(1);
     });
 
+    it("changes nothing for a sign-in with the guardian's email", async () => {
+      const { db, ctx } = setup();
+      const owner = await guardianSeatCreated(ctx, {
+        accounts: [OWNER_CLOUD, OWNER_EMAIL],
+        avatarUrl: "https://example.com/owner.png",
+      });
+      await invitedEmailsSaved(ctx, [OWNER_EMAIL.accountId]);
+      const before = await listMembers(ctx);
+
+      await memberSignedIn(ctx, {
+        email: "Owner@Example.com",
+        account: { platform: ROME_CLOUD_PLATFORM, accountId: "acct-visitor" },
+        avatarUrl: "https://example.com/visitor.png",
+      });
+
+      expect(await listMembers(ctx)).toEqual(before);
+      expect(before[0]?.person).toEqual({
+        id: owner.id,
+        name: null,
+        avatarUrl: "https://example.com/owner.png",
+      });
+      expect(
+        await roleOfAccount(ctx, { platform: ROME_CLOUD_PLATFORM, accountId: "acct-visitor" }),
+      ).toBeNull();
+      expect(db.select().from(identities).all()).toHaveLength(1);
+    });
+
     it("rejects an account another person holds", async () => {
       const { ctx, identity } = setup();
       await inviteMember(ctx, ADA_EMAIL.accountId);

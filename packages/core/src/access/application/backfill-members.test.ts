@@ -146,7 +146,52 @@ describe("backfillMembers", () => {
     );
   });
 
-  it("gives the guardian a rebound seat's accounts and takes away none it cannot tell came from the seat", async () => {
+  it("gives the guardian no Rome Cloud account a visitor signed in with under the guardian's email", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    db.insert(visitorProfiles)
+      .values({
+        accountId: "acct-visitor",
+        email: "OWNER@example.com",
+        avatarUrl: "https://example.com/visitor.png",
+        updatedAt: now,
+      })
+      .run();
+
+    await backfillMembers(db);
+
+    const ctx = memberContext(db);
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-visitor" }),
+    ).toBeNull();
+    expect((await listMembers(ctx))[0]?.person.avatarUrl).toBe("https://example.com/owner.png");
+  });
+
+  it("takes from the guardian every Rome Cloud account but the seat's, and a second run changes nothing", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const ctx = memberContext(db);
+    const guardianId = (await listMembers(ctx))[0]?.person.id ?? "";
+    // Added by a sign-in under the guardian's email before sign-ins skipped the guardian.
+    await ctx.identity.addAccount(guardianId, { platform: "rome-cloud", accountId: "acct-stray" });
+
+    await backfillMembers(db);
+
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-stray" }),
+    ).toBeNull();
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-owner" })).toBe(
+      "guardian",
+    );
+    const first = snapshot(db);
+    await backfillMembers(db);
+    expect(snapshot(db)).toEqual(first);
+  });
+
+  it("gives the guardian a rebound seat's accounts and takes away only the Rome Cloud account the seat no longer names", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -166,7 +211,6 @@ describe("backfillMembers", () => {
       "email:olive@example.com",
       "email:owner@example.com",
       "rome-cloud:acct-new",
-      "rome-cloud:acct-owner",
       "slack:T1:U1",
       "telegram:42",
     ]);

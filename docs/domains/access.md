@@ -25,11 +25,11 @@ A person with a role, the guardian included. A member is a [person](identity.md#
 These coordinate Identity and Access. They are how Rome uses the rules above now, not rules of roles.
 
 - **A guardian's seat is created.** The guardian's person gets the seat's accounts, and is created with the guardian role when there is no guardian. An account that another person holds moves to the guardian.
-- **A guardian's seat is rebound** to another Rome Cloud account or email. The guardian's person loses the seat's old account and email and gets the new ones. Its other accounts stay, even an email that differs from the seat's, because Identity cannot tell which earlier seat or People link gave the guardian an account. For the same reason, the startup repair adds the seat's accounts and takes none away.
+- **A guardian's seat is rebound** to another Rome Cloud account or email. The guardian's person loses the seat's old account and email and gets the new ones. Its other accounts stay, even an email that differs from the seat's, because Identity cannot tell which earlier seat or People link gave the guardian an account. For the same reason, the startup repair adds the seat's accounts and takes no email or People account away. It does take away every Rome Cloud account on the guardian other than the seat's, because only the seat gives the guardian one.
 - **A member is invited** by email. When nobody holds that email, a new person is created with the email as their account. Inviting the guardian's own email leaves them the guardian.
 - **A member is removed.** Their role is revoked, then their person and every account of theirs are deleted, and each account then belongs to nobody.
 - **The invited emails are saved.** Each listed email is invited, and every member who holds none of them is removed.
-- **A member signs in.** Their person gets the account they signed in with. A sign-in by someone with no role creates no person.
+- **A member signs in.** Their person gets the account they signed in with. A sign-in by someone with no role creates no person. A sign-in with the guardian's email changes nothing: the guardian holds at most one Rome Cloud account, the one the seat names, and a local password seat names none.
 - An account that would land on the guardian and on someone else stays with the guardian.
 
 ## Decided against

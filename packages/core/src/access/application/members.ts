@@ -179,18 +179,19 @@ export async function invitedEmailsSaved(
 }
 
 /**
- * Records a sign-in by the person with a role behind `email`: gives them
- * `account` and, when known, their avatar. Does nothing when no person with a
- * role holds the email, so a visitor who is not a member gets no person.
- * Rejects with Identity's `AccountTakenError` when another person holds the
- * account.
+ * Records a sign-in by the member behind `email`: gives them `account` and,
+ * when known, their avatar. Does nothing when no member holds the email, so a
+ * visitor who is not a member gets no person, and nothing when the email is
+ * the guardian's, since only the guardian's seat gives the guardian a Rome
+ * Cloud account. Rejects with Identity's `AccountTakenError` when another person
+ * holds the account.
  */
 export async function memberSignedIn(
   { identity, access }: MemberContext,
   signIn: { email: string; account: Account; avatarUrl?: string | null },
 ): Promise<void> {
   const person = await identity.personOf(emailAccount(signIn.email));
-  if (!person || (await access.roleOf(person.id)) === null) return;
+  if (!person || (await access.roleOf(person.id)) !== "member") return;
   await identity.addAccount(person.id, signIn.account);
   if (signIn.avatarUrl) await identity.updatePerson(person.id, { avatarUrl: signIn.avatarUrl });
 }

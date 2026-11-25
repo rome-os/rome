@@ -255,7 +255,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
       });
     if (newAccount) deps.visitorAllowListSync.requestResend();
     // Only a member gets the account: a visitor off the dashboard list stays
-    // without a person.
+    // without a person, and the guardian's email gives the guardian nothing.
     await memberSignedIn(memberContext(deps.db), {
       email,
       account: { platform: ROME_CLOUD_PLATFORM, accountId },

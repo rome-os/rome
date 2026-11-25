@@ -11,6 +11,7 @@ import { Permissions } from "../../access/permissions.js";
 import { appPermissions } from "../../apps/app-permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 import {
+  guardianSeatCreated,
   inviteMember,
   listMembers,
   memberContext,
@@ -159,6 +160,32 @@ describe("/api/auth/visitor dashboard access", () => {
       accounts: [
         { platform: "email", accountId: "ada@example.com" },
         { platform: "rome-cloud", accountId: "acct-1" },
+      ],
+    });
+  });
+
+  it("gives the guardian nothing when a visitor signs in with the guardian's email", async () => {
+    const ctx = memberContext(testDb.db);
+    await guardianSeatCreated(ctx, {
+      accounts: [
+        { platform: "rome-cloud", accountId: "acct-owner" },
+        { platform: "email", accountId: "owner@example.com" },
+      ],
+    });
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["owner@example.com"]);
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession("Owner@Example.com") });
+    const nonce = await startDashboardLogin(app);
+
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-1" })).toBeNull();
+    expect((await listMembers(ctx))[0]).toMatchObject({
+      person: { avatarUrl: null },
+      role: "guardian",
+      accounts: [
+        { platform: "email", accountId: "owner@example.com" },
+        { platform: "rome-cloud", accountId: "acct-owner" },
       ],
     });
   });
