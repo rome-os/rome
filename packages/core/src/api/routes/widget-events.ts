@@ -1,8 +1,6 @@
 import { isWidgetAppPath } from "@rome-os/app-runtime";
 import { Hono } from "hono";
-import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
-import { canOpenChat } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { deviceConnectPath } from "../../connections/connect-card.js";
@@ -259,15 +257,10 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<
-    WebChatRepository,
-    "widgetMessage" | "getSession" | "getMessages" | "askingDeviceOf"
-  >;
+  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getMessages" | "askingDeviceOf">;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
-  /** Whose chats the caller may open. */
-  callerOwner?: () => Promise<string | null>;
   /** Who can read a dashboard chat now. Absent, every chat reads as shared,
    *  so no location is accepted. */
   chatAudience?: (chatId: string) => Promise<"private" | "shared">;
@@ -279,15 +272,13 @@ export interface WidgetEventDeps {
 /**
  * Where a client (the web dashboard or the iOS app) sends every event a widget
  * fires. A widget is a message of its own, so its id is the message's id.
- * Core finds it, checks that the caller may open its chat and that the widget
- * declares the event, then hands the event to the widget's owner: an app's
+ * Core finds it, checks that the widget declares the event, then hands the event to the widget's owner: an app's
  * widget calls the app at `/api/apps/<app id>/<event>`; a widget core owns,
  * such as the question card, is handled here, and its answer becomes a turn in
  * the chat. The client only sends the event; it never decides what it means.
  */
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
-  const callerOwner = deps.callerOwner ?? currentChatOwner;
   /** The cards whose answer is on its way to their chat. */
   const answering = new Set<string>();
 
@@ -301,18 +292,8 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     const name = typeof body?.name === "string" ? body.name : "";
     const context = isObject(body?.context) ? body.context : {};
 
-    // The route checks the chat itself: it is under no chat's path, so no
-    // other route's guard runs before it. Not found, to anyone who may not open it.
-    // The chat and the widget come from one row, so the chat checked is the
-    // chat whose widget is pressed.
     const message = await deps.webchatRepo.widgetMessage(widgetId);
-    const owner = await callerOwner();
-    if (
-      !message ||
-      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), message.chatId, owner))
-    ) {
-      return c.json({ error: "No widget with this id" }, 404);
-    }
+    if (!message) return c.json({ error: "No widget with this id" }, 404);
     const widget = readWidget(message.chatId, message.content);
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
     const unshown =

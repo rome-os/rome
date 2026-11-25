@@ -82,14 +82,7 @@ function harness() {
       getMessages: (async () => [
         { id: "m", role: "assistant", content: JSON.stringify([card]) },
       ]) as never,
-      getSession: (async (id: string) => ({
-        id,
-        agentName: "main",
-        ownerKey: "guardian",
-        triggerKind: null,
-      })) as never,
     },
-    callerOwner: async () => "guardian",
     // The card reads the connections as `GET /api/connections` lists them.
     forward: (request) => {
       const url = new URL(request.url);

@@ -43,10 +43,9 @@ interface Row {
   content: unknown[];
 }
 
-/** The route with its messages, its chats (`private` = the guardian's own), and a caller. */
+/** The route with its messages, and what Rome answers it. */
 function setup(
   rows: Record<string, Row>,
-  caller: string | null = "guardian",
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
@@ -86,12 +85,7 @@ function setup(
               : "assistant",
             content: JSON.stringify(row.content),
           }))) as never,
-      getSession: (async (id: string) =>
-        id === "private"
-          ? { id, agentName: "core:concierge", ownerKey: "guardian", triggerKind: null }
-          : { id, agentName: null, ownerKey: null, triggerKind: null }) as never,
     },
-    callerOwner: async () => caller,
     startSetup: async (request) => {
       setups.push(request);
       return setupState;
@@ -223,9 +217,12 @@ describe("an event on a widget", () => {
         },
       },
     };
-    const { fire, forwarded } = setup({ m4: { chatId: "c1", content: [connect] } }, "guardian", {
-      answer: { toolkit: "gmail", status: "connected" },
-    });
+    const { fire, forwarded } = setup(
+      { m4: { chatId: "c1", content: [connect] } },
+      {
+        answer: { toolkit: "gmail", status: "connected" },
+      },
+    );
     const res = await fire("m4", { name: "check", context: { toolkit: "gmail" } });
     expect(await res.json()).toMatchObject({ answered: true });
     expect(forwarded.map((f) => [f.url, f.body])).toEqual([
@@ -261,9 +258,12 @@ describe("an event on a widget", () => {
         },
       },
     };
-    const { fire, forwarded } = setup({ m5: { chatId: "c1", content: [connect] } }, "guardian", {
-      open: "https://auth.example.com/authorize",
-    });
+    const { fire, forwarded } = setup(
+      { m5: { chatId: "c1", content: [connect] } },
+      {
+        open: "https://auth.example.com/authorize",
+      },
+    );
     const res = await fire("m5", { name: "connect" });
     expect(await res.json()).toEqual({ open: "https://auth.example.com/authorize" });
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/connector/connect"]);
@@ -285,11 +285,7 @@ describe("an event on a widget", () => {
       },
     };
     const said = async (reply: unknown) => {
-      const { fire, forwarded } = setup(
-        { m6: { chatId: "c1", content: [connect] } },
-        "guardian",
-        reply,
-      );
+      const { fire, forwarded } = setup({ m6: { chatId: "c1", content: [connect] } }, reply);
       const res = await fire("m6", { name: "connect" });
       return { body: await res.json(), forwarded: forwarded.map((f) => f.url) };
     };
@@ -322,9 +318,12 @@ describe("an event on a widget", () => {
         },
       },
     };
-    const declined = setup({ m7: { chatId: "c1", content: [connect] } }, "guardian", {
-      answer: { toolkit: "notion", dismissed: true },
-    });
+    const declined = setup(
+      { m7: { chatId: "c1", content: [connect] } },
+      {
+        answer: { toolkit: "notion", dismissed: true },
+      },
+    );
     await declined.fire("m7", { name: "connect-card/dismiss" });
     expect(declined.forwarded[1]?.body).toMatchObject({
       parts: [
@@ -345,9 +344,7 @@ describe("an event on a widget", () => {
         getMessages: (async () => [
           { id: "m7", role: "assistant", content: JSON.stringify([connect]) },
         ]) as never,
-        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
-      callerOwner: async () => "guardian",
       forward: async () =>
         Response.json(
           { error: "no_api_key", message: "Log in to Composio first" },
@@ -433,15 +430,6 @@ describe("an event on a widget", () => {
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/todos/delete"]);
   });
 
-  it("is not found to a caller who may not open its chat, checked by the route itself", async () => {
-    const { fire, forwarded } = setup(
-      { m1: { chatId: "private", content: [mealWidget("w1", "meals", "water")] } },
-      "visitor:someone",
-    );
-    expect((await fire("m1", { name: "water" })).status).toBe(404);
-    expect(forwarded).toEqual([]);
-  });
-
   it("is not found when the message holds no widget, or more than one part", async () => {
     const { fire } = setup({
       text: { chatId: "c1", content: [{ type: "text", content: "hi" }] },
@@ -475,7 +463,6 @@ describe("an event on a widget, over the dashboard's own storage", () => {
       const forwarded: string[] = [];
       const app = widgetEventRoutes({
         webchatRepo: repo,
-        callerOwner: async () => "guardian",
         forward: async (request) => {
           forwarded.push(new URL(request.url).pathname);
           return Response.json({ ok: true });
@@ -575,7 +562,6 @@ describe("an event on the connect card core owns", () => {
   it("starts the setup the Connections page's Connect starts, and opens its authorization page", async () => {
     const { fire, forwarded, setups } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, link),
     );
@@ -588,7 +574,6 @@ describe("an event on the connect card core owns", () => {
   it("starts no setup for a Connect from another site, as the setup route refuses one", async () => {
     const { fire, setups } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, link),
     );
@@ -604,7 +589,6 @@ describe("an event on the connect card core owns", () => {
   it("starts afresh into a broken connection, as the page's Reconnect does", async () => {
     const { fire, setups } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github("broken", link, "conn-1"),
     );
@@ -618,20 +602,15 @@ describe("an event on the connect card core owns", () => {
       available: true,
       unavailableReason: null,
     };
-    const { fire, setups } = setup(
-      { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
-      undefined,
-      [
-        {
-          id: null,
-          connectionKind: "shopify",
-          grants: { store: "unauthorized" },
-          state: null,
-          connect: install,
-        },
-      ],
-    );
+    const { fire, setups } = setup({ m: { chatId: "c1", content: [connectCard] } }, undefined, [
+      {
+        id: null,
+        connectionKind: "shopify",
+        grants: { store: "unauthorized" },
+        state: null,
+        connect: install,
+      },
+    ]);
     const res = await fire("m", { name: "connect", context: { kind: "shopify" } });
     expect(await res.json()).toEqual({ open: "https://apps.shopify.com/rome" });
     expect(setups).toEqual([]);
@@ -640,7 +619,6 @@ describe("an event on the connect card core owns", () => {
   it("refuses Connect with the setup's reason when it does not start", async () => {
     const { fire } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, link),
       [],
@@ -656,7 +634,6 @@ describe("an event on the connect card core owns", () => {
   it("turns a link to a dashboard page into a link on the caller's origin", async () => {
     const { fire } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, link),
       [],
@@ -671,7 +648,6 @@ describe("an event on the connect card core owns", () => {
   it("joins a dashboard page to the address the guardian reached Rome at, behind a proxy", async () => {
     const { fire } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, link),
       [],
@@ -690,7 +666,6 @@ describe("an event on the connect card core owns", () => {
   it("refuses Connect with the reason when the kind can't be connected here", async () => {
     const { fire } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github(null, { url: null, available: false, unavailableReason: "Rome Cloud is not set up." }),
     );
@@ -702,7 +677,6 @@ describe("an event on the connect card core owns", () => {
   it("answers the agent on Check only once the connection is working", async () => {
     const notYet = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github("broken", link),
     );
@@ -713,7 +687,6 @@ describe("an event on the connect card core owns", () => {
 
     const working = setup(
       { m: { chatId: "c1", content: [connectCard] } },
-      "guardian",
       undefined,
       github("working", link),
     );
@@ -760,7 +733,7 @@ describe("an event on the connect card for a device kind", () => {
   });
   const health = (state: string) => [row(state)];
   const card = (rows: unknown[]) =>
-    setup({ m: { chatId: "c1", content: [deviceCard] } }, "guardian", undefined, [], rows);
+    setup({ m: { chatId: "c1", content: [deviceCard] } }, undefined, [], rows);
 
   it("opens the device's page on Connect, on the caller's origin", async () => {
     const { fire, forwarded } = card(health("off"));
@@ -805,13 +778,7 @@ describe("an event on the connect card for a device kind", () => {
     };
     // The guardian's own install has Health off; another install reports it working.
     const rows = [row("off", "dev-asking"), row("working", "dev-other")];
-    const off = setup(
-      { m: { chatId: "c1", content: [forAsking] } },
-      "guardian",
-      undefined,
-      [],
-      rows,
-    );
+    const off = setup({ m: { chatId: "c1", content: [forAsking] } }, undefined, [], rows);
     expect(await (await off.fire("m", { name: "connect", context })).json()).toEqual({
       open: "http://localhost/connections/device/apple_health",
     });
@@ -820,7 +787,6 @@ describe("an event on the connect card for a device kind", () => {
 
     const on = setup(
       { m: { chatId: "c1", content: [forAsking] } },
-      "guardian",
       undefined,
       [],
       [{ ...rows[0], state: "working" }, rows[1]],
@@ -844,7 +810,6 @@ describe("an event on the connect card for a device kind", () => {
     ) => {
       const { fire, forwarded } = setup(
         { m: { chatId: "c1", content: [content] } },
-        "guardian",
         undefined,
         [],
         rows,
@@ -878,7 +843,6 @@ describe("an event on the connect card for a device kind", () => {
     const appCard = { ...deviceCard, appId: "connector" };
     const { fire } = setup(
       { m: { chatId: "c1", content: [appCard] } },
-      "guardian",
       undefined,
       [],
       health("working"),
@@ -999,7 +963,6 @@ describe("an event on the share-location card core owns", () => {
     // Visitors were let in while the card waited, so the chat is now shared.
     const { fire, forwarded } = setup(
       { m: { chatId: "c1", content: [locationCard] } },
-      "guardian",
       undefined,
       [],
       [],
@@ -1025,9 +988,7 @@ describe("an event on the share-location card core owns", () => {
         getMessages: (async () => [
           { id: "m", role: "assistant", content: JSON.stringify([locationCard]) },
         ]) as never,
-        getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
-      callerOwner: async () => "guardian",
       chatAudience: async () => "private",
       forward: async (request) => {
         turns.push(await request.json());
