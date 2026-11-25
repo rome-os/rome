@@ -22,6 +22,7 @@ import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { RecordingStopped } from "../connections/types.js";
 import { legacyMessage, makePasteTalk } from "../connections/test-fixtures.js";
+import { type UnknownSendersDeps, unknownSenders } from "../participation/unknown-senders.js";
 import { createTestDb, type TestDb } from "./db.js";
 
 const ROME: Account = { platform: "telegram", id: "rome-bot" };
@@ -65,6 +66,8 @@ describe("a delivery settles once Chats has the message on record", () => {
       /** Held until it resolves, before the channel hands a message over, as
        *  fetching its attachments would hold it. */
       handOver?: Promise<void>;
+      /** Told of a message from a sender nobody holds, which every one is. */
+      tell?: UnknownSendersDeps["tell"];
     } = {},
   ) {
     const logged: { level: string; message: string }[] = [];
@@ -87,6 +90,7 @@ describe("a delivery settles once Chats has the message on record", () => {
         channelOf: (connection) => connection.connectionKind,
         accountOf: () => ROME,
         accepted: (channel, ref) => recording?.accepted(channel, ref) ?? Promise.resolve(),
+        entry: async () => ({ kind: "unknown" }),
       },
       "fake-telegram",
     );
@@ -127,6 +131,11 @@ describe("a delivery settles once Chats has the message on record", () => {
             });
           },
         },
+        onRecord: unknownSenders({
+          isRomes: (account) => account.id === ROME.id,
+          isOwnAccount: () => true,
+          ...(opts.tell ? { tell: opts.tell } : {}),
+        }),
         ...(opts.acceptTimeoutMs === undefined ? {} : { acceptTimeoutMs: opts.acceptTimeoutMs }),
       },
       [channel],
@@ -153,6 +162,29 @@ describe("a delivery settles once Chats has the message on record", () => {
 
     await expect(deliver(said("m1", "hello"))).resolves.toBeUndefined();
     expect(recorded).toEqual(["hello"]);
+  });
+
+  it("settles a delivery without waiting for its unknown sender to be told, once on record", async () => {
+    const told: string[] = [];
+    const held = gate();
+    const { deliver, recorded } = await connect({
+      tell: async (message) => {
+        told.push(`${message.platformMessageId} after ${recorded.length}`);
+        await held.opened;
+        throw new Error("not delivered");
+      },
+    });
+    const addressed = { ...said("m1", "hello"), mentions: [] };
+    await expect(deliver(addressed)).resolves.toBeUndefined();
+    await expect(deliver(addressed)).resolves.toBeUndefined();
+    const fromBot = { ...said("m2", "beep"), mentions: [] };
+    await deliver({ ...fromBot, sender: { ...fromBot.sender, isBot: true } });
+    const fromApp = { ...said("m3", "posted"), mentions: [] };
+    await deliver({ ...fromApp, sender: { ...fromApp.sender, viaApp: true } });
+    held.open();
+    await settle();
+    expect(told).toEqual(["m1 after 1"]);
+    expect(recorded).toEqual(["hello", "beep", "posted"]);
   });
 
   it("resolves at once for a message with nothing to answer, which Chats never records", async () => {

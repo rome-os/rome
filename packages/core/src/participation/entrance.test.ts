@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
-import { enteredAs, entrance, markEntered } from "./entrance.js";
-import type { EntryAccount } from "./entry.js";
+import { arrivalOf, enteredAs, entrance, markArrival } from "./entrance.js";
+import type { Entry, EntryAccount } from "./entry.js";
 
-/** An entrance that lets Ada in, and how often it asked. */
+/** An entrance that lets Ada in, and whom it was asked about. */
 function onlyAda() {
   const asked: EntryAccount[] = [];
   return {
@@ -17,14 +17,13 @@ function onlyAda() {
 }
 
 describe("entrance", () => {
-  it("names whom a message is let in as, asking once", async () => {
+  it("answers for a message's sender, asking once", async () => {
     const { asked, entrance: door } = onlyAda();
-    expect(await door.message({ platform: "slack", id: "ada" })).toBe("Ada");
-    expect(await door.message({ platform: "slack", id: "sam" })).toBeUndefined();
-    expect(asked).toEqual([
-      { platform: "slack", id: "ada" },
-      { platform: "slack", id: "sam" },
-    ]);
+    const ada = { platform: "slack", id: "ada" };
+    const sam = { platform: "slack", id: "sam" };
+    expect(await door.message(ada)).toEqual({ kind: "entered", person: "Ada" });
+    expect(await door.message(sam)).toEqual({ kind: "unknown" });
+    expect(asked).toEqual([ada, sam]);
   });
 
   it("runs a command for someone let in alone, and keeps the list", async () => {
@@ -56,12 +55,23 @@ describe("entrance", () => {
   });
 });
 
-describe("markEntered", () => {
+describe("markArrival", () => {
   it("stays on a copy of the event, and is nothing an event can carry itself", () => {
-    const event = { text: "hi" };
-    expect(enteredAs({ ...markEntered(event, "Ada") })).toBe("Ada");
-    expect(enteredAs(markEntered(event, undefined))).toBeUndefined();
-    expect(enteredAs(JSON.parse(JSON.stringify(markEntered(event, "Ada"))))).toBeUndefined();
-    expect(enteredAs({ ...event, entered: "Ada" })).toBeUndefined();
+    const entry: Entry = { kind: "entered", person: "Ada" };
+    const arrival = { entry, automated: false };
+    const marked = markArrival({ text: "hi" }, arrival);
+    expect(arrivalOf({ ...marked })).toEqual(arrival);
+    expect(arrivalOf(JSON.parse(JSON.stringify(marked)))).toBeUndefined();
+    expect(arrivalOf({ text: "hi", arrival })).toBeUndefined();
+  });
+});
+
+describe("enteredAs", () => {
+  it("names only someone let in", () => {
+    const event = (entry: Entry) => markArrival({ text: "hi" }, { entry, automated: false });
+    expect(enteredAs(event({ kind: "entered", person: "Ada" }))).toBe("Ada");
+    expect(enteredAs(event({ kind: "unknown" }))).toBeUndefined();
+    expect(enteredAs(event({ kind: "refused" }))).toBeUndefined();
+    expect(enteredAs({ text: "hi" })).toBeUndefined();
   });
 });
