@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
@@ -56,12 +57,18 @@ async function startSignerDouble(answers: Record<string, { status: number; body:
 let testDb: TestDb;
 let approvalHandler: ApprovalHandler;
 
-function appFor(actor: SessionActor | null): Hono {
+function appFor(actor: SessionActor | null, team: string[] = []): Hono {
+  const dashboardAccessState = new DashboardAccessState();
+  dashboardAccessState.setCloudEmailAccess(team);
   const app = new Hono();
   app.use("*", (_c, next) => (actor ? runWithSessionActor(actor, next) : next()));
   app.route(
     "/",
-    vaultRoutes({ approvalsRepo: new ApprovalsRepository(testDb.db), approvalHandler }),
+    vaultRoutes({
+      approvalsRepo: new ApprovalsRepository(testDb.db),
+      approvalHandler,
+      dashboardAccessState,
+    }),
   );
   return app;
 }
@@ -180,6 +187,16 @@ describe("vaultRoutes", () => {
       expect(response.status).toBe(403);
     }
     expect(signer.calls).toEqual([]);
+  });
+
+  it("lets a dashboard admin use the vault but not reset it", async () => {
+    const app = appFor(visitor, ["guest@example.com"]);
+    expect((await app.request("/vault")).status).toBe(200);
+    expect((await post(app, "/vault/pin", { pin: PIN })).status).toBe(200);
+
+    const reset = await post(app, "/vault/reset", { pin: PIN });
+    expect(reset.status).toBe(403);
+    expect(forwarded().map((call) => call.url)).toEqual(["/v1/secrets", "/v1/pin"]);
   });
 
   it("rejects cross-site writes from a guardian session", async () => {

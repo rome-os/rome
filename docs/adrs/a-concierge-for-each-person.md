@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-06
+- **Superseded in part by**: [A dashboard admin has the guardian's access](a-dashboard-admin-has-the-guardians-access.md), for who decides approvals
 
 ## Context
 
