@@ -253,7 +253,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                 turn.live?.() === true &&
                 actor &&
                 (actor.kind === "guardian" || actor.kind === "visitor") &&
-                (actor.kind !== "guardian" || audience === "private") &&
                 turn.agentName === "core:concierge" &&
                 !turn.isSubagent &&
                 turnId &&

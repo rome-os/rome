@@ -60,8 +60,7 @@ export function backToDefaultBody(
 
 /**
  * The transcript's last row while a chat does not follow the default
- * provider, with "Back to default", which asks first. The caller leaves it
- * out for visitors.
+ * provider, with "Back to default", which asks first.
  */
 export function PinnedModelHint({
   sessionId,
