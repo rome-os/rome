@@ -268,6 +268,60 @@ describe("voice conversation socket", () => {
     expect(mouth.closed()).toBe(true);
   });
 
+  it("counts the person as following the chat while the conversation runs, so the Concierge does not push to them", async () => {
+    const ear = standInTranscriber();
+    const following: string[] = [];
+    let released = 0;
+    const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
+    const { client, messages, closed } = await connect(
+      {
+        listening: {
+          open: async () => ({
+            ok: true,
+            source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
+          }),
+        },
+        speaker: standInSpeaker().source,
+        canTalkIn: async () => true,
+        send: async () => replyOf(""),
+        follow: (owner, chatId) => {
+          following.push(`${owner} ${chatId}`);
+          return () => {
+            released++;
+          };
+        },
+      },
+      guardian,
+    );
+    client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+    await until(() => messages.some((m) => m.type === "ready"), "ready");
+    expect(following).toEqual(["guardian chat-1"]);
+    expect(released).toBe(0);
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+    expect(released).toBe(1);
+  });
+
+  it("follows no chat it refuses", async () => {
+    const following: string[] = [];
+    const { client, closed } = await connect(
+      {
+        listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
+        speaker: standInSpeaker().source,
+        canTalkIn: async () => false,
+        send: async () => replyOf(""),
+        follow: (owner, chatId) => {
+          following.push(`${owner} ${chatId}`);
+          return () => {};
+        },
+      },
+      { kind: "visitor", accountId: "a", email: "a@example.com" },
+    );
+    client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+    await closed;
+    expect(following).toEqual([]);
+  });
+
   it("refuses audio before start", async () => {
     const first = await connect({
       listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
@@ -448,6 +502,44 @@ describe("voice conversation socket", () => {
       expect(messages.filter((m) => m.type !== "alive")).toEqual([
         { type: "error", reason: "chat-refused" },
       ]);
+    });
+
+    it("follows the chat only for the phone app's conversation", async () => {
+      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      const followedBy = async (headers: Record<string, string>) => {
+        const following: string[] = [];
+        const http: Server = createServer();
+        const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
+          listening: {
+            available: () => true,
+            info: async () => ({ available: true, place: null }),
+            open: async () => ({ ok: false, reason: "service-refused" }),
+          },
+          speaker: standInSpeaker().source,
+          canTalkIn: async () => true,
+          send: async () => replyOf(""),
+          dashboardAccess: { isCloudEmailAllowed: () => true },
+          follow: (owner, chatId) => {
+            following.push(`${owner} ${chatId}`);
+            return () => {};
+          },
+        });
+        await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+        servers.push({ close: () => (voice.close(), http.close()) });
+        const client = new WebSocket(
+          `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
+          { headers },
+        );
+        const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
+        await new Promise<void>((resolve) => client.on("open", () => resolve()));
+        client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+        // Listening is refused, after the chat is followed.
+        await closed;
+        return following;
+      };
+      expect(await followedBy({ "x-rome-client": "phone" })).toEqual(["visitor:ada chat-1"]);
+      // A dashboard's conversation holds back no push, as its watch does not.
+      expect(await followedBy({})).toEqual([]);
     });
 
     it("is not there for the guardian of an account off the voice input list", async () => {

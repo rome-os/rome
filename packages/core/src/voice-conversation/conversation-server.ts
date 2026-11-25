@@ -17,10 +17,12 @@ import {
   type VoiceConversationStopReason,
   voiceConversationClientMessageSchema,
 } from "@rome/api-types/voice-conversation";
+import { LIVE_EVENTS_CLIENT_HEADER, PHONE_CLIENT } from "@rome/api-types/live-events";
 import {
   enrichGuardianActor,
   runWithSessionActor,
   type SessionActor,
+  sessionOwnerKey,
 } from "../access/session-actor.js";
 import { type DashboardAllowList, isOnTeam } from "../access/team.js";
 import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
@@ -57,6 +59,13 @@ export interface VoiceConversationDeps {
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
   maxConversationMs?: number;
+  /**
+   * Counts the person as following `chatId`, as their phone showing it does:
+   * the Concierge does not push what it says there, since they hear it.
+   * Returns the release. `owner` is their chat owner key. Only a phone's
+   * conversation follows, as only a phone's live-events socket watches.
+   */
+  follow?: (owner: string, chatId: string) => () => void;
   /**
    * Whether the person on the socket is still on the team. Asked before any
    * session opens, before each turn, and every 25 s, and the conversation ends
@@ -103,7 +112,11 @@ export function attachVoiceConversationServer(
             ? await enrichGuardianActor(db, caller)
             : actorOfUpgrade(caller);
         const onTeam = () => isOnTeam(actor, deps.dashboardAccess);
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { ...deps, onTeam }, actor));
+        // The phone app marks its sockets as it marks its live-events socket.
+        const { follow, ...rest } = deps;
+        const phone = req.headers[LIVE_EVENTS_CLIENT_HEADER] === PHONE_CLIENT;
+        const served = { ...rest, onTeam, ...(phone && follow ? { follow } : {}) };
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, served, actor));
       })
       .catch((err) => {
         log.error("voice conversation upgrade failed", {
@@ -133,6 +146,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   let bytes = 0;
   let alive: ReturnType<typeof setInterval> | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
+  let unfollow: (() => void) | null = null;
   let chatId: string | null = null;
   const onTeam = deps.onTeam ?? (() => true);
 
@@ -174,6 +188,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const settle = (outcome: string) => {
+    unfollow?.();
     clearInterval(teamCheck);
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
@@ -218,6 +233,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       : await deps.canTalkIn(to);
     if (!canTalk) return fail("chat-refused");
     if (closed) return;
+    // They hear the replies: the Concierge does not also push them.
+    const owner = sessionOwnerKey(actor);
+    if (owner && deps.follow) unfollow = deps.follow(owner, to);
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
       if (spoken.ok) spoken.session.close();
