@@ -354,6 +354,17 @@ describe("Computer Use Unix socket bridge", () => {
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 
+  it("closes the socket and removes bootstrap state when consent is aborted", async () => {
+    const helper = mockHelper({ handshake: "stall" });
+    const abort = new AbortController();
+    const hello = helper.next("hello");
+    const pending = helper.start({ signal: abort.signal });
+    await hello;
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ code: "request_aborted" });
+    expect(existsSync(helper.stateDir)).toBe(false);
+  });
+
   it("rejects an incorrectly permissioned socket and a non-socket at the same path", async () => {
     const helper = mockHelper({ socketMode: 0o660 });
     await expect(helper.start()).rejects.toMatchObject({ code: "socket_unavailable" });

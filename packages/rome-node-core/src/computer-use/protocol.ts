@@ -50,6 +50,9 @@ const wireErrorCodes = [
 type WireErrorCode = (typeof wireErrorCodes)[number];
 type ErrorCode =
   | WireErrorCode
+  | "computer_use_off"
+  | "computer_use_unsupported_platform"
+  | "computer_use_helper_missing"
   | "invalid_helper_bundle"
   | "socket_path_limit"
   | "unsafe_state_directory"
@@ -525,14 +528,22 @@ const paramsValidators: Record<Method, (params: unknown) => boolean> = {
   stop: (params) => params === undefined,
 };
 
+export function requestParams<M extends Method>(method: M, params: unknown): RequestParams[M] {
+  if (!Object.hasOwn(paramsValidators, method) || !paramsValidators[method](params)) {
+    throw new ComputerUseError("invalid_request");
+  }
+  return params as RequestParams[M];
+}
+
 export function makeRequest<M extends Method>(
   id: string,
   method: M,
   params: RequestParams[M],
 ): Request<M> {
-  if (!Object.hasOwn(paramsValidators, method) || !isId(id) || !paramsValidators[method](params)) {
+  if (!isId(id)) {
     throw new ComputerUseError("invalid_request");
   }
+  requestParams(method, params);
   return params === undefined ? { v: 1, id, method } : { v: 1, id, method, params };
 }
 

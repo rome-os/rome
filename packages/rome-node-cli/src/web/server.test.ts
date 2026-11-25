@@ -355,6 +355,7 @@ describe("rome-node web server", () => {
       cloudUrl: mock.cloudUrl,
       name: "Test Container",
       assetsDir,
+      computerUse: { enabled: true, appPath: join(configDir, "missing.app") },
       log: () => {},
     });
     cleanup.push(() => running.close());
@@ -383,6 +384,19 @@ describe("rome-node web server", () => {
       const res = await fetch(`${running.url}/api/status`);
       const body = (await res.json()) as { phase: string };
       return body.phase === "online";
+    });
+
+    expect(await mock.sendRpc("system.info", {})).toMatchObject({
+      result: {
+        computerUse: false,
+        computerUseStatus: {
+          state: "unavailable",
+          code:
+            process.platform === "darwin"
+              ? "computer_use_helper_missing"
+              : "computer_use_unsupported_platform",
+        },
+      },
     });
 
     // Credential file is persisted on disk.
@@ -444,6 +458,10 @@ describe("rome-node web server", () => {
     };
     expect(refused.ok).toBe(false);
     expect(refused.error?.code).toBe("computer_use_off");
+
+    expect(await mock.sendRpc("computer.windows", {})).toMatchObject({
+      error: { code: "computer_use_off" },
+    });
 
     // Disconnect keeps credentials; connect restores online state.
     const disc = await fetch(`${running.url}/api/host/disconnect`, { method: "POST" });

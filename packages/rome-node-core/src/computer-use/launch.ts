@@ -21,7 +21,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { ComputerUseError } from "./protocol.js";
 
-const APP_NAME = "Rome Computer Use.app";
+export const APP_NAME = "Rome Computer Use.app";
 const EXECUTABLE = "Contents/MacOS/RomeComputerUse";
 export const RELEASE_SIGNING_REQUIREMENT =
   'anchor apple generic and identifier "com.rome.computer-use" and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "4YWXB26F39"';
@@ -39,6 +39,7 @@ interface LaunchContext {
 
 export interface LaunchOptions {
   appPath?: string;
+  signal?: AbortSignal;
   stateRoot?: string;
   startupTimeoutMs?: number;
   verifyBundle?: (appPath: string, signal: AbortSignal) => void | Promise<void>;
@@ -141,7 +142,13 @@ export async function untilAbort<T>(
   });
   const listener = addAbortListener(signal, abort);
   try {
-    return await Promise.race([Promise.resolve().then(runOperation), stopped]);
+    return await Promise.race([
+      Promise.resolve().then(() => {
+        signal.throwIfAborted();
+        return runOperation();
+      }),
+      stopped,
+    ]);
   } finally {
     listener[Symbol.dispose]();
   }
@@ -155,14 +162,13 @@ async function verifySignedBundle(appPath: string, signal: AbortSignal): Promise
   );
 }
 
-async function validatedApp(
-  options: LaunchOptions,
+export async function verifyHelperBundle(
+  path: string,
   signal: AbortSignal,
-): Promise<string | undefined> {
-  if (!options.appPath && options.launcher) return;
+  verify: NonNullable<LaunchOptions["verifyBundle"]> = verifySignedBundle,
+): Promise<string> {
   try {
-    if (!options.appPath) throw new Error(`Expected an app named ${APP_NAME}`);
-    const appPath = realpathSync(options.appPath);
+    const appPath = realpathSync(path);
     const executable = join(appPath, EXECUTABLE);
     if (
       basename(appPath) !== APP_NAME ||
@@ -173,7 +179,6 @@ async function validatedApp(
       throw new Error("The helper app or its executable is missing");
     }
     accessSync(executable, constants.X_OK);
-    const verify = options.verifyBundle ?? verifySignedBundle;
     await untilAbort(() => verify(appPath, signal), signal);
     return appPath;
   } catch (cause) {
@@ -207,11 +212,18 @@ export async function launchHelper(options: LaunchOptions) {
   const secret = randomBytes(32);
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), options.startupTimeoutMs ?? 10_000);
-  const { signal } = deadline;
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, deadline.signal])
+    : deadline.signal;
   let state: ReturnType<typeof prepareState> | undefined;
   let socket: Socket | undefined;
   try {
-    const appPath = await validatedApp(options, signal);
+    signal.throwIfAborted();
+    const appPath = options.appPath
+      ? await verifyHelperBundle(options.appPath, signal, options.verifyBundle)
+      : undefined;
+    if (!appPath && !options.launcher) throw new ComputerUseError("invalid_helper_bundle");
+    signal.throwIfAborted();
     state = prepareState(
       options.stateRoot ?? (process.platform === "darwin" ? "/private/tmp" : "/tmp"),
       uid,
@@ -243,7 +255,8 @@ export async function launchHelper(options: LaunchOptions) {
     socket?.destroy();
     secret.fill(0);
     state?.cleanup();
-    if (signal.aborted) throw new ComputerUseError("startup_timeout");
+    if (options.signal?.aborted) throw new ComputerUseError("request_aborted");
+    if (deadline.signal.aborted) throw new ComputerUseError("startup_timeout");
     if (cause instanceof ComputerUseError) throw cause;
     throw new ComputerUseError("socket_unavailable", { cause });
   } finally {

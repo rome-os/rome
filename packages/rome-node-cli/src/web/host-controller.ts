@@ -17,6 +17,7 @@ import {
   type AuditStatus,
   type AuditSummary,
   type ContentName,
+  type ComputerUseOptions,
   type CredentialStore,
   type DeviceAuthorizationPrompt,
   type DeviceSession,
@@ -93,6 +94,7 @@ export interface HostControllerOptions {
   explicitName?: boolean;
   version?: string;
   deps?: HostControllerDeps;
+  computerUse?: ComputerUseOptions;
 }
 
 class CredentialInvalidError extends Error {
@@ -482,7 +484,11 @@ export class HostController {
 
     const run = (
       this.config.executionEnabled
-        ? this.doConnectHost({ ...baseOptions, audit: this.audit })
+        ? this.doConnectHost({
+            ...baseOptions,
+            audit: this.audit,
+            computerUse: this.options.computerUse,
+          })
         : this.doConnectLimitedHost(baseOptions)
     )
       .then(() => {

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { FRAME_TYPE, encodeFrame, encodeMeta, parseFrame, uuidBytes } from "@rome-os/node-core";
@@ -59,7 +61,7 @@ async function until(check: () => boolean) {
  * Relays text envelopes and binary frames between a real caller daemon and two real
  * `rome-node connect` hosts, rewriting the frame peer to the sender as the Gateway does.
  */
-async function fixture() {
+async function fixture(computerUse = false) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-transfer-"));
   const port = await freePort();
   cleanup.push(() =>
@@ -142,10 +144,22 @@ async function fixture() {
   });
   const cloudUrl = `http://127.0.0.1:${await listen(cloud)}`;
 
-  function spawnCli(args: string[], directory: string, cwd = root, input?: Buffer) {
+  const helper = computerUse ? await headlessHelper(root) : undefined;
+  function spawnCli(
+    args: string[],
+    directory: string,
+    cwd = root,
+    input?: Buffer,
+    preload?: string,
+  ) {
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), ...args], {
       cwd,
-      env: { ...process.env, ROME_NODE_CONFIG_DIR: directory, ROME_NODE_DAEMON_PORT: String(port) },
+      env: {
+        ...process.env,
+        ROME_NODE_CONFIG_DIR: directory,
+        ROME_NODE_DAEMON_PORT: String(port),
+        ...(preload ? { NODE_OPTIONS: `--import=${preload}` } : {}),
+      },
       stdio: "pipe",
       windowsHide: true,
     });
@@ -164,6 +178,7 @@ async function fixture() {
   }
 
   const hosts: Record<string, string> = {};
+  let firstHost: ReturnType<typeof spawnCli> | undefined;
   for (const [letter, deviceId] of [
     ["a", deviceA],
     ["b", deviceB],
@@ -176,7 +191,20 @@ async function fixture() {
       deviceId,
       name: `Host ${letter}`,
     });
-    const host = spawnCli(["connect", "--cloud", cloudUrl], directory, join(directory, "files"));
+    const testHelper = letter === "a" ? helper : undefined;
+    const host = spawnCli(
+      [
+        "connect",
+        "--cloud",
+        cloudUrl,
+        ...(testHelper ? ["--computer-use", "--computer-use-helper", testHelper.appPath] : []),
+      ],
+      directory,
+      join(directory, "files"),
+      undefined,
+      testHelper?.preload,
+    );
+    if (letter === "a") firstHost = host;
     cleanup.push(async () => {
       if (host.child.exitCode === null) host.child.kill();
       await host.exited;
@@ -193,8 +221,204 @@ async function fixture() {
     const code = await run.exited;
     return { code, stdout: run.stdout(), stderr: run.stderr() };
   };
-  return { root, deviceA, deviceB, hosts, cli, binaryFrames: () => binaryFrames };
+  const reconnect = async () => {
+    const previous = online.get(deviceA);
+    previous?.close(1012);
+    await until(() => online.has(deviceA) && online.get(deviceA) !== previous);
+  };
+  const revoke = () => online.get(deviceA)?.close(4001);
+  return {
+    root,
+    deviceA,
+    deviceB,
+    hosts,
+    cli,
+    caller,
+    reconnect,
+    revoke,
+    firstHost: firstHost!,
+    binaryFrames: () => binaryFrames,
+  };
 }
+
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB9sAAAAASUVORK5CYII=",
+  "base64",
+);
+
+async function headlessHelper(root: string) {
+  const appPath = join(root, "Rome Computer Use.app");
+  const executable = join(appPath, "Contents", "MacOS", "RomeComputerUse");
+  await mkdir(join(appPath, "Contents", "MacOS"), { recursive: true });
+  await writeFile(executable, "");
+  await chmod(executable, 0o700);
+  const preload = join(root, "headless-helper.mjs");
+  const bridgeModule = pathToFileURL(resolve("../rome-node-core/dist/computer-use/bridge.js")).href;
+  await writeFile(
+    preload,
+    `
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { registerHooks } from "node:module";
+import { createServer } from "node:net";
+import { join } from "node:path";
+import { ComputerUseBridge } from ${JSON.stringify(bridgeModule)};
+import { FrameDecoder, encodeFrame } from ${JSON.stringify(new URL("frames.js", bridgeModule).href)};
+import { ComputerUseError, createProof, verifyProof } from ${JSON.stringify(new URL("protocol.js", bridgeModule).href)};
+const path = ${JSON.stringify(appPath)};
+const discovery = new URL("discovery.js", ${JSON.stringify(bridgeModule)}).href;
+registerHooks({ load(url, context, next) {
+  if (url !== discovery) return next(url, context);
+  return { format: "module", shortCircuit: true, source: \`export async function discoverHelper(options) {
+    if (options?.enabled !== true || options.appPath !== \${JSON.stringify(path)}) throw new Error("Missing host flags");
+    return options.appPath;
+  }\` };
+}});
+const launch = ComputerUseBridge.launch.bind(ComputerUseBridge);
+ComputerUseBridge.launch = (options) => launch({
+  ...options, verifyBundle() {},
+  async launcher({ stateDir }) {
+    writeFileSync(${JSON.stringify(join(root, "helper-state-path"))}, stateDir);
+    const bootstrap = JSON.parse(readFileSync(join(stateDir, "bootstrap.json"), "utf8"));
+    const instance = randomUUID();
+    const binding = randomUUID();
+    const png = Buffer.from(${JSON.stringify(png.toString("base64"))}, "base64");
+    const window = { window: 9, title: "private-window-name", appName: "Fake", bundleName: "Fake", bundleId: "test.fake", bounds: [0, 0, 1, 1] };
+    const tree = { ref: "ref", title: "private-ax-text", role: "AXWindow", actions: [], children: [] };
+    let stopped = false;
+    const server = createServer((socket) => {
+      socket.on("close", () => server.close());
+      const decoder = new FrameDecoder(({ id, method, params }) => () => {
+        let result;
+        let body;
+        switch (method) {
+          case "hello": {
+            const context = { secret: Buffer.from(bootstrap.secret, "hex"), nonce: Buffer.from(params.nonce, "base64"), hostPid: bootstrap.hostPid };
+            if (!verifyProof(params.proof, context, "host")) throw new ComputerUseError("authentication_failed");
+            result = { instance, helperPid: process.pid, helperProof: createProof(context, "helper", process.pid, instance), locale: "en", auth: "session" };
+            break;
+          }
+          case "windows": result = { windows: [window] }; break;
+          case "bind": result = { binding, window }; break;
+          case "observe": {
+            result = { binding, tree, truncated: false, refTTLms: 15000 };
+            if (params.screenshot) {
+              result.screenshot = { mimeType: "image/png", width: 1, height: 1, bytes: png.length };
+              body = png;
+            }
+            break;
+          }
+          case "act": result = { binding, dispatched: true }; break;
+          case "cancel": stopped = true; result = { stop: "cancel_requested", reason: "session_stopped" }; break;
+          case "status": result = { instance, ...(stopped ? { stop: "stop_confirmed", reason: "session_stopped" } : { stop: "running" }) }; break;
+          default: throw new Error(method);
+        }
+        socket.write(encodeFrame({ v: 1, id, ok: true, result }, body));
+      });
+      socket.on("data", (data) => decoder.push(data));
+    });
+    const socketPath = join(stateDir, "helper.sock");
+    server.listen(socketPath);
+    await once(server, "listening");
+    chmodSync(socketPath, 0o600);
+  }
+});
+`,
+  );
+  return { appPath, preload: pathToFileURL(preload).href };
+}
+
+it.skipIf(process.platform === "win32")(
+  "runs Computer Use through connect, describe, JSON and --output without desktop access",
+  async () => {
+    const f = await fixture(true);
+    const describe = await f.cli(["device", "describe", f.deviceA]);
+    expect(describe.stderr).toBe("");
+    expect(JSON.parse(describe.stdout.toString())).toMatchObject({
+      ok: true,
+      result: {
+        computerUse: true,
+        actions: expect.arrayContaining([
+          "computer.windows",
+          "computer.bind",
+          "computer.unbind",
+          "computer.observe",
+          "computer.act",
+          "computer.cancel",
+        ]),
+      },
+    });
+    const run = async (action: string, args: unknown = {}, flags: string[] = [], code = 0) => {
+      const reply = await f.cli([
+        "device",
+        "run",
+        f.deviceA,
+        `computer.${action}`,
+        "--args",
+        JSON.stringify(args),
+        ...flags,
+      ]);
+      expect(reply.code).toBe(code);
+      return JSON.parse(reply.stdout.toString());
+    };
+    expect(await run("windows")).toMatchObject({ result: { windows: [{ window: 9 }] } });
+    const {
+      result: { binding },
+    } = await run("bind", { window: 9 });
+    expect(await run("observe", { binding })).toMatchObject({
+      result: { binding, tree: { title: "private-ax-text" } },
+    });
+    expect(
+      await run("observe", { binding, screenshot: true }, ["--output", "window.png"]),
+    ).toMatchObject({ result: { screenshot: { bytes: png.length, mimeType: "image/png" } } });
+    expect(await readFile(join(f.root, "window.png"))).toEqual(png);
+    const actionId = randomUUID();
+    const act = { binding, actionId, action: "type_text", text: "private-input-text" };
+    expect(await run("act", act)).toMatchObject({ result: { actionId, dispatched: true } });
+    expect(await run("cancel")).toMatchObject({ result: { stop: "cancel_requested" } });
+    expect(await run("cancel")).toMatchObject({ result: { stop: "stop_confirmed" } });
+    expect(await run("act", act, [], 1)).toMatchObject({ error: { code: "session_stopped" } });
+    const disabled = await f.cli(["device", "run", f.deviceB, "computer.windows"]);
+    expect(disabled.code).toBe(1);
+    expect(JSON.parse(disabled.stdout.toString())).toMatchObject({
+      error: { code: "computer_use_off" },
+    });
+    const audit = new DatabaseSync(join(f.root, "host-a", "audit", "audit.db"), { readOnly: true });
+    const activity = new DatabaseSync(join(f.caller, "observe.db"), { readOnly: true });
+    try {
+      const host = JSON.stringify(
+        audit.prepare("SELECT record FROM events WHERE action LIKE 'computer.%'").all(),
+      );
+      const caller = JSON.stringify(
+        activity.prepare("SELECT args FROM actions WHERE action LIKE 'computer.%'").all(),
+      );
+      for (const log of [host, caller]) {
+        expect(log).toContain(actionId);
+        for (const secret of [
+          act.text,
+          "private-window-name",
+          "private-ax-text",
+          png.toString("base64"),
+        ])
+          expect(log).not.toContain(secret);
+      }
+      expect(audit.prepare("SELECT COUNT(*) AS rows FROM content").get()).toEqual({ rows: 0 });
+    } finally {
+      audit.close();
+      activity.close();
+    }
+    await f.reconnect();
+    const rebound = await run("bind", { window: 9 });
+    expect(rebound.result.binding).not.toBe(binding);
+    const stateDir = await readFile(join(f.root, "helper-state-path"), "utf8");
+    await expect(access(stateDir)).resolves.toBeUndefined();
+    f.revoke();
+    expect(await f.firstHost.exited).toBe(1);
+    await expect(access(stateDir)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+  30_000,
+);
 
 describe("binary transfers through Gateway frames", () => {
   it("pushes and pulls a multi-chunk file with fs streams and replaces existing files", async () => {

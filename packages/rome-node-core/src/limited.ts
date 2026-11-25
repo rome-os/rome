@@ -34,6 +34,7 @@ export function createLimitedResponder(
       // Nothing can run. transferVersion is left out on purpose, so rome-node cp stops early.
       actions: [],
       computerUse: false,
+      computerUseStatus: { state: "unavailable", code: "computer_use_off" },
       frameVersion: 1,
     },
   });
