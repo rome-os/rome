@@ -22,6 +22,13 @@ export interface SlackAppWebApi {
     input: { channel: string; markdown: string; threadTs?: string },
     signal?: AbortSignal,
   ): Promise<{ ts: string }>;
+  /** Posts a message in `channel` that only member `user` sees, as Slack's
+   *  "Only visible to you", and Slack does not keep it. */
+  postEphemeral(
+    teamId: string,
+    input: { channel: string; user: string; markdown: string; threadTs?: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
   openDirectMessage(teamId: string, userId: string, signal?: AbortSignal): Promise<string>;
   /** Reacts to the message at `timestamp` with the emoji named `name`. A
    *  reaction already there counts as added. */
@@ -230,6 +237,19 @@ export function createSlackAppWebApi(
       const ts = stringField(result.ts);
       if (!ts) throw new SlackApiError("missing_message_id");
       return { ts };
+    },
+    async postEphemeral(teamId, input, signal) {
+      await call(
+        teamId,
+        "chat.postEphemeral",
+        {
+          channel: input.channel,
+          user: input.user,
+          markdown_text: input.markdown,
+          ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
+        },
+        signal,
+      );
     },
     async addReaction(teamId, input, signal) {
       try {

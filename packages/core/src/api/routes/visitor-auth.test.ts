@@ -10,6 +10,13 @@ import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { Permissions } from "../../access/permissions.js";
 import { appPermissions } from "../../apps/app-permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  inviteMember,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+} from "../../access/application/members.js";
+import { identities } from "../../db/schema.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());
@@ -18,6 +25,7 @@ const ENV_KEYS = ["PANTHEON_BASE_ORIGIN"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  testDb.db.delete(identities).run();
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = "http://localhost:3100";
 });
@@ -131,6 +139,41 @@ describe("/api/auth/visitor dashboard access", () => {
 
     const profiles = await new VisitorProfilesRepository(testDb.db).getMany(["acct-lin"]);
     expect(profiles.size).toBe(0);
+  });
+
+  it("gives a member the Rome Cloud account and avatar they signed in with", async () => {
+    const ctx = memberContext(testDb.db);
+    const ada = await inviteMember(ctx, "ada@example.com");
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession("Ada@Example.com") });
+    const nonce = await startDashboardLogin(app);
+
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+
+    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-1" })).toBe(
+      "member",
+    );
+    expect((await listMembers(ctx))[0]).toMatchObject({
+      person: { id: ada.id, avatarUrl: "https://example.com/avatar.png" },
+      accounts: [
+        { platform: "email", accountId: "ada@example.com" },
+        { platform: "rome-cloud", accountId: "acct-1" },
+      ],
+    });
+  });
+
+  it("makes no person for a visitor who is not a member", async () => {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, {
+      fetchImpl: mockAccountSession("lin@example.com", "acct-lin"),
+    });
+    const nonce = await startDashboardLogin(app);
+
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+
+    expect(testDb.db.select().from(identities).all()).toEqual([]);
   });
 
   it.each([

@@ -14,6 +14,12 @@ import { isValidAppId } from "../../apps/packaging/app-id.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import {
+  logStepFailure,
+  memberContext,
+  memberSignedIn,
+  ROME_CLOUD_PLATFORM,
+} from "../../access/application/members.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:visitor-auth");
@@ -248,6 +254,13 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
         return false;
       });
     if (newAccount) deps.visitorAllowListSync.requestResend();
+    // Only a member gets the account: a visitor off the dashboard list stays
+    // without a person.
+    await memberSignedIn(memberContext(deps.db), {
+      email,
+      account: { platform: ROME_CLOUD_PLATFORM, accountId },
+      avatarUrl,
+    }).catch(logStepFailure("visitor sign-in not recorded on their member"));
     return { ok: true, accountId, email, avatarUrl, favorViewerToken };
   }
 

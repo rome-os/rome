@@ -72,6 +72,27 @@ describe("renameSymbol", () => {
     expect(service.text(pkg("src/a/source.ts"))).toContain("/** Call oldName for one. */");
   });
 
+  it("renames a JSDoc link to the declaration", () => {
+    write(
+      "src/b/linked.ts",
+      lines(
+        'import { oldName } from "../a/source.js";',
+        "/** As {@link oldName} does. */",
+        "export const linked = oldName;",
+      ),
+    );
+
+    const service = renameSymbol(pkg("src/a/source.ts"), "oldName", "newName");
+
+    expect(service.text(pkg("src/b/linked.ts"))).toBe(
+      lines(
+        'import { newName } from "../a/source.js";',
+        "/** As {@link newName} does. */",
+        "export const linked = newName;",
+      ),
+    );
+  });
+
   it("refuses a name a nested scope already binds", () => {
     write(
       "src/a/capture.ts",
