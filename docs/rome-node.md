@@ -1045,16 +1045,26 @@ window-scoped Computer Use on macOS. `ROME_NODE_COMPUTER_USE=1` also enables it.
 Remote execution must be on. The host looks for a signed `Rome Computer Use.app`
 in `/Applications` and `~/Applications`, in that order. Set
 `--computer-use-helper <absolute-app-path>` or `ROME_NODE_COMPUTER_USE_HELPER` to
-use an explicit location. A missing or invalid explicit bundle stops discovery.
+use an explicit location that takes precedence over the standard paths.
 The helper asks for local session approval and may need Accessibility and Screen
 Recording permissions in System Settings → Privacy & Security.
 
-`rome-node device describe <device-id>` reports `computerUse` and
-`computerUseStatus`. When available, `actions` lists the `computer.*` operations.
-Availability means the host can request approval. The helper enforces approval
-and permissions before access. Common discovery errors are `computer_use_off`,
-`computer_use_unsupported_platform`, `computer_use_helper_missing`, and
-`invalid_helper_bundle`.
+`rome-node device describe <device-id>` lists Window Control in
+`system.info.capabilities` with `id: "computer_use"`, `prefix: "computer"`, and
+`personal: true`. The CLI refuses its actions in shared chats, including AX
+observations and screenshots. Its state is `off` when window control is disabled,
+unavailable, or stopped for the caller. A discovered bundle reports
+`needs_permission` until the caller has an approved helper session, which reports
+`on`. The describe probe checks the bundle path. The host verifies the signature
+at launch before requesting approval. The flat `actions` list includes window
+control actions when the host can request approval or already has it. It lists
+only `computer.cancel` for a stopped window control session, alongside any
+regular host actions.
+
+A full host with window control disabled returns `window_control_off` for its
+`computer.*` actions. A limited host returns `computer_use_off` for remote
+actions. Other errors include `computer_use_unsupported_platform`,
+`computer_use_helper_missing`, and `invalid_helper_bundle`.
 
 | Action | Arguments and result |
 | --- | --- |
@@ -1063,7 +1073,7 @@ and permissions before access. Common discovery errors are `computer_use_off`,
 | `computer.observe` | `{binding, element?}` returns the Accessibility tree as JSON. Set `screenshot: true` and pass `--output` to save PNG bytes, up to 8 MiB. |
 | `computer.act` | `{binding, actionId, action, ...}` sends an input to the bound window. Use a UUID for `actionId` and the same ID when checking a timed-out action. |
 | `computer.unbind` | `{binding}` releases the window. |
-| `computer.cancel` | Stops input for the calling peer's session. `cancel_requested` means the host has closed input admission. `stop_confirmed` means the helper has also finished stopping. Repeat the request to check for confirmation. |
+| `computer.cancel` | Closes input admission for the calling peer's session and returns the stop status. |
 
 ```bash
 rome-node device run <device-id> computer.observe \
@@ -1075,6 +1085,17 @@ five-minute session ends and on host disconnect. The host remembers each action
 ID for its binding's lifetime. A duplicate returns the recorded dispatch outcome
 without sending input again. After an uncertain outcome, use a fresh observation
 before deciding whether to send a different action.
+
+`computer.cancel` returns `stop_confirmed` immediately if a helper has never
+been ready to accept input for the session. With a live helper, `cancel_requested`
+means input admission is closed and the helper has yet to confirm stopping. When
+the helper reports `cancel_requested`, the host checks for confirmation for up to
+one more second and then closes the bridge. If the helper cannot confirm,
+`cancel_requested` remains the final
+result for that session. A stopped peer receives `session_stopped` on other
+window control actions for the rest of its five-minute session lease, or for up
+to five minutes after a cancel before approval. A host disconnect ends the lock.
+The peer needs local approval for any new helper session.
 
 With remote execution on, `exec` can also run local system tools. For example,
 `{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}` saves a

@@ -386,16 +386,20 @@ describe("rome-node web server", () => {
       return body.phase === "online";
     });
 
-    expect(await mock.sendRpc("system.info", {})).toMatchObject({
+    const info = await mock.sendRpc("system.info", {});
+    expect(info).toMatchObject({
       result: {
-        computerUse: false,
-        computerUseStatus: {
-          state: "unavailable",
-          code:
-            process.platform === "darwin"
-              ? "computer_use_helper_missing"
-              : "computer_use_unsupported_platform",
-        },
+        actions: ["system.info", "exec", "fs.list"],
+        capabilities: [{ id: "computer_use", prefix: "computer", state: "off", personal: true }],
+      },
+    });
+    expect(info).not.toHaveProperty("result.computerUse");
+    expect(await mock.sendRpc("computer.windows", {})).toMatchObject({
+      error: {
+        code:
+          process.platform === "darwin"
+            ? "computer_use_helper_missing"
+            : "computer_use_unsupported_platform",
       },
     });
 
@@ -458,6 +462,9 @@ describe("rome-node web server", () => {
     };
     expect(refused.ok).toBe(false);
     expect(refused.error?.code).toBe("computer_use_off");
+    expect(await mock.sendRpc("system.info", {})).toMatchObject({
+      result: { computerUse: false, actions: [] },
+    });
 
     expect(await mock.sendRpc("computer.windows", {})).toMatchObject({
       error: { code: "computer_use_off" },

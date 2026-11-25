@@ -162,7 +162,7 @@ async function verifySignedBundle(appPath: string, signal: AbortSignal): Promise
   );
 }
 
-export async function verifyHelperBundle(
+async function verifyHelperBundle(
   path: string,
   signal: AbortSignal,
   verify: NonNullable<LaunchOptions["verifyBundle"]> = verifySignedBundle,

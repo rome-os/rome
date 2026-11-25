@@ -151,6 +151,7 @@ async function fixture(computerUse = false) {
     cwd = root,
     input?: Buffer,
     preload?: string,
+    env?: NodeJS.ProcessEnv,
   ) {
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), ...args], {
       cwd,
@@ -159,6 +160,7 @@ async function fixture(computerUse = false) {
         ROME_NODE_CONFIG_DIR: directory,
         ROME_NODE_DAEMON_PORT: String(port),
         ...(preload ? { NODE_OPTIONS: `--import=${preload}` } : {}),
+        ...env,
       },
       stdio: "pipe",
       windowsHide: true,
@@ -216,8 +218,8 @@ async function fixture(computerUse = false) {
   const caller = join(root, "caller");
   await writePrivateJson(join(caller, "caller.json"), { cloudUrl, token: tokenFor("c") });
   cleanup.push(() => stopDaemon(createNodeConfig({ directory: caller, port })));
-  const cli = async (args: string[], input?: Buffer) => {
-    const run = spawnCli(args, caller, root, input);
+  const cli = async (args: string[], input?: Buffer, env?: NodeJS.ProcessEnv) => {
+    const run = spawnCli(args, caller, root, input, undefined, env);
     const code = await run.exited;
     return { code, stdout: run.stdout(), stderr: run.stderr() };
   };
@@ -338,7 +340,15 @@ it.skipIf(process.platform === "win32")(
     expect(JSON.parse(describe.stdout.toString())).toMatchObject({
       ok: true,
       result: {
-        computerUse: true,
+        capabilities: [
+          {
+            id: "computer_use",
+            prefix: "computer",
+            state: "needs_permission",
+            personal: true,
+            actions: expect.arrayContaining(["computer.observe"]),
+          },
+        ],
         actions: expect.arrayContaining([
           "computer.windows",
           "computer.bind",
@@ -373,6 +383,23 @@ it.skipIf(process.platform === "win32")(
       await run("observe", { binding, screenshot: true }, ["--output", "window.png"]),
     ).toMatchObject({ result: { screenshot: { bytes: png.length, mimeType: "image/png" } } });
     expect(await readFile(join(f.root, "window.png"))).toEqual(png);
+    const shared = { ROME_TURN_AUDIENCE: "shared" };
+    const observe = (screenshot: boolean) => [
+      "device",
+      "run",
+      f.deviceA,
+      "computer.observe",
+      "--args",
+      JSON.stringify({ binding, screenshot }),
+    ];
+    for (const args of [observe(false), [...observe(true), "--output", "shared.png"]]) {
+      const blocked = await f.cli(args, undefined, shared);
+      expect(blocked.code).toBe(1);
+      expect(JSON.parse(blocked.stdout.toString())).toMatchObject({
+        error: { code: "personal_data_private_only" },
+      });
+    }
+    await expect(access(join(f.root, "shared.png"))).rejects.toMatchObject({ code: "ENOENT" });
     const actionId = randomUUID();
     const act = { binding, actionId, action: "type_text", text: "private-input-text" };
     expect(await run("act", act)).toMatchObject({ result: { actionId, dispatched: true } });
@@ -382,7 +409,7 @@ it.skipIf(process.platform === "win32")(
     const disabled = await f.cli(["device", "run", f.deviceB, "computer.windows"]);
     expect(disabled.code).toBe(1);
     expect(JSON.parse(disabled.stdout.toString())).toMatchObject({
-      error: { code: "computer_use_off" },
+      error: { code: "window_control_off" },
     });
     const audit = new DatabaseSync(join(f.root, "host-a", "audit", "audit.db"), { readOnly: true });
     const activity = new DatabaseSync(join(f.caller, "observe.db"), { readOnly: true });

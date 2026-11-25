@@ -50,7 +50,7 @@ const wireErrorCodes = [
 type WireErrorCode = (typeof wireErrorCodes)[number];
 type ErrorCode =
   | WireErrorCode
-  | "computer_use_off"
+  | "window_control_off"
   | "computer_use_unsupported_platform"
   | "computer_use_helper_missing"
   | "invalid_helper_bundle"

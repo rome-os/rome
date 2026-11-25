@@ -32,7 +32,7 @@ function errorCode(cause: unknown): ComputerUseError["code"] {
 }
 
 const errorMessages: Partial<Record<ComputerUseError["code"], string>> = {
-  computer_use_off: "Computer use is turned off on this host.",
+  window_control_off: "Window control is turned off on this host.",
   computer_use_unsupported_platform: "The Computer Use Helper requires macOS.",
   computer_use_helper_missing: "The Computer Use Helper is missing from this Mac.",
   action_outcome_unknown:
@@ -69,6 +69,7 @@ interface Binding {
 
 type StopResult = Results["cancel"];
 const stopRequested: StopResult = { stop: "cancel_requested", reason: "session_stopped" };
+const stopConfirmed: StopResult = { stop: "stop_confirmed", reason: "session_stopped" };
 
 interface Session {
   peer: string;
@@ -200,17 +201,24 @@ export class ComputerUseHost {
   async info(peer: string) {
     if (isUuid(peer)) peer = peer.toLowerCase();
     const session = this.sessions.get(peer);
-    try {
-      if (!session?.bridge || session.bridge.closed) await this.findHelper();
-      if (this.sessions.get(peer)?.stop) throw new ComputerUseError("session_stopped");
-      return { available: true, actions: Object.keys(this.operations) };
-    } catch (cause) {
-      return {
-        available: false,
-        code: errorCode(cause),
-        actions: errorCode(cause) === "session_stopped" ? ["computer.cancel"] : [],
-      };
+    let state: "off" | "needs_permission" | "on" = "off";
+    if (this.options?.enabled && !session?.stop) {
+      if (session?.bridge && !session.bridge.closed) state = "on";
+      else if (await this.findHelper().catch(() => undefined)) state = "needs_permission";
     }
+    const stopped = Boolean(this.sessions.get(peer)?.stop);
+    const actions = Object.keys(this.operations);
+    return {
+      capability: {
+        id: "computer_use",
+        prefix: "computer",
+        title: "Window Control",
+        state: stopped ? "off" : state,
+        personal: true,
+        actions,
+      },
+      actions: stopped ? ["computer.cancel"] : state === "off" ? [] : actions,
+    };
   }
 
   prepare(
@@ -242,12 +250,17 @@ export class ComputerUseHost {
     if (session) session.pending++;
     // Stop bypasses both audit I/O and ordinary request validation.
     const stopping =
-      operation.urgent && session ? operation.run(session, args, body !== undefined) : undefined;
+      operation.urgent && (session || this.options?.enabled)
+        ? operation.run(session, args, body !== undefined)
+        : undefined;
     const run = async (refusal?: ActionResponse) => {
       try {
-        const appPath = session?.bridge ? undefined : await this.findHelper();
         if (operation.urgent)
-          return await (stopping ?? operation.run(session, args, body !== undefined));
+          return stopping
+            ? await stopping
+            : failure("window_control_off", errorMessages.window_control_off);
+        if (session) this.check(session);
+        const appPath = session?.bridge ? undefined : await this.findHelper();
         if (session) this.check(session);
         if (refusal) return { response: refusal, body: empty };
         if (body?.byteLength)
@@ -399,14 +412,15 @@ export class ComputerUseHost {
   }
 
   private cancel(session: Session | undefined): Promise<StopResult> {
-    if (!session) return Promise.resolve(stopRequested);
+    if (!session) return Promise.resolve(stopConfirmed);
     if (session.stopped) return Promise.resolve(session.stopped);
     if (session.stop) return session.stop;
     const bridge = session.bridge;
     session.bindings.clear();
     session.timer ??= setTimeout(() => this.remove(session), this.deps.sessionTtlMs).unref();
-    session.stop = bridge ? this.stopHelper(session, bridge) : Promise.resolve(stopRequested);
+    session.stop = bridge ? this.stopHelper(session, bridge) : Promise.resolve(stopConfirmed);
     if (!bridge) {
+      session.stopped = stopConfirmed;
       session.launch.abort();
       this.releaseWindows(session);
     }

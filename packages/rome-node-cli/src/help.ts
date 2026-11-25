@@ -216,7 +216,8 @@ macOS Computer Use actions, when advertised by device describe:
   computer.observe  Read AX JSON for {binding, element?}. Pass screenshot: true with --output for PNG.
   computer.act      Send {binding, actionId, action, ...}. Use a new UUID for each intended action.
   computer.unbind   Release {binding}.
-  computer.cancel   Stop this caller's Computer Use session. Repeat to check for stop_confirmed.
+  computer.cancel   Stop this caller's Computer Use session. Check again briefly for stop_confirmed.
+                    The helper connection closes if confirmation does not arrive.
 
 Example screenshot:
   rome-node device run <device-id> computer.observe --args '{"binding":"<binding-id>","screenshot":true}' --output shot.png

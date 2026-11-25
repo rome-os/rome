@@ -164,7 +164,7 @@ export function createExecutor(
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
   const info = async (peer: string): Promise<ActionResponse> => {
-    const { available, actions, code } = await computer.info(peer);
+    const { capability, actions } = await computer.info(peer);
     return {
       type: "response",
       ok: true,
@@ -176,8 +176,7 @@ export function createExecutor(
         actions: [...Object.keys(handlers), ...actions],
         frameVersion: 1,
         transferVersion: TRANSFER_VERSION,
-        computerUse: available,
-        computerUseStatus: available ? { state: "available" } : { state: "unavailable", code },
+        capabilities: [capability],
         audit: await audit.status(),
       },
     };
