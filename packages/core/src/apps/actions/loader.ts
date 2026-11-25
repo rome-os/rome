@@ -6,7 +6,7 @@ import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../types.js"
 import type { AppCatalog } from "../catalog.js";
 import { toArtifactMetadata } from "../artifact-ref-adapter.js";
 import { ActionConfigSchema } from "../packaging/index.js";
-import type { ArtifactIdentityContext } from "../artifact-id.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../artifact-id.js";
 import { loadArtifactRecords } from "../artifact-records.js";
 
 export class ActionLoader {
@@ -35,7 +35,7 @@ export class ActionLoader {
   }
 
   get(name: string): ActionConfig | undefined {
-    return this.records.get(name)?.config;
+    return this.records.get(this.resolveName(name))?.config;
   }
 
   getAllRecords(): Map<
@@ -47,6 +47,18 @@ export class ActionLoader {
 
   getRegistryLoadFailures(): AppOwnedArtifactLoadFailure[] {
     return [...this.registryLoadFailures];
+  }
+
+  private resolveName(name: string): string {
+    try {
+      return resolveArtifactId({
+        kind: "action",
+        value: name,
+        legacyBindings: this.identity.legacyBindings,
+      });
+    } catch {
+      return name;
+    }
   }
 
   private async readActionConfig(yamlPath: string): Promise<ActionConfig> {
