@@ -222,20 +222,16 @@ without splitting surrogate pairs.
 
 Before dispatch, the helper checks the host, console, capture, and target
 process identity. If the target app needs activation, the helper asks AppKit
-to activate it. If the app stays in the background, the helper uses
-Accessibility to bring it to the front. The helper checks that the bound
-window has focus.
+to activate it and waits briefly for the app to come to the front. If the app
+stays in the background, the helper uses Accessibility to bring it to the
+front. Once the app is in front, the helper raises the bound window as needed
+and checks that it has focus.
 
-Pointer input checks for overlap at the event coordinates. Keyboard input
-checks for overlap across the bound window. An overlapping window from
-another process above the bound window blocks either kind of input. The
-system cursor is exempt.
-
-For pointer input, menus and other windows from the target process with a
-positive layer can overlap the bound window.
-Windows from that process at layer zero or lower block pointer input at the
-event coordinates. Keyboard input allows overlap with any window from the
-target process.
+A window above the bound window blocks pointer input at the event coordinates.
+This includes menus and other windows from the target process. For keyboard
+input, a window from another process blocks input if it overlaps any part of
+the bound window from above. Keyboard input allows overlap with windows from
+the target process. The system cursor is exempt for both kinds of input.
 
 The helper sends the events to the verified PID. It checks each stage of a
 drag and each text chunk before dispatch. If a drag stops after mouse-down,

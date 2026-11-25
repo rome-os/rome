@@ -153,8 +153,8 @@ struct WindowInput {
             guard !bounds.isEmpty,
                   point.map({ bounds.contains($0) }) ?? target.bounds.intersects(bounds) else { continue }
             let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            if pid == target.pid, point == nil { continue }
             let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value
-            if pid == target.pid, point == nil || (layer ?? 0) > 0 { continue }
             if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server",
                let pid, isWindowServer(pid) { continue }

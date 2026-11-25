@@ -508,16 +508,29 @@ final class Windows: @unchecked Sendable {
                       timeout: DispatchTimeInterval = .milliseconds(750)) throws {
         guard !focused() else { return }
         let deadline = DispatchTime.now() + timeout
+        var fallbackAt: DispatchTime?
         if !frontmost() {
             try activate()
-            // Cooperative activation can leave an accessory app's request pending or ignored.
-            if !frontmost() { try setFrontmost() }
+            fallbackAt = min(.now() + .milliseconds(150), deadline)
         }
-        if !focused() { try raise() }
         while !focused() {
             try check()
             guard DispatchTime.now() < deadline else { throw Failure("window_focus_unavailable") }
-            Thread.sleep(forTimeInterval: 0.025)
+            if frontmost() {
+                fallbackAt = nil
+                // Activation can restore a different key window.
+                try raise()
+                if focused() { return }
+            } else if let fallback = fallbackAt, DispatchTime.now() >= fallback {
+                try setFrontmost()
+                fallbackAt = nil
+            }
+
+            let now = DispatchTime.now()
+            let nextPoll = min(now + .milliseconds(25), fallbackAt ?? deadline)
+            if now < nextPoll {
+                Thread.sleep(forTimeInterval: Double(nextPoll.uptimeNanoseconds - now.uptimeNanoseconds) / 1_000_000_000)
+            }
         }
     }
 

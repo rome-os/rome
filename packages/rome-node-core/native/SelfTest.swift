@@ -100,27 +100,35 @@ final class SelfTest {
 
     private func windowFocus() throws {
         var requests: [String] = []
-        func focus(activateSucceeds: Bool, fallbackSucceeds: Bool) throws {
+        func focus(activationPoll: Int?, fallbackPoll: Int? = nil, raisesToFocus: Int = 1,
+                   timeout: DispatchTimeInterval = .milliseconds(750)) throws {
             requests.removeAll()
-            var frontmost = false
-            var raised = false
-            try Windows.focus(frontmost: { frontmost }, focused: { frontmost && raised }, activate: {
+            var poll = 0
+            var frontmostAt: Int?
+            var raises = 0
+            func frontmost() -> Bool { frontmostAt.map { poll >= $0 } ?? false }
+            try Windows.focus(frontmost: frontmost, focused: { frontmost() && raises == raisesToFocus }, activate: {
                 requests.append("activate")
-                frontmost = activateSucceeds
+                frontmostAt = activationPoll
             }, setFrontmost: {
                 requests.append("AXFrontmost")
-                frontmost = fallbackSucceeds
+                frontmostAt = fallbackPoll.map { poll + $0 }
             }, raise: {
+                try expect(frontmost(), "raise waits for the app to come to the front")
                 requests.append("raise")
-                raised = true
-            }, check: {}, timeout: .milliseconds(0))
+                raises += 1
+            }, check: { poll += 1 }, timeout: timeout)
         }
-        try focus(activateSucceeds: true, fallbackSucceeds: false)
-        try expect(requests == ["activate", "raise"], "activation skips the fallback when the app is frontmost")
-        try focus(activateSucceeds: false, fallbackSucceeds: true)
+        try focus(activationPoll: 3)
+        try expect(requests == ["activate", "raise"], "asynchronous activation skips the fallback")
+        try focus(activationPoll: nil, fallbackPoll: 2)
         try expect(requests == ["activate", "AXFrontmost", "raise"], "Accessibility activates the app before the window is raised")
-        try rejects("window_focus_unavailable") { try focus(activateSucceeds: false, fallbackSucceeds: false) }
-        try expect(requests == ["activate", "AXFrontmost", "raise"], "focus fails after trying both ways to activate the app")
+        try focus(activationPoll: 3, raisesToFocus: 2)
+        try expect(requests == ["activate", "raise", "raise"], "raise retries in the foreground until the window has focus")
+        try rejects("window_focus_unavailable") { try focus(activationPoll: nil) }
+        try expect(requests == ["activate", "AXFrontmost"], "focus fails without raising a background window")
+        try rejects("window_focus_unavailable") { try focus(activationPoll: nil, timeout: .milliseconds(50)) }
+        try expect(requests == ["activate"], "the focus deadline bounds the activation wait")
     }
 
     private final class EndedBindings: @unchecked Sendable {
@@ -285,8 +293,9 @@ final class SelfTest {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
             try rejects("window_occluded") { try verify([blocker, expected]) }
         }
-        try rejects("window_occluded") { try verify([document, expected], at: point) }
-        try verify([popup, expected], at: point)
+        for blocker in [document, popup] {
+            try rejects("window_occluded") { try verify([blocker, expected], at: point) }
+        }
         try verify([document, popup, expected])
         try rejects("window_unavailable") { try verify([adjacent], at: point) }
         try rejects("window_unavailable") { try verify([expected, expected], at: point) }
