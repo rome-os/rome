@@ -92,11 +92,32 @@ describe("Gmail actions", () => {
       await actions.get(GMAIL_READ_ACTION)!.execute({ path: "/gmail/v1/users/me/profile" }),
     ).toMatchObject({ status: "ok" });
     invoke.mockClear();
-    expect(await actions.get(GMAIL_SEND_ACTION)!.execute(message)).toMatchObject({
+    expect(
+      await withForwardedApprovalId("test-approved", () =>
+        actions.get(GMAIL_SEND_ACTION)!.execute(message),
+      ),
+    ).toMatchObject({
       status: "error",
-      error: expect.stringContaining("Nothing was sent"),
+      error: expect.stringMatching(/^gmail_send_not_granted: .*Nothing was sent/),
     });
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("names a missing send grant apart from a missing connection", async () => {
+    const send = (scopes: string[], input = message) =>
+      withForwardedApprovalId("test-approved", () =>
+        harness(undefined, scopes).actions.get(GMAIL_SEND_ACTION)!.execute(input),
+      );
+    for (const scopes of [[GMAIL_SCOPES[0]], [GMAIL_SCOPES[1]], []]) {
+      expect(await send(scopes)).toMatchObject({
+        status: "error",
+        error: expect.stringMatching(/^gmail_send_not_granted: /),
+      });
+    }
+    expect(await send(GMAIL_SCOPES, { ...message, connectionId: "no-such" })).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^gmail_not_connected: /),
+    });
   });
 
   it("rejects unknown query parameters as caller input, without blaming the connection", async () => {

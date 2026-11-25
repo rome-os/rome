@@ -38,7 +38,7 @@ export function registerOutlookActions(
       name: OUTLOOK_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). Calendar, contacts and other Graph APIs stay on Composio. If outlook_not_connected, Outlook mail can still be used through Composio. Connect Microsoft in Settings → Connections (SHOW_MICROSOFT_OAUTH is opt-in until verified).",
+        "Read the Rome-managed Microsoft (Outlook) mailbox through Microsoft Graph. GET only: /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders, /v1.0/me/mailFolders/{id}, /v1.0/me/mailFolders/{id}/messages. Query options: $select, $filter, $search, $top, $skip, $orderby, $count. No modifying, moving, deleting or flagging mail, and no attachments. Returns connectionId for core:outlook_send; /v1.0/me returns the sender address (mail, else userPrincipalName). Calendar, contacts and other Graph APIs stay on Composio. outlook_not_connected means no Rome-managed Microsoft connection reads Outlook mail: Outlook is then the Composio Outlook connection, for reading and for sending with its own tools. Suggest connecting Microsoft only when connect_service takes kind microsoft.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -113,7 +113,7 @@ export function registerOutlookActions(
       name: OUTLOOK_SEND_ACTION,
       type: "system",
       description:
-        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls.",
+        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections, and never send through another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -151,17 +151,24 @@ export function registerOutlookActions(
       const connection = connections
         .find("microsoft")
         .find((entry) => entry.id === parsed.data.connectionId);
-      if (!connection?.act)
+      if (!connection)
         return {
           status: "error",
-          error: "The approved Microsoft connection is unavailable. Nothing was sent.",
+          error:
+            "outlook_not_connected: No Rome-managed Microsoft connection has this connectionId, so core:outlook_send cannot send it. Nothing was sent.",
+        };
+      if (!connection.act)
+        return {
+          status: "error",
+          error:
+            "The approved Microsoft connection is unavailable. Reconnect Microsoft in Settings → Connections. Nothing was sent.",
         };
       const scopes = (await connections.grantOf(connection.id))?.profile?.scopes;
       if (!hasScope(scopes, "Mail.Send") || !hasScope(scopes, "User.Read")) {
         return {
           status: "error",
           error:
-            "The approved Microsoft connection needs Outlook send permission. Reconnect Microsoft. Nothing was sent.",
+            "outlook_send_not_granted: Microsoft is connected, but without permission to send Outlook mail. Reconnect Microsoft in Settings → Connections to grant sending. Nothing was sent.",
         };
       }
       const approved = approvedSendId();

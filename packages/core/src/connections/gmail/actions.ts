@@ -26,7 +26,7 @@ export function registerGmailActions(
       name: GMAIL_READ_ACTION,
       type: "system",
       description:
-        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Attachment downloads are not supported through this connection. Returns connectionId for core:gmail_send; profile returns the From emailAddress. If gmail_not_connected, Gmail can still be used through Composio. Connect Google in Settings → Connections (SHOW_GOOGLE_OAUTH is opt-in until verification).",
+        "Read the Rome-managed Google mailbox. GET only: /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads, /threads/{id}. Query options include q, maxResults, pageToken, format. No modifying, deleting, or labeling mail. Attachment downloads are not supported through this connection. Returns connectionId for core:gmail_send; profile returns the From emailAddress. gmail_not_connected means no Rome-managed Google connection reads Gmail: Gmail is then the Composio Gmail connection, for reading and for sending with its own tools. Suggest connecting Google only when connect_service takes kind google.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -101,7 +101,7 @@ export function registerGmailActions(
       name: GMAIL_SEND_ACTION,
       type: "system",
       description:
-        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls.",
+        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Google connection: with none, send through the Composio Gmail connection's tools. gmail_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Google in Settings → Connections, and never send through another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -141,10 +141,17 @@ export function registerGmailActions(
       const connection = connections
         .find("google")
         .find((entry) => entry.id === parsed.data.connectionId);
-      if (!connection?.act)
+      if (!connection)
         return {
           status: "error",
-          error: "The approved Google connection is unavailable. Nothing was sent.",
+          error:
+            "gmail_not_connected: No Rome-managed Google connection has this connectionId, so core:gmail_send cannot send it. Nothing was sent.",
+        };
+      if (!connection.act)
+        return {
+          status: "error",
+          error:
+            "The approved Google connection is unavailable. Reconnect Google in Settings → Connections. Nothing was sent.",
         };
       const scopes = (await connections.grantOf(connection.id))?.profile?.scopes;
       if (
@@ -155,7 +162,7 @@ export function registerGmailActions(
         return {
           status: "error",
           error:
-            "The approved Google connection needs Gmail read and send permissions. Reconnect Google. Nothing was sent.",
+            "gmail_send_not_granted: Google is connected, but without permission to read and send Gmail. Reconnect Google in Settings → Connections to grant sending. Nothing was sent.",
         };
       }
       const approved = approvalId();
