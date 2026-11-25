@@ -44,4 +44,22 @@ describe("sidebar pins", () => {
       { type: "app", id: "recipe-box" },
     ]);
   });
+
+  it("drops removed builtin pins while keeping valid builtins and app pins", () => {
+    expect(
+      normalizeSidebarPins([
+        { type: "builtin", id: "people" },
+        { type: "builtin", id: "memory" },
+        { type: "builtin", id: "sessions" },
+        { type: "app", id: "people" },
+      ]),
+    ).toEqual([
+      { type: "builtin", id: "apps" },
+      { type: "builtin", id: "chat" },
+      { type: "builtin", id: "projects" },
+      { type: "builtin", id: "memory" },
+      { type: "builtin", id: "activity" },
+      { type: "app", id: "people" },
+    ]);
+  });
 });
