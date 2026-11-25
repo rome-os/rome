@@ -9,10 +9,14 @@ enum ConsentOcclusion {
     static func isWindowServer(_ pid: pid_t) -> Bool {
         guard let path = windowServerPath else { return false }
         // A process name alone does not authenticate the Window Server.
+        return executablePath(pid) == path
+    }
+
+    static func executablePath(_ pid: pid_t) -> String? {
         var bytes = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let length = proc_pidpath(pid, &bytes, UInt32(bytes.count))
-        guard length > 0 else { return false }
-        return String(decoding: bytes.prefix(Int(length)), as: UTF8.self) == path
+        guard length > 0 else { return nil }
+        return String(bytes: bytes.prefix(Int(length)), encoding: .utf8)
     }
 
     static func bounds(_ row: [String: Any]) -> CGRect? {
@@ -39,6 +43,12 @@ enum ConsentOcclusion {
 }
 
 struct ConsentUnlock {
+    enum State: Equatable {
+        case needsFocus, occluded, checking, ready
+    }
+
+    static let dwell: TimeInterval = 0.5
+
     private var focusedSince: TimeInterval?
     private var lastMouseDown: TimeInterval?
     private var pendingClick: (count: Int, interval: TimeInterval?)?
@@ -57,7 +67,17 @@ struct ConsentUnlock {
         }
         let since = focusedSince ?? uptime
         focusedSince = since
-        return uptime - since >= 1
+        return uptime - since >= Self.dwell
+    }
+
+    mutating func state(eligible: Bool = true, focused: Bool, raised: Bool, at uptime: TimeInterval) -> State? {
+        guard eligible else {
+            reset()
+            return nil
+        }
+        if update(focused: focused && raised, at: uptime) { return .ready }
+        if !raised { return .occluded }
+        return focused ? .checking : .needsFocus
     }
 
     mutating func mouseDown(at timestamp: TimeInterval, clickCount: Int, enabled: Bool) {
@@ -94,7 +114,7 @@ struct ConsentUnlock {
     }
 
     mutating func revalidate(clear: Bool, focused: Bool, eligible: Bool, at uptime: TimeInterval) -> Bool {
-        guard clear, focused, eligible, let focusedSince, uptime - focusedSince >= 1 else {
+        guard clear, focused, eligible, let focusedSince, uptime - focusedSince >= Self.dwell else {
             reset()
             return false
         }
@@ -102,31 +122,381 @@ struct ConsentUnlock {
     }
 }
 
-extension ConsentPrompt {
-    var informativeText: String {
-        var details = [locale[.access]]
-        if mode.choices.contains(.allowPersistent) { details.append(locale[.persistentAccess]) }
-        if let controller {
-            details.append(locale[controller.scope == .local ? .localRisk : .remoteRisk])
-            let groups = controller.key.fingerprint.split(separator: "-")
-            let lines = [groups.prefix(4), groups.dropFirst(4)].map { locale.keyFingerprint($0.joined(separator: "-")) }
-            details.append(([locale[.fingerprint]] + lines).joined(separator: "\n"))
+enum ConsentCountdown {
+    static func seconds(until deadline: DispatchTime, now: DispatchTime = .now()) -> Int {
+        guard deadline > now else { return 0 }
+        let remaining = deadline.uptimeNanoseconds - now.uptimeNanoseconds
+        return Int((remaining - 1) / 1_000_000_000 + 1)
+    }
+
+    static func title(_ locale: HelperLocale, seconds: Int) -> String {
+        "\(locale[.deny]) (\(seconds)s)"
+    }
+}
+
+struct ConsentPoll {
+    private var generation: UInt64 = 0
+    private var inFlight = false
+    private var active = false
+
+    mutating func start() {
+        invalidate()
+        active = true
+    }
+
+    mutating func invalidate() { generation &+= 1 }
+
+    mutating func stop() {
+        invalidate()
+        active = false
+    }
+
+    mutating func begin() -> UInt64? {
+        guard active, !inFlight else { return nil }
+        inFlight = true
+        return generation
+    }
+
+    mutating func finish(_ token: UInt64) -> Bool {
+        inFlight = false
+        return active && token == generation
+    }
+}
+
+extension ConsentDecision {
+    var buttonTitle: HelperLocale.Text {
+        switch self {
+        case .deny: .deny
+        case .allowSession: .allowSession
+        case .allowPersistent: .allowPersistent
         }
-        details.append("\(locale[.source])\n\(locale.sourceLabel(label))")
-        if mode == .sessionOnly {
-            var identity = [
-                "\(locale[.executable]) \(locale.sourceLabel(String(reflecting: host.executable)))",
-                "PID: \(host.pid)",
-            ]
-            if let signingSummary {
-                identity.append("\(locale[.signingIdentifier]) \(locale.sourceLabel(String(reflecting: signingSummary.identifier)))")
-                if let teamID = signingSummary.teamID {
-                    identity.append("\(locale[.teamID]) \(locale.sourceLabel(String(reflecting: teamID)))")
+    }
+}
+
+extension ConsentPrompt {
+    var accessText: String { locale[.access] }
+
+    var persistentNotice: String? {
+        guard let controller, mode.choices.contains(.allowPersistent) else { return nil }
+        return controller.scope == .local ? locale[.localRisk] : locale[.persistentAccess] + " " + locale[.remoteRisk]
+    }
+
+    var fingerprintLines: String? {
+        guard let controller else { return nil }
+        let groups = controller.key.fingerprint.split(separator: "-")
+        return [groups.prefix(4), groups.dropFirst(4)].map {
+            locale.keyFingerprint($0.joined(separator: "-"))
+        }.joined(separator: "\n")
+    }
+
+    var detailFields: [ConsentDisclosure.Field] {
+        func field(_ key: HelperLocale.Text, _ value: String) -> ConsentDisclosure.Field {
+            (key, auditDisplayValue(value))
+        }
+        var identity: [ConsentDisclosure.Field] = []
+        if let fingerprintLines { identity.append((.fingerprint, fingerprintLines)) }
+        identity.append(field(.executable, host.executable))
+        if let signingSummary {
+            identity.append(field(.signingIdentifier, signingSummary.identifier))
+            if let teamID = signingSummary.teamID { identity.append(field(.teamID, teamID)) }
+        }
+        return identity
+    }
+}
+
+func auditDisplayValue(_ text: String) -> String {
+    var visible = ""
+    for scalar in text.unicodeScalars {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator:
+            visible += "\\u{\(String(scalar.value, radix: 16))}"
+        default:
+            visible.unicodeScalars.append(scalar)
+        }
+    }
+    return visible
+}
+
+struct ConsentDisclosure {
+    typealias Field = (label: HelperLocale.Text, value: String)
+    let fields: [Field]
+    private(set) var expanded = false
+
+    var visibleFields: [Field] { expanded ? fields : [] }
+    var rows: [[Field]] {
+        let fields = visibleFields
+        guard fields.suffix(2).map(\.label) == [.signingIdentifier, .teamID] else { return fields.map { [$0] } }
+        return fields.dropLast(2).map { [$0] } + [Array(fields.suffix(2))]
+    }
+
+    mutating func toggle() { expanded.toggle() }
+
+    static func contentWidth(alertWidth: CGFloat) -> CGFloat {
+        min(228, max(1, alertWidth - 32))
+    }
+
+    static func pathLineLimit(heightLimit: CGFloat, fittingHeight: (Int) -> CGFloat) -> Int {
+        (2...3).reversed().first { ceil(fittingHeight($0)) <= heightLimit } ?? 1
+    }
+}
+
+@MainActor
+private final class ConsentAccessory: NSObject {
+    private final class DisclosureButton: NSButton {
+        override var alignmentRectInsets: NSEdgeInsets {
+            var insets = super.alignmentRectInsets
+            insets.left += 4
+            return insets
+        }
+    }
+
+    let view = NSView()
+    private let stack = NSStackView()
+    private let body = NSStackView()
+    private let toggle = DisclosureButton()
+    private let accessoryWidth: CGFloat
+    private var width: CGFloat { max(1, accessoryWidth - 12) }
+    private let heightLimit: CGFloat
+    private weak var alert: NSAlert?
+    private let locale: HelperLocale
+    private var disclosure: ConsentDisclosure
+    private var introduction: NSStackView?
+    private var detailsView: NSView?
+    private let beforeLayout: @MainActor () -> Void
+    private(set) var resizing = false
+
+    init(prompt: ConsentPrompt, alert: NSAlert, beforeLayout: @escaping @MainActor () -> Void) {
+        self.alert = alert
+        self.beforeLayout = beforeLayout
+        locale = prompt.locale
+        let width = ConsentDisclosure.contentWidth(alertWidth: alert.window.contentLayoutRect.width)
+        accessoryWidth = width
+        heightLimit = Self.maxCompactHeight(of: alert, accessoryWidth: width)
+        disclosure = ConsentDisclosure(fields: prompt.detailFields)
+        super.init()
+        for column in [stack, body] {
+            column.orientation = .vertical
+            column.alignment = .leading
+            column.spacing = 10
+        }
+        stack.detachesHiddenViews = true
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.widthAnchor.constraint(equalToConstant: self.width),
+            body.widthAnchor.constraint(equalToConstant: self.width),
+        ])
+        if let name = prompt.sourceLabel {
+            let value = label(locale.sourceLabel(name), font: .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
+                              color: .labelColor)
+            let header = group(locale[.introduction], value: value)
+            introduction = header
+            addBlock(header, to: stack)
+        }
+
+        let host = prompt.host
+        let running = NSRunningApplication(processIdentifier: host.pid)
+        let name = running?.localizedName.flatMap { sanitizeLabel($0) } ??
+            sanitizeLabel(URL(fileURLWithPath: host.executable).lastPathComponent) ?? locale[.source]
+        let icon = NSImageView(image: running?.icon ?? NSWorkspace.shared.icon(forFile: host.executable))
+        icon.imageScaling = .scaleProportionallyDown
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 16),
+                                     icon.heightAnchor.constraint(equalToConstant: 16)])
+        let nameLabel = label("\(locale.sourceLabel(name)) (\(host.pid))",
+                              font: .systemFont(ofSize: NSFont.systemFontSize), color: .labelColor)
+        nameLabel.maximumNumberOfLines = 1
+        nameLabel.lineBreakMode = .byTruncatingMiddle
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let process = NSStackView(views: [icon, nameLabel])
+        process.orientation = .horizontal
+        process.alignment = .centerY
+        process.spacing = 6
+        addBlock(group(locale[.process], value: process), to: body)
+
+        let explanation = label(prompt.accessText, font: .systemFont(ofSize: NSFont.systemFontSize), color: .labelColor)
+        addBlock(explanation, to: body)
+        stack.addArrangedSubview(body)
+        if let notice = prompt.persistentNotice {
+            addBlock(label(notice), to: body)
+            if alert.buttons.count == 3 {
+                body.setCustomSpacing(6, after: explanation)
+                stack.setCustomSpacing(6, after: body)
+            }
+        }
+
+        toggle.controlSize = .mini
+        toggle.title = locale[.details]
+        toggle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        toggle.isBordered = false
+        toggle.imagePosition = .imageLeft
+        toggle.imageHugsTitle = true
+        toggle.contentTintColor = .secondaryLabelColor
+        toggle.target = self
+        toggle.action = #selector(toggleDetails)
+        toggle.setAccessibilityLabel(locale[.details])
+        updateDisclosure()
+        stack.addArrangedSubview(toggle)
+        fit()
+    }
+
+    private static func maxCompactHeight(of alert: NSAlert, accessoryWidth: CGFloat) -> CGFloat {
+        let nativeWidth = alert.window.frame.width
+        var low = 1, high = 350
+        // AppKit changes layout when the complete alert gets too tall.
+        while low < high {
+            let height = (low + high + 1) / 2
+            alert.accessoryView = NSView(frame: CGRect(x: 0, y: 0, width: accessoryWidth, height: CGFloat(height)))
+            alert.layout()
+            if alert.window.frame.width <= nativeWidth { low = height }
+            else { high = height - 1 }
+        }
+        alert.accessoryView = nil
+        return CGFloat(low)
+    }
+
+    private func label(_ text: String, font: NSFont = .systemFont(ofSize: NSFont.smallSystemFontSize),
+                       color: NSColor = .secondaryLabelColor) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = font
+        field.textColor = color
+        field.maximumNumberOfLines = 0
+        field.lineBreakMode = .byCharWrapping
+        field.preferredMaxLayoutWidth = width
+        return field
+    }
+
+    private func addBlock(_ block: NSView, to column: NSStackView) {
+        column.addArrangedSubview(block)
+        block.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+    }
+
+    private func group(_ caption: String, value: NSView, spacing: CGFloat = 3, columnWidth: CGFloat? = nil) -> NSStackView {
+        let title = label(caption)
+        title.preferredMaxLayoutWidth = columnWidth ?? width
+        let group = NSStackView(views: [title, value])
+        group.orientation = .vertical
+        group.alignment = .leading
+        group.spacing = spacing
+        title.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        value.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        return group
+    }
+
+    private func fit() {
+        stack.layoutSubtreeIfNeeded()
+        view.setFrameSize(CGSize(width: accessoryWidth, height: ceil(stack.fittingSize.height)))
+        view.layoutSubtreeIfNeeded()
+    }
+
+    private func updateDisclosure() {
+        toggle.image = NSImage(systemSymbolName: disclosure.expanded ? "chevron.down" : "chevron.right",
+                               accessibilityDescription: nil)
+        toggle.setAccessibilityExpanded(disclosure.expanded)
+    }
+
+    @objc private func toggleDetails() {
+        relayout {
+            disclosure.toggle()
+            updateDisclosure()
+            if disclosure.expanded {
+                showDetails()
+            } else if let detailsView {
+                stack.removeArrangedSubview(detailsView)
+                detailsView.removeFromSuperview()
+                self.detailsView = nil
+                body.isHidden = false
+                if let introduction {
+                    introduction.spacing = 3
+                    stack.setCustomSpacing(10, after: introduction)
                 }
             }
-            details.append(identity.joined(separator: "\n"))
         }
-        return details.joined(separator: "\n\n")
+    }
+
+    private func showDetails() {
+        let audit = NSStackView()
+        audit.orientation = .vertical
+        audit.alignment = .leading
+        audit.spacing = 5
+        var executable: NSTextField?
+        for row in disclosure.rows {
+            let columnWidth = row.count == 2 ? (width - 8) / 2 : width
+            let groups = row.map { field in
+                let value = auditValue(field, columnWidth: columnWidth)
+                if field.label == .executable { executable = value }
+                return group(locale[field.label], value: value, spacing: 2, columnWidth: columnWidth)
+            }
+            if groups.count == 2 {
+                let pair = NSStackView(views: groups)
+                pair.orientation = .horizontal
+                pair.alignment = .top
+                pair.distribution = .fillEqually
+                pair.spacing = 8
+                addBlock(pair, to: audit)
+            } else if let field = groups.first {
+                addBlock(field, to: audit)
+            }
+        }
+        detailsView = audit
+        stack.setCustomSpacing(2, after: toggle)
+        addBlock(audit, to: stack)
+        if ceil(stack.fittingSize.height) > heightLimit {
+            body.isHidden = true
+            if let introduction {
+                introduction.spacing = 2
+                stack.setCustomSpacing(2, after: introduction)
+            }
+        }
+        if let executable {
+            executable.maximumNumberOfLines = 0
+            let fullHeight = ceil(executable.fittingSize.height)
+            executable.maximumNumberOfLines = ConsentDisclosure.pathLineLimit(heightLimit: heightLimit) { lines in
+                executable.maximumNumberOfLines = lines
+                return stack.fittingSize.height
+            }
+            if ceil(executable.fittingSize.height) < fullHeight {
+                executable.lineBreakMode = .byTruncatingMiddle
+            }
+        }
+    }
+
+    private func auditValue(_ field: ConsentDisclosure.Field, columnWidth: CGFloat) -> NSTextField {
+        let value = label(field.value, color: .labelColor)
+        value.preferredMaxLayoutWidth = columnWidth
+        value.isSelectable = true
+        value.toolTip = field.value
+        if field.label == .fingerprint {
+            value.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            value.maximumNumberOfLines = 2
+        } else if field.label == .executable {
+            value.maximumNumberOfLines = 3
+        } else {
+            value.maximumNumberOfLines = 1
+            value.lineBreakMode = .byTruncatingMiddle
+        }
+        return value
+    }
+
+    private func relayout(_ change: () -> Void) {
+        guard let alert else { return }
+        let window = alert.window
+        let previous = window.frame
+        beforeLayout()
+        resizing = true
+        defer { resizing = false }
+        change()
+        fit()
+        alert.layout()
+        let size = window.frame.size
+        let frame = CGRect(x: previous.midX - size.width / 2, y: previous.maxY - size.height,
+                           width: size.width, height: size.height)
+        if window.isVisible, frame != previous {
+            window.setFrame(previous, display: false)
+            window.setFrame(frame, display: true, animate: true)
+        }
+        view.layoutSubtreeIfNeeded()
     }
 }
 
@@ -143,10 +513,12 @@ func revokeTrustedKeys(admission: Admission, persistent: Bool, remove: () throws
 
 @MainActor
 final class DesktopSession: NSObject, NSMenuDelegate {
-    private enum ConsentVisibility { case untrusted, clear, raised }
+    private enum ConsentVisibility: Sendable { case untrusted, clear, raised }
 
     private let admission: Admission
     private let store: any TrustedKeyStore
+    private let consentQueue = DispatchQueue(label: "com.rome.computer-use.consent-visibility", qos: .userInteractive)
+    private var consentPoll = ConsentPoll()
     private var unlock = ConsentUnlock()
     private var answer: ((NSButton) -> Void)?
     private var statusItem: NSStatusItem?
@@ -175,29 +547,48 @@ final class DesktopSession: NSObject, NSMenuDelegate {
     }
 
     func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision {
-        let eligible: @MainActor @Sendable () -> Bool = {
-            canContinue() && DesktopAccess.consoleAvailable(Windows.onScreen())
+        let eligible: @Sendable () -> Bool = {
+            canContinue() && DesktopAccess.consoleSessionAvailable()
         }
         guard eligible() else { return .deny }
+        var remaining = ConsentCountdown.seconds(until: prompt.deadline)
+        guard remaining > 0 else { return .deny }
         let locale = prompt.locale
         let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = locale[.title]
-        alert.informativeText = prompt.informativeText
-        let deny = alert.addButton(withTitle: locale[.deny])
-        deny.tag = ConsentDecision.deny.rawValue
-        let allows = prompt.mode.choices.dropFirst().map { choice in
-            let button = alert.addButton(withTitle: locale[choice == .allowSession ? .allowSession : .allowPersistent])
-            button.tag = choice.rawValue
-            button.keyEquivalent = ""
-            button.isEnabled = false
-            return button
+        alert.alertStyle = .informational
+        if let iconURL = Bundle.main.url(forResource: "icon", withExtension: "icns") {
+            alert.icon = NSImage(contentsOf: iconURL)
         }
-        deny.keyEquivalent = "\r"
-        for button in [deny] + allows {
+        alert.messageText = locale[.title]
+        alert.informativeText = ""
+        let choices = prompt.mode.choices
+        let buttons = choices.map { decision in
+            let title = decision == .deny ? ConsentCountdown.title(locale, seconds: remaining) : locale[decision.buttonTitle]
+            let button = alert.addButton(withTitle: title)
+            button.tag = decision.rawValue
+            button.keyEquivalent = decision == .deny ? "\r" : ""
+            button.isEnabled = decision == .deny
             button.target = self
             button.action = #selector(answerConsent)
+            return button
         }
+        let deny = buttons[0]
+        deny.font = .monospacedDigitSystemFont(ofSize: deny.font?.pointSize ?? NSFont.systemFontSize, weight: .semibold)
+        let protected = buttons.dropFirst()
+        consentPoll.start()
+        defer { consentPoll.stop() }
+        unlock = ConsentUnlock()
+        let setEnabled: @MainActor @Sendable (Bool) -> Void = { ready in
+            protected.forEach { if $0.isEnabled != ready { $0.isEnabled = ready } }
+        }
+        let reset: @MainActor @Sendable () -> Void = {
+            self.consentPoll.invalidate()
+            self.unlock.reset()
+            setEnabled(false)
+        }
+        alert.layout()
+        let accessory = ConsentAccessory(prompt: prompt, alert: alert, beforeLayout: reset)
+        alert.accessoryView = accessory.view
         alert.layout()
         let window = alert.window
         let level = NSWindow.Level(rawValue: ConsentOcclusion.alertLevel)
@@ -206,35 +597,34 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         window.makeFirstResponder(deny)
 
         let app = NSApplication.shared
-        unlock = ConsentUnlock()
-        let enable: @MainActor @Sendable (Bool) -> Void = { enabled in
-            allows.forEach { $0.isEnabled = enabled }
-        }
-        let reset: @MainActor @Sendable () -> Void = {
-            self.unlock.reset()
-            enable(false)
+        let sample: @Sendable ([CGWindowID]?) -> Bool = { ids in
+            guard let ids, DesktopAccess.consoleAvailable(Windows.onScreen()) else { return false }
+            return Self.visibility(ids) == .raised
         }
         let revalidate: @MainActor () -> Bool = {
-            self.unlock.revalidate(clear: Self.visibility(window) == .raised,
+            let clear = !accessory.resizing && sample(Self.surfaceIDs(window))
+            return self.unlock.revalidate(clear: clear,
                                    focused: window.isKeyWindow && app.isActive, eligible: eligible(),
                                    at: ProcessInfo.processInfo.systemUptime)
         }
         answer = { sender in
-            guard sender.isEnabled else { return }
-            if sender !== deny {
-                // AppKit can deliver a control action after currentEvent has changed.
-                let clickCount = app.currentEvent.flatMap { event in
-                    event.type == .leftMouseDown || event.type == .leftMouseUp ? event.clickCount : nil
-                }
-                guard revalidate() else {
-                    reset()
-                    app.abortModal()
-                    return
-                }
-                guard self.unlock.accept(currentClickCount: clickCount, doubleClickInterval: NSEvent.doubleClickInterval) else {
-                    reset()
-                    return
-                }
+            guard sender.isEnabled, buttons.contains(where: { $0 === sender }) else { return }
+            if sender === deny {
+                app.stopModal(withCode: .init(rawValue: ConsentDecision.deny.rawValue))
+                return
+            }
+            // AppKit can deliver a control action after currentEvent has changed.
+            let clickCount = app.currentEvent.flatMap { event in
+                event.type == .leftMouseDown || event.type == .leftMouseUp ? event.clickCount : nil
+            }
+            guard revalidate() else {
+                reset()
+                if !eligible() { app.abortModal() }
+                return
+            }
+            guard self.unlock.accept(currentClickCount: clickCount, doubleClickInterval: NSEvent.doubleClickInterval) else {
+                reset()
+                return
             }
             app.stopModal(withCode: .init(rawValue: sender.tag))
         }
@@ -242,12 +632,12 @@ final class DesktopSession: NSObject, NSMenuDelegate {
 
         guard let inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown], handler: { event in
             MainActor.assumeIsolated {
-                let enabled = allows.allSatisfy(\.isEnabled)
+                let enabled = protected.allSatisfy(\.isEnabled)
                 if event.type == .leftMouseDown {
                     self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: enabled)
                 } else {
                     self.unlock.keyDown(enabled: enabled, isRepeat: event.isARepeat)
-                    if event.isARepeat { enable(false) }
+                    if event.isARepeat { setEnabled(false) }
                 }
             }
             return event
@@ -259,43 +649,80 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             if window.level != level { window.level = level }
             for child in window.childWindows ?? [] where child.level != level { child.level = level }
         }
-        let onFocusLoss: @Sendable (Notification) -> Void = { _ in MainActor.assumeIsolated { reset() } }
+        let onChange: @Sendable (Notification) -> Void = { _ in MainActor.assumeIsolated { reset() } }
         let notifications = NotificationCenter.default
         let becomeKey = notifications.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window,
                                                    queue: nil) { _ in MainActor.assumeIsolated { raise() } }
-        let resignKey = notifications.addObserver(forName: NSWindow.didResignKeyNotification, object: window,
-                                                   queue: nil, using: onFocusLoss)
+        let windowChanges = [NSWindow.didResignKeyNotification, NSWindow.didMoveNotification, NSWindow.didResizeNotification].map {
+            notifications.addObserver(forName: $0, object: window, queue: nil, using: onChange)
+        }
         let resignActive = notifications.addObserver(forName: NSApplication.willResignActiveNotification, object: app,
-                                                      queue: nil, using: onFocusLoss)
+                                                      queue: nil, using: onChange)
         defer {
             notifications.removeObserver(becomeKey)
-            notifications.removeObserver(resignKey)
+            windowChanges.forEach(notifications.removeObserver)
             notifications.removeObserver(resignActive)
         }
 
-        let timer = Timer(timeInterval: 0.1, repeats: true) { _ in
+        let requestSample: @MainActor @Sendable () -> Void = {
+            guard !accessory.resizing, let token = self.consentPoll.begin() else { return }
+            let ids = Self.surfaceIDs(window)
+            self.consentQueue.async {
+                let live = eligible()
+                let raised = live && sample(ids)
+                // The modal runs inside a main-queue block, so deliver through its run loop.
+                let runLoop = CFRunLoopGetMain()
+                let modes = [RunLoop.Mode.default.rawValue, RunLoop.Mode.modalPanel.rawValue, RunLoop.Mode.eventTracking.rawValue]
+                CFRunLoopPerformBlock(runLoop, modes as CFArray) {
+                    MainActor.assumeIsolated {
+                        guard self.consentPoll.finish(token) else { return }
+                        if !live {
+                            reset()
+                            app.abortModal()
+                            return
+                        }
+                        let state = self.unlock.state(focused: window.isKeyWindow && app.isActive,
+                                                      raised: raised && ids == Self.surfaceIDs(window),
+                                                      at: ProcessInfo.processInfo.systemUptime)
+                        setEnabled(state == .ready)
+                    }
+                }
+                CFRunLoopWakeUp(runLoop)
+            }
+        }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
             MainActor.assumeIsolated {
-                raise()
-                let visibility = Self.visibility(window)
-                guard visibility != .untrusted, eligible() else {
+                let seconds = ConsentCountdown.seconds(until: prompt.deadline)
+                if seconds != remaining {
+                    remaining = seconds
+                    deny.title = ConsentCountdown.title(locale, seconds: seconds)
+                }
+                guard seconds > 0 else {
                     reset()
                     app.abortModal()
                     return
                 }
-                enable(self.unlock.update(focused: visibility == .raised && window.isKeyWindow && app.isActive,
-                                          at: ProcessInfo.processInfo.systemUptime))
+                raise()
+                requestSample()
             }
         }
         RunLoop.main.add(timer, forMode: .modalPanel)
-        app.activate(ignoringOtherApps: true)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        app.activate()
         // Keep the alert ordered on screen until the acceptance checks finish.
         return withExtendedLifetime(alert) {
-            let response = app.runModal(for: window)
-            timer.invalidate()
-            defer { window.orderOut(nil) }
-            guard let decision = ConsentDecision(rawValue: response.rawValue), decision != .deny,
-                  allows.contains(where: { $0.tag == decision.rawValue && $0.isEnabled }), revalidate() else { return .deny }
-            return decision
+            defer {
+                timer.invalidate()
+                window.orderOut(nil)
+            }
+            while true {
+                let response = app.runModal(for: window)
+                guard let decision = ConsentDecision(rawValue: response.rawValue), decision != .deny,
+                      let button = protected.first(where: { $0.tag == decision.rawValue }) else { return .deny }
+                if revalidate(), button.isEnabled { return decision }
+                reset()
+                if !eligible() { return .deny }
+            }
         }
     }
 
@@ -303,16 +730,24 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         answer?(sender)
     }
 
-    private static func visibility(_ window: NSWindow) -> ConsentVisibility {
+    private static func surfaceIDs(_ window: NSWindow) -> [CGWindowID]? {
+        // AppKit can draw the alert in a child window with its own Core Graphics ID.
+        var ids: [CGWindowID] = []
+        for surface in [window] + (window.childWindows ?? []).filter(\.isVisible) {
+            guard let id = CGWindowID(exactly: surface.windowNumber), id != kCGNullWindowID else { return nil }
+            ids.append(id)
+        }
+        return ids
+    }
+
+    nonisolated private static func visibility(_ ids: [CGWindowID]) -> ConsentVisibility {
         let helperPID = getpid()
         var checked = false
         var raised = true
-        // AppKit can draw the alert in a child window with its own Core Graphics ID.
-        for surface in [window] + (window.childWindows ?? []).filter(\.isVisible) {
-            guard let id = CGWindowID(exactly: surface.windowNumber), id != kCGNullWindowID,
-                  let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]]
+        for (index, id) in ids.enumerated() {
+            guard let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]]
             else { return .untrusted }
-            if surface === window, rows.isEmpty { continue }
+            if index == 0, rows.isEmpty { continue }
             guard let row = rows.first, row[kCGWindowIsOnscreen as String] as? Bool == true,
                   let bounds = ConsentOcclusion.bounds(row),
                   let ordered = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .optionIncludingWindow], id) as? [[String: Any]],
@@ -396,7 +831,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             alert.messageText = authorization.prompt.locale[.keyStoreError]
             alert.informativeText = reason
             presentingRevocationError = true
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.activate()
             _ = alert.runModal()
             presentingRevocationError = false
             if let pendingExitCode { finish(pendingExitCode) }

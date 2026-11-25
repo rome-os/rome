@@ -7,7 +7,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
         case title, access, persistentAccess, source, fingerprint, remoteRisk, localRisk
         case deny, allowSession, allowPersistent
         case menuTitle, noWindows, oneWindow, multipleWindows, stop, revokeCurrent, revokeAll, keyStoreError
-        case executable, signingIdentifier, teamID
+        case introduction, process, details, executable, signingIdentifier, teamID
     }
 
     subscript(_ text: Text) -> String { Self.strings[self]![text.rawValue] }
@@ -18,53 +18,53 @@ enum HelperLocale: String, CaseIterable, Sendable {
 
     private static let strings: [Self: [String]] = [
         .en: [
-            "Allow computer use?",
-            "This source can list, read, and control eligible windows until the session ends. Use Stop Computer Use in the menu bar to stop it.",
-            "If you always allow this source, its private key can start future sessions without asking you.",
+            "Allow window control through Rome?",
+            "This source is requesting window control and may read private information. You can stop it in the menu bar or app settings.",
+            "Always allowing this source lets the key holder connect without asking.",
             "Source", "Key fingerprint",
-            "The requester says a remote host holds the private key. Compare the fingerprint with the one shown on that host before you approve.",
-            "The requester says the private key is on this Mac. If you always allow this source, any process running as you that can read the key can control this Mac unattended until you revoke it.",
+            "The source says the key is remote. Compare the fingerprint on that host.",
+            "For long-term access, any process running as you that can read the private key on this Mac can connect without asking.",
             "Deny", "Allow This Session", "Always Allow This Source",
             "Rome Computer Use", "No window bound", "1 active window", "%d active windows", "Stop Computer Use",
             "Revoke “%@” (%@) & Stop", "Revoke All Authorized Keys", "Could not revoke authorized keys",
-            "Executable:", "Signing identifier:", "Team ID:",
+            "About", "Process", "Details", "Executable", "Signing identifier", "Team ID",
         ],
         .zhHans: [
-            "允许电脑控制？",
-            "此来源可以列出、读取和控制符合条件的窗口，直到会话结束。可在菜单栏选择「停止电脑控制」。",
-            "如果总是允许此来源，持有私钥的一方可以在未来无需确认地开启会话。",
+            "允许通过 Rome 控制窗口？",
+            "此来源申请控制窗口，可能读取隐私信息。你可以在菜单栏或应用设置中停止。",
+            "长期授权凭私钥免确认。",
             "来源", "公钥指纹",
-            "请求方声明私钥由远端主机持有。请在确认前核对这里的指纹与远端主机显示的指纹一致。",
-            "请求方声明私钥存放在本机。如果总是允许该来源，以你的用户身份运行且能读取私钥的任何进程，都可以在撤销授权前无人值守地控制这台 Mac。",
+            "核对远端指纹。",
+            "本机同用户进程可凭私钥免确认。",
             "拒绝", "允许本次会话", "总是允许该来源",
             "Rome 电脑控制", "未绑定窗口", "1 个活动窗口", "%d 个活动窗口", "停止电脑控制",
             "撤销「%@」（%@）并停止", "撤销全部已授权来源", "无法撤销已授权公钥",
-            "可执行文件：", "签名标识：", "团队 ID：",
+            "介绍", "进程", "详细信息", "可执行文件", "签名标识", "团队 ID",
         ],
         .zhHant: [
-            "允許電腦控制？",
-            "此來源可以列出、讀取和控制符合條件的視窗，直到工作階段結束。可在選單列選擇「停止電腦控制」。",
-            "如果一律允許此來源，持有私密金鑰的一方日後可直接啟動工作階段，無需確認。",
+            "允許透過 Rome 控制視窗？",
+            "此來源申請控制視窗，可能讀取隱私資訊。你可以在選單列或應用程式設定中停止。",
+            "長期授權可憑私密金鑰直接連線。",
             "來源", "公開金鑰指紋",
-            "請求方聲明私密金鑰由遠端主機持有。確認前，請核對這裡的指紋與遠端主機顯示的指紋一致。",
-            "請求方聲明私密金鑰儲存在這台 Mac。如果一律允許此來源，以你的使用者身分執行且能讀取金鑰的任何程序，都能在撤銷授權前無人值守地控制這台 Mac。",
+            "私密金鑰據稱在遠端，請核對指紋。",
+            "長期授權後，同一使用者下能讀取本機私密金鑰的程序可直接連線。",
             "拒絕", "允許本次工作階段", "一律允許此來源",
             "Rome 電腦控制", "未綁定視窗", "1 個使用中的視窗", "%d 個使用中的視窗", "停止電腦控制",
             "撤銷「%@」（%@）並停止", "撤銷所有已授權來源", "無法撤銷已授權的公開金鑰",
-            "可執行檔：", "簽章識別碼：", "團隊 ID：",
+            "介紹", "程序", "詳細資訊", "可執行檔", "簽章識別碼", "團隊 ID",
         ],
         .ja: [
-            "コンピュータの操作を許可しますか？",
-            "この接続元はセッションが終了するまで、対象のウインドウを一覧表示し、読み取り、操作できます。メニューバーの「コンピュータの操作を停止」で終了できます。",
-            "この接続元を常に許可すると、秘密鍵を持つ側は今後、確認なしでセッションを開始できます。",
+            "Rome 経由でウインドウの操作を許可しますか？",
+            "この接続元はウインドウの操作を要求しており、プライバシー情報を読み取る可能性があります。メニューバーまたはアプリ設定から停止できます。",
+            "常に許可すると、秘密鍵の所有者は確認なしで接続できます。",
             "接続元", "公開鍵のフィンガープリント",
-            "接続元は、秘密鍵をリモートホストで管理していると申告しています。許可する前に、表示されているフィンガープリントがリモートホストの表示と一致することを確認してください。",
-            "接続元は、秘密鍵をこの Mac に保存していると申告しています。この接続元を常に許可すると、自分のユーザーとして動作し、秘密鍵を読み取れるプロセスは、許可を取り消すまで無人でこの Mac を操作できます。",
+            "接続元によると秘密鍵はリモートにあります。リモート側のフィンガープリントと照合してください。",
+            "常に許可すると、同じユーザーでこの Mac の秘密鍵を読めるプロセスも確認なしで接続できます。",
             "拒否", "今回のセッションを許可", "この接続元を常に許可",
             "Rome コンピュータ操作", "接続中のウインドウなし", "1 個のウインドウが接続中", "%d 個のウインドウが接続中",
             "コンピュータの操作を停止", "「%@」（%@）の許可を取り消して停止", "すべての接続元の許可を取り消す",
             "許可済みの鍵を取り消せませんでした",
-            "実行ファイル:", "署名識別子:", "チーム ID:",
+            "紹介", "プロセス", "詳細", "実行ファイル", "署名識別子", "チーム ID",
         ],
     ]
 }

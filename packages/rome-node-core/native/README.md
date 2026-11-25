@@ -40,6 +40,11 @@ Build and install take the same lock in the output directory and publish the
 validated app in one rename. Use a stable signing identity and installation
 path so macOS can retain permissions across upgrades.
 
+The build resolves `packages/desktop/build/icon.icns` relative to the build
+script. For a standalone checkout, pass `build --icon PATH` with the Rome
+ICNS asset. Builds package it inside the app, and validation checks it before
+installing or releasing the bundle.
+
 ## Launch and authenticate
 
 1. Create a fresh mode `0700` directory owned by the graphical session user.
@@ -54,13 +59,17 @@ path so macOS can retain permissions across upgrades.
 3. Start the signed app through LaunchServices.
 
    ```sh
-   open -g -n -a "/path/to/Rome Computer Use.app" --args --serve "$state_dir"
+   open -n -a "/path/to/Rome Computer Use.app" --args --serve "$state_dir"
    ```
 
    LaunchServices starts the helper in the graphical session under
    `launchd`. macOS attributes Accessibility and Screen Recording to
    `com.rome.computer-use` as the responsible process. A native host can
    use `NSWorkspace.openApplication` to launch the app and get its PID.
+   For unattended launches that already have a trusted key, add `-g` or
+   set the native launch configuration's `activates` property to false.
+   When macOS keeps another app active, click the consent window if prompted
+   and wait for its status to say the buttons are ready.
 4. Connect to `STATE_DIR/helper.sock` from the declared host process. The
    helper exposes the socket with mode `0600`. It checks the peer UID and PID
    with `getpeereid` and `LOCAL_PEERPID`, then validates the code associated
@@ -93,7 +102,7 @@ following fields as UTF-8, joined by one LF byte with no final newline.
 
 The helper waits up to 10 seconds for the declared host and 5 seconds for
 `hello`. Each challenge and each consent dialog has its own 60-second
-deadline. A consent denial, obscured dialog, dialog timeout, lock, stop
+deadline. A consent denial, dialog timeout, lock, stop
 signal or disconnect ends the session. The helper sends `consent_denied`
 when the socket can still carry the reply.
 
@@ -113,10 +122,26 @@ contract using the helper PID from the response.
 
 ### Authorization modes
 
-`hello` accepts optional `locale`, `consentMode`, and `controller` fields.
+`hello` accepts optional `locale`, `consentMode`, `controller`, and `source` fields.
 With no controller, the helper asks for permission to start a single
 session. Its successful reply includes `auth: "session"` and the resolved
 `locale` alongside the helper proof.
+
+In any mode, `source` can name the requester.
+
+```json
+{"source":"Rome Node CLI"}
+```
+
+The caller declares its own name. For example, Rome App can send
+`"source": "Rome App"` or use `Rome App` as its controller `label`.
+The helper removes control and direction markers, collapses whitespace, and
+limits the name to 64 characters. A controller's `label` takes precedence.
+The dialog shows the supplied name under **About**, followed by the verified
+host process and the system explanation. When a caller supplies no name,
+the dialog omits **About**. The `source` field affects the displayed
+name only. Authorization, signed challenges, and stored keys use the usual
+controller fields.
 
 A controller object has three fields.
 
@@ -135,6 +160,8 @@ unknown mode, or a mode that requires a missing controller with
 | `session_only` (default) | No | Deny, Allow This Session |
 | `persistent_only` | Yes | Deny, Always Allow This Source |
 | `session_or_persistent` | Yes | Deny, Allow This Session, Always Allow This Source |
+
+AppKit lays out the native response buttons according to the localized labels.
 
 With a controller, the successful `hello` reply contains
 `status: "challenge_required"`, `instance`, `helperPid`, `helperProof`,
@@ -186,13 +213,15 @@ If the requested tag has no match, the helper tries system preferred
 languages in order, then uses `en`. The caller supplies a source label.
 The helper writes all warnings and computes the fingerprint itself.
 
-A `session_only` dialog shows the host's canonical executable path, PID, and
-any signing identifier and Team ID the helper found for the host.
+The dialog displays the host process and PID. **Details** reveals the
+canonical executable path, available signing identifier and Team ID, and
+the controller's fingerprint when a controller is present.
 
 The fingerprint is the first 16 bytes of SHA-256 of the raw public key.
 It uses eight groups of four uppercase hexadecimal digits, such as
 `21FE-31DF-A154-A261-626B-F854-046F-D227`. The dialog shows four groups on each
-line. The menu, protocol, and commands use the full hyphenated form.
+line in **Details**. The menu, protocol, and commands use the full hyphenated
+form.
 The helper matches grants by the full public key.
 
 ### Manage trusted keys
@@ -242,11 +271,21 @@ fingerprint with the one on the remote host before approving. For `local`,
 any process running as the same user that can read the private key can
 control the Mac unattended until the grant is revoked.
 
-**Deny** is the default. Approval buttons unlock together when the dialog
-stays focused and clear for one second. A left mouse press or key press
+**Deny** is the default and shows the remaining seconds until the 60-second
+authorization deadline. The approval buttons unlock when the dialog stays
+focused and clear for 0.5 seconds. Approval requires a fresh gesture. A left mouse press or key press
 during that delay restarts it. An overlapping window from another process
-above the dialog ends confirmation, except for the system cursor. The
-helper checks focus, visibility and eligibility again before approval.
+above the dialog pauses confirmation, except for the system cursor.
+System overlays such as screenshot selection also pause confirmation.
+Once clear, the dialog waits for a full 0.5 seconds of focus again. The helper
+checks focus, visibility and eligibility again before approving. Periodic
+window visibility checks run in the background.
+The process row shows the authenticated host. Expand **Details** to see its
+key fingerprint, when present, executable path and available code-signing
+identifiers. All details appear directly in the alert. If the compact alert
+has limited room, expanding details replaces the explanatory section until
+the details are collapsed. Long paths are selectable and have a full-path
+tooltip.
 
 An authorized host can list eligible open windows and their titles.
 The authenticated host can hold bindings to several distinct windows at once.
@@ -404,10 +443,12 @@ requests target different windows. `status`, `stop` and `cancel` use the
 socket reader and can reply out of order while a window operation is busy.
 `kill -USR1 HELPER_PID` provides a local stop, and `SIGTERM` seals admission
 and exits. **Stop Computer Use** also seals admission and exits. Locking the
-screen, session switching, sleep and the console guard seal
-admission. The console guard uses public session fields, display state and
-visible window levels. It runs during window operations and once per second
-while a slot or binding is active.
+screen, session switching, sleep and the console guard seal admission. The
+console guard checks public session fields, display state, shielding levels,
+and the executable owners of high-layer system windows. High-layer
+third-party windows remain subject to the same geometric occlusion checks
+for input and consent. The guard runs during window operations and once per
+second while a slot or binding is active.
 
 `stop` and `cancel` permanently seal admission and stop every binding's
 stream. `cancel_requested` means an admitted operation or binding cleanup

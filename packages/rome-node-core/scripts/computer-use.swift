@@ -27,6 +27,15 @@ func run(_ path: String, _ arguments: [String]) throws {
 
 func infoPlist(_ app: URL) -> URL { app.appendingPathComponent("Contents/Info.plist") }
 func executable(_ app: URL) -> URL { app.appendingPathComponent("Contents/MacOS/\(executableName)") }
+func bundleIcon(_ app: URL) -> URL { app.appendingPathComponent("Contents/Resources/icon.icns") }
+
+func validateIcon(_ url: URL) throws {
+    var info = stat()
+    guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size > 8,
+          let handle = try? FileHandle(forReadingFrom: url) else { throw BuildError("Missing Rome icon at \(url.path).") }
+    defer { try? handle.close() }
+    guard handle.readData(ofLength: 4) == Data("icns".utf8) else { throw BuildError("Invalid Rome icon at \(url.path).") }
+}
 
 func plist(_ url: URL) throws -> [String: Any] {
     let data = try Data(contentsOf: url)
@@ -63,6 +72,10 @@ func validate(_ app: URL, signed: Bool = false, release: Bool = false) throws {
           info["CFBundlePackageType"] as? String == "APPL" else {
         throw BuildError("The helper bundle identity is incorrect.")
     }
+    guard info["CFBundleIconFile"] as? String == "icon", isDirectory(bundleIcon(app).deletingLastPathComponent()) else {
+        throw BuildError("The helper bundle has no Rome icon.")
+    }
+    try validateIcon(bundleIcon(app))
     if signed || release {
         guard info[testKey] as? Bool == false else { throw BuildError("A compile-only helper cannot be released or installed.") }
         let developerID = " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
@@ -177,12 +190,17 @@ func applicationIdentifier(in profile: [String: Any]) throws -> String {
     return appID[...separator] + bundleID
 }
 
-func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?) throws {
+func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?, iconPath: String?) throws {
     guard selfTest ? identity == nil && profile == nil : identity != nil && identity != "-" && identity != "" else {
         throw BuildError("Choose either --self-test-build or an Apple code-signing --identity.")
     }
+    let icon = iconPath.map { URL(fileURLWithPath: $0) } ??
+        repository.appendingPathComponent("packages/desktop/build/icon.icns")
+    try validateIcon(icon)
     try withPublication(output) { app in
         try files.createDirectory(at: executable(app).deletingLastPathComponent(), withIntermediateDirectories: true)
+        try files.createDirectory(at: bundleIcon(app).deletingLastPathComponent(), withIntermediateDirectories: true)
+        try files.copyItem(at: icon, to: bundleIcon(app))
         var info = try plist(native.appendingPathComponent("Info.plist"))
         info[testKey] = selfTest
         let metadata = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
@@ -244,6 +262,10 @@ func test(_ app: URL) throws {
             try withPublication(installed) { _ in throw BuildError("Unexpected competing publication.") }
         }
         try files.copyItem(at: app, to: candidate)
+        let icon = bundleIcon(candidate)
+        try files.moveItem(at: icon, to: icon.appendingPathExtension("fixture"))
+        try rejects("Missing Rome icon at \(icon.path).") { try validate(candidate) }
+        try files.moveItem(at: icon.appendingPathExtension("fixture"), to: icon)
     }
     try validate(installed)
     try rejects("staging failed") {
@@ -258,7 +280,7 @@ func test(_ app: URL) throws {
         try data.write(to: infoPlist(candidate), options: .atomic)
     }
     try rejects("The release helper needs a valid Developer ID Application signature.") { try validate(installed, release: true) }
-    print("Bundle checks passed (profile authorization, build lock, staging, atomic replacement, absent and unsigned release rejection).")
+    print("Bundle checks passed (icon, profile authorization, build lock, staging, atomic replacement, absent and unsigned release rejection).")
 }
 
 func testNodeHandshake(_ app: URL, state: URL) throws {
@@ -351,7 +373,7 @@ func main() throws {
     while let option = args.first {
         args.removeFirst()
         if ["--self-test-build", "--release"].contains(option), flags.insert(option).inserted { continue }
-        guard ["--app", "--source", "--identity", "--provisioning-profile"].contains(option), options[option] == nil,
+        guard ["--app", "--source", "--identity", "--provisioning-profile", "--icon"].contains(option), options[option] == nil,
               let value = args.first, !value.hasPrefix("--") else { throw BuildError("Invalid option \(option).") }
         options[option] = value
         args.removeFirst()
@@ -360,9 +382,10 @@ func main() throws {
         repository.appendingPathComponent(".scratch/rome-node-native/\(appName)", isDirectory: true)
     let buildOptions = Set(options.keys).subtracting(["--app"])
     switch command {
-    case "build" where buildOptions.isSubset(of: ["--identity", "--provisioning-profile"]) && flags.isSubset(of: ["--self-test-build"]):
+    case "build" where buildOptions.isSubset(of: ["--identity", "--provisioning-profile", "--icon"]) &&
+        flags.isSubset(of: ["--self-test-build"]):
         try build(output, selfTest: flags.contains("--self-test-build"), identity: options["--identity"],
-                  profile: options["--provisioning-profile"])
+                  profile: options["--provisioning-profile"], iconPath: options["--icon"])
         print(output.path)
     case "verify" where buildOptions.isEmpty && flags.isSubset(of: ["--release"]):
         try validate(output, release: flags.contains("--release"))

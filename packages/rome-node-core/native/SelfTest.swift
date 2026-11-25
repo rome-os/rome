@@ -159,9 +159,29 @@ final class SelfTest {
         }
         try rejects("console_unavailable") { try DesktopAccess.require(trusted: true, console: false) }
         let layer = kCGWindowLayer as String
-        let cursor = [layer: CGWindowLevelForKey(.cursorWindow), kCGWindowOwnerName as String: "Window Server"] as [String: Any]
-        try expect(DesktopAccess.visibleLayersClear([[layer: 0], cursor]), "cursor does not make the console unavailable")
-        try expect(!DesktopAccess.visibleLayersClear([[layer: CGShieldingWindowLevel()]]), "shielded console is unavailable")
+        let pid = kCGWindowOwnerPID as String
+        let saver = CGWindowLevelForKey(.screenSaverWindow)
+        let cursor = [layer: CGWindowLevelForKey(.cursorWindow), pid: 12,
+                      kCGWindowOwnerName as String: "Window Server"] as [String: Any]
+        let paths: [pid_t: String] = [
+            13: "/Applications/Overlay.app/Contents/MacOS/Overlay",
+            14: "/System/Library/CoreServices/ScreenSaverEngine.app/Contents/MacOS/ScreenSaverEngine",
+            15: "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
+            16: "/usr/libexec/PrivacySurface",
+        ]
+        func available(_ rows: [[String: Any]]) -> Bool {
+            DesktopAccess.visibleLayersClear(rows, isWindowServer: { $0 == 12 }, executablePath: { paths[$0] })
+        }
+        try expect(available([[layer: 0], cursor]), "authenticated system cursor leaves the console available")
+        var impostor = cursor
+        impostor[pid] = 13
+        try expect(!available([impostor]), "a third party cannot claim the system cursor exception")
+        try expect(available([[layer: saver + 100, pid: 13]]), "an ordinary high overlay leaves the console available")
+        try expect(!available([[layer: saver, pid: 14]]), "the screen saver makes the console unavailable")
+        try expect(!available([[layer: saver, pid: 15]]), "the system login window makes the console unavailable")
+        try expect(!available([[layer: saver, pid: 16]]), "a protected system executable can own a private surface")
+        try expect(!available([[layer: saver, pid: 17]]), "an unverifiable high-layer owner fails closed")
+        try expect(!available([[layer: CGShieldingWindowLevel(), pid: 13]]), "the shield level makes the console unavailable")
         try expect(!DesktopAccess.visibleLayersClear(nil), "missing window list fails closed")
         let access = DesktopAccess()
         try access.recording(granted: false, required: false)
@@ -494,6 +514,70 @@ final class SelfTest {
     }
 
     private func consent() throws {
+        let modeButtons: [(ConsentMode, [HelperLocale.Text])] = [
+            (.sessionOnly, [.deny, .allowSession]),
+            (.persistentOnly, [.deny, .allowPersistent]),
+            (.sessionOrPersistent, [.deny, .allowSession, .allowPersistent]),
+        ]
+        for (mode, titles) in modeButtons {
+            try expect(mode.choices.map(\.buttonTitle) == titles,
+                       "\(mode.rawValue) maps each decision to a response button with Deny first")
+        }
+        let start = DispatchTime(uptimeNanoseconds: 1_000_000_000)
+        let deadline = start + .seconds(60)
+        try expect(ConsentCountdown.seconds(until: deadline, now: start) == 60, "show the full consent period at presentation")
+        try expect(ConsentCountdown.seconds(until: deadline, now: start + .milliseconds(999)) == 60,
+                   "a fraction of a second rounds up so zero is never shown before expiration")
+        try expect(ConsentCountdown.seconds(until: deadline, now: start + .seconds(1)) == 59,
+                   "the countdown changes only across a whole-second boundary")
+        try expect(ConsentCountdown.seconds(until: deadline, now: deadline - .milliseconds(1)) == 1,
+                   "one remains visible until the actual deadline")
+        try expect(ConsentCountdown.seconds(until: deadline, now: deadline) == 0 &&
+                   ConsentCountdown.seconds(until: deadline, now: deadline + .seconds(1)) == 0,
+                   "consent expires at the server deadline without negative time")
+        for (locale, title) in [(HelperLocale.en, "Deny (59s)"), (.zhHans, "拒绝 (59s)"),
+                                (.zhHant, "拒絕 (59s)"), (.ja, "拒否 (59s)")] {
+            try expect(ConsentCountdown.title(locale, seconds: 59) == title, "localize Deny with the remaining time")
+        }
+
+        var poll = ConsentPoll()
+        try expect(poll.begin() == nil, "do not sample a modal that has not begun")
+        poll.start()
+        let stale = try require(poll.begin(), "start an asynchronous visibility sample")
+        try expect(poll.begin() == nil, "coalesce timer ticks while WindowServer sampling is in flight")
+        poll.invalidate()
+        try expect(poll.begin() == nil && !poll.finish(stale), "discard a result after focus or layout changes without queueing more work")
+        let current = try require(poll.begin(), "start a fresh visibility sample after invalidation")
+        try expect(poll.finish(current), "apply the current sample")
+        let closed = try require(poll.begin(), "sample before the modal exits")
+        poll.stop()
+        poll.start()
+        try expect(!poll.finish(closed), "a newly presented modal cannot consume a previous modal's sample")
+
+        var state = ConsentUnlock()
+        try expect(state.state(focused: false, raised: true, at: 0) == .needsFocus, "consent prompts for a click when inactive")
+        try expect(state.state(focused: true, raised: true, at: 0.05) == .checking, "consent shows its initial focused wait")
+        try expect(state.state(focused: true, raised: true, at: 0.5) == .checking, "consent remains waiting before the dwell ends")
+        try expect(state.state(focused: true, raised: true, at: 0.55) == .ready, "consent becomes ready after a full focused half-second")
+        try expect(state.state(focused: true, raised: false, at: 0.6) == .occluded, "a temporary cover pauses consent")
+        try expect(state.state(focused: false, raised: false, at: 0.625) == .occluded,
+                   "a covering window can also take focus without ending consent")
+        try expect(!state.revalidate(clear: false, focused: false, eligible: true, at: 0.625),
+                   "approval is rejected under a covering window")
+        try expect(state.state(focused: true, raised: true, at: 0.65) == .checking, "consent waits again after being raised")
+        try expect(state.state(focused: true, raised: true, at: 1.145) == .checking, "clearing a cover starts a full half-second of dwell")
+        try expect(state.state(focused: true, raised: true, at: 1.155) == .ready, "consent unlocks after the full uncovered dwell")
+        try expect(!state.revalidate(clear: false, focused: true, eligible: true, at: 1.16),
+                   "a stale enabled button cannot approve under a new overlay")
+        try expect(state.state(focused: false, raised: true, at: 1.2) == .needsFocus, "consent prompts again on focus loss")
+        let host = Admission()
+        _ = host.stop("host_disconnected")
+        let hostLive = (try? host.check()) != nil
+        try expect(state.state(eligible: hostLive, focused: true, raised: false, at: 1.5) == nil,
+                   "host shutdown ends consent even while covered")
+        let consoleAvailable = false
+        try expect(state.state(eligible: consoleAvailable, focused: true, raised: true, at: 2) == nil,
+                   "loss of the console ends consent even with an unobstructed window")
         let prompt = CGRect(x: 140, y: 260, width: 320, height: 220)
         let helper: pid_t = 42
         let server: pid_t = 43
@@ -513,6 +597,8 @@ final class SelfTest {
                    DesktopAccess.visibleLayersClear([[layerKey: ConsentOcclusion.alertLevel]]),
                    "consent is above menus and status windows without blocking the console")
         try expect(!clear([row(other, prompt)]), "overlapping window from another process blocks consent")
+        try expect(!clear([row(other, prompt, layer: CGWindowLevelForKey(.screenSaverWindow) + 100)]),
+                   "a high third-party overlay blocks consent at overlapping bounds")
         try expect(!clear([row(other, prompt, alpha: 0)]), "transparent click-through window blocks consent")
         try expect(clear([row(other, prompt.offsetBy(dx: 400, dy: 0))]), "nonoverlapping window leaves consent clear")
         try expect(clear([row(other, .zero), row(helper, prompt)]), "empty and helper-owned windows leave consent clear")
@@ -524,85 +610,85 @@ final class SelfTest {
 
         var unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "consent starts locked")
-        try expect(!unlock.update(focused: true, at: 0.99), "consent stays locked for the first second")
-        try expect(unlock.update(focused: true, at: 1), "consent unlocks after one focused second")
-        try expect(!unlock.update(focused: false, at: 1.1), "focus loss relocks consent immediately")
+        try expect(!unlock.update(focused: true, at: 0.495), "consent stays locked for the first half-second")
+        try expect(unlock.update(focused: true, at: 0.5), "consent unlocks after one focused half-second")
+        try expect(!unlock.update(focused: false, at: 0.55), "focus loss relocks consent immediately")
         unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "a new confirmation starts locked")
-        try expect(!unlock.update(focused: false, at: 0.8), "focus loss clears the partial delay")
-        try expect(!unlock.update(focused: true, at: 1), "regaining focus restarts the delay")
-        try expect(!unlock.update(focused: true, at: 1.2), "prior focus time does not count")
-        try expect(unlock.update(focused: true, at: 2), "consent unlocks after a full second of renewed focus")
+        try expect(!unlock.update(focused: false, at: 0.4), "focus loss clears the partial delay")
+        try expect(!unlock.update(focused: true, at: 0.5), "regaining focus restarts the delay")
+        try expect(!unlock.update(focused: true, at: 0.6), "prior focus time does not count")
+        try expect(unlock.update(focused: true, at: 1), "consent unlocks after a full half-second of renewed focus")
 
         unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "consent starts locked before repeated clicks")
-        for timestamp in stride(from: 0.25, through: 1.25, by: 0.25) {
+        for timestamp in stride(from: 0.125, through: 0.625, by: 0.125) {
             let enabled = unlock.update(focused: true, at: timestamp)
-            try expect(!enabled, "repeated clicks keep consent locked past one focused second")
+            try expect(!enabled, "repeated clicks keep consent locked past one focused half-second")
             unlock.mouseDown(at: timestamp, clickCount: 1, enabled: enabled)
         }
-        try expect(!unlock.update(focused: true, at: 1.25), "the last click restarts the delay")
-        try expect(!unlock.update(focused: true, at: 2.24), "consent needs a full quiet second")
-        try expect(unlock.update(focused: true, at: 2.25), "one focused second without clicks unlocks consent")
+        try expect(!unlock.update(focused: true, at: 0.625), "the last click restarts the delay")
+        try expect(!unlock.update(focused: true, at: 1.12), "consent needs a full quiet half-second")
+        try expect(unlock.update(focused: true, at: 1.125), "one focused half-second without clicks unlocks consent")
 
-        unlock.mouseDown(at: 2.25, clickCount: 1, enabled: true)
-        try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 1),
+        unlock.mouseDown(at: 1.125, clickCount: 1, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
                    "a click exactly one double-click interval after a locked click is rejected")
-        try expect(!unlock.update(focused: true, at: 2.25), "rejecting a close click relocks consent")
-        try expect(unlock.update(focused: true, at: 3.25), "consent unlocks after the restarted delay")
+        try expect(!unlock.update(focused: true, at: 1.125), "rejecting a close click relocks consent")
+        try expect(unlock.update(focused: true, at: 1.625), "consent unlocks after the restarted delay")
 
-        unlock.mouseDown(at: 3.25, clickCount: 2, enabled: true)
+        unlock.mouseDown(at: 1.625, clickCount: 2, enabled: true)
         try expect(!unlock.accept(currentClickCount: nil, doubleClickInterval: 0.5),
                    "a recorded double-click is rejected even when the current event has changed")
-        try expect(!unlock.update(focused: true, at: 3.25), "rejecting a double-click relocks consent")
-        try expect(unlock.update(focused: true, at: 4.25), "consent unlocks after a quiet second")
+        try expect(!unlock.update(focused: true, at: 1.625), "rejecting a double-click relocks consent")
+        try expect(unlock.update(focused: true, at: 2.125), "consent unlocks after a quiet half-second")
 
-        unlock.mouseDown(at: 4.25, clickCount: 1, enabled: true)
-        unlock.mouseDown(at: 4.5, clickCount: 1, enabled: true)
+        unlock.mouseDown(at: 2.125, clickCount: 1, enabled: true)
+        unlock.mouseDown(at: 2.25, clickCount: 1, enabled: true)
         try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
                    "a single click too close to another unlocked click is rejected")
-        try expect(!unlock.update(focused: true, at: 4.5), "the close single click relocks consent")
-        try expect(unlock.update(focused: true, at: 5.5), "consent unlocks after the final quiet second")
-        unlock.mouseDown(at: 5.5, clickCount: 1, enabled: true)
+        try expect(!unlock.update(focused: true, at: 2.25), "the close single click relocks consent")
+        try expect(unlock.update(focused: true, at: 2.75), "consent unlocks after the final quiet half-second")
+        unlock.mouseDown(at: 2.875, clickCount: 1, enabled: true)
         try expect(unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
                    "a single click past the double-click interval approves consent")
 
         unlock = ConsentUnlock()
         try expect(!unlock.update(focused: true, at: 0), "consent starts locked before typing")
-        for timestamp in stride(from: 0.25, through: 1.25, by: 0.25) {
+        for timestamp in stride(from: 0.125, through: 0.625, by: 0.125) {
             let enabled = unlock.update(focused: true, at: timestamp)
-            try expect(!enabled, "key presses keep consent locked past one focused second")
+            try expect(!enabled, "key presses keep consent locked past one focused half-second")
             unlock.keyDown(enabled: enabled)
         }
-        try expect(!unlock.update(focused: true, at: 1.25), "the last key press restarts the delay")
-        try expect(!unlock.update(focused: true, at: 2.24), "typing requires a full quiet second")
-        try expect(unlock.update(focused: true, at: 2.25), "one focused second without typing unlocks consent")
+        try expect(!unlock.update(focused: true, at: 0.625), "the last key press restarts the delay")
+        try expect(!unlock.update(focused: true, at: 1.12), "typing requires a full quiet half-second")
+        try expect(unlock.update(focused: true, at: 1.125), "one focused half-second without typing unlocks consent")
         unlock.keyDown(enabled: true)
-        try expect(unlock.update(focused: true, at: 2.3), "keyboard navigation remains available after unlocking")
+        try expect(unlock.update(focused: true, at: 1.15), "keyboard navigation remains available after unlocking")
 
         for choice in ConsentMode.sessionOrPersistent.choices.dropFirst() {
             var shared = ConsentUnlock()
             try expect(!shared.update(focused: true, at: 0), "\(choice) starts locked")
-            shared.mouseDown(at: 0.99, clickCount: 1, enabled: false)
-            try expect(!shared.update(focused: true, at: 1), "a locked click restarts both choices")
-            try expect(shared.update(focused: true, at: 2), "\(choice) shares the full quiet second")
+            shared.mouseDown(at: 0.495, clickCount: 1, enabled: false)
+            try expect(!shared.update(focused: true, at: 0.5), "a locked click restarts both choices")
+            try expect(shared.update(focused: true, at: 1), "\(choice) shares the full quiet half-second")
             shared.keyDown(enabled: true, isRepeat: true)
             try expect(!shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "a held key cannot approve")
-            try expect(!shared.update(focused: true, at: 2.25), "a repeat relocks both choices")
-            try expect(shared.update(focused: true, at: 3.25), "both choices unlock after a quiet second")
+            try expect(!shared.update(focused: true, at: 1.125), "a repeat relocks both choices")
+            try expect(shared.update(focused: true, at: 1.625), "both choices unlock after a quiet half-second")
             shared.keyDown(enabled: true)
             try expect(shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "fresh keyboard approval works")
-            try expect(shared.revalidate(clear: true, focused: true, eligible: true, at: 3.25), "approval still qualifies")
-            shared.mouseDown(at: 3.5, clickCount: 2, enabled: true)
+            try expect(shared.revalidate(clear: true, focused: true, eligible: true, at: 1.625), "approval still qualifies")
+            shared.mouseDown(at: 1.75, clickCount: 2, enabled: true)
             try expect(!shared.accept(currentClickCount: nil, doubleClickInterval: 0.5), "\(choice) rejects a double-click")
-            try expect(!shared.update(focused: true, at: 4) && shared.update(focused: true, at: 5),
+            try expect(!shared.update(focused: true, at: 2) && shared.update(focused: true, at: 2.5),
                        "double-click rejection relocks both choices")
-            var uptime = 5.0
+            var uptime = 2.5
             for (clear, focused, eligible) in [(false, true, true), (true, false, true), (true, true, false)] {
                 try expect(!shared.revalidate(clear: clear, focused: focused, eligible: eligible, at: uptime),
                            "approval rechecks visibility, focus and eligibility")
                 try expect(!shared.update(focused: true, at: uptime), "failed recheck relocks all approval choices")
-                uptime += 1
+                uptime += 0.5
                 try expect(shared.update(focused: true, at: uptime), "approval can be checked again after refocusing")
             }
         }
@@ -687,21 +773,88 @@ final class SelfTest {
         let signing = Peer.SigningSummary(identifier: "com.example.rome", teamID: "ABCDEFG123")
         for locale in HelperLocale.allCases {
             let claim = ControllerClaim(key: key, label: "Controller", scope: .remote)
-            let prompt = ConsentPrompt(locale: locale, mode: .sessionOnly, label: claim.label, controller: claim,
-                                       host: host, signingSummary: signing)
-            let text = prompt.informativeText
-            try expect(text.contains(locale[.executable]) && text.contains(host.executable) && text.contains("PID: 456") &&
-                       text.contains(locale[.signingIdentifier]) && text.contains(signing.identifier) &&
-                       text.contains(locale[.teamID]) && text.contains("ABCDEFG123"),
-                       "session-only consent shows the verified host identity in \(locale.rawValue)")
-            let fingerprint = [locale[.fingerprint], locale.keyFingerprint("21FE-31DF-A154-A261"),
+            let prompt = ConsentPrompt(locale: locale, mode: .sessionOrPersistent, sourceLabel: claim.label,
+                                       controller: claim, host: host, signingSummary: signing, deadline: .now())
+            let captions: [HelperLocale.Text] = [.introduction, .process, .details, .fingerprint, .executable, .signingIdentifier, .teamID]
+            try expect(captions.map { locale[$0] }.allSatisfy { !$0.isEmpty && !$0.hasSuffix(":") && !$0.hasSuffix("：") },
+                       "consent uses standalone field captions in \(locale.rawValue)")
+            try expect(prompt.accessText == locale[.access] &&
+                       prompt.persistentNotice?.contains(locale[.persistentAccess]) == true &&
+                       prompt.persistentNotice?.contains(locale[.remoteRisk]) == true &&
+                       !prompt.accessText.contains(host.executable) && !prompt.accessText.contains(claim.label),
+                       "the system explanation stays distinct from the declared source and audit fields")
+            let fingerprint = [locale.keyFingerprint("21FE-31DF-A154-A261"),
                                locale.keyFingerprint("626B-F854-046F-D227")].joined(separator: "\n")
-            try expect(text.contains(fingerprint), "consent displays all 128 fingerprint bits across two lines")
+            try expect(prompt.fingerprintLines == fingerprint, "consent displays all 128 fingerprint bits across two lines")
+            var disclosure = ConsentDisclosure(fields: prompt.detailFields)
+            try expect(disclosure.rows.isEmpty, "verified details start collapsed")
+            disclosure.toggle()
+            try expect(disclosure.visibleFields.map(\.label) == [.fingerprint, .executable, .signingIdentifier, .teamID] &&
+                       disclosure.visibleFields.map(\.value) == [fingerprint, host.executable, signing.identifier, "ABCDEFG123"],
+                       "the fingerprint leads the verified disclosure in \(locale.rawValue)")
+            try expect(disclosure.rows.map { $0.map(\.label) } == [[.fingerprint], [.executable], [.signingIdentifier, .teamID]],
+                       "signing identifiers share one row so all four fields can fit on screen")
+            disclosure.toggle()
+            try expect(disclosure.visibleFields.isEmpty, "collapsing hides the details again")
         }
-        let unsigned = ConsentPrompt(locale: .en, mode: .sessionOnly, label: "Rome", controller: nil,
-                                     host: host, signingSummary: nil).informativeText
-        try expect(unsigned.contains(host.executable) && unsigned.contains("PID: 456") &&
-                   !unsigned.contains(HelperLocale.en[.signingIdentifier]), "host details survive missing signing metadata")
+        let unsigned = ConsentPrompt(locale: .en, mode: .sessionOnly, sourceLabel: nil,
+                                     controller: nil, host: host, signingSummary: nil, deadline: .now())
+        try expect(unsigned.accessText == HelperLocale.en[.access] && unsigned.fingerprintLines == nil &&
+                   unsigned.sourceLabel == nil, "legacy consent omits an empty introduction and fingerprint")
+        try expect(unsigned.detailFields.map(\.value) == [host.executable], "host details survive missing signing metadata")
+        try expect(auditDisplayValue("/tmp/Desk\n\u{202E}App") == "/tmp/Desk\\u{a}\\u{202e}App",
+                   "audit fields visibly escape line breaks and direction controls without adding quotes")
+        let local = ConsentPrompt(locale: .zhHans, mode: .persistentOnly, sourceLabel: "Controller",
+                                  controller: ControllerClaim(key: key, label: "Controller", scope: .local),
+                                  host: host, signingSummary: signing, deadline: .now())
+        try expect(local.persistentNotice?.contains(local.locale[.localRisk]) == true && local.detailFields.first?.label == .fingerprint,
+                   "persistent-only consent displays the local-key risk and fingerprint")
+        let translations: [(HelperLocale, String, String)] = [
+            (.en, "About", "Always Allow This Source"),
+            (.zhHans, "介绍", "总是允许该来源"),
+            (.zhHant, "介紹", "一律允許此來源"),
+            (.ja, "紹介", "この接続元を常に許可"),
+        ]
+        for (locale, introduction, approval) in translations {
+            try expect(locale[.introduction] == introduction &&
+                       locale[ConsentDecision.allowPersistent.buttonTitle] == approval,
+                       "the introduction and persistent approval use the requested text in \(locale.rawValue)")
+        }
+        try expect(ConsentDisclosure.contentWidth(alertWidth: 260) == 228 &&
+                   ConsentDisclosure.contentWidth(alertWidth: 310) == 228 &&
+                   ConsentDisclosure.contentWidth(alertWidth: 240) == 208, "accessory width follows the compact alert column")
+        let auditHeight: (Int) -> CGFloat = { lines in 130 + 14 * CGFloat(lines) }
+        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 176, fittingHeight: auditHeight) == 3,
+                   "a long executable path can use three lines when all details fit")
+        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 169, fittingHeight: auditHeight) == 2,
+                   "a compact alert limits the path to the lines left after the other audit fields")
+        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 150, fittingHeight: auditHeight) == 1,
+                   "a tight layout reserves one path line so every audit field remains visible")
+        let longPath = "/opt/" + String(repeating: "very-long-install-directory/", count: 8) + "bin/node"
+        let longPathDisclosure = ConsentDisclosure(fields: [(.executable, auditDisplayValue(longPath))])
+        try expect(longPathDisclosure.fields.first?.value == longPath,
+                   "limiting path height preserves the full selectable audit value")
+        var unsignedDetails = ConsentDisclosure(fields: unsigned.detailFields)
+        unsignedDetails.toggle()
+        try expect(unsignedDetails.rows.map { $0.map(\.label) } == [[.executable]],
+                   "an unsigned process keeps its path in a full-width row")
+
+        func declaredSource(_ options: [String: Any]) throws -> String? {
+            try Hello(JSONSerialization.data(withJSONObject: ["params": options]), preferred: []).sourceLabel
+        }
+        try expect(try declaredSource(["source": "  Rome\n\u{202E} Node CLI "]) == "Rome Node CLI",
+                   "the helper sanitizes and preserves the caller's self-introduction")
+        try expect(try declaredSource([:]) == nil, "an unnamed source has no introduction")
+        try expect(try declaredSource(["source": "\u{202E} \u{0000}\t"]) == nil, "an invisible source name is omitted")
+        try expect(try declaredSource(["source": String(repeating: "名", count: 70)])?.count == 64, "the source name is capped")
+        for mode in [ConsentMode.sessionOnly, .persistentOnly, .sessionOrPersistent] {
+            let merged = try declaredSource(["consentMode": mode.rawValue,
+                                             "controller": ["label": "Rome App", "publicKey": encoded, "scope": "local"],
+                                             "source": "Rome Node CLI"])
+            try expect(merged == "Rome App",
+                       "a controller supplies the source label in \(mode.rawValue)")
+        }
+        try rejects("invalid_request") { _ = try declaredSource(["source": 42]) }
 
         let privateKey = Curve25519.Signing.PrivateKey()
         let claim = ControllerClaim(key: try ControllerKey(privateKey.publicKey.rawRepresentation.base64EncodedString()),
@@ -1062,6 +1215,13 @@ final class SelfTest {
         try expect(legacy.prompts.count == 1 && legacy.prompts.first?.controller == nil &&
                    legacy.prompts.first?.mode == .sessionOnly, "hello without a controller uses session-only consent")
         try expect(try legacy.prompts.first?.host == ProcessIdentity.read(getpid()), "session consent receives the authenticated host")
+        let introduced = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: introduced.provider(.allowSession)) { fd, _, key in
+            let grant = try result(hello(fd, key, ["source": "Desk\n Helper"]))
+            try expect(grant["auth"] as? String == "session" && grant["label"] == nil,
+                       "a source introduction preserves the session-only reply")
+        }
+        try expect(introduced.prompts.first?.sourceLabel == "Desk Helper", "session consent receives the sanitized source name")
 
         let invalid = ConsentProbe()
         try withControllerSocket(path, store: store, consent: invalid.provider(.allowSession)) { fd, _, key in

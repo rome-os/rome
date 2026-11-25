@@ -268,10 +268,15 @@ final class Connection: @unchecked Sendable {
 struct ConsentPrompt: Sendable {
     let locale: HelperLocale
     let mode: ConsentMode
-    let label: String
+    let sourceLabel: String?
     let controller: ControllerClaim?
     let host: ProcessIdentity
     let signingSummary: Peer.SigningSummary?
+    let deadline: DispatchTime
+
+    var label: String {
+        sourceLabel ?? sanitizeLabel(URL(fileURLWithPath: host.executable).lastPathComponent) ?? locale[.source]
+    }
 }
 
 struct SessionAuthorization: Sendable {
@@ -428,11 +433,10 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         authorizedID = first.id
     }
 
-    let executable = URL(fileURLWithPath: peer.identity.executable).lastPathComponent
-    let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode,
-                               label: hello.controller?.label ?? sanitizeLabel(executable) ?? hello.locale[.source],
-                               controller: hello.controller, host: peer.identity, signingSummary: peer.signingSummary)
     let consentDeadline = DispatchTime.now() + .seconds(60)
+    let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode, sourceLabel: hello.sourceLabel,
+                               controller: hello.controller, host: peer.identity, signingSummary: peer.signingSummary,
+                               deadline: consentDeadline)
     let canContinue: @Sendable () -> Bool = {
         do {
             // Preserve the write side so a peer that half-closes can receive the denial.

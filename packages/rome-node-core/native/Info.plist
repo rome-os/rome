@@ -10,6 +10,8 @@
   <string>Rome Computer Use</string>
   <key>CFBundleExecutable</key>
   <string>RomeComputerUse</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>

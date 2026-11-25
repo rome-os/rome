@@ -117,24 +117,37 @@ final class DesktopAccess: @unchecked Sendable {
         guard console() else { throw Failure("console_unavailable") }
     }
 
-    static func consoleAvailable(_ rows: [[String: Any]]?) -> Bool {
+    static func consoleSessionAvailable(requireFrontmost: Bool = false) -> Bool {
         guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
               (session[kCGSessionUserIDKey as String] as? NSNumber)?.uint32Value == getuid(),
               session[kCGSessionOnConsoleKey as String] as? Bool == true,
               session[kCGSessionLoginDoneKey as String] as? Bool == true,
-              CGDisplayIsAsleep(CGMainDisplayID()) == 0,
-              let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != "com.apple.loginwindow" else { return false }
-        return visibleLayersClear(rows)
+              CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return false }
+        let front = NSWorkspace.shared.frontmostApplication
+        return (!requireFrontmost || front != nil) && front?.bundleIdentifier != "com.apple.loginwindow"
     }
 
-    static func visibleLayersClear(_ rows: [[String: Any]]?) -> Bool {
+    static func consoleAvailable(_ rows: [[String: Any]]?) -> Bool {
+        consoleSessionAvailable(requireFrontmost: true) && visibleLayersClear(rows)
+    }
+
+    static func visibleLayersClear(_ rows: [[String: Any]]?,
+                                   isWindowServer: (pid_t) -> Bool = ConsentOcclusion.isWindowServer,
+                                   executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
         guard let rows, !rows.isEmpty else { return false }
         let screenSaver = CGWindowLevelForKey(.screenSaverWindow)
-        return rows.allSatisfy {
-            guard let layer = ($0[kCGWindowLayer as String] as? NSNumber)?.int32Value else { return false }
-            return layer < screenSaver || (layer == CGWindowLevelForKey(.cursorWindow) &&
-                $0[kCGWindowOwnerName as String] as? String == "Window Server")
+        let shield = CGShieldingWindowLevel()
+        let systemPaths = ["/System/", "/usr/libexec/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/"]
+        return rows.allSatisfy { row in
+            guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value else { return false }
+            if layer < screenSaver { return true }
+            guard let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0 else { return false }
+            if layer == CGWindowLevelForKey(.cursorWindow) {
+                return row[kCGWindowOwnerName as String] as? String == "Window Server" && isWindowServer(pid)
+            }
+            guard layer < shield, let path = executablePath(pid), path.hasPrefix("/") else { return false }
+            // Third-party overlays still participate in the per-window occlusion checks.
+            return !systemPaths.contains { path.hasPrefix($0) }
         }
     }
 }
