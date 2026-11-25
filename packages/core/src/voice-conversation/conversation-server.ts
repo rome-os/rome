@@ -61,9 +61,11 @@ export interface VoiceConversationDeps {
   maxConversationMs?: number;
   /**
    * Counts the person as following `chatId`, as their phone showing it does:
-   * the Concierge does not push what it says there, since they hear it.
-   * Returns the release. `owner` is their chat owner key. Only a phone's
-   * conversation follows, as only a phone's live-events socket watches.
+   * the Concierge does not push what it says there. Held only while the reply
+   * to a spoken turn is read, since they hear that, and released after:
+   * what else the chat gets pushes as usual. Returns the release. `owner` is
+   * their chat owner key. Only a phone's conversation follows, as only a
+   * phone's live-events socket watches.
    */
   follow?: (owner: string, chatId: string) => () => void;
   /**
@@ -146,7 +148,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   let bytes = 0;
   let alive: ReturnType<typeof setInterval> | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
-  let unfollow: (() => void) | null = null;
+  // Each spoken turn's hold on the chat, until its reply is read.
+  const following = new Set<() => void>();
   let chatId: string | null = null;
   const onTeam = deps.onTeam ?? (() => true);
 
@@ -154,14 +157,40 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
   };
 
+  // Holds `chatId` as followed for the person, once, until the release.
+  const follow = (to: string): (() => void) => {
+    const owner = sessionOwnerKey(actor);
+    if (!owner || !deps.follow) return () => {};
+    const stop = deps.follow(owner, to);
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      following.delete(release);
+      stop();
+    };
+    following.add(release);
+    return release;
+  };
+
   const conversation = createConversation({
     send: (text, inputId, signal) => {
       const to = chatId;
       if (!to) return Promise.reject(new Error("no chat"));
       if (!onTeam()) return Promise.reject(new Error("off the team"));
-      return actor
+      // They hear this turn's reply: the Concierge does not also push it.
+      const release = follow(to);
+      signal.addEventListener("abort", release, { once: true });
+      const sent = actor
         ? runWithSessionActor(actor, () => deps.send(to, text, inputId, signal))
         : deps.send(to, text, inputId, signal);
+      return sent.then(
+        (turn) => heardThrough(turn, release),
+        (err: unknown) => {
+          release();
+          throw err;
+        },
+      );
     },
     message: (message) => {
       if (!closed) reply(message);
@@ -188,7 +217,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const settle = (outcome: string) => {
-    unfollow?.();
+    for (const release of [...following]) release();
     clearInterval(teamCheck);
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
@@ -233,9 +262,6 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       : await deps.canTalkIn(to);
     if (!canTalk) return fail("chat-refused");
     if (closed) return;
-    // They hear the replies: the Concierge does not also push them.
-    const owner = sessionOwnerKey(actor);
-    if (owner && deps.follow) unfollow = deps.follow(owner, to);
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
       if (spoken.ok) spoken.session.close();
@@ -325,4 +351,20 @@ function toBytes(data: RawData): Uint8Array {
   if (Array.isArray(data)) return Buffer.concat(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return data;
+}
+
+/** `turn`, releasing `release` once its reply has been read to the end or left. */
+function heardThrough(turn: ReplyTurn, release: () => void): ReplyTurn {
+  return {
+    ...turn,
+    events: () => releasing(turn.events(), release),
+  };
+}
+
+async function* releasing<T>(events: AsyncIterable<T>, release: () => void): AsyncGenerator<T> {
+  try {
+    yield* events;
+  } finally {
+    release();
+  }
 }

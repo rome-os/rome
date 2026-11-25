@@ -268,10 +268,14 @@ describe("voice conversation socket", () => {
     expect(mouth.closed()).toBe(true);
   });
 
-  it("counts the person as following the chat while the conversation runs, so the Concierge does not push to them", async () => {
+  it("holds the chat as followed only while the reply to a spoken turn is read, so that reply does not also push", async () => {
     const ear = standInTranscriber();
     const following: string[] = [];
     let released = 0;
+    let finishReply = () => {};
+    const replyDone = new Promise<void>((resolve) => {
+      finishReply = resolve;
+    });
     const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
     const { client, messages, closed } = await connect(
       {
@@ -283,7 +287,15 @@ describe("voice conversation socket", () => {
         },
         speaker: standInSpeaker().source,
         canTalkIn: async () => true,
-        send: async () => replyOf(""),
+        // A reply that runs until the test lets it end.
+        send: async () => ({
+          events: () => ({
+            async *[Symbol.asyncIterator]() {
+              yield { type: "text_delta" as const, content: "好的。" };
+              await replyDone;
+            },
+          }),
+        }),
         follow: (owner, chatId) => {
           following.push(`${owner} ${chatId}`);
           return () => {
@@ -295,31 +307,63 @@ describe("voice conversation socket", () => {
     );
     client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
     await until(() => messages.some((m) => m.type === "ready"), "ready");
+    // No turn yet: what the chat gets pushes as usual.
+    expect(following).toEqual([]);
+
+    ear.listener().onText("合并了吗？", "");
+    ear.listener().onEndpoint?.();
+    await until(() => following.length === 1, "followed");
     expect(following).toEqual(["guardian chat-1"]);
     expect(released).toBe(0);
+    finishReply();
+    // The reply was read: later messages, such as a task's result, push again.
+    await until(() => released === 1, "released");
+
     client.send(JSON.stringify({ type: "stop" }));
     await closed;
     expect(released).toBe(1);
   });
 
-  it("follows no chat it refuses", async () => {
-    const following: string[] = [];
-    const { client, closed } = await connect(
+  it("lets go of a turn's hold when the conversation ends mid-reply", async () => {
+    const ear = standInTranscriber();
+    let followed = 0;
+    let released = 0;
+    const { client, messages, closed } = await connect(
       {
-        listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
+        listening: {
+          open: async () => ({
+            ok: true,
+            source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
+          }),
+        },
         speaker: standInSpeaker().source,
-        canTalkIn: async () => false,
-        send: async () => replyOf(""),
-        follow: (owner, chatId) => {
-          following.push(`${owner} ${chatId}`);
-          return () => {};
+        canTalkIn: async () => true,
+        // A reply that never ends.
+        send: async () => ({
+          events: () => ({
+            async *[Symbol.asyncIterator]() {
+              await new Promise(() => {});
+            },
+          }),
+        }),
+        follow: () => {
+          followed++;
+          return () => {
+            released++;
+          };
         },
       },
-      { kind: "visitor", accountId: "a", email: "a@example.com" },
+      { kind: "guardian", userId: "seat", via: "cookie" },
     );
     client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+    await until(() => messages.some((m) => m.type === "ready"), "ready");
+    ear.listener().onText("在吗", "");
+    ear.listener().onEndpoint?.();
+    await until(() => followed === 1, "followed");
+    client.send(JSON.stringify({ type: "stop" }));
     await closed;
-    expect(following).toEqual([]);
+    await until(() => released === 1, "released");
+    expect(released).toBe(1);
   });
 
   it("refuses audio before start", async () => {
@@ -508,16 +552,24 @@ describe("voice conversation socket", () => {
       gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
       const followedBy = async (headers: Record<string, string>) => {
         const following: string[] = [];
+        const ear = standInTranscriber();
+        let sent = 0;
         const http: Server = createServer();
         const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
           listening: {
             available: () => true,
             info: async () => ({ available: true, place: null }),
-            open: async () => ({ ok: false, reason: "service-refused" }),
+            open: async () => ({
+              ok: true,
+              source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
+            }),
           },
           speaker: standInSpeaker().source,
           canTalkIn: async () => true,
-          send: async () => replyOf(""),
+          send: async () => {
+            sent++;
+            return replyOf("");
+          },
           dashboardAccess: { isCloudEmailAllowed: () => true },
           follow: (owner, chatId) => {
             following.push(`${owner} ${chatId}`);
@@ -530,11 +582,17 @@ describe("voice conversation socket", () => {
           `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
           { headers },
         );
-        const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
+        const messages: VoiceConversationServerMessage[] = [];
+        client.on("message", (data, isBinary) => {
+          if (!isBinary) messages.push(JSON.parse(data.toString()));
+        });
         await new Promise<void>((resolve) => client.on("open", () => resolve()));
         client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
-        // Listening is refused, after the chat is followed.
-        await closed;
+        await until(() => messages.some((m) => m.type === "ready"), "ready");
+        ear.listener().onText("在吗", "");
+        ear.listener().onEndpoint?.();
+        await until(() => sent === 1, "sent");
+        client.close();
         return following;
       };
       expect(await followedBy({ "x-rome-client": "phone" })).toEqual(["visitor:ada chat-1"]);
