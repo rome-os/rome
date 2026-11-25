@@ -194,7 +194,7 @@ export interface ProviderFailuresDeps {
       body: string;
       level?: "active" | "passive";
       chatId?: string;
-    }): Promise<unknown>;
+    }): Promise<{ kind: string }>;
   };
   delay?: (ms: number) => Promise<void>;
   now?: () => Date;
@@ -717,6 +717,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       await writeOutages([...outages, outage]);
       await deps.notify
         ?.send({ owner, body: outagePushText(outage), level: "active", chatId: noticeChatId })
+        // A refused push resolves with its reason instead of throwing.
+        .then(({ kind }) =>
+          log.info("provider outage push", { chatId: noticeChatId, outcome: kind }),
+        )
         .catch((error: unknown) =>
           log.warn("provider outage push failed", { error: String(error) }),
         );
