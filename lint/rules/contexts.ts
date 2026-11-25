@@ -26,7 +26,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "webchat",
   ],
   apps: ["access", "instance"],
-  chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  chats: ["access", "agent", "apps", "connections", "identity", "participation", "people"],
   concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
   connections: ["apps", "desktops", "instance"],
   desktops: ["access", "instance"],

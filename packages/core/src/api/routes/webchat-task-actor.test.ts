@@ -103,6 +103,7 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
   };
   const deps = {
     webchatRepo: repo,
+    voidAccountCodesIn: async () => undefined,
     appCatalog: { get: () => undefined },
     agentLoader: { find: () => agent, list: () => [agent] },
     agentTurnStreamRegistry: { onSessionChange: () => () => {}, listBySession: () => [] },

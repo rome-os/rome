@@ -36,7 +36,9 @@ export class AccountCodeRepository {
   /**
    * Gives `account` to the person the code belongs to and marks the code used
    * at `now`, in one transaction. When the person already holds the account,
-   * only marks the code. Returns the person's id, or why it wrote nothing.
+   * only marks the code. When another person holds it, only marks the code
+   * and returns `"taken"`: the mark is written although the account is not.
+   * Returns the person's id, or why it added nothing.
    */
   redeem(
     codeHash: string,
@@ -50,8 +52,8 @@ export class AccountCodeRepository {
       if (row.expiresAt.getTime() <= now.getTime()) return { refused: "expired" as const };
       const refused = insertAccountIn(tx, row.personId, account, now);
       if (refused === "unknown") return { refused: "unknown-person" as const };
-      if (refused === "taken") return { refused: "taken" as const };
       tx.update(accountCodes).set({ usedAt: now }).where(eq(accountCodes.codeHash, codeHash)).run();
+      if (refused === "taken") return { refused: "taken" as const };
       return { personId: row.personId };
     });
   }
