@@ -1,0 +1,366 @@
+import Darwin
+import Foundation
+
+final class Admission {
+    private let lock = NSLock()
+    private var active = false
+    private var reason: String?
+    private var exiting = false
+
+    func begin() throws {
+        try lock.withLock {
+            if let reason { throw Failure(reason) }
+            guard !active else { throw Failure("busy") }
+            active = true
+        }
+    }
+
+    func check() throws {
+        try lock.withLock {
+            if let reason { throw Failure(reason) }
+        }
+    }
+
+    func finish() {
+        lock.withLock { active = false }
+    }
+
+    func stop(_ reason: String = "session_stopped") -> [String: Any] {
+        lock.withLock {
+            self.reason = self.reason ?? reason
+            return statusLocked()
+        }
+    }
+
+    func terminate() {
+        lock.withLock {
+            reason = reason ?? "session_stopped"
+            exiting = true
+        }
+    }
+
+    var terminating: Bool { lock.withLock { exiting } }
+
+    func status() -> [String: Any] {
+        lock.withLock { statusLocked() }
+    }
+
+    private func statusLocked() -> [String: Any] {
+        var status: [String: Any] = ["stop": reason == nil ? "running" : active ? "cancel_requested" : "stop_confirmed"]
+        status["reason"] = reason
+        return status
+    }
+}
+
+func socketAddress<T>(_ path: String, _ body: (UnsafePointer<sockaddr>, socklen_t) -> T) throws -> T {
+    var addr = sockaddr_un()
+    let bytes = Array(path.utf8CString)
+    guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { throw Failure("socket_path_limit") }
+    addr.sun_family = sa_family_t(AF_UNIX)
+    let length = MemoryLayout.offset(of: \sockaddr_un.sun_path)! + bytes.count
+    addr.sun_len = UInt8(length)
+    withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: bytes.map { UInt8(bitPattern: $0) }) }
+    return withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { body($0, socklen_t(length)) }
+    }
+}
+
+func readBytes(_ fd: Int32, count: Int, deadline: DispatchTime? = nil) throws -> Data {
+    var buffer = Data(count: count)
+    try buffer.withUnsafeMutableBytes { bytes in
+        var offset = 0
+        while offset < count {
+            if let deadline {
+                var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                guard DispatchTime.now() < deadline else { throw Failure("authentication_failed") }
+                let ready = poll(&event, 1, 50)
+                if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+                guard ready > 0 else { throw Failure("authentication_failed") }
+            }
+            let n = read(fd, bytes.baseAddress!.advanced(by: offset), count - offset)
+            if n < 0, errno == EINTR || (deadline != nil && errno == EAGAIN) { continue }
+            guard n > 0 else { throw Failure("connection_closed") }
+            offset += n
+        }
+    }
+    return buffer
+}
+
+func sendBytes(_ fd: Int32, _ data: Data) throws {
+    try data.withUnsafeBytes { bytes in
+        var offset = 0
+        let deadline = DispatchTime.now() + .seconds(2)
+        while offset < bytes.count {
+            guard DispatchTime.now() < deadline else { throw Failure("connection_closed") }
+            let count = send(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset, MSG_DONTWAIT)
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN {
+                var event = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                _ = poll(&event, 1, 50)
+                continue
+            }
+            guard count > 0 else { throw Failure("connection_closed") }
+            offset += count
+        }
+    }
+}
+
+final class Listener {
+    let state: StateDirectory
+    let socket: FileIdentity
+    let fd: Int32
+
+    init(state: StateDirectory) throws {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw Failure("socket_unavailable") }
+        do {
+            let mask = umask(0o177)
+            defer { umask(mask) }
+            guard state.intact, try socketAddress(state.path + "/helper.sock", { bind(fd, $0, $1) }) == 0 else {
+                throw Failure("socket_unavailable")
+            }
+            guard let socket = state.socketIdentity() else { throw Failure("unsafe_state_directory") }
+            guard listen(fd, 1) == 0 else {
+                if state.socketIdentity() == socket { unlinkat(state.fd, "helper.sock", 0) }
+                throw Failure("socket_unavailable")
+            }
+            self.state = state
+            self.socket = socket
+            self.fd = fd
+        } catch {
+            close(fd)
+            throw error
+        }
+    }
+
+    deinit { close(fd) }
+
+    func removeSocket() {
+        if intact { unlinkat(state.fd, "helper.sock", 0) }
+    }
+
+    var intact: Bool { state.socketIdentity() == socket }
+
+    func acceptHost(_ host: ProcessIdentity, admission: Admission) throws -> (Int32, Peer) {
+        let deadline = DispatchTime.now() + .seconds(10)
+        while DispatchTime.now() < deadline, intact, !admission.terminating, getppid() == host.pid {
+            var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let n = poll(&event, 1, 100)
+            if n == 0 || (n < 0 && errno == EINTR) { continue }
+            guard n > 0, event.revents == POLLIN else { break }
+            let peer = accept(fd, nil, nil)
+            guard peer >= 0 else { continue }
+            if let identity = try? Peer.authenticate(peer, expecting: host) { return (peer, identity) }
+            close(peer)
+        }
+        throw Failure("host_unavailable")
+    }
+}
+
+final class Connection {
+    let fd: Int32
+    let listener: Listener
+    let peer: Peer
+    let admission: Admission
+    private let writer = DispatchQueue(label: "rome.computer-use.writer", qos: .userInitiated)
+    private let output = NSLock()
+    private var pendingBytes = 0
+    private var pendingFrames = 0
+
+    init(fd: Int32, listener: Listener, peer: Peer, admission: Admission) throws {
+        var enabled: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout.size(ofValue: enabled))) == 0 else {
+            close(fd)
+            throw Failure("socket_unavailable")
+        }
+        self.fd = fd
+        self.listener = listener
+        self.peer = peer
+        self.admission = admission
+    }
+
+    deinit { close(fd) }
+
+    func end() {
+        _ = admission.stop("connection_closed")
+        shutdown(fd, SHUT_RDWR)
+    }
+
+    func verify() throws {
+        var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        var byte: UInt8 = 0
+        guard !admission.terminating, listener.intact, getppid() == peer.identity.pid, (try? peer.identity.verify()) != nil,
+              poll(&event, 1, 0) >= 0, Int32(event.revents) & (POLLHUP | POLLERR | POLLNVAL) == 0 else {
+            end()
+            throw Failure("connection_closed")
+        }
+        let peek = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        guard peek > 0 || (peek < 0 && [EAGAIN, EWOULDBLOCK, EINTR].contains(errno)) else {
+            end()
+            throw Failure("connection_closed")
+        }
+    }
+
+    func verifySignedPeer() throws {
+        try verify()
+        guard (try? peer.revalidate()) != nil else {
+            end()
+            throw Failure("connection_closed")
+        }
+    }
+
+    func next() throws -> Request {
+        let lengths = try Wire.lengths(readBytes(fd, count: 8), request: true)
+        return try Wire.request(readBytes(fd, count: lengths.0))
+    }
+
+    func sendNow(_ frame: Data) throws {
+        try verifySignedPeer()
+        try sendBytes(fd, frame)
+    }
+
+    func flush() { writer.sync {} }
+
+    func send(_ frame: Data) throws {
+        let queued = output.withLock {
+            guard pendingFrames < 16, pendingBytes + frame.count <= Wire.imageLimit + 2 * Wire.metadataLimit else { return false }
+            pendingBytes += frame.count
+            pendingFrames += 1
+            return true
+        }
+        guard queued else {
+            end()
+            throw Failure("connection_closed")
+        }
+        writer.async {
+            defer {
+                self.output.withLock {
+                    self.pendingBytes -= frame.count
+                    self.pendingFrames -= 1
+                }
+            }
+            do { try self.sendNow(frame) }
+            catch { self.end() }
+        }
+    }
+}
+
+func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
+           admission: Admission, desktop: Bool) throws {
+    defer { listener.removeSocket() }
+    let (fd, peer) = try listener.acceptHost(host, admission: admission)
+    let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
+    defer { connection.end() }
+
+    let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
+    let handshakeDeadline = DispatchTime.now() + .seconds(5)
+    let authenticated = DispatchSemaphore(value: 0)
+    let access = DesktopAccess()
+    watchdog.setEventHandler {
+        guard (try? connection.verifySignedPeer()) != nil else { return }
+        if authenticated.wait(timeout: .now()) == .success {
+            authenticated.signal()
+            if desktop {
+                do { try access.check() }
+                catch let failure as Failure { _ = admission.stop(failure.code) }
+                catch { _ = admission.stop() }
+            }
+        } else if DispatchTime.now() >= handshakeDeadline {
+            connection.end()
+        }
+    }
+    watchdog.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
+    watchdog.resume()
+    defer { watchdog.cancel() }
+
+    let instance = UUID().uuidString
+    let first = try connection.next()
+    guard first.v == 1, first.method == "handshake",
+          let rawNonce = first.params?.nonce, let nonce = Data(base64Encoded: rawNonce),
+          let rawProof = first.params?.proof, let proof = Data(base64Encoded: rawProof),
+          handshake.verify(proof, role: "host", nonce: nonce) else {
+        try connection.sendNow(Wire.failure(first.id, "authentication_failed"))
+        return
+    }
+    try connection.sendNow(Wire.reply(first.id, result: [
+        "instance": instance, "pid": getpid(),
+        "proof": handshake.proof("helper", nonce: nonce, instance: instance).base64EncodedString(),
+    ]))
+    authenticated.signal()
+
+    let worker = DispatchQueue(label: "rome.computer-use.window", qos: .userInitiated)
+    let windows = Windows(instance: instance, access: access, live: {
+        try connection.verify()
+        try admission.check()
+    }, authorize: {
+        try connection.verifySignedPeer()
+        try admission.check()
+    })
+
+    while true {
+        let request: Request
+        do { request = try connection.next() }
+        catch let failure as Failure {
+            if failure.code == "invalid_request" {
+                try connection.send(Wire.failure(nil, failure.code))
+                continue
+            }
+            if failure.code != "connection_closed" {
+                _ = admission.stop()
+                try connection.send(Wire.failure(nil, failure.code))
+                connection.flush()
+            }
+            return
+        }
+
+        do {
+            guard request.v == 1 else { throw Failure("unsupported_version") }
+            switch request.method {
+            case "status":
+                var status = admission.status()
+                status["instance"] = instance
+                try connection.send(Wire.reply(request.id, result: status))
+            case "cancel":
+                let state = admission.stop()
+                try connection.send(Wire.reply(request.id, result: state))
+            case "windows", "bind", "observe", "act":
+                guard desktop else { throw Failure("desktop_disabled") }
+                try connection.verifySignedPeer()
+                try admission.begin()
+                worker.async {
+                    let response: Data?
+                    do {
+                        let args = request.params
+                        let result: [String: Any]
+                        var image: Wire.Image?
+                        switch request.method {
+                        case "windows":
+                            result = try windows.list(application: args?.application)
+                        case "bind":
+                            guard let window = args?.window, window != 0 else { throw Failure("invalid_request") }
+                            result = try windows.bind(window)
+                        case "observe":
+                            guard let id = args?.binding else { throw Failure("invalid_request") }
+                            (result, image) = try windows.observe(id, screenshot: args?.screenshot ?? false)
+                        default:
+                            guard let id = args?.binding, let ref = args?.element, let action = args?.action else {
+                                throw Failure("invalid_request")
+                            }
+                            result = try windows.act(id, element: ref, action: action, input: args?.value)
+                        }
+                        response = try Wire.reply(request.id, result: result, image: image)
+                    } catch {
+                        response = try? Wire.failure(request.id, (error as? Failure)?.code ?? "internal_error")
+                    }
+                    admission.finish()
+                    if let response { try? connection.send(response) }
+                }
+            default:
+                throw Failure("method_unavailable")
+            }
+        } catch let failure as Failure {
+            if failure.code == "connection_closed" { return }
+            try connection.send(Wire.failure(request.id, failure.code))
+        }
+    }
+}
