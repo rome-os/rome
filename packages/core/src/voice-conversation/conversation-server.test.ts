@@ -400,7 +400,7 @@ describe("voice conversation socket", () => {
           return replyOf("好的。");
         },
         voiceTerms: async () => [],
-        onTeam: async () => team.on,
+        onTeam: () => team.on,
       });
       conversation.client.send(
         JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }),
@@ -419,17 +419,6 @@ describe("voice conversation socket", () => {
       await closed;
       expect(messages.at(-1)).toEqual({ type: "error", reason: "chat-refused" });
       expect(ear.aborted()).toBe(true);
-    });
-
-    it("takes no audio", async () => {
-      const { client, team, ear, messages, closed } = await listeningConversation();
-
-      team.on = false;
-      client.send(Buffer.alloc(320));
-
-      await closed;
-      expect(ear.aborted()).toBe(true);
-      expect(messages.at(-1)).toEqual({ type: "error", reason: "chat-refused" });
     });
 
     it("sends no further turn to the chat", async () => {
@@ -462,7 +451,7 @@ describe("voice conversation socket", () => {
         },
         canTalkIn: async () => true,
         send: async () => replyOf(""),
-        onTeam: async () => false,
+        onTeam: () => false,
       });
 
       client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import { createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
-import { ENTRY_RECHECK_MS } from "./access/entry.js";
+import { ENTRY_RECHECK_MS } from "./access/held-entry.js";
 import { attachDesktopProxy } from "./desktops/desktop-proxy-server.js";
 import { attachTerminalServer, TERMINAL_COMMAND_PRESETS } from "./terminal-server.js";
 import { createTestDb, type TestDb } from "./test/db.js";
@@ -70,7 +70,7 @@ const fakeIntervals = () => rs.useFakeTimers({ toFake: ["setInterval", "clearInt
 
 describe("the terminal", () => {
   beforeEach(() => {
-    TERMINAL_COMMAND_PRESETS[PRESET] = { cmd: "sh", args: ["-c", "cat"] };
+    TERMINAL_COMMAND_PRESETS[PRESET] = { cmd: "sh", args: ["-c", "echo pid $$; exec cat"] };
     const handler = attachTerminalServer(server, testDb.db, dashboardAccess);
     cleanups.push(
       () => handler.close(),
@@ -78,37 +78,29 @@ describe("the terminal", () => {
     );
   });
 
-  it("closes at the recheck", async () => {
+  it("closes at the recheck, and ends its process", async () => {
     fakeIntervals();
-    const { closed } = await connect(`/ws/terminal?preset=${PRESET}`);
+    const { closed, said } = await connect(`/ws/terminal?preset=${PRESET}`);
+    await rs.waitFor(() => expect(said()).toMatch(/pid \d+/), { timeout: 5_000 });
+    const pid = Number(/pid (\d+)/.exec(said())?.[1]);
+    expect(process.kill(pid, 0)).toBe(true);
     removeMember();
     rs.advanceTimersByTime(ENTRY_RECHECK_MS);
-    expect(await closed).toBe(1008);
-  });
-
-  it("takes no input", async () => {
-    const { ws, closed, said } = await connect(`/ws/terminal?preset=${PRESET}`);
-    const type = (data: string) => ws.send(JSON.stringify({ type: "input", data }));
-    type("as a member\r");
-    await rs.waitFor(() => expect(said()).toContain("as a member"), { timeout: 5_000 });
-    removeMember();
-    type("after removal\r");
-    expect(await closed).toBe(1008);
-    expect(said()).not.toContain("after removal");
+    expect(await closed).toBe(1006);
+    await rs.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
   });
 });
 
 describe("the desktop proxy", () => {
-  let received: string[];
+  let upstreamClosed: boolean;
 
   beforeEach(async () => {
-    received = [];
+    upstreamClosed = false;
     const upstream = createServer();
     const wss = new WebSocketServer({ server: upstream });
     wss.on("connection", (ws) => {
-      ws.on("message", (data) => {
-        received.push(data.toString());
-        ws.send(`echo ${data}`);
+      ws.on("close", () => {
+        upstreamClosed = true;
       });
     });
     const before = process.env.ROME_NOVNC_PORT;
@@ -123,22 +115,13 @@ describe("the desktop proxy", () => {
     });
   });
 
-  it("closes at the recheck", async () => {
+  it("closes at the recheck, and its desktop connection with it", async () => {
     fakeIntervals();
     const { closed } = await connect("/desktop-proxy/websockify");
     removeMember();
     rs.advanceTimersByTime(ENTRY_RECHECK_MS);
     expect(await closed).toBe(1006);
-  });
-
-  it("takes no input", async () => {
-    const { ws, closed, said } = await connect("/desktop-proxy/websockify");
-    ws.send("as a member");
-    await rs.waitFor(() => expect(said()).toContain("echo as a member"));
-    removeMember();
-    ws.send("after removal");
-    await closed;
-    expect(received).toEqual(["as a member"]);
+    await rs.waitFor(() => expect(upstreamClosed).toBe(true));
   });
 });
 
@@ -198,15 +181,7 @@ describe("voice input", () => {
     const { closed } = await dictate();
     removeMember();
     rs.advanceTimersByTime(ENTRY_RECHECK_MS);
-    expect(await closed).toBe(1008);
-    expect(aborted).toBe(true);
-  });
-
-  it("takes no audio", async () => {
-    const { ws, closed } = await dictate();
-    removeMember();
-    ws.send(Buffer.alloc(320));
-    expect(await closed).toBe(1008);
-    expect([audio, aborted]).toEqual([1, true]);
+    expect(await closed).toBe(1006);
+    await rs.waitFor(() => expect(aborted).toBe(true));
   });
 });

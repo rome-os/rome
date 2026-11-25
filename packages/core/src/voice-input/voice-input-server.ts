@@ -15,9 +15,8 @@ import {
   voiceInputClientMessageSchema,
 } from "@rome/api-types/voice-input";
 import type { DrizzleDb } from "../db/index.js";
-import { mayEnter, holdEntry } from "../access/entry.js";
-import type { DashboardAllowList } from "../access/team.js";
 import { gateUpgrade } from "../access/ws-guardian-gate.js";
+import type { DashboardAllowList } from "../access/team.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
@@ -46,8 +45,6 @@ export const OPEN_TIMEOUT_MS = 12_000;
 const AUDIO_SLACK_MS = 5_000;
 // The most audio a client may say it recorded before its socket opened.
 const MAX_BUFFERED_MS = 15_000;
-
-const CLOSE_POLICY_VIOLATION = 1008;
 
 const STOP_REASON: Record<TranscriptionFailure, VoiceInputStopReason> = {
   unavailable: "provider-unavailable",
@@ -80,12 +77,9 @@ export function attachVoiceInputServer(
       return;
     }
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((actor) => {
-        if (!actor || socket.destroyed) return;
-        const mayStillEnter = async () => (await mayEnter(actor, dashboardAccess)) !== null;
-        wss.handleUpgrade(req, socket, head, (ws) =>
-          serve(ws, { source, usage, voiceTerms, mayStillEnter }),
-        );
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, { source, usage, voiceTerms }));
       })
       .catch((err) => {
         log.error("voice input upgrade failed", {
@@ -111,11 +105,6 @@ export interface ServeOptions {
   finishTimeoutMs?: number;
   openTimeoutMs?: number;
   quietLimitMs?: number;
-  /**
-   * Whether the person on the socket may still enter. Once it answers false
-   * the dictation ends and takes no more audio. Default: always.
-   */
-  mayStillEnter?: () => Promise<boolean>;
 }
 
 /** Runs one dictation over `ws`. Exported for tests. */
@@ -149,19 +138,10 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
   let stopAt: number | null = null;
   let earlyBytes = 0;
 
-  const entry = holdEntry(options.mayStillEnter ?? (async () => true), () => {
-    if (closed) return;
-    closed = true;
-    ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
-    settle("may-not-enter");
-    stream?.abort();
-  });
-
   const reply = (message: VoiceInputServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
   };
   const settle = (outcome: string) => {
-    entry.release();
     if (limit) clearTimeout(limit);
     if (quiet) clearTimeout(quiet);
     if (finishing) clearTimeout(finishing);
@@ -305,7 +285,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     finish();
   }
 
-  const take = (data: RawData, isBinary: boolean) => {
+  ws.on("message", (data: RawData, isBinary) => {
     if (closed) return;
     if (isBinary) {
       if (!starting && !stream) return close({ type: "error", reason: "bad-request" });
@@ -357,8 +337,7 @@ export function serve(ws: WebSocket, options: ServeOptions): void {
     }
     if (!stream) return close({ type: "error", reason: "bad-request" });
     finish();
-  };
-  ws.on("message", (data: RawData, isBinary) => entry.admit(() => take(data, isBinary)));
+  });
 
   // Asks the provider for the rest of the text.
   function finish() {
