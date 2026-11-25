@@ -82,9 +82,11 @@ function standInTranscriber() {
 /** A speaker that speaks each sentence as 100 ms of silence at once. */
 function standInSpeaker(outcome: "ok" | "not-configured" = "ok") {
   const said: string[] = [];
+  const choices: unknown[] = [];
   let closed = false;
   const source: SpeakerSource = {
-    async open(listener: SpeakerListener) {
+    async open(listener: SpeakerListener, choice) {
+      choices.push(choice);
       if (outcome === "not-configured") return { ok: false, reason: "not-configured" };
       return {
         ok: true,
@@ -106,7 +108,7 @@ function standInSpeaker(outcome: "ok" | "not-configured" = "ok") {
       };
     },
   };
-  return { source, said, closed: () => closed };
+  return { source, said, choices, closed: () => closed };
 }
 
 const replyOf = (text: string): ReplyTurn => ({
@@ -162,6 +164,7 @@ describe("voice conversation socket", () => {
           }),
         },
         speaker: mouth.source,
+        speaking: async () => ({ voice: "Reid", speed: 1.2 }),
         canTalkIn: async () => true,
         send: async (chatId, text, inputId) => {
           inputIds.push(inputId);
@@ -190,6 +193,8 @@ describe("voice conversation socket", () => {
     // The turn is the guardian's, as a typed one is.
     expect(sent).toEqual([{ chatId: "chat-1", text: "合并了吗？", actor: guardian }]);
     expect(mouth.said).toEqual(["好的，已经合并了。"]);
+    // It speaks in the voice and at the speed picked in Settings.
+    expect(mouth.choices).toEqual([{ voice: "Reid", speed: 1.2 }]);
     expect(audio).toEqual([4800]);
     // The turn names the message it was sent as.
     expect(messages).toContainEqual({ type: "turn", text: "合并了吗？", inputId: inputIds[0] });

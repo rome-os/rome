@@ -33,8 +33,16 @@ type SpeakerOpenOutcome =
       detail?: string;
     };
 
+/** How a session speaks, in place of the credential's voice and the provider's pace. */
+export interface SpeakingChoice {
+  voice?: string;
+  speed?: number;
+  /** The main language of the text, which sets the prosody. */
+  language?: string;
+}
+
 export interface SpeakerSource {
-  open(listener: SpeakerListener): Promise<SpeakerOpenOutcome>;
+  open(listener: SpeakerListener, choice?: SpeakingChoice): Promise<SpeakerOpenOutcome>;
 }
 
 export interface SpeakerSourceDeps {
@@ -46,10 +54,10 @@ export interface SpeakerSourceDeps {
 export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
   const retire = deps.credentials.retire?.bind(deps.credentials);
   return {
-    async open(listener) {
+    async open(listener, choice) {
       return renewing(
         listener,
-        (inner) => openOnCredential(deps.credentials, inner),
+        (inner) => openOnCredential(deps.credentials, inner, choice),
         retire,
         deps.now ?? Date.now,
       );
@@ -61,6 +69,7 @@ export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
 async function openOnCredential(
   credentials: SpeechCredentialSource,
   listener: SpeakerListener,
+  choice: SpeakingChoice = {},
 ): Promise<SpeakerOpenOutcome> {
   const outcome = await credentials.get();
   switch (outcome.kind) {
@@ -81,7 +90,9 @@ async function openOnCredential(
           token: granted.token,
           url: granted.url,
           model: granted.model,
-          voice: granted.voice,
+          voice: choice.voice ?? granted.voice,
+          language: choice.language,
+          speed: choice.speed,
         });
         if (!speaker) {
           log.warn("speech provider has no adapter", { provider: granted.provider });

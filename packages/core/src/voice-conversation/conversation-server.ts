@@ -31,7 +31,7 @@ import type { TranscriptionUsageSink } from "../usage/recorder.js";
 import type { TranscriptionStream } from "../voice-input/transcriber.js";
 import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-input-source.js";
 import { readVoiceTerms } from "../voice-input/voice-terms.js";
-import type { SpeakerSource } from "../voice-output/speaker-source.js";
+import type { SpeakerSource, SpeakingChoice } from "../voice-output/speaker-source.js";
 import { createConversation, type ReplyTurn } from "./conversation.js";
 
 const log = createLogger("voice-conversation");
@@ -50,6 +50,8 @@ export interface VoiceConversationDeps {
   /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
   listening: Pick<VoiceInputSource, "open">;
   speaker: SpeakerSource;
+  /** The voice and speed picked in Settings, read as each conversation starts. */
+  speaking?: () => Promise<SpeakingChoice | undefined>;
   /** Whether `chatId` can take spoken turns from the ambient session actor, asked before any session opens. */
   canTalkIn(chatId: string): Promise<boolean>;
   /** Sends the speaker's turn into `chatId` as the message `inputId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
@@ -218,7 +220,10 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       : await deps.canTalkIn(to);
     if (!canTalk) return fail("chat-refused");
     if (closed) return;
-    const spoken = await deps.speaker.open(conversation.speakerListener);
+    const spoken = await deps.speaker.open(
+      conversation.speakerListener,
+      await (deps.speaking ?? (async () => undefined))(),
+    );
     if (closed) {
       if (spoken.ok) spoken.session.close();
       return;

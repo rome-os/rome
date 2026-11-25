@@ -1042,6 +1042,29 @@
         "show": "Show microphones",
         "refused": "The browser blocked the microphone, so it won't list them. Allow it in the browser's site settings."
       }
+    },
+    "voiceConversation": {
+      "title": "Voice conversation",
+      "loadFailed": "Failed to load voice conversation settings",
+      "sampleFailed": "This voice couldn't play. Try again.",
+      "playSample": "Play a sample",
+      "stopSample": "Stop the sample",
+      "voice": {
+        "title": "Conversation voice",
+        "description": "Rome speaks in this voice in a voice conversation, on the web and on iPhone. Picking one plays a sample."
+      },
+      "speed": {
+        "title": "Conversation speed",
+        "description": "How fast Rome speaks in a voice conversation."
+      },
+      "voices": {
+        "Iris": "Female · clear and patient",
+        "Grace": "Female · calm, unhurried American",
+        "Nina": "Female · young and upbeat, British",
+        "Adrian": "Male · deep and composed",
+        "Daniel": "Male · low, steady British baritone",
+        "Reid": "Male · low, unhurried American"
+      }
     }
   },
   "easterEgg": {

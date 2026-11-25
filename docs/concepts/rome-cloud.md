@@ -105,7 +105,8 @@ Voice conversation mode lets a person on the [team](people.md#team) talk with a 
 
 **Contracts:**
 
-- It has no setting and no feature gate. Rome Cloud's voice input list decides it, as it decides the microphone. Rome asks for a speech credential only when a conversation starts.
+- It has no feature gate. Rome Cloud's voice input list decides it, as it decides the microphone. Rome asks for a speech credential only when a conversation starts.
+- Settings picks the voice Rome speaks in, from six of the speech provider's English voices, three female and three male, and how fast, from 0.9 to 1.3 times the voice's own pace. `GET` and `PUT /api/voice-conversation/settings` read and keep them, for anyone on the team. Each conversation reads them as it starts, on the web and in the iOS app. Without a pick, Rome speaks as Iris at the voice's own pace. The picked voice takes the place of the one Rome Cloud names. `POST /api/voice-conversation/preview` speaks a sample sentence in a voice at a speed, on a speech session of its own, and answers a WAV file, so Settings plays a voice as it is picked.
 - With no credential source, Rome says speaking is not set up. It does not fall back to a long-lived provider key.
 - The instance asks `POST /v1/speech/sessions`, as the instance. Rome Cloud answers the provider, its address, the model, the voice, a credential, when the credential expires, and a session id. The credential opens new streams for about an hour.
 - An account holds at most five unexpired speech sessions, and Rome Cloud cannot end one early. So the instance keeps one session and its credential in its settings, and uses it for every conversation, also after a restart. It asks for a new session only when the one it has expires within 5 minutes, or once the provider has refused its credential. A session another sign-in opened is never reused. `GET /api/settings` never shows it, and `PUT /api/settings` cannot write it.
