@@ -256,8 +256,11 @@ describe("Webchat API", () => {
       null,
       { ownerKey: "guardian" },
     );
-    const status = async (actor: typeof guardian | typeof visitor, path: string) =>
-      (await runWithSessionActor(actor, () => app.request(path))).status;
+    const status = async (
+      actor: typeof guardian | typeof visitor,
+      path: string,
+      init?: RequestInit,
+    ) => (await runWithSessionActor(actor, () => app.request(path, init))).status;
 
     for (const actor of [guardian, visitor]) {
       for (const id of ["concierge", "visitor-main", "guardian-task", "task-branch", "shared"]) {
@@ -265,6 +268,17 @@ describe("Webchat API", () => {
         expect(await status(actor, `/chat/sessions/${id}/messages`)).toBe(200);
       }
     }
+
+    // Reading another person's Concierge chat leaves what its owner has not read.
+    const marked = rs.spyOn(deps.webchatRepo, "markSessionRead");
+    for (const [actor, id] of [
+      [visitor, "concierge"],
+      [guardian, "concierge"],
+      [visitor, "shared"],
+    ] as const) {
+      expect(await status(actor, `/chat/sessions/${id}/read`, { method: "POST" })).toBe(200);
+    }
+    expect(marked.mock.calls.flat()).toEqual(["concierge", "shared"]);
 
     const listed = async (actor: typeof guardian | typeof visitor) =>
       (

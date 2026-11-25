@@ -11,6 +11,7 @@ import {
   canOpenChat,
   type ConciergeService,
   isConciergeChat,
+  privateOwnerOf,
   isMainConciergeChat,
   TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
@@ -3211,7 +3212,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const session = await deps.webchatRepo.markSessionRead(sessionId);
+    // What a Concierge or task chat counts as unread is its owner's.
+    const owner = privateOwnerOf(lookup.session);
+    const session =
+      owner === null || owner === (await currentChatOwner())
+        ? await deps.webchatRepo.markSessionRead(sessionId)
+        : lookup.session;
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json({
       sessionId,
