@@ -41,8 +41,6 @@ export interface SubmitOptions extends SendTurnOptions {
   onInputStatus?(status: InputStatusEvent): Promise<void> | void;
   /** Defaults to `next`. */
   priority?: SubmitPriority;
-  /** For `priority: "after"` (e.g. isolated Concierge computer-use turns), stop any running turn so this turn starts immediately without folding or steering. */
-  supersedeRunning?: boolean;
 }
 
 /** Where a submitted input landed, and the turn it lands in. */
@@ -117,8 +115,6 @@ export class AgentInputQueue {
 
   submit(input: AgentTurnInput & { inputId: string }, options: QueueOptions): AgentInputReceipt {
     if (this.closed) throw new Error("Input queue is closed");
-    if (options.computerUseGrant !== undefined)
-      throw new Error("A computer-use grant requires a separate turn.");
     const existing = this.entries.get(input.inputId);
     if (existing) {
       return {
@@ -166,15 +162,6 @@ export class AgentInputQueue {
   /** Whether `turnId` is a turn this queue started. */
   owns(turnId: string): boolean {
     return this.active?.handle.id === turnId;
-  }
-
-  /** Supersedes the queue's active turn while preserving carry-over bookkeeping for its inputs. */
-  supersedeActive(): boolean {
-    const active = this.active;
-    if (!active || active.turn.superseded) return false;
-    active.turn = supersede(active.turn);
-    void active.handle.stop(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
-    return true;
   }
 
   private start(first: Entry): void {

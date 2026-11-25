@@ -171,8 +171,6 @@
   },
   "thisComputer": {
     "label": "电脑操作",
-    "permissions": "屏幕控制权限",
-    "permissionsFailed": "无法打开屏幕控制权限，请确认桌面应用已更新。",
     "auditLog": "电脑操作记录",
     "tooltip": {
       "connected": "Rome 可以操作这台电脑",

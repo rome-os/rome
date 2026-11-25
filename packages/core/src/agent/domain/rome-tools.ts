@@ -13,7 +13,7 @@
 export type ModelToolCallId = string;
 
 /** The groups Rome serves tools in. A provider mounts each group as one server. */
-export const ROME_TOOL_GROUPS = ["actions", "subagents", "skills", "ask_user", "computer"] as const;
+export const ROME_TOOL_GROUPS = ["actions", "subagents", "skills", "ask_user"] as const;
 
 export type RomeToolGroup = (typeof ROME_TOOL_GROUPS)[number];
 
@@ -42,35 +42,10 @@ export interface ModelToolCallContext {
   toolUseId: ModelToolCallId;
 }
 
-export interface RomeToolText {
-  type: "text";
-  text: string;
-}
-
-export interface RomeToolImage {
-  type: "image";
-  mimeType: "image/png" | "image/jpeg";
-  data: string;
-}
-
-export type RomeToolContent = RomeToolText | RomeToolImage;
-
-/** Image results start with text metadata so existing text callers retain their first block. */
+/** Value object. A tool's answer as the adapter relays it to the model. */
 export interface RomeToolResult {
-  content: RomeToolText[] | [RomeToolText, ...RomeToolContent[]];
+  content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
-}
-
-/** Image bytes belong to model input, never the persisted activity trace. */
-export function romeToolTraceOutput(result: RomeToolResult): RomeToolResult {
-  return {
-    content: result.content.map((item) =>
-      item.type === "text"
-        ? item
-        : { type: "text", text: `[${item.mimeType} image omitted from activity]` },
-    ),
-    ...(result.isError === undefined ? {} : { isError: result.isError }),
-  };
 }
 
 export type RomeToolHandler = (

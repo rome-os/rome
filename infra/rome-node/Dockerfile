@@ -5,7 +5,6 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.json ./
 COPY packages/ui/ packages/ui/
 COPY packages/web/src/lib/theme.ts packages/web/src/lib/themes.ts packages/web/src/lib/stored-preference.ts packages/web/src/lib/
 COPY packages/rome-node-core/ packages/rome-node-core/
-COPY packages/rome-node-core-darwin-arm64/ packages/rome-node-core-darwin-arm64/
 COPY packages/rome-node-ui/ packages/rome-node-ui/
 COPY packages/rome-node-cli/ packages/rome-node-cli/
 COPY packages/rome-node-web/ packages/rome-node-web/

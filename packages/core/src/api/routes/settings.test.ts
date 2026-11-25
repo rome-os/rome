@@ -14,7 +14,6 @@ import {
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
-import { computerUseApprovalKey } from "../../core/computer-use-approvals.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 
@@ -38,15 +37,6 @@ describe("Settings API", () => {
   });
 
   afterEach(() => testDb.close());
-
-  it("keeps durable computer-use approvals outside the generic settings API", async () => {
-    const key = computerUseApprovalKey({ userId: "guardian" }, "local-device", "local");
-    expect((await putSettings(app, { [key]: "forged", theme: "dark" })).status).toBe(400);
-    expect(await deps.settingsRepo.get("theme")).toBeNull();
-    await deps.settingsRepo.set(key, "stored-approval");
-    expect(await (await app.request("/settings")).json()).not.toHaveProperty(key);
-    expect(await deps.settingsRepo.get(key)).toBe("stored-approval");
-  });
 
   it("validates and persists the Codex credits preference and refreshes availability", async () => {
     const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);

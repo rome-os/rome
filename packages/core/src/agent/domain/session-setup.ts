@@ -24,11 +24,7 @@ export interface SessionSetup {
  * same way, different when the instructions, the identity or a tool changed.
  */
 export function setupFingerprint(setup: SessionSetup): string {
-  // Omit the optional computer group when empty so existing sessions do not
-  // renew until computer-use tools are actually mounted for the agent.
-  const tools = ROME_TOOL_GROUPS.filter(
-    (group) => group !== "computer" || setup.tools[group].length > 0,
-  ).map((group) => [
+  const tools = ROME_TOOL_GROUPS.map((group) => [
     group,
     setup.tools[group].map(({ name, description, inputSchema }) => [
       name,

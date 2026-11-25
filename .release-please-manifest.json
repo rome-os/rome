@@ -5,6 +5,5 @@
   "packages/lib": "0.0.4",
   "packages/web-content": "0.1.29",
   "packages/rome-node-cli": "0.1.11",
-  "packages/rome-node-core": "0.1.8",
-  "packages/rome-node-core-darwin-arm64": "0.1.8"
+  "packages/rome-node-core": "0.1.8"
 }
