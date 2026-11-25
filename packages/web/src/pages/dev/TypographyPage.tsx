@@ -233,13 +233,13 @@ function buildRoleSamples(): RoleSampleDef[] {
       lines: [
         {
           lang: "en",
-          text: ["chat", "activity", "people", "projects", "apps", "store", "settings"]
+          text: ["chat", "activity", "memory", "projects", "apps", "store", "settings"]
             .map((key) => enCommon(`nav.${key}`))
             .join("   "),
         },
         {
           lang: "zh",
-          text: ["chat", "activity", "people", "projects", "apps", "store", "settings"]
+          text: ["chat", "activity", "memory", "projects", "apps", "store", "settings"]
             .map((key) => zhCommon(`nav.${key}`))
             .join("   "),
         },

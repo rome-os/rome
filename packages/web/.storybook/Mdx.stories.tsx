@@ -10,10 +10,7 @@ function StorybookDevIndex() {
       <p className="mt-2 text-ui text-muted-foreground">
         Use Storybook’s Dev/Design group to open another design page.
       </p>
-      <Link
-        to="/dev/mdx?doc=people-page"
-        className="mt-6 inline-block text-ui text-foreground hover:underline"
-      >
+      <Link to="/dev/mdx" className="mt-6 inline-block text-ui text-foreground hover:underline">
         Design docs
       </Link>
     </main>
@@ -25,7 +22,7 @@ const meta = {
   component: MdxDocsPage,
   decorators: [
     (Story) => (
-      <MemoryRouter initialEntries={["/dev/mdx?doc=people-page"]}>
+      <MemoryRouter initialEntries={["/dev/mdx"]}>
         <Routes>
           <Route path="/dev" element={<StorybookDevIndex />} />
           <Route path="/dev/mdx" element={<Story />} />

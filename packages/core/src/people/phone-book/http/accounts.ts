@@ -19,9 +19,6 @@ import type { PhoneBookDeps } from "../deps.js";
 //
 // A contacts list: every account, ordered by name, carrying nothing about what
 // anyone said.
-//
-// It is a read. Placing an account is a write on the person's own route;
-// dismissing and restoring one are `./account-decisions.ts`.
 
 export function accountsRoutes(deps: PhoneBookDeps): Hono {
   const app = new Hono();

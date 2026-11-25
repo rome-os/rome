@@ -83,7 +83,7 @@ export type MergeResult = { merged: true; links: number } | { merged: false; rea
 
 /** Why a merge did not happen. "unknown-*" describes an id that names nobody,
  *  and "guardian-source" a person who exists and stays. */
-export type MergeRefusal = "same-person" | "unknown-target" | "unknown-source" | "guardian-source";
+type MergeRefusal = "same-person" | "unknown-target" | "unknown-source" | "guardian-source";
 
 /** What a {@link PeopleRepository.delete} attempt did: removed the person and
  *  returned this many accounts to strangers, or refused because the id names

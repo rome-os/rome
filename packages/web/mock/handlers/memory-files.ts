@@ -5,10 +5,9 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
  * core seeds from `packages/core/memory.example`, filled in as if Rome had been
  * running for a while against the People fixtures.
  *
- * The relationship profiles are the reason this exists: a person's dossier
- * links to `memory/relationship/<person-id>.md`, and that link led nowhere in
- * mock mode until this tree served it. `memoryProfilePath` below is what keeps
- * the two surfaces from disagreeing about who has a profile.
+ * A person's `memoryPath` points at `memory/relationship/<person-id>.md`, and
+ * `memoryProfilePath` below reads it off this tree, so the people listing and
+ * the Memory page agree about who has a profile.
  */
 
 /**
@@ -171,8 +170,8 @@ export const memoryTree: MockFsNode[] = [
 /**
  * Where a person's profile lives, or null when nothing has been written about
  * them — the fixture stand-in for the relationship-dir read core answers
- * `memoryPath` from. Reading it off the tree is what keeps the dossier's
- * "Memory profile" link from pointing at a file the browser cannot open.
+ * `memoryPath` from. Reading it off the tree keeps `memoryPath` from naming a
+ * file the Memory page cannot open.
  */
 export function memoryProfilePath(personId: string): string | null {
   const path = `memory/relationship/${personId}.md`;
