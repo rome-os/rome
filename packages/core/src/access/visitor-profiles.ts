@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { visitorProfiles } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 
@@ -33,5 +33,16 @@ export class VisitorProfilesRepository {
       .from(visitorProfiles)
       .where(inArray(visitorProfiles.accountId, [...accountIds]));
     return new Map(rows.map(({ accountId, ...profile }) => [accountId, profile]));
+  }
+
+  /** The Rome Cloud account that last signed in with `email`, or null when none has. */
+  async accountIdOf(email: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ accountId: visitorProfiles.accountId })
+      .from(visitorProfiles)
+      .where(eq(sql`lower(trim(${visitorProfiles.email}))`, email.trim().toLowerCase()))
+      .orderBy(desc(visitorProfiles.updatedAt))
+      .limit(1);
+    return row?.accountId ?? null;
   }
 }
