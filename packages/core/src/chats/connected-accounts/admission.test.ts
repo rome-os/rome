@@ -9,6 +9,7 @@ import { tokenPaste } from "../../connections/schemes.js";
 import type { ConnectionDescriptor, Talker } from "../../connections/types.js";
 import { AdmissionTimedOut, OrderedAdmission } from "./admission.js";
 import { connectionPorts } from "./connection-ports.js";
+import type { Entry } from "../../participation/entry.js";
 
 describe("a channel's Connection across epochs", () => {
   let testDb: TestDb | undefined;
@@ -200,6 +201,30 @@ describe("OrderedAdmission", () => {
     await expect(stuck).rejects.toBeInstanceOf(AdmissionTimedOut);
     await expect(next).resolves.toBeUndefined();
     expect(heard).toEqual(["next"]);
+  });
+
+  it("asks the entry once about an admitted message, and never about one it leaves out", async () => {
+    const ADA: Entry = { kind: "entered", person: "Ada" };
+    const asked: string[] = [];
+    const admission = new OrderedAdmission(
+      async (_id, _kind, message) => message.messageId !== "left-out",
+      {},
+      async (connectionId, message) => {
+        asked.push(`${connectionId}/${message.messageId}`);
+        return message.messageId === "ada" ? ADA : { kind: "unknown" };
+      },
+    );
+    const heard: unknown[] = [];
+    for (const id of ["ada", "sam", "left-out"]) {
+      await admission.deliver(connection, inbound(id), async (message, entry) => {
+        heard.push([message.messageId, entry]);
+      });
+    }
+    expect(asked).toEqual(["conn-1/ada", "conn-1/sam"]);
+    expect(heard).toEqual([
+      ["ada", ADA],
+      ["sam", { kind: "unknown" }],
+    ]);
   });
 
   it("resolves a delivery admission refuses, which Rome leaves out", async () => {

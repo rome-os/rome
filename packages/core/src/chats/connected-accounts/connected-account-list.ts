@@ -9,6 +9,7 @@ import type { Connection } from "../../connections/types.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { Accounts } from "../accounts/accounts.js";
 import type { Channel, Channels } from "./connected-account.js";
+import { type ReadBack, readingBack } from "./admission.js";
 import { type ChannelOf, connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
 import { linkedInMessages } from "../history/linkedin-messages.js";
 import { whatsAppMessages } from "../history/whatsapp-messages.js";
@@ -32,6 +33,11 @@ import { whatsAppMessages } from "../history/whatsapp-messages.js";
  * its whole address book per call serves every caller from one read of it, and
  * two instances of one book is two folds of it.
  *
+ * Every channel's history, whichever store answers it, runs `readBack` on
+ * each page before the page is handed on. It is applied here, to every channel
+ * the list holds, and in `joinLaterChannel`, so no channel's history is read
+ * without it.
+ *
  * Build it once per registry: each build's inbound ports admit every message
  * the registry's Talks deliver (`connectionPorts`).
  */
@@ -52,6 +58,9 @@ export function channelList(deps: {
   laterChannels?: ReadonlyArray<{ name: string; connectionKind: string }>;
   /** Channels Rome serves itself, which no Connection backs, such as webchat. */
   own?: readonly Channel[];
+  /** Runs on each page any channel's history answers, before the page is
+   *  handed on. */
+  readBack?: ReadBack;
 }): Channel[] {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
@@ -87,7 +96,13 @@ export function channelList(deps: {
       if (channel) channels.push(channel);
     }
   }
-  return channels;
+  return channels.map((channel) => readBackOn(channel, deps.readBack));
+}
+
+/** `channel` with `readBack` run on every page its history answers. */
+function readBackOn(channel: Channel, readBack: ReadBack | undefined): Channel {
+  if (!readBack || !channel.messages) return channel;
+  return { ...channel, messages: readingBack(channel.messages, readBack) };
 }
 
 /**
@@ -98,7 +113,7 @@ export function channelList(deps: {
  * Build it once per registry and name, as `channelList` does for the first
  * channel of each connection kind: its inbound port runs admission for every message.
  */
-export function laterChannel(
+function laterChannel(
   connections: ConnectionPortsDeps,
   connectionKind: string,
   name: string,
@@ -119,12 +134,14 @@ export function laterChannel(
  * Connection, so each message still arrives once.
  */
 export function joinLaterChannel(
-  deps: ConnectionPortsDeps & { channelOf: ChannelOf; channels: Channel[] },
+  deps: ConnectionPortsDeps & { channelOf: ChannelOf; channels: Channel[]; readBack?: ReadBack },
   connection: Pick<Connection, "id" | "connectionKind">,
 ): Channel | null {
   const name = deps.channelOf(connection);
   if (name === null || deps.channels.some((channel) => channel.name === name)) return null;
-  const channel = laterChannel(deps, connection.connectionKind, name);
-  if (channel) deps.channels.push(channel);
+  const later = laterChannel(deps, connection.connectionKind, name);
+  if (!later) return null;
+  const channel = readBackOn(later, deps.readBack);
+  deps.channels.push(channel);
   return channel;
 }

@@ -45,7 +45,9 @@ describe("modelResolutionRequest", () => {
   });
 
   it("runs a selection's strength on Codex while every chat is on Rome credits", () => {
-    expect(modelResolutionRequest("claude-sonnet", undefined, { tier: "large" }, true)).toEqual({
+    expect(
+      modelResolutionRequest("anthropic/claude-sonnet-5-5", undefined, { tier: "large" }, true),
+    ).toEqual({
       kind: "exact",
       providerId: "openai",
       model: "gpt-6-luna",
@@ -78,7 +80,7 @@ describe("modelResolutionRequest", () => {
   });
 
   it("uses the provider's model ID rather than the WebChat selection slug", () => {
-    expect(modelResolutionRequest("gpt-5-6-terra", undefined, config)).toEqual({
+    expect(modelResolutionRequest("openai/gpt-5.6-terra", undefined, config)).toEqual({
       kind: "exact",
       providerId: "openai",
       model: "gpt-5.6-terra",

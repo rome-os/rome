@@ -26,6 +26,7 @@ import {
   slackSenderId,
   slackUserIdOf,
   splitSlackText,
+  threadOfMessage,
 } from "../slack/slack.js";
 import { isDepositedFor } from "./deposit.js";
 import {
@@ -43,7 +44,11 @@ import { SlackMemberChannels } from "./channels.js";
 import { compareTs } from "./timeline-order.js";
 import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 import type { Message } from "../../message.js";
-import { RecordingStopped } from "../../types.js";
+import {
+  type PrivateMessageOptions,
+  PrivateMessageRefused,
+  RecordingStopped,
+} from "../../types.js";
 
 const log = createLogger("slack-app");
 
@@ -73,6 +78,10 @@ const HISTORY_PAGE = 15;
 const HISTORY_MAX_WAIT_MS = 60 * 1000;
 /** Slack's refusals that mean the app may not read a conversation. */
 const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
+
+/** Slack's refusals of a private message that are about the member, not the
+ *  app: one who is not in the chat cannot be shown it there. */
+const NOT_SHOWN_PRIVATELY = new Set(["user_not_in_channel"]);
 
 /** One frame drained from the instance's mailbox. */
 export interface MailboxFrame {
@@ -142,12 +151,12 @@ function withinRead(ts: string, read: TalkHistoryRead): boolean {
 
 /**
  * The connection's `Message` for `kept`, a message as the connection reads
- * it, said to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * it, said to the bot account `receivedBy`, through an app when `viaApp`. Platform facts only: Rome works out whom it
  * addresses (docs/domains/connections.md#message). The app hears a group only
  * when it is mentioned, so a mention lists the bot's account; no other account
  * a message mentions is listed.
  */
-export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
+export function messageOf(kept: ChannelMessage, receivedBy: string, viaApp = false): Message {
   const direct = kept.thread?.kind === "dm";
   return {
     id: kept.messageId,
@@ -162,6 +171,7 @@ export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
       accountId: kept.senderId,
       ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
       ...(kept.senderUsername !== undefined ? { handle: kept.senderUsername } : {}),
+      ...(viaApp ? { viaApp } : {}),
     },
     content: { text: kept.text, attachments: kept.attachments },
     receivedBy,
@@ -330,7 +340,11 @@ export class SlackAppAdapter {
     if (!this.handler) return { status: 500 };
     try {
       await this.handler(
-        messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)),
+        messageOf(
+          message,
+          slackSenderId(this.config.teamId, this.config.botUserId),
+          event.bot_id !== undefined,
+        ),
       );
     } catch (error) {
       if (error instanceof RecordingStopped) {
@@ -410,6 +424,42 @@ export class SlackAppAdapter {
       firstTs ??= sent.ts;
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
+  }
+
+  /** Posts `text` in `named` that only member `accountId` sees, in the
+   *  thread of the message it answers when that message is in one. Unlike
+   *  `send`, an answer to a message at the top of the chat starts no thread:
+   *  Slack shows such a message in a thread only once the thread has replies.
+   *  Slack refuses it for a member who is not in the chat, which reads as
+   *  {@link PrivateMessageRefused}. */
+  async sendOnlyTo(
+    named: ChatId,
+    accountId: string,
+    text: string,
+    options: PrivateMessageOptions = {},
+  ): Promise<void> {
+    const replyTo = replyToShaped("slack", options.replyToMessageId, SLACK_MESSAGE_ID);
+    const chatId = named.startsWith("#")
+      ? await this.memberChannels.resolve(named, this.abort.signal, { fresh: true })
+      : named;
+    const parsed = parseSlackChatId(chatId);
+    const channelId = parsed.channelId;
+    const threadTs = parsed.threadTs ?? threadOfMessage(replyTo);
+    const user = slackUserIdOf(accountId.trim());
+    try {
+      for (const chunk of splitSlackText(text.trim())) {
+        await this.config.api.postEphemeral(
+          this.config.teamId,
+          { channel: channelId, user, markdown: chunk, threadTs },
+          this.abort.signal,
+        );
+      }
+    } catch (error) {
+      if (error instanceof SlackApiError && NOT_SHOWN_PRIVATELY.has(error.code)) {
+        throw new PrivateMessageRefused(accountId, error.code, { cause: error });
+      }
+      throw error;
+    }
   }
 
   /** Reacts to message `messageId` in `chatId` with `emoji`, as the app's

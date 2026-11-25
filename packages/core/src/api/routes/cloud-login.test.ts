@@ -62,7 +62,8 @@ import {
 } from "../../instance/instance-identity.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { CloudProfileService } from "../../instance/cloud-profile.js";
-import { guardianAuth, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { guardianAuth, identities, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { listMembers, memberContext } from "../../access/application/members.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
@@ -82,6 +83,7 @@ beforeEach(() => {
   testDb.db.delete(persons).run();
   testDb.db.delete(settings).run();
   testDb.db.delete(visitorProfiles).run();
+  testDb.db.delete(identities).run();
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
@@ -626,6 +628,18 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
   });
 
+  it("makes the guardian with the seat's email as their only account", async () => {
+    await signInFresh({ name: "Alex Doe", email: "Alex@Example.com" });
+
+    expect(await listMembers(memberContext(testDb.db))).toEqual([
+      {
+        person: expect.objectContaining({ name: "Alex Doe" }),
+        role: "guardian",
+        accounts: [{ platform: "rome-cloud-email", accountId: "alex@example.com" }],
+      },
+    ]);
+  });
+
   it("falls back to the email local part when the id_token has no name claim", async () => {
     const { deps } = await signInFresh({ email: "alex.doe@example.com" });
 
@@ -1126,7 +1140,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const visitorState = authorizeUrl.searchParams.get("state") as string;
     const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`);
     expect(done.status).toBe(302);
-    expect(done.headers.get("location")).toBe("/");
+    // Where the guardian's sign-in lands, so the page follows the stored return.
+    expect(done.headers.get("location")).toBe("/?cloud=success");
     expect(done.headers.get("set-cookie")).toContain(`${VISITOR_COOKIE_NAME}=`);
   });
 

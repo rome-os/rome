@@ -17,7 +17,8 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
-import { createWebchatRuntime, openToolOf } from "./webchat.js";
+import { createWebchatRuntime as createRuntime, openToolOf } from "./webchat.js";
+import { asGuardian, GUARDIAN } from "../../test/signed-in.js";
 import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
 import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -45,6 +46,7 @@ import type {
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import {
+  accountCodes,
   chatMessages,
   conciergeMessageTurns,
   guardianAuth,
@@ -61,6 +63,26 @@ import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
 import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
 import { showCardTools } from "../../core/show-card-tool.js";
+import { accountCodesVoidedIn } from "../../chats/connected-accounts/account-code-admission.js";
+import { AccountCodeRepository } from "../../identity/account-code-repository.js";
+import {
+  accountCodeContext,
+  accountCodeIssued,
+  accountCodeRedeemed,
+  AccountCodeUsedError,
+} from "../../identity/application/account-codes.js";
+import { createIdentity } from "../../identity/identity.js";
+
+// The guardian's dashboard, unless a test runs a request as someone else.
+function createWebchatRuntime(...args: Parameters<typeof createRuntime>) {
+  const built = createRuntime(...args);
+  asGuardian(built.routes);
+  const { runtime } = built;
+  const { canSendSpoken, sendSpoken } = runtime;
+  runtime.canSendSpoken = (...sent) => runWithSessionActor(GUARDIAN, () => canSendSpoken(...sent));
+  runtime.sendSpoken = (...sent) => runWithSessionActor(GUARDIAN, () => sendSpoken(...sent));
+  return built;
+}
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -165,7 +187,6 @@ describe("Webchat API", () => {
     expect(await list({ ...visitor, email: "changed@example.com" }, "mine")).toEqual([visitorId]);
     expect(await list(otherVisitor, "mine")).toEqual([otherId]);
     expect(await list({ kind: "anonymous" }, "mine")).toEqual([]);
-    expect(await (await app.request("/chat/sessions?scope=mine")).json()).toEqual([]);
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
@@ -593,6 +614,12 @@ describe("Webchat API", () => {
       "No dashboard chat",
     );
     await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    // An app's own work, such as its endpoint for another service's webhook.
+    await expect(
+      webchatCaller.run({ actor: { kind: "anonymous" }, chatId: null }, () =>
+        channel.send!.send("concierge" as never, { text: "hi" }),
+      ),
+    ).resolves.toBeTruthy();
     await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 
@@ -1213,6 +1240,12 @@ describe("Webchat API", () => {
       ).toHaveLength(2);
 
       // The guardian's own message, as their composer sends it: said by no agent.
+      await expect(runtime.sendAsGuardian(id, "Before a guardian.")).rejects.toThrow(
+        "No guardian to send as",
+      );
+      await testDb.db
+        .insert(guardianAuth)
+        .values({ id: "seat", userId: "seat", passwordHash: "unused", createdAt: new Date() });
       await runtime.sendAsGuardian(id, "Help me follow Gmail.");
       const inputs3 = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
       expect(inputs3).toHaveLength(3);
@@ -2175,9 +2208,6 @@ describe("Webchat API", () => {
         },
       });
       expect(creationRecords[0].attributes).not.toHaveProperty("name");
-      // No ambient session actor in this harness — the attributes must be
-      // absent, not empty, mirroring the action_executions contract.
-      expect(creationRecords[0].attributes).not.toHaveProperty("actorKind");
       expect(JSON.stringify(creationRecords[0])).not.toContain("Private title");
     } finally {
       stdoutSpy.mockRestore();
@@ -2351,7 +2381,6 @@ describe("Webchat API", () => {
         },
       });
       expect(deletionRecords[0].attributes).not.toHaveProperty("sessionName");
-      expect(deletionRecords[0].attributes).not.toHaveProperty("actorKind");
       expect(JSON.stringify(deletionRecords[0])).not.toContain("Private title");
       expect(JSON.stringify(deletionRecords[0])).not.toContain("Private message");
     } finally {
@@ -2664,7 +2693,11 @@ describe("Webchat API", () => {
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       // A stored selection does not change the key the runtime session is under.
-      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol", "owner");
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        session.id,
+        "openai/gpt-5.6-sol",
+        "owner",
+      );
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
     });
   });
@@ -2869,23 +2902,23 @@ describe("Webchat API", () => {
         }),
       )
     ).json()) as { id: string };
-    const send = (headers: Record<string, string>, actor?: typeof guardian) => {
-      const request = () =>
+    const member = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const send = (headers: Record<string, string>, actor: typeof guardian | typeof member) =>
+      runWithSessionActor(actor, () =>
         app.request(`/chat/sessions/${session.id}/turns`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify({ text: "battery?" }),
-        });
-      return actor ? runWithSessionActor(actor, request) : request();
-    };
+        }),
+      );
     expect((await send({ "x-rome-device": "dev-1" }, guardian)).status).toBe(200);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-1");
-    // No header, a malformed one, or no guardian session: no asking device.
+    // No header, a malformed one, or another person's session: no asking device.
     await send({}, guardian);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
     await send({ "x-rome-device": "dev 1" }, guardian);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
-    await send({ "x-rome-device": "dev-1" });
+    await send({ "x-rome-device": "dev-1" }, member);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
     expect(sent).toHaveLength(4);
   });
@@ -3407,7 +3440,7 @@ describe("Webchat API", () => {
       "Calendar",
       undefined,
       undefined,
-      "claude-sonnet",
+      "anthropic/claude-sonnet-5-5",
       undefined,
       "core:concierge",
     );
@@ -3418,7 +3451,7 @@ describe("Webchat API", () => {
     expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
     expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1", { replace: true });
     expect(init).toMatchObject({
-      selectionId: "claude-sonnet",
+      selectionId: "anthropic/claude-sonnet-5-5",
       threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
     });
     expect(String(init?.contextSuffix)).toContain("## Guardian");
@@ -4975,7 +5008,11 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         followDefault: async (chatId: string) => {
-          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna", "owner");
+          await deps.webchatRepo.updateSessionLargeModelSelection(
+            chatId,
+            "openai/gpt-6-luna",
+            "owner",
+          );
           return null;
         },
         conciergeChat: async () => null,
@@ -4985,7 +5022,7 @@ describe("Webchat API", () => {
         "Quota",
         undefined,
         undefined,
-        "claude-sonnet",
+        "anthropic/claude-sonnet-5-5",
         undefined,
         "core:concierge",
       );
@@ -5000,7 +5037,7 @@ describe("Webchat API", () => {
       expect(sent.status).toBe(200);
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.objectContaining({ selectionId: "openai/gpt-6-luna" }),
       );
     });
 
@@ -5034,7 +5071,7 @@ describe("Webchat API", () => {
           "Quota",
           undefined,
           undefined,
-          id === "concierge" ? "claude-opus-5-5" : "claude-sonnet",
+          id === "concierge" ? "anthropic/claude-opus-5-5[1m]" : "anthropic/claude-sonnet-5-5",
           undefined,
           id === "concierge" ? "core:concierge" : "main",
           undefined,
@@ -5053,15 +5090,70 @@ describe("Webchat API", () => {
         const stream = await (await app.request(`/chat/turns/${turnId}/stream`)).text();
         if (id === "ordinary-quota") expect(stream).toContain("quota_exhausted");
         expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
-          id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+          id === "concierge" ? "openai/gpt-6.1-sol" : "anthropic/claude-sonnet-5-5",
         );
         expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.objectContaining({
-            selectionId: id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+            selectionId: id === "concierge" ? "openai/gpt-6.1-sol" : "anthropic/claude-sonnet-5-5",
             // A Concierge chat runs at its agent's effort, whatever the send asks.
             reasoningEffort: id === "concierge" ? undefined : "high",
           }),
+        );
+      }
+    });
+
+    it("stores one qualified key, freezes legacy picks, and retains unknown saved values", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      const app = createWebchatRuntime(deps).routes;
+      const id = await newSession(app);
+      const pick = (value: string) =>
+        app.request(`/chat/sessions/${id}/model`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ largeModelSelection: value }),
+        });
+      for (const value of ["claude-opus", "anthropic/claude-opus-4-8[1m]"]) {
+        expect(await (await pick(value)).json()).toMatchObject({
+          largeModelSelection: "anthropic/claude-opus-4-8[1m]",
+        });
+      }
+      expect((await pick("opus")).status).toBe(400);
+      expect((await pick("unknown")).status).toBe(400);
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        id,
+        "unrecognized-old-choice",
+        "owner",
+      );
+      expect(await (await app.request(`/chat/sessions/${id}`)).json()).toMatchObject({
+        largeModelSelection: "unrecognized-old-choice",
+      });
+    });
+
+    it("keeps the same qualified key through JSON creation and multipart validation", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      const app = createWebchatRuntime(deps).routes;
+      const created = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Fixed",
+          projectPath: "default",
+          largeModelSelection: "openai/gpt-6.1-sol",
+        }),
+      });
+      expect(created.status).toBe(200);
+      const chat = (await created.json()) as { id: string; largeModelSelection: string };
+      expect(chat.largeModelSelection).toBe("openai/gpt-6.1-sol");
+      for (const value of ["", new File(["not a choice"], "model.txt")]) {
+        const body = new FormData();
+        body.set("text", "Keep my draft");
+        body.set("largeModelSelection", value);
+        expect(
+          (await app.request(`/chat/sessions/${chat.id}/turns`, { method: "POST", body })).status,
+        ).toBe(400);
+        expect((await deps.webchatRepo.getSession(chat.id))?.largeModelSelection).toBe(
+          "openai/gpt-6.1-sol",
         );
       }
     });
@@ -5089,13 +5181,15 @@ describe("Webchat API", () => {
         expect.objectContaining({ selectionId: null }),
       );
 
-      const picked = await pick("gpt-6-luna");
+      const picked = await pick("openai/gpt-6-luna");
       expect(picked.status).toBe(200);
-      await expect(picked.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-luna" });
+      await expect(picked.json()).resolves.toMatchObject({
+        largeModelSelection: "openai/gpt-6-luna",
+      });
       await drainTurn(app, await send("second"));
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.objectContaining({ selectionId: "openai/gpt-6-luna" }),
       );
 
       // Auto clears the pick, and the next acquire clears it on a live session.
@@ -5110,7 +5204,7 @@ describe("Webchat API", () => {
       expect((await pick("gpt-99")).status).toBe(400);
       expect((await pick(null)).status).toBe(400);
       await deps.settingsRepo.set("enableModelSelector", false);
-      expect((await pick("gpt-6-luna")).status).toBe(409);
+      expect((await pick("openai/gpt-6-luna")).status).toBe(409);
       await deps.webchatRepo.createSession("concierge", "Concierge");
       const conciergePick = await app.request("/chat/sessions/concierge/model", {
         method: "PATCH",
@@ -5119,7 +5213,7 @@ describe("Webchat API", () => {
       });
       expect(conciergePick.status).toBe(200);
       expect((await deps.webchatRepo.getSession("concierge"))?.largeModelSelection).toBe(
-        "gpt-6-luna",
+        "openai/gpt-6-luna",
       );
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
@@ -7019,6 +7113,37 @@ describe("Webchat API", () => {
       );
     });
 
+    it("stores written feedback without forking an unknown saved model choice", async () => {
+      const runForked = rs.fn();
+      deps.agentRunner = { run: deps.agentRunner.run.bind(deps.agentRunner), runForked };
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        SESSION_ID,
+        "unknown-old-choice",
+        "owner",
+      );
+      await deps.webchatRepo.addMessage(
+        "unknown-feedback-user",
+        SESSION_ID,
+        "user",
+        JSON.stringify([{ type: "text", content: "Rated exchange" }]),
+        TURN_ID,
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const response = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: "negative", comment: "Please keep this feedback" }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        feedback: { comment: "Please keep this feedback" },
+      });
+      expect(runForked).not.toHaveBeenCalled();
+      expect((await deps.webchatRepo.getSession(SESSION_ID))?.largeModelSelection).toBe(
+        "unknown-old-choice",
+      );
+    });
+
     it("stores feedback but skips processing when the rated exchange has no chat text", async () => {
       // TURN_ID is anchored by a trace row only (see anchorTurn). Without a
       // persisted user/assistant exchange the fork prompt cannot quote the
@@ -7829,7 +7954,11 @@ describe("Webchat API", () => {
 
     it("runs a branch's own stored selection on its next send, not the first message's", async () => {
       await deps.settingsRepo.set("enableModelSelector", true);
-      await deps.webchatRepo.updateSessionLargeModelSelection(PROMOTED_ID, "gpt-6-luna", "kept");
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        PROMOTED_ID,
+        "openai/gpt-6-luna",
+        "kept",
+      );
       rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
       let selectionId: unknown = "unset";
       deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
@@ -7858,7 +7987,7 @@ describe("Webchat API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
       });
-      expect(selectionId).toBe("gpt-6-luna");
+      expect(selectionId).toBe("openai/gpt-6-luna");
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
@@ -10447,6 +10576,81 @@ describe("Webchat API", () => {
         { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
         { type: "text", content: "typed" },
       ]);
+    });
+  });
+
+  describe("an account code typed into a dashboard chat", () => {
+    /** A chat whose agent notes, as each turn starts, its prompt and whether the code is used up. */
+    const setup = async () => {
+      const codes = accountCodeContext(testDb.db);
+      const ann = await createIdentity(testDb.db).createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, ann.id);
+      const usedAt = () => testDb.db.select().from(accountCodes).get()?.usedAt ?? null;
+      const turns: Array<{ prompt: string; usedAt: Date | null }> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        startTurn(input: AgentTurnInput) {
+          turns.push({ prompt: input.prompt, usedAt: usedAt() });
+          return testTurnHandle({
+            turnId: `turn-${turns.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          });
+        },
+        onStatusChange: () => () => undefined,
+        stop: async () => undefined,
+        close: async () => undefined,
+      }));
+      await deps.webchatRepo.createSession("code-chat", "Code");
+      const send = (text: string) =>
+        createWebchatRuntime(deps).routes.request("/chat/sessions/code-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      return { code, codes, turns, send };
+    };
+
+    it("is used up before the turn receives the message, which is still handed on", async () => {
+      const { code, codes, turns, send } = await setup();
+      const text = `what do I do with ${code.toLowerCase()}?`;
+
+      expect((await send(text)).status).toBe(200);
+
+      expect(turns).toEqual([{ prompt: text, usedAt: expect.any(Date) }]);
+      await expect(
+        accountCodeRedeemed(codes, code, { platform: "discord", accountId: "42" }),
+      ).rejects.toBeInstanceOf(AccountCodeUsedError);
+    });
+
+    it("costs an ordinary message no database read for codes", async () => {
+      const { code, turns, send } = await setup();
+      const repository = new AccountCodeRepository(testDb.db);
+      let reads = 0;
+      const counted = new Proxy(repository, {
+        get(target, name, receiver) {
+          const value = Reflect.get(target, name, receiver);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => {
+            reads += 1;
+            return value.apply(target, args);
+          };
+        },
+      });
+      deps.voidAccountCodesIn = accountCodesVoidedIn({
+        codes: { codes: counted, now: () => new Date() },
+      });
+
+      expect((await send("hello there")).status).toBe(200);
+
+      expect(turns).toHaveLength(1);
+      expect(reads).toBe(0);
+      await send(`my code is ${code}`);
+      expect(reads).toBeGreaterThan(0);
     });
   });
 });

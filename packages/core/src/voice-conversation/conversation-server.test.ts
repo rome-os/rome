@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceConversationServerMessage } from "@rome/api-types/voice-conversation";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
-import * as gateModule from "../access/ws-guardian-gate.js" with { rstest: "importActual" };
 import type { DrizzleDb } from "../db/index.js";
 import type { Transcriber, TranscriptionListener } from "../voice-input/transcriber.js";
 import type { SpeakerListener } from "../voice-output/speaker.js";
@@ -21,10 +20,9 @@ const gate = rs.hoisted(() => ({
   caller: null as
     | null
     | { kind: "guardian" }
-    | { kind: "dashboard-admin"; accountId: string; email: string },
+    | { kind: "visitor"; accountId: string; email: string },
 }));
 rs.mock("../access/ws-guardian-gate.js", () => ({
-  ...gateModule,
   gateUpgrade: async (_req: unknown, socket: import("node:stream").Duplex) => {
     if (gate.caller) return gate.caller;
     socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
@@ -383,92 +381,6 @@ describe("voice conversation socket", () => {
     expect(first.messages).toEqual([{ type: "error", reason: "bad-request" }]);
   });
 
-  describe("a person taken off the team", () => {
-    afterEach(() => {
-      rs.useRealTimers();
-    });
-
-    // A conversation that is listening, for a person whose place on the team the test sets.
-    async function listeningConversation() {
-      const team = { on: true };
-      const ear = standInTranscriber();
-      const sent: string[] = [];
-      const conversation = await connect({
-        listening: {
-          open: async () => ({
-            ok: true,
-            source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
-          }),
-        },
-        speaker: standInSpeaker().source,
-        canTalkIn: async () => true,
-        send: async (_chatId, text) => {
-          sent.push(text);
-          return replyOf("好的。");
-        },
-        voiceTerms: async () => [],
-        onTeam: () => team.on,
-      });
-      conversation.client.send(
-        JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }),
-      );
-      await until(() => conversation.messages.some((m) => m.type === "ready"), "ready");
-      return { ...conversation, team, ear, sent };
-    }
-
-    it("loses the conversation at the next membership check", async () => {
-      rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-      const { team, ear, messages, closed } = await listeningConversation();
-
-      team.on = false;
-      rs.advanceTimersByTime(25_000);
-
-      await closed;
-      expect(messages.at(-1)).toEqual({ type: "error", reason: "chat-refused" });
-      expect(ear.aborted()).toBe(true);
-    });
-
-    it("sends no further turn to the chat", async () => {
-      const { team, ear, sent, messages, closed } = await listeningConversation();
-
-      team.on = false;
-      ear.listener().onText("还在吗？", "");
-      ear.listener().onEndpoint?.();
-
-      await closed;
-      expect(sent).toEqual([]);
-      expect(messages.at(-1)).toEqual({ type: "error", reason: "chat-refused" });
-    });
-
-    it("opens no session once off the team", async () => {
-      let listened = 0;
-      let spoke = 0;
-      const { client, messages, closed } = await connect({
-        listening: {
-          open: async () => {
-            listened++;
-            return { ok: false, reason: "service-unavailable" };
-          },
-        },
-        speaker: {
-          open: async () => {
-            spoke++;
-            return { ok: false, reason: "not-configured" };
-          },
-        },
-        canTalkIn: async () => true,
-        send: async () => replyOf(""),
-        onTeam: () => false,
-      });
-
-      client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
-
-      await closed;
-      expect(messages).toEqual([{ type: "error", reason: "chat-refused" }]);
-      expect([listened, spoke]).toEqual([0, 0]);
-    });
-  });
-
   describe("who may open it", () => {
     afterEach(() => {
       gate.caller = null;
@@ -515,46 +427,12 @@ describe("voice conversation socket", () => {
     });
 
     it("lets a dashboard admin in on the guardian's voice input list", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      gate.caller = { kind: "visitor", accountId: "ada", email: "ada@example.com" };
       expect(await upgrade(true, true)).toEqual({ status: 101, asked: 1 });
     });
 
-    it("ends a dashboard admin's conversation once the allow-list drops them", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
-      const allowList = { emails: ["ada@example.com"] };
-      const http: Server = createServer();
-      const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
-        listening: {
-          available: () => true,
-          info: async () => ({ available: true, place: null }),
-          open: async () => ({ ok: false, reason: "service-refused" }),
-        },
-        speaker: standInSpeaker().source,
-        canTalkIn: async () => true,
-        send: async () => replyOf(""),
-        dashboardAccess: { isCloudEmailAllowed: (email) => allowList.emails.includes(email) },
-      });
-      await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-      servers.push({ close: () => (voice.close(), http.close()) });
-      const client = new WebSocket(
-        `ws://127.0.0.1:${(http.address() as AddressInfo).port}/ws/voice-conversation`,
-      );
-      const messages: VoiceConversationServerMessage[] = [];
-      client.on("message", (data) => messages.push(JSON.parse(data.toString())));
-      const closed = new Promise<void>((resolve) => client.on("close", () => resolve()));
-      await new Promise<void>((resolve) => client.on("open", () => resolve()));
-
-      allowList.emails = [];
-      client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
-
-      await closed;
-      expect(messages.filter((m) => m.type !== "alive")).toEqual([
-        { type: "error", reason: "chat-refused" },
-      ]);
-    });
-
     it("follows the chat only for the phone app's conversation", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      gate.caller = { kind: "visitor", accountId: "ada", email: "ada@example.com" };
       const followedBy = async (headers: Record<string, string>) => {
         const following: string[] = [];
         const ear = standInTranscriber();

@@ -64,16 +64,9 @@ import {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
-import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
+import { OWNERS_BY_ROLE, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 import { guardianNow } from "./alerts.js";
 import { resolveGuardianTimezone } from "../instance/timezone.js";
-
-/** The models a Concierge chat started on before it ran on the strongest. */
-const OLD_DEFAULTS: ReadonlySet<ModelSelectionId> = new Set([
-  "claude-sonnet",
-  "gpt-6-luna",
-  "gpt-5-6-terra",
-]);
 
 const log = createLogger("concierge");
 
@@ -482,7 +475,7 @@ export class ConciergeService {
     const id = mainChatIdOf(owner);
     const existing = await this.deps.webchatRepo.getSession(id);
     if (existing) {
-      if (!existing.largeModelSelection) {
+      if (!existing.largeModelSelection && !this.deps.held?.(id)) {
         const picked = this.pickModel();
         if (picked) {
           await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked, "auto");
@@ -557,14 +550,9 @@ export class ConciergeService {
     );
   }
 
-  /** Who each owner is, and whether Rome still serves them. */
+  /** Who each owner is. */
   get owners(): ConciergeOwners {
-    return this.deps.owners ?? ALL_OWNERS_SERVED;
-  }
-
-  /** Whether Rome serves `owner`'s Concierge now: the guardian always, a dashboard admin while on the allow-list. */
-  isServed(owner: ConciergeOwner): Promise<boolean> {
-    return this.owners.isServed(owner);
+    return this.deps.owners ?? OWNERS_BY_ROLE;
   }
 
   /**
@@ -902,14 +890,13 @@ export class ConciergeService {
 
   /**
    * Before a turn in chat `chatId`: a model Rome chose for it follows the
-   * default provider at the same strength, and a Concierge chat on an older
-   * default moves to the strong model. A model its owner picked stays. Returns
+   * default provider at the same strength. A saved choice with no recorded
+   * provenance stays on its original target. Returns
    * the provider the chat moved from and to, or null when it stayed.
    */
   async followDefault(
     chatId: string,
   ): Promise<{ from: "anthropic" | "openai"; to: "anthropic" | "openai" } | null> {
-    await this.adoptStrongDefault(chatId);
     const chat = await this.deps.webchatRepo.getSession(chatId);
     const stored = chat?.largeModelSelection;
     if (!chat || chat.largeModelSelectionBy !== "auto" || !isModelSelectionId(stored)) return null;
@@ -932,30 +919,6 @@ export class ConciergeService {
       (to !== "anthropic" && to !== "openai")
       ? null
       : { from, to };
-  }
-
-  /**
-   * Moves a chat Rome put on an older default (Sonnet, Luna or Terra) before
-   * it kept who chose a chat's model to the strong model of the same
-   * provider, once. A model its owner picked, or one Rome chose since, stays.
-   */
-  private async adoptStrongDefault(chatId: string): Promise<void> {
-    const chat = await this.deps.webchatRepo.getSession(chatId);
-    const stored = chat?.largeModelSelection as ModelSelectionId | null | undefined;
-    // Only a Concierge chat: in any other chat, task chats included, a
-    // stored Sonnet or Luna may be its owner's pick or a task's fast model.
-    if (!chat || !isConciergeChat(chat)) return;
-    if (!stored || chat.largeModelSelectionBy || !OLD_DEFAULTS.has(stored)) return;
-    const provider = MODEL_SELECTIONS[stored].providerId;
-    if (provider !== "anthropic" && provider !== "openai") return;
-    const strong = selectionOfStrength(
-      provider,
-      "strong",
-      this.deps.accounts.read().openai?.account,
-    );
-    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, strong, "auto");
-    if (strong !== stored)
-      log.info("concierge chat moved to its strong model", { chatId, from: stored, to: strong });
   }
 
   /**

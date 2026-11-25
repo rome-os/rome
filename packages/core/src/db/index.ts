@@ -38,6 +38,28 @@ export function inTransaction(db: DrizzleDb): boolean {
   return (db as DrizzleDb & { $client: Database.Database }).$client.inTransaction;
 }
 
+/**
+ * Makes `db.transaction()` open with `BEGIN IMMEDIATE` unless the caller passes
+ * another `behavior`, and returns the same `db`. A nested call still opens a
+ * savepoint.
+ *
+ * Rome's main process and each action worker hold their own connection to one
+ * WAL database. A deferred transaction that reads before it writes fails at
+ * once with "database is locked" when another connection wrote in between:
+ * SQLite cannot upgrade its stale read snapshot, and busy_timeout does not
+ * apply to that upgrade. An immediate transaction takes the write lock first,
+ * so it waits under busy_timeout instead. Its cost is that a read-only
+ * transaction also waits for, and holds, the write lock.
+ */
+export function withImmediateTransactions<TSchema extends Record<string, unknown>>(
+  db: BetterSQLite3Database<TSchema>,
+): BetterSQLite3Database<TSchema> {
+  const begin = db.transaction.bind(db);
+  db.transaction = ((transaction, config) =>
+    begin(transaction, { behavior: "immediate", ...config })) as typeof db.transaction;
+  return db;
+}
+
 export function createDb(config: DatabaseConfig): DrizzleDb {
   if (config.type === "sqlite") {
     const sqlitePath = config.sqlitePath ?? DEFAULT_SQLITE_PATH;
@@ -45,7 +67,7 @@ export function createDb(config: DatabaseConfig): DrizzleDb {
     const sqlite = new Database(sqlitePath);
     sqlite.pragma("journal_mode = WAL");
     sqlite.pragma("foreign_keys = ON");
-    return drizzleSqlite(sqlite);
+    return withImmediateTransactions(drizzleSqlite(sqlite));
   }
 
   if (config.type === "postgresql") {

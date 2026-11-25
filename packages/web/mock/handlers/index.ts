@@ -1,5 +1,6 @@
+import { readModelSelectionInput } from "@rome/api-types/models";
 import { appDocumentAccessHandlers } from "./app-document-access";
-import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
+import type { AccountCodeIssued, BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
 import type { ProviderFailurePart } from "@rome/api-types/chat";
@@ -1710,6 +1711,17 @@ export const handlers = [
   ),
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
+  // A fresh code each time, in the shape core gives one, valid for ten minutes.
+  http.post("/api/account-codes", () => {
+    const letters = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+    const group = () =>
+      Array.from({ length: 6 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
+    const issued: AccountCodeIssued = {
+      code: `ROME-${group()}-${group()}`,
+      expiresInSeconds: 600,
+    };
+    return HttpResponse.json(issued);
+  }),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
   // The Concierge: the guardian's main chat, and the topic chats started here.
   http.get("/api/concierge/session", () => HttpResponse.json({ id: CONCIERGE_CHAT_ID, unread: 0 })),
@@ -1925,8 +1937,16 @@ export const handlers = [
   http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
-    const { largeModelSelection } = (await request.json()) as { largeModelSelection: string };
-    found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
+    try {
+      const id = readModelSelectionInput(
+        ((await request.json()) as { largeModelSelection?: unknown }).largeModelSelection,
+      );
+      if (!id)
+        return HttpResponse.json({ error: "A model selection is required" }, { status: 400 });
+      found.largeModelSelection = id === "auto" ? null : id;
+    } catch (error) {
+      return HttpResponse.json({ error: String(error) }, { status: 400 });
+    }
     return HttpResponse.json(found);
   }),
   // Thumbs on an assistant turn. A chat's rows hydrate from one read once the

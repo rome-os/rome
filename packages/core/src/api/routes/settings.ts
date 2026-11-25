@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 import { AGENT_REPORTS_ENABLED_KEY } from "../../instance/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
@@ -104,6 +105,12 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       }
       // The helper owns the persist/clear for this key; don't double-write it.
       delete body[GUARDIAN_TIMEZONE_SETTING_KEY];
+    }
+
+    if ("webchatLargeModel" in body && body.webchatLargeModel !== "auto") {
+      const id = canonicalModelSelection(body.webchatLargeModel);
+      if (!id) return c.json({ error: "Unknown fixed model selection" }, 400);
+      body.webchatLargeModel = id;
     }
 
     for (const [key, value] of Object.entries(body)) {

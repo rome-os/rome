@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 // What a dashboard chat shows when the provider its turn needed cannot run.
 // Rome never moves a chat to another provider on its own. It recovers by
 // itself only when no context is lost, no money is spent and nobody's pick is
@@ -186,13 +187,14 @@ export interface ProviderFailuresDeps {
   selectModel?: (chatId: string, agentName: string, selection: string | null) => void;
   /** An agent's canonical id ("core:main") for the name a chat uses ("main"). */
   canonicalAgent?: (agentName: string) => string;
-  /** Pushes to the guardian's phone. Absent, nothing is pushed. */
+  /** Pushes to the phone of the person `owner` names. Absent, nothing is pushed. */
   notify?: {
     send(content: {
+      owner: ConciergeOwner;
       body: string;
       level?: "active" | "passive";
       chatId?: string;
-    }): Promise<unknown>;
+    }): Promise<{ kind: string }>;
   };
   delay?: (ms: number) => Promise<void>;
   now?: () => Date;
@@ -671,7 +673,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /**
    * Adds an unattended chat to its incident's notice, in its owner's main
-   * chat, opening one with a push to the guardian for the guardian's own.
+   * chat, opening one with a push to that owner.
    */
   const groupIn = (turn: ChatTurnFailure, part: ProviderFailurePart) =>
     serial(async () => {
@@ -713,9 +715,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       ]);
       outage.noticeMessageId = message.id;
       await writeOutages([...outages, outage]);
-      if (owner !== GUARDIAN_OWNER) return;
       await deps.notify
-        ?.send({ body: outagePushText(outage), level: "active", chatId: noticeChatId })
+        ?.send({ owner, body: outagePushText(outage), level: "active", chatId: noticeChatId })
+        // A refused push resolves with its reason instead of throwing.
+        .then(({ kind }) =>
+          log.info("provider outage push", { chatId: noticeChatId, outcome: kind }),
+        )
         .catch((error: unknown) =>
           log.warn("provider outage push failed", { error: String(error) }),
         );
@@ -787,7 +792,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         ? sameProviderTarget(deps.accounts.read(), card.runsOn, card.part.model)
         : null;
       if (
-        card.part.replacement?.selection === change.selection &&
+        canonicalModelSelection(card.part.replacement?.selection) === change.selection &&
         now_?.selectionId !== change.selection
       ) {
         throw new StaleOption();
@@ -1120,12 +1125,18 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     continuing(chatId) {
       if (cardedChats.has(chatId)) resuming.add(chatId);
     },
-    switchCard: (messageId, change) =>
-      runFromCard(
+    switchCard: (messageId, change) => {
+      if (change.kind === "model") {
+        const id = canonicalModelSelection(change.selection);
+        if (!id) return Promise.reject(new Error("Unknown model"));
+        change = { ...change, selection: id };
+      }
+      return runFromCard(
         messageId,
         (card) => moveChat(card, card.chatId, card.agentName, change),
         (continued) => switchResolution(change, continued),
-      ),
+      );
+    },
     continueCard: async (messageId) => {
       await runFromCard(
         messageId,

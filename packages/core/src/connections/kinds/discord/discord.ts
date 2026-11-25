@@ -54,7 +54,7 @@ import {
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
 import { archivedDiscordThreads } from "./discord-threads.js";
-import type { TalkHistoryRead } from "../../types.js";
+import { PrivateMessageRefused, type TalkHistoryRead } from "../../types.js";
 import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
 import { botReadsHistory } from "./discord-permissions.js";
 import { discordAttachment } from "./discord-attachment.js";
@@ -1083,7 +1083,30 @@ export class DiscordAdapter {
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
-    return (await this.client.users.createDM(channelUserId)).id;
+    return (await this.directMessageWith(channelUserId)).id;
+  }
+
+  /** The bot's direct message with user `userId`, opened or found. */
+  private directMessageWith(userId: string) {
+    return this.client.users.createDM(userId);
+  }
+
+  /** Sends `text` to user `accountId` in their direct message with the bot.
+   *  A bot can show one member a message in a shared chat only to answer a
+   *  command, so the direct message is the private place. A user whose
+   *  direct messages are closed to the bot, who shares no server with it, or
+   *  who is another bot or unknown to Discord, reads as
+   *  {@link PrivateMessageRefused}, whether Discord refuses to open the
+   *  direct message or to send to it. */
+  async sendOnlyTo(accountId: string, text: string): Promise<void> {
+    try {
+      const dm = await this.directMessageWith(accountId);
+      for (const chunk of splitMessage(text.trim())) await dm.send({ content: chunk });
+    } catch (err) {
+      const refused = err instanceof discordJs().DiscordAPIError && dmRefusal(Number(err.code));
+      if (refused) throw new PrivateMessageRefused(accountId, refused, { cause: err });
+      throw err;
+    }
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
@@ -1290,6 +1313,25 @@ async function sendQuoting(
 const ALL_MENTIONS = {
   parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
 };
+
+/** Why Discord refused to open or send to a direct message with the user,
+ *  when error `code` is about the user; otherwise undefined. Opening one
+ *  with another bot answers 50007. */
+function dmRefusal(code: number): string | undefined {
+  const codes = discordJs().RESTJSONErrorCodes;
+  switch (code) {
+    case codes.CannotSendMessagesToThisUser:
+      return "they take no direct messages from the bot";
+    case codes.CannotSendMessagesToThisUserDueToHavingNoMutualGuilds:
+      return "they share no server with the bot";
+    case codes.UnknownUser:
+      return "Discord knows no such user";
+    case codes.InvalidRecipients:
+      return "Discord takes no direct message with them";
+    default:
+      return undefined;
+  }
+}
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;

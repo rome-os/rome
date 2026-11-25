@@ -11,7 +11,13 @@ describe("ChatSessionSettings", () => {
   async function setup() {
     const testDb = createTestDb();
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
-    await webchatRepo.createSession("chat-1", "Chat", undefined, undefined, "claude-opus");
+    await webchatRepo.createSession(
+      "chat-1",
+      "Chat",
+      undefined,
+      undefined,
+      "anthropic/claude-opus-4-8[1m]",
+    );
     const store = (id: string, channelThreadKey: string) =>
       testDb.db
         .insert(sessions)
@@ -30,7 +36,9 @@ describe("ChatSessionSettings", () => {
   it("answers the model saved by the web chat whose own session it is", async () => {
     const { settings, store } = await setup();
     store("own", webchatSessionKey("chat-1"));
-    expect(await settings.savedModelSelection("own")).toEqual(MODEL_SELECTIONS["claude-opus"]);
+    expect(await settings.savedModelSelection("own")).toEqual(
+      MODEL_SELECTIONS["anthropic/claude-opus-4-8[1m]"],
+    );
   });
 
   it("answers none for a subagent's session under the chat, or a session it does not know", async () => {
@@ -38,6 +46,20 @@ describe("ChatSessionSettings", () => {
     store("subagent", storeSubagentParent(webchatSessionKey("chat-1")));
     expect(await settings.savedModelSelection("subagent")).toBeNull();
     expect(await settings.savedModelSelection("missing")).toBeNull();
+  });
+
+  it("fails closed on an unknown saved choice instead of falling through to a tier", async () => {
+    const { settings, store, webchatRepo } = await setup();
+    store("own", webchatSessionKey("chat-1"));
+    await webchatRepo.updateSessionLargeModelSelection(
+      "chat-1",
+      "unrecognized-old-choice",
+      "owner",
+    );
+    await expect(settings.savedModelSelection("own")).rejects.toThrow("unrecognized-old-choice");
+    expect((await webchatRepo.getSession("chat-1"))?.largeModelSelection).toBe(
+      "unrecognized-old-choice",
+    );
   });
 
   it("answers the effort saved by the web chat whose own session it is, and none when it saved none", async () => {

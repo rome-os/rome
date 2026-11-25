@@ -158,6 +158,76 @@ export const dismissedAccounts = sqliteTable(
 );
 
 /**
+ * The people Rome knows, one row each (docs/domains/identity.md#person).
+ * Separate from People's `persons`: nothing here grades a relationship or
+ * knows who is a member.
+ */
+export const identities = sqliteTable("identities", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  avatarUrl: text("avatar_url"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Which person each account belongs to (docs/domains/identity.md#account).
+ * Keyed by the account, so one account belongs to at most one person.
+ */
+export const identityAccounts = sqliteTable(
+  "identity_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    identityId: text("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId] }),
+    index("idx_identity_accounts_identity").on(table.identityId),
+  ],
+);
+
+/**
+ * Open codes for adding an account to a person (docs/domains/identity.md#account-code).
+ * Keyed by a hash of the code, never the code. One row per person: a new code
+ * replaces the earlier one, and deleting the person deletes their row.
+ */
+export const accountCodes = sqliteTable(
+  "account_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("idx_account_codes_person").on(table.personId)],
+);
+
+/**
+ * The members: each person with a role in this Rome (docs/domains/access.md#member).
+ * Deleting the person deletes their row. The partial unique index holds the
+ * Rome to one guardian.
+ */
+export const members = sqliteTable(
+  "members",
+  {
+    identityId: text("identity_id")
+      .primaryKey()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["guardian", "member"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_members_one_guardian").on(table.role).where(sql`${table.role} = 'guardian'`),
+  ],
+);
+
+/**
  * What a platform says about an account: its display name, handle and avatar
  * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
  * account itself, the platform and the platform's own id. It has no id of its
@@ -449,8 +519,10 @@ export const guardianAuth = sqliteTable("guardian_auth", {
 
 // The last Rome Cloud profile each visitor signed in with, kept so other
 // dashboard people see who sent a chat message. A visitor's own session holds
-// the same fields, but only in their cookie. Display only, never used for
-// authentication; a sign-in overwrites the row.
+// the same fields, but only in their cookie. Never used to sign anyone in. A
+// member's message on a platform is theirs as the account their email last
+// signed in with here (access/application/account-entry.ts). A sign-in
+// overwrites the row.
 export const visitorProfiles = sqliteTable("visitor_profiles", {
   accountId: text("account_id").primaryKey(),
   email: text("email").notNull(),

@@ -514,6 +514,19 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
                 }
               },
             },
+            // Slack's own "Only visible to you" message, in the chat it answers.
+            privateMessaging: {
+              async sendOnlyTo(chatId, accountId, text, options) {
+                try {
+                  await adapter.sendOnlyTo(chatId, accountId, text, options);
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
+              },
+            },
           };
         },
       },

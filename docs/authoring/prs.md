@@ -32,8 +32,7 @@ The body is a one-minute briefing for a reviewer who already has the diff, and i
 | Section | When | Length |
 |---|---|---|
 | [Why](#why) | Always | 1–3 sentences |
-| [Sketch](#sketch) | When a sketch beats prose | One small block |
-| [Invariants](#invariants) | When a product rule is added or changed | Up to 3 bullets |
+| [Sketch](#sketch) | Always | One small block, about 10 lines |
 | [Scope](#scope) | Always | Up to 3 bullets |
 | [Merge danger](#merge-danger) | Always | 1–2 lines |
 | [Evidence](#evidence) | Always | Up to 3 bullets, or one per task-spec check |
@@ -49,7 +48,7 @@ Open with the problem — what was missing, broken, or accreted — and the appr
 
 ### Sketch
 
-When the shape of the change is clearer as a picture, show it: a `diff` of an API, call tree, component tree, or file tree. Keep only the parts that carry the change. A `refactor:` PR usually uses a sketch in place of Invariants, since its contract is the code structure.
+Show the shape of the change as a picture: a `diff` of an API, a call tree, a component tree, or a file tree. Keep only the parts that carry the change. A `refactor:` PR uses the sketch as its contract, since its contract is the code structure.
 
 ```diff
  AgentSession
@@ -57,13 +56,6 @@ When the shape of the change is clearer as a picture, show it: a `diff` of an AP
 -  submitInput(input, onTurn)
 +  submit(input, { priority: now | next | after })
 ```
-
-### Invariants
-
-The business rules that must stay true, which a reader checks against the product without opening the code. An invariant names no file, function, type, or field. Name the durable home of a new concept — [`docs/concepts/`](../concepts/index.md) for vocabulary, [`docs/architecture/`](../architecture/index.md) for invariants — instead of explaining it here.
-
-> Prefer: "A guardian stays reachable through a service while at least one of its bots can still talk to them."
-> Over: "Teardown deletes `channel_mappings` only when `connectionsHoldingIn(...)` is empty."
 
 ### Scope
 
@@ -88,17 +80,20 @@ A PR that changes what the dashboard or an app shows pastes screenshots of the c
 
 ### Example
 
-```markdown
+````markdown
 ## Why
 A listed visitor who deleted their Rome Cloud account and signed up again
 with the same email lost the shared instance. The instance remembered
 sign-ins by email, so the new account looked like a repeat and the list
 was never resent.
 
-## Invariants
-- A listed email that signs in with a different account resends the list once.
-- The same account signing in again sends nothing.
-- Removing an email from the list forgets its account.
+## Sketch
+```diff
+ shared instance: listed visitor
+   email
+-  signed in before: yes | no
++  account that signed in last
+```
 
 ## Scope
 - Covers re-registration and an email moving between accounts.
@@ -112,7 +107,7 @@ One-way only for the old email-only records, which a revert does not restore. Th
 - Same email, new account: resends once. Fails without the fix.
 - Same account from browser then phone: one resend total.
 - Old email-only record: counts once, then the field is gone. Fails without the fix.
-```
+````
 
 ## Tone
 

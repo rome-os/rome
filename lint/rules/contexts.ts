@@ -8,7 +8,7 @@
 import type { ImportRule, ListedCrossing } from "../import-rules.js";
 
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  access: ["instance"],
+  access: ["identity", "instance"],
   agent: ["instance"],
   "app-host": [
     "access",
@@ -26,11 +26,12 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "webchat",
   ],
   apps: ["access", "instance"],
-  chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  chats: ["access", "agent", "apps", "connections", "identity", "participation", "people"],
   concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
   connections: ["apps", "desktops", "instance"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
+  identity: [],
   instance: [],
   participation: [],
   people: ["apps", "chats", "connections", "instance"],
@@ -74,6 +75,8 @@ const REASONS: Record<string, string> = {
     "A connection names a sender by the platform's account id. People decides who that is, so no file in connections/ imports people/.",
   "connections-never-imports-participation":
     "A connection never decides whom a message addresses or whether Rome answers it. Participation does, for each of Rome's accounts, so no file in connections/ imports participation/.",
+  "connections-never-imports-identity":
+    "A connection hands on what the platform said and never knows an account code exists or whom an account belongs to, so no file in connections/ imports identity/, the account code's shape and its steps included.",
   "connections-never-imports-webchat":
     "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":
@@ -90,6 +93,10 @@ const REASONS: Record<string, string> = {
     "Desktops never knows what a favor asked for, so no file in desktops/ imports favors/.",
   "desktops-never-imports-participation":
     "Desktops never knows what woke an agent or where it speaks, so no file in desktops/ imports participation/.",
+  "identity-never-imports-access":
+    "Identity says which person an account belongs to. Access's steps on members ask Identity who a person is, so no file in identity/ imports access/.",
+  "identity-never-imports-people":
+    "Identity says who a person is, whoever they are to the guardian. People grades that relationship, so no file in identity/ imports people/.",
   "instance-never-imports-agent":
     "Instance says which Rome this is and whether it is healthy, whoever runs on it, so no file in instance/ imports agent/.",
   "instance-never-imports-apps":

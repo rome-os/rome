@@ -64,8 +64,10 @@ import { EventCatalog } from "../event-catalog.js";
 import { Permissions } from "../access/permissions.js";
 import { loadAppPermissions } from "../apps/app-permissions.js";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
+import { sessionActorMiddleware } from "../access/session-actor.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import { invitedEmailsSaved, memberContext } from "../access/application/members.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
@@ -105,6 +107,8 @@ import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
+import { accountCodesVoidedIn } from "../chats/connected-accounts/account-code-admission.js";
+import { accountCodeContext } from "../identity/application/account-codes.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import { AppKeyInjector } from "../apps/app-keys/injector.js";
@@ -767,7 +771,9 @@ export async function buildTestDeps(
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, (emails) =>
+    invitedEmailsSaved(memberContext(db), emails),
+  );
   const visitorAllowListSync = new VisitorAllowListSync({
     getEnrollmentId: () => null,
     onLinkChanged: () => () => {},
@@ -815,6 +821,7 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
+    voidAccountCodesIn: accountCodesVoidedIn({ codes: accountCodeContext(db) }),
     chats: chatsWired.chats,
     messages: chatsWired.messages,
     recording: {
@@ -1233,6 +1240,7 @@ export async function createAppLifecycleHarness(
       ...(options.romeCloudListings ? { romeCloudListings: options.romeCloudListings } : {}),
     };
     const router = new Hono();
+    router.use("*", sessionActorMiddleware(db));
     router.route("/", appsRoutes(apiDeps));
 
     return {

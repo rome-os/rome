@@ -186,11 +186,18 @@ export function topLevelDeclarations(
   return { sf, statements, nameOf };
 }
 
-/** The identifier that starts at `pos` in `sf`. */
+/** The identifier that starts at `pos` in `sf`, a name in a JSDoc tag such as
+ *  `{@link name}` included. */
 export function identifierAt(sf: ts.SourceFile, pos: number): ts.Identifier | undefined {
   const find = (n: ts.Node): ts.Identifier | undefined => {
-    if (pos < n.getStart(sf) || pos >= n.getEnd()) return undefined;
+    if (pos < n.getStart(sf, true) || pos >= n.getEnd()) return undefined;
     if (ts.isIdentifier(n)) return n;
+    // forEachChild skips a node's JSDoc, which TypeScript keeps beside its children.
+    const docs = (n as { jsDoc?: ts.JSDoc[] }).jsDoc ?? [];
+    for (const doc of docs) {
+      const found = find(doc);
+      if (found) return found;
+    }
     return ts.forEachChild(n, find);
   };
   return find(sf);

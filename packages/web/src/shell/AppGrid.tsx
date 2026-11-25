@@ -8,7 +8,15 @@ import {
   PinOff,
   Search,
 } from "lucide-react";
-import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
@@ -81,6 +89,14 @@ interface CachedApp {
   projectPath?: string | null;
 }
 
+type RailApp = (InstalledAppCard | CachedApp) & { href: string };
+
+type ResolvedPin = { type: "builtin"; entry: BuiltinNavEntry } | { type: "app"; app: RailApp };
+
+function hasAppHref(app: InstalledAppCard | CachedApp): app is RailApp {
+  return Boolean(app.href);
+}
+
 function parsePins(raw: unknown): PinnedEntry[] | null {
   if (!Array.isArray(raw)) return null;
   const valid = raw.filter(
@@ -97,6 +113,7 @@ function parsePins(raw: unknown): PinnedEntry[] | null {
 // Builtin pages folded into another one. A pin saved under the old id opens
 // the page that replaced it.
 const MERGED_BUILTIN_PINS: Readonly<Record<string, string>> = { sessions: "activity" };
+const builtinMap = new Map(APP_NAV.map((entry) => [entry.id, entry]));
 
 export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
   const requiredIds = new Set(REQUIRED_BUILTIN_PINS.map((pin) => pin.id));
@@ -107,7 +124,9 @@ export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
       pin.type === "builtin" && MERGED_BUILTIN_PINS[pin.id]
         ? { type: pin.type, id: MERGED_BUILTIN_PINS[pin.id] }
         : pin;
-    if (entry.type === "builtin" && requiredIds.has(entry.id)) continue;
+    if (entry.type === "builtin" && (requiredIds.has(entry.id) || !builtinMap.has(entry.id))) {
+      continue;
+    }
     // Both old pages pinned leave one pin, not two.
     const key = `${entry.type}:${entry.id}`;
     if (seen.has(key)) continue;
@@ -342,12 +361,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   // A recent app offers Pin where a pinned one offers Unpin. onSelect runs
   // after any item, for a caller that must close its own menu.
   const withAppContextMenu = (
-    app: InstalledAppCard | CachedApp,
+    app: RailApp,
     trigger: React.ReactNode,
     pinned = true,
     onSelect?: () => void,
   ): React.ReactNode => {
-    if (!app.href) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
@@ -395,17 +413,14 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     );
   };
 
-  const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
-
-  const renderPin = (pin: PinnedEntry): React.ReactNode => {
+  const renderPin = (pin: ResolvedPin): ReactNode => {
     if (pin.type === "builtin") {
-      const entry = builtinMap.get(pin.id);
-      if (!entry) return null;
+      const { entry } = pin;
       const label = t(entry.labelKey);
       const active = isEntryActive(location.pathname, entry.href);
       if (entry.id === "chat" && chatPeek) {
         return (
-          <Fragment key={`builtin-${pin.id}`}>
+          <Fragment key={`builtin-${entry.id}`}>
             {withBuiltinContextMenu(
               entry,
               <Link
@@ -424,7 +439,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
         );
       }
       return (
-        <Tooltip key={`builtin-${pin.id}`}>
+        <Tooltip key={`builtin-${entry.id}`}>
           {withBuiltinContextMenu(
             entry,
             <TooltipTrigger asChild>
@@ -444,11 +459,10 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
       );
     }
 
-    const app = installedApps.find((a) => a.id === pin.id);
-    if (!app || !app.hasFrontend || !app.href) return null;
+    const { app } = pin;
     const active = isEntryActive(location.pathname, app.href);
     return (
-      <Tooltip key={`app-${pin.id}`}>
+      <Tooltip key={`app-${app.id}`}>
         {withAppContextMenu(
           app,
           <TooltipTrigger asChild>
@@ -476,6 +490,39 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   };
 
   const fixedCount = REQUIRED_BUILTIN_PINS.length;
+  const core = REQUIRED_BUILTIN_PINS.flatMap<ResolvedPin>(({ id }) => {
+    const entry = builtinMap.get(id);
+    return entry ? [{ type: "builtin", entry }] : [];
+  });
+  const pinned = pins.slice(fixedCount).flatMap<ResolvedPin>((pin) => {
+    if (pin.type === "builtin") {
+      const entry = builtinMap.get(pin.id);
+      return entry ? [{ type: "builtin", entry }] : [];
+    }
+    const app = installedApps.find((app) => app.id === pin.id);
+    return app?.hasFrontend && hasAppHref(app) ? [{ type: "app", app }] : [];
+  });
+  const recent = recentApps.filter(hasAppHref);
+
+  const sections: Array<{ id: "core" | "pinned" | "recent"; content: ReactNode }> = [];
+  if (core.length > 0) sections.push({ id: "core", content: core.map(renderPin) });
+  if (pinned.length > 0) sections.push({ id: "pinned", content: pinned.map(renderPin) });
+  if (recent.length > 0) {
+    sections.push({
+      id: "recent",
+      content: (
+        <RecentAppsRail
+          apps={recent}
+          unopenedIds={unopenedIds}
+          pathname={location.pathname}
+          wrapWithContextMenu={(app, trigger, onSelect) =>
+            withAppContextMenu(app, trigger, false, onSelect)
+          }
+        />
+      ),
+    });
+  }
+
   return (
     // A labelled tile renders no tooltip content, and Radix closes a hoverable
     // tooltip from that content, not the trigger. Hovering labelled tiles would
@@ -510,21 +557,16 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             {tip(t("recentChats.searchShortcut", { shortcut: chatSearchShortcutForPlatform() }))}
           </Tooltip>
         ) : null}
-        {pins.slice(0, fixedCount).map(renderPin)}
-        {pins.length > fixedCount ? (
-          <Separator
-            className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
-          />
-        ) : null}
-        {pins.slice(fixedCount).map(renderPin)}
-        <RecentAppsRail
-          apps={recentApps}
-          unopenedIds={unopenedIds}
-          pathname={location.pathname}
-          wrapWithContextMenu={(app, trigger, onSelect) =>
-            withAppContextMenu(app, trigger, false, onSelect)
-          }
-        />
+        {sections.map((section, index) => (
+          <Fragment key={section.id}>
+            {index > 0 ? (
+              <Separator
+                className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
+              />
+            ) : null}
+            {section.content}
+          </Fragment>
+        ))}
       </nav>
     </TooltipProvider>
   );

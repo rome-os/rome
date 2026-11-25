@@ -19,19 +19,28 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import type {
   Connection,
   TalkFeatureName,
   TalkHistoryRead,
+  TalkPrivateMessaging,
   Talker,
 } from "../../connections/types.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
-import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import {
+  type Admission,
+  type MessageEntry,
+  OrderedAdmission,
+  type OrderedAdmissionOptions,
+} from "./admission.js";
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
+import { markArrival } from "../../participation/entrance.js";
+import type { Entry } from "../../participation/entry.js";
 import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
@@ -47,6 +56,10 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
+  /** Whether each admitted message is let in, asked once before any subscriber
+   *  hears it. The event is marked with the answer (participation/entrance.ts).
+   *  Absent, no event is marked. */
+  entry?: MessageEntry;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
@@ -277,6 +290,7 @@ function connectionSend(backing: Backing): ChannelSend {
   // channel that cannot reach an account directly.
   const notConnected = () => Promise.reject(new AccountNotConnected(channel));
   const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
+  const unbackedPrivately: TalkPrivateMessaging = { sendOnlyTo: notConnected };
   return {
     async send(chatId, message) {
       const connection = connectionFor(backing);
@@ -294,6 +308,27 @@ function connectionSend(backing: Backing): ChannelSend {
         callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
       const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
       return direct;
+    },
+    get privately() {
+      const connection = connectionFor(backing);
+      if (!connection) return unbackedPrivately;
+      // As `direct`: while talk is locked, the port stands and asks whichever
+      // talker is live when it is called.
+      const offered = connection.withTalker((talker) => talker.privateMessaging !== undefined);
+      if (offered === false) return null;
+      const privately: TalkPrivateMessaging = {
+        async sendOnlyTo(chatId, accountId, text, options) {
+          // Every kind would send a blank text as an empty message, which its
+          // platform refuses in its own words.
+          if (!text.trim()) {
+            throw new SendRefused("empty", `A private message to ${accountId} needs text`);
+          }
+          return callTalker(connection, (talker) =>
+            talker.privateMessaging?.sendOnlyTo(chatId, accountId, text, options),
+          );
+        },
+      };
+      return privately;
     },
     get activity() {
       const connection = connectionFor(backing);
@@ -319,7 +354,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // One talker subscription per Connection, fanned out to every handler. A new
   // epoch starts with no handlers, so each unlock subscribes again (R5).
   const attached = new Map<string, () => void>();
-  const admission = new OrderedAdmission(deps.admit, deps.admission);
+  const admission = new OrderedAdmission(deps.admit, deps.admission, deps.entry);
 
   // Each subscription's buffer hears one conversation's events one at a time,
   // in the order they are pushed here, which admission keeps as arrival
@@ -332,7 +367,11 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // stopping it.
   const dispatchFrom =
     (connectionId: string) =>
-    async (message: ChannelMessage): Promise<void> => {
+    async (
+      message: ChannelMessage,
+      entry: Entry | undefined,
+      automated: boolean,
+    ): Promise<void> => {
       // A talker delivers the channel's own record, inbound, named after its
       // connection kind. The event names the channel and the account it
       // arrived on.
@@ -341,11 +380,12 @@ function connectionInbound(backing: Backing): ChannelInbound {
       // A message with nothing to answer still says who sent it.
       deps.heard?.(named);
       if (!isAnswerable(message)) return;
-      const event: InboundEvent = {
+      const heard: InboundEvent = {
         kind: "message",
         message: named,
         ref: { connectionId, chatId: message.chatId },
       };
+      const event = entry ? markArrival(heard, { entry, automated }) : heard;
       // Waited on from before any subscriber can hear it, so its recording
       // cannot come first.
       const accepted = deps.accepted?.(channel, {
@@ -379,7 +419,9 @@ function connectionInbound(backing: Backing): ChannelInbound {
     if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
-      admission.deliver(connection, channelMessageOf(message, channel), dispatch),
+      admission.deliver(connection, channelMessageOf(message, channel), (heard, entry) =>
+        dispatch(heard, entry, message.sender.isBot === true || message.sender.viaApp === true),
+      ),
     );
     if (detach) attached.set(connection.id, detach);
   };

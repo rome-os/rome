@@ -1,3 +1,4 @@
+import { canonicalModelSelection } from "@rome/api-types/models";
 import {
   forwardRef,
   memo,
@@ -346,8 +347,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   useEffect(() => {
     if (!settings || seededFromSettingsRef.current) return;
     const stored = settings.webchatLargeModel;
-    if (typeof stored === "string" && LARGE_MODEL_OPTIONS.some((option) => option.id === stored)) {
-      setLargeModelSelection(stored);
+    if (typeof stored === "string") {
+      setLargeModelSelection(canonicalModelSelection(stored) ?? stored);
     }
     if (isReasoningEffort(settings.webchatReasoningEffort)) {
       setReasoningEffort(settings.webchatReasoningEffort);

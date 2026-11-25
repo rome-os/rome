@@ -22,13 +22,13 @@ it("does not move a model onto ChatGPT credits", () => {
 });
 
 it.each([
-  ["anthropic", "claude-sonnet-5-5", "claude-opus-5-5"],
-  ["anthropic", "claude-opus-5-5[1m]", "claude-sonnet"],
-  ["anthropic", "claude-fable-5-1[1m]", "claude-sonnet"],
-  ["anthropic", "claude-haiku-5-5", "claude-sonnet"],
-  ["openai", "gpt-6-luna", "gpt-5-6-terra"],
-  ["openai", "gpt-5.6-terra", "gpt-6-luna"],
-  ["openai", "gpt-6.1-sol", "gpt-6-luna"],
+  ["anthropic", "claude-sonnet-5-5", "anthropic/claude-opus-5-5[1m]"],
+  ["anthropic", "claude-opus-5-5[1m]", "anthropic/claude-sonnet-5-5"],
+  ["anthropic", "claude-fable-5-1[1m]", "anthropic/claude-sonnet-5-5"],
+  ["anthropic", "claude-haiku-5-5", "anthropic/claude-sonnet-5-5"],
+  ["openai", "gpt-6-luna", "openai/gpt-5.6-terra"],
+  ["openai", "gpt-5.6-terra", "openai/gpt-6-luna"],
+  ["openai", "gpt-6.1-sol", "openai/gpt-6-luna"],
 ] as const)("keeps %s's thread from %s on %s", (provider, model, target) => {
   const raw: ModelAccountReports = { anthropic: available(), openai: available() };
   expect(sameProviderTarget(raw, provider, model)?.selectionId).toBe(target);
@@ -40,7 +40,9 @@ it("requires same-provider availability and model access", () => {
     openai: available({ loggedIn: true, modelsDenied: FRONTIER_DENIED }),
   };
   expect(sameProviderTarget(raw, "openai", "gpt-5.6-terra")).toBeNull();
-  expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")?.selectionId).toBe("gpt-5-6-terra");
+  expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")?.selectionId).toBe(
+    "openai/gpt-5.6-terra",
+  );
   for (const claude of [
     { state: "unauthorized", account: { loggedIn: false } },
     { state: "expired", account: { loggedIn: false, needsReauth: true } },

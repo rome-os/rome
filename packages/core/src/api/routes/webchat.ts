@@ -1,3 +1,4 @@
+import { readModelSelectionInput } from "@rome/api-types/models";
 import { withTaskCards } from "../../concierge/task-cards.js";
 import {
   ConciergeTurnTiming,
@@ -90,7 +91,6 @@ import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
   WEBCHAT_LARGE_MODEL_SETTING_KEY,
-  normalizeWebchatLargeModelSelectionId,
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
@@ -115,6 +115,7 @@ import {
 import {
   currentChatOwner,
   currentSessionActor,
+  guardianActor,
   sessionOwnerKey,
   type SessionActor,
 } from "../../access/session-actor.js";
@@ -2056,7 +2057,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const agentName = input.session.agentName ?? "main";
-    const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
     const channelThreadKey = webchatSessionKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
@@ -2069,6 +2069,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       heldSource = undefined;
     };
     try {
+      const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)
@@ -3084,6 +3085,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
   const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
+    try {
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 400);
+    }
     let deviceFolder: DeviceFolder | null = null;
     if (body.deviceFolder) {
       const { deviceId, path } = body.deviceFolder;
@@ -3131,7 +3137,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const message = err instanceof Error ? err.message : "Internal error";
       return answer({ error: message }, getWebchatProjectErrorStatus(message));
     }
-    const modelSelection = await resolveRequestedInitialModelSelection(body.largeModelSelection);
+    let modelSelection;
+    try {
+      modelSelection = await resolveRequestedInitialModelSelection(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 409);
+    }
     const personaId = await resolveRequestedPersonaId(body.personaId);
 
     // `agentName` locks this session to a non-main agent for its lifetime.
@@ -3418,16 +3429,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "A fork chat keeps the model it branched with" }, 409);
     }
     const body = await c.req.json<unknown>().catch(() => undefined);
-    const requested =
-      typeof body === "object" && body !== null
-        ? (body as { largeModelSelection?: unknown }).largeModelSelection
-        : undefined;
-    if (
-      typeof requested !== "string" ||
-      normalizeWebchatLargeModelSelectionId(requested) !== requested
-    ) {
-      return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
+    let requested;
+    try {
+      requested = readModelSelectionInput(
+        body && typeof body === "object"
+          ? (body as { largeModelSelection?: unknown }).largeModelSelection
+          : undefined,
+      );
+    } catch (error) {
+      return c.json({ error: String(error) }, 400);
     }
+    if (requested === undefined) return c.json({ error: "A model selection is required" }, 400);
     if (
       !isConciergeChat(lookup.session) &&
       (await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true
@@ -3785,6 +3797,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (prompt.length > TURN_BRANCH_PROMPT_MAX_LENGTH) {
       return c.json({ error: `prompt too long (max ${TURN_BRANCH_PROMPT_MAX_LENGTH} chars)` }, 400);
     }
+    await deps.voidAccountCodesIn(prompt);
 
     const started = await startForkedSession({
       session,
@@ -3885,6 +3898,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       comment = trimmed.length === 0 ? null : trimmed;
     }
+    if (comment) await deps.voidAccountCodesIn(comment);
 
     const stored = await deps.webchatRepo.insertTurnFeedback(
       sessionId,
@@ -4186,6 +4200,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (contentType.includes("multipart/form-data")) {
       const form = await c.req.formData().catch(() => null);
       if (!form) return {};
+      const choice = form.get("largeModelSelection");
+      if (choice !== null && typeof choice !== "string")
+        throw new Error("Model selection must be text");
       const getString = (key: string) => {
         const value = form.get(key);
         return typeof value === "string" ? value : undefined;
@@ -4237,6 +4254,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return row ? ((await tasks?.getWithChat(row.id))?.conciergeChat.id ?? null) : null;
   };
 
+  // A code a person types into a dashboard chat is dead before the message is
+  // recorded or reaches an agent (docs/domains/identity.md#account-code):
+  // the text, the quote it replies with, a card's answer and each file's name.
+  const voidAccountCodesInSend = (body: SendBody): Promise<void> =>
+    deps.voidAccountCodesIn(
+      [
+        body.text,
+        body.replyQuote,
+        Array.isArray(body.parts) ? JSON.stringify(body.parts) : undefined,
+        ...(Array.isArray(body.files) ? body.files.map((file) => file?.name) : []),
+      ]
+        .filter((text): text is string => typeof text === "string")
+        .join("\n"),
+    );
+
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
@@ -4244,15 +4276,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       saidBy?: Account;
       fromWidgetEvent?: boolean;
       askingDeviceId?: string;
+      /** The person the message is from, when no request of theirs sends it. */
+      sender?: SessionActor;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
       /** Gets the turn this input starts or joins, once the input is submitted. */
       onTurn?: (turn: Promise<AgentTurnHandle>) => void;
     } = {},
   ): Promise<RouteAnswer> => {
+    try {
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
+    } catch (error) {
+      return answer({ error: String(error) }, 400);
+    }
     // A Concierge turn's timing starts when the owner's send reaches Rome.
     const receivedAtMs = Date.now();
-    const actor = said.taskActor ?? (await currentSessionActor());
+    const actor = said.taskActor ?? said.sender ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -4318,6 +4357,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     ) {
       return answer({ error: "session id and text or files are required" }, 400);
     }
+
+    await voidAccountCodesInSend(body);
 
     const session = await findContinuableSession(sessionId);
     if (!session) return answer({ error: "Session not found" }, 404);
@@ -4661,8 +4702,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: sessionProjectName,
         projectPath: sessionProjectPath,
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-        // The web dashboard is guardian-only, so a webchat turn is always from
-        // the guardian.
+        // Only the guardian and members write on the dashboard, and the
+        // dashboard answers each of them as the guardian.
         senderBondLevel: "guardian",
       },
       // The guardian's own message names its device; a task chat's message
@@ -4687,17 +4728,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // model that thread pinned, unless it stores one of its own: kept by a
     // change of the default, or Rome's strength after Back to default. A
     // model the first message names does not apply to a branch.
-    const modelSelection =
-      session.parentSessionId !== null
-        ? resolveStoredModelSelection(largeModelSelection)
-        : await resolveSessionModelSelectionForTurn(
-            {
-              id: sessionId,
-              largeModelSelection,
-            },
-            messageCount,
-            body.largeModelSelection,
-          );
+    let modelSelection;
+    try {
+      modelSelection =
+        session.parentSessionId !== null
+          ? resolveStoredModelSelection(largeModelSelection)
+          : await resolveSessionModelSelectionForTurn(
+              {
+                id: sessionId,
+                largeModelSelection,
+              },
+              messageCount,
+              body.largeModelSelection,
+            );
+    } catch (error) {
+      return answer({ error: String(error) }, 409);
+    }
     const reasoningEffort = await chatReasoningEffort(session, body.reasoningEffort);
     const channelThreadKey = webchatSessionKey(sessionId);
 
@@ -5493,7 +5539,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   app.post("/chat/sessions/:id/turns", async (c) => {
-    const body = await parseChatSendBody(c);
+    let body: SendBody;
+    try {
+      body = await parseChatSendBody(c);
+    } catch {
+      return c.json({ error: "Invalid model identity or request body" }, 400);
+    }
     const sent = await handleChatSend(c.req.param("id"), body, {
       fromWidgetEvent: cameThroughWidgetEvent(c.env),
       askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),
@@ -5949,8 +6000,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     async sendAsGuardian(chatId, text) {
+      const sender = await guardianActor(deps.db);
+      if (!sender) throw new Error("No guardian to send as");
       const inputId = randomUUID();
-      const sent = await handleChatSend(chatId, { inputId, text });
+      const sent = await handleChatSend(chatId, { inputId, text }, { sender });
       if (sent.status < 400) return;
       // Once the input is recorded it is said, even when the agent could not be woken on it.
       if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {

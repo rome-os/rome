@@ -13,6 +13,8 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
+| **Identity** | Which person an account belongs to, and which accounts are a person's | [identity.md](identity.md) |
+| **Access** | Who has a role in this Rome, and which | [access.md](access.md) |
 
 ```mermaid
 flowchart LR
@@ -90,6 +92,8 @@ The language is the model. The code holds most of it and owes the rest. A reader
 
 Diffs still owed to the model, each a change of its own:
 
+- Only [Access's steps on members](access.md#steps-rome-takes-today) read or write [Identity](identity.md) yet. The parts that work with a person move onto it one at a time.
+- Every check of who may use the dashboard still reads the guardian's seat and the dashboard allow-list. The [members](access.md#member) are kept in line with them, and nothing reads them yet.
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
