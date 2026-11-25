@@ -237,6 +237,18 @@ import Testing
         controller.end()
     }
 
+    @Test func aFirstConnectionKeepsTheFirstWordsAndAReconnectWaitsForReady() {
+        var gate = MicrophoneGate()
+        // The guardian may speak at once: their first words go out behind `start`.
+        gate.attached(reconnecting: false)
+        #expect(gate.open)
+        // A reconnect drops what comes before Rome is ready, so no burst follows a slow handshake.
+        gate.attached(reconnecting: true)
+        #expect(!gate.open)
+        gate.ready()
+        #expect(gate.open)
+    }
+
     @Test func aConversationRomeNeverAnsweredEndsAtOnceAndSaysSo() async {
         let audio = FakeAudio(allowed: true)
         let controller = VoiceConversationController(makeAudio: { audio })

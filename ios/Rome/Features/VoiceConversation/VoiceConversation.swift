@@ -69,7 +69,8 @@ final class VoiceConversation {
         task = socket
         replyRate = nil
         // One step: microphone audio queued meanwhile goes after `start`, never before it.
-        sender.attach(socket, first: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate))
+        // A reconnect's audio waits for `ready`; a first connection's is kept.
+        sender.attach(socket, first: VoiceConversationWire.start(chatId: chatId, sampleRate: VoiceConversationWire.sampleRate), reconnecting: established)
         socket.resume()
         heardFromRome(within: VoiceConversationWire.openLimit)
         receive(socket)
@@ -259,27 +260,26 @@ private final class ConversationSender: @unchecked Sendable {
     private let queue = DispatchQueue(label: "cc.romeos.voice-conversation.send")
     private var task: URLSessionWebSocketTask?
     private var muted = false
-    /// Rome is ready on `task`. Until then the microphone's audio is dropped,
-    /// not queued: a slow handshake would let it pile up past what Rome takes.
-    private var open = false
+    /// Whether the microphone's audio goes out on `task` yet.
+    private var gate = MicrophoneGate()
 
     /// Sends on `task` from now, `first` before anything else.
-    func attach(_ task: URLSessionWebSocketTask, first: String) {
+    func attach(_ task: URLSessionWebSocketTask, first: String, reconnecting: Bool) {
         queue.async {
             self.task = task
-            self.open = false
+            self.gate.attached(reconnecting: reconnecting)
             task.send(.string(first)) { _ in }
         }
     }
 
     /// Rome said `ready`: the microphone's audio goes out from now.
     func ready() {
-        queue.async { self.open = true }
+        queue.async { self.gate.ready() }
     }
 
     func send(audio: Data) {
         queue.async {
-            guard !self.muted, self.open else { return }
+            guard !self.muted, self.gate.open else { return }
             self.task?.send(.data(audio)) { _ in }
         }
     }
@@ -296,5 +296,22 @@ private final class ConversationSender: @unchecked Sendable {
             guard let last else { return task.cancel(with: .normalClosure, reason: nil) }
             task.send(.string(last)) { _ in task.cancel(with: .normalClosure, reason: nil) }
         }
+    }
+}
+
+/// Whether the microphone's audio goes out on the current socket. A first
+/// connection takes it at once, queued behind `start`, so the guardian's
+/// first words are kept. A reconnect's audio is dropped, not queued, until
+/// Rome says `ready`: after a slow handshake a queue would arrive as a burst
+/// past what Rome takes.
+struct MicrophoneGate {
+    private(set) var open = true
+
+    mutating func attached(reconnecting: Bool) {
+        open = !reconnecting
+    }
+
+    mutating func ready() {
+        open = true
     }
 }
