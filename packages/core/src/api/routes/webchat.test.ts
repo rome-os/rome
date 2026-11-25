@@ -856,7 +856,6 @@ describe("Webchat API", () => {
     const repo = new ConciergeTasksRepository(testDb.db);
     const tasks = new ConciergeTasks(repo);
     deps.concierge = {
-      writerOf: async () => null,
       deps: { tasks },
       conciergeChat: async () => null,
       followDefault: async () => {},
@@ -3406,7 +3405,6 @@ describe("Webchat API", () => {
       buildAgent(name, { name: "concierge", policy: { finalText: "private", autoTitle: false } }),
     );
     deps.concierge = {
-      writerOf: async () => null,
       followDefault: async () => null,
       conciergeChat: async () => null,
       turnFailedBeforeStart: () => undefined,
@@ -4800,7 +4798,6 @@ describe("Webchat API", () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
-        writerOf: async () => null,
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
         followDefault: async () => null,
         conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
@@ -4831,21 +4828,22 @@ describe("Webchat API", () => {
       }
       const [first, second] = sentTurns.map((turn) => turn.prompt as string);
       expect(first).toMatch(
-        /^<concierge_chat [^\n]+\/>\n<concierge_owner [^\n]+\/>\n<workspace_context>[\s\S]+<\/workspace_context>\n<chat_thread [^\n]+\/>\n<now>Fri 20\/11\/2026 09:30 \(Europe\/Berlin\)<\/now>\n\none$/,
+        /^<concierge_chat [^\n]+\/>\n<concierge_owner [^\n]+\/>\n<workspace_context>[\s\S]+<\/workspace_context>\n<chat_thread [^\n]+\/>\n<now>Fri 20\/11\/2026 09:30 \(Europe\/Berlin\)<\/now>\n\n<current_message from="guardian">\none\n<\/current_message>$/,
       );
       // What the session sends of the second input: no unchanged header, the time kept.
       const { headers } = withoutRepeatedHeaders(first as string, STICKY_HEADERS, new Map());
       const resent = withoutRepeatedHeaders(second as string, STICKY_HEADERS, headers).prompt;
       expect(resent).not.toContain("workspace_context");
       expect(resent).not.toContain("<concierge_chat");
-      expect(resent).toMatch(/^<chat_thread [^\n]+\/>\n<now>[^\n]+<\/now>\n\ntwo$/);
+      expect(resent).toMatch(
+        /^<chat_thread [^\n]+\/>\n<now>[^\n]+<\/now>\n\n<current_message from="guardian">\ntwo\n<\/current_message>$/,
+      );
     });
 
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
-        writerOf: async () => null,
         deps: { tasks: {} },
         followDefault: async () => null,
         conciergeChat: async (id: string) =>
@@ -4877,7 +4875,7 @@ describe("Webchat API", () => {
       // The Concierge reads which message it is, and its thread's root: a
       // message sent from the composer replies to nothing, so it is its own.
       const first = sentTurns[0]?.prompt.match(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\n<current_message from="guardian">\nhello\n<\/current_message>$/,
       )?.[1] as string;
       expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
@@ -4935,8 +4933,6 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         deps: { tasks: {} },
-        owners: { profileOf: async () => ({ role: "guardian", name: "Eric" }) },
-        writerOf: ConciergeService.prototype.writerOf,
         followDefault: async () => null,
         conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
         turnHeader: async () => "<concierge_owner/>",
@@ -4951,6 +4947,7 @@ describe("Webchat API", () => {
         undefined,
         "core:concierge",
       );
+      await deps.settingsRepo.set("guardianName", "Eric");
       const app = createWebchatRuntime(deps).routes;
       const send = async (actor: SessionActor, body: Record<string, unknown>) =>
         drainTurn(
@@ -4985,7 +4982,6 @@ describe("Webchat API", () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
-        writerOf: async () => null,
         followDefault: async (chatId: string) => {
           await deps.webchatRepo.updateSessionLargeModelSelection(
             chatId,
@@ -6446,7 +6442,6 @@ describe("Webchat API", () => {
       // The real card write, on the real store.
       const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
       deps.concierge = {
-        writerOf: async () => null,
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
         followDefault: async () => null,
         conciergeChat: async () => null,
@@ -9732,6 +9727,55 @@ describe("Webchat API", () => {
       expect(levels).toEqual(["active", undefined]);
     });
 
+    it("gives a message in a Concierge chat the active level only when its owner wrote it", async () => {
+      const levels: Array<string | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "core:concierge", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        startTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+          levels.push(options?.pushLevel);
+          return testTurnHandle({
+            turnId: `turn-${levels.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          });
+        },
+        onStatusChange: () => () => undefined,
+        stop: async () => undefined,
+        close: async () => undefined,
+      }));
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      deps.concierge = {
+        deps: { tasks: {} },
+        followDefault: async () => null,
+        conciergeChat: async () => null,
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const send = (actor: SessionActor) =>
+        runWithSessionActor(actor, () =>
+          app.request("/chat/sessions/topic-1/turns", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "Hello" }),
+          }),
+        );
+      await send({ kind: "guardian", userId: "seat", via: "cookie" });
+      await send({ kind: "visitor", accountId: "ann", email: "ann@example.com" });
+      expect(levels).toEqual(["active", undefined]);
+    });
+
     it("gives nothing said as an agent account, or by a loopback caller, under a guardian actor", async () => {
       const levels: Array<string | undefined> = [];
       deps.agentSessionManager = fakeSessionManager(async () => ({
@@ -10477,7 +10521,6 @@ describe("Webchat API", () => {
         props: { questions: [{ question: "Which tone?" }] },
       };
       deps.concierge = {
-        writerOf: async () => null,
         conciergeChat: async () => null,
         followDefault: async () => null,
         taskCardSources: () => ({
