@@ -58,6 +58,28 @@
     "notAComputer": "This connection turns on one capability of a device that already uses Rome. It doesn't add a computer or bring an offline one back online.",
     "devicesLink": "Manage computers in Settings › Devices"
   },
+  "connectAccount": {
+    "title": "Connect an account",
+    "intro": "Connect an account you message Rome from, so Rome knows its messages come from you. Get a code here, then send it to Rome from that account.",
+    "getCode": "Get a code",
+    "getNewCode": "Get a new code",
+    "asking": "Getting a code…",
+    "replaces": "A new code replaces this one, and this one stops working.",
+    "yourCode": "Your code",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyRefused": "Could not copy. Select the code instead",
+    "expiresIn": "Stops working in {{time}}",
+    "expired": "This code has expired.",
+    "stepsTitle": "Send it to Rome",
+    "stepOpen": "Open a direct message with Rome from the account you want to connect.",
+    "stepSend": "Send only the code, with nothing else in the message.",
+    "stepWait": "Wait for Rome to answer that the account is connected.",
+    "warningTitle": "This code is yours alone",
+    "warningBody": "Send it only from your own account, and share it with nobody. Whoever sends it gets your access to Rome.",
+    "errorTitle": "Could not get a code",
+    "noPerson": "This sign-in belongs to no one on this Rome. Ask the guardian to invite your email."
+  },
   "connections": {
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",

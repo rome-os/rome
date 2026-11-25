@@ -1140,7 +1140,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const visitorState = authorizeUrl.searchParams.get("state") as string;
     const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`);
     expect(done.status).toBe(302);
-    expect(done.headers.get("location")).toBe("/");
+    // Where the guardian's sign-in lands, so the page follows the stored return.
+    expect(done.headers.get("location")).toBe("/?cloud=success");
     expect(done.headers.get("set-cookie")).toContain(`${VISITOR_COOKIE_NAME}=`);
   });
 

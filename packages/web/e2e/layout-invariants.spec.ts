@@ -36,6 +36,7 @@ const ROUTES = [
   "/sessions/events",
   "/memory",
   "/projects",
+  "/connect-account",
   "/dev/styleguide",
   "/dev/typography",
   "/dev/connections",

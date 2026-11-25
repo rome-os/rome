@@ -275,7 +275,7 @@ import { ConciergeService, GUARDIAN_LANGUAGE_SETTING_KEY } from "./concierge/ser
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
-import { createConciergeOwners } from "./concierge/owners.js";
+import { createConciergeOwners, recipientOf } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOf, ownerOfChat } from "./webchat/owner.js";
 import { actorOfOwner } from "./access/owner-actor.js";
@@ -1815,7 +1815,12 @@ async function main() {
       // its first message would have.
       (await concierge.dashboard.chats.openSession(chatId).catch(() => null)),
     runner: backendTurnRunner,
-    notify: notifyClient,
+    notify: {
+      send: ({ owner, ...content }) => {
+        const recipient = recipientOf(owner);
+        return notifyClient.send({ ...content, ...(recipient === undefined ? {} : { recipient }) });
+      },
+    },
   });
   const stopProviderFailureTurns = turnListeners.listen({
     // A live session refused on its model before the turn began: the same
