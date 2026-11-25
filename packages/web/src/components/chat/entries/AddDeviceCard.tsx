@@ -12,7 +12,7 @@ import {
   setupMethods,
 } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
-import { useDevicesQuery } from "@/hooks/use-devices-query";
+import { useDeviceListQuery } from "@/hooks/use-devices-query";
 import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { WidgetHostContext } from "./widget-ui/turn-fields";
 
@@ -55,7 +55,7 @@ export function AddDeviceCard({
   const parsed = addDeviceCardPropsSchema.safeParse(props);
   const known = parsed.success ? parsed.data.deviceIds : undefined;
   const live = !resolved && !host.readOnly;
-  const devices = useDevicesQuery({ enabled: live && !failed && known !== undefined });
+  const devices = useDeviceListQuery({ enabled: live && !failed && known !== undefined });
   const added = known && devices.data?.devices.find((device) => !known.includes(device.id));
 
   const send = useCallback(

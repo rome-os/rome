@@ -21,16 +21,27 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function mockDevices(devices: Array<{ id: string; name: string }>) {
-  return rs.spyOn(globalThis, "fetch").mockImplementation((async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({
-      connection: "online",
-      checkedAt: "2026-11-24T09:00:00.000Z",
-      devices: devices.map((device) => ({ ...device, platform: "macos", status: "connected" })),
-    }),
-  })) as unknown as typeof fetch);
+/** Answers the device reads with the account's devices as Rome Cloud lists
+ *  them: the status keeps revoked ones, the list drops them. */
+function mockDevices(devices: Array<{ id: string; name: string; revoked?: true }>) {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    const listed = (path === "/api/devices/list" ? devices.filter((d) => !d.revoked) : devices).map(
+      ({ id, name }) => ({ id, name, platform: "macos" }),
+    );
+    return {
+      ok: true,
+      status: 200,
+      json: async () =>
+        path === "/api/devices/list"
+          ? { devices: listed }
+          : {
+              connection: "online",
+              checkedAt: "2026-11-24T09:00:00.000Z",
+              devices: listed.map((device) => ({ ...device, status: "connected" })),
+            },
+    };
+  }) as unknown as typeof fetch);
 }
 
 describe("AddDeviceCard", () => {
@@ -68,6 +79,21 @@ describe("AddDeviceCard", () => {
     expect(sendEvent).toHaveBeenCalledOnce();
     expect(await screen.findByText("Added New laptop")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "App" })).toBeNull();
+  });
+
+  it("never takes a revoked device the account still lists for a new one", async () => {
+    const fetchSpy = mockDevices([
+      { id: "mac", name: "MacBook Pro" },
+      { id: "old", name: "Old phone", revoked: true },
+    ]);
+    const sendEvent = rs.fn();
+
+    render(<AddDeviceCard widgetId="w-7" props={{ deviceIds: ["mac"] }} sendEvent={sendEvent} />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sendEvent).not.toHaveBeenCalled();
+    expect(screen.getByText("Waiting for a new device")).toBeTruthy();
   });
 
   it("never asks on its own without the devices it was sent with", async () => {
