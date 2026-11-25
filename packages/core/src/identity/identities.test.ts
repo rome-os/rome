@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { identities } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { AccountTakenError, createIdentities } from "./identities.js";
+import { AccountTakenError, createIdentities, UnknownPersonError } from "./identities.js";
 
 const ANN_SLACK = { platform: "slack", accountId: "T1:U1" };
 const ANN_EMAIL = { platform: "email", accountId: "ann@example.com" };
@@ -47,6 +47,28 @@ describe("Identities", () => {
     await expect(identity.addAccount(bob.id, ANN_SLACK)).rejects.toBeInstanceOf(AccountTakenError);
     expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
     expect(await identity.accountsOf(bob.id)).toEqual([]);
+  });
+
+  it("rejects an account given to a person Rome does not know, and the account stays nobody's", async () => {
+    const { identity } = setup();
+
+    await expect(identity.addAccount("no-such-person", ANN_SLACK)).rejects.toBeInstanceOf(
+      UnknownPersonError,
+    );
+    expect(await identity.personOf(ANN_SLACK)).toBeNull();
+  });
+
+  it("changes nothing when asked to rename a person Rome does not know", async () => {
+    const { identity } = setup();
+    const ann = await identity.create({ name: "Ann", accounts: [ANN_SLACK] });
+
+    await identity.update("no-such-person", { name: "Bob" });
+
+    expect(await identity.personOf(ANN_SLACK)).toEqual({
+      id: ann.id,
+      name: "Ann",
+      avatarUrl: null,
+    });
   });
 
   it("accepts an account given again to the person who holds it", async () => {

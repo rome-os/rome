@@ -15,6 +15,14 @@ export class AccountTakenError extends Error {
   }
 }
 
+/** A person asked for by an id Rome knows no person by. */
+export class UnknownPersonError extends Error {
+  constructor(readonly identityId: string) {
+    super(`No person has id ${identityId}`);
+    this.name = "UnknownPersonError";
+  }
+}
+
 /**
  * The people Rome knows and the accounts that are theirs. An account belongs
  * to at most one person, and one nobody holds resolves to nobody.
@@ -50,13 +58,15 @@ export class Identities {
     return identity;
   }
 
-  /** Gives the person one more account. Rejects with {@link AccountTakenError}
-   *  when it belongs to another person. Giving it again is a no-op. */
+  /** Gives the person one more account. Rejects with
+   *  {@link UnknownPersonError} when no person has `identityId`, and with
+   *  {@link AccountTakenError} when the account belongs to another person.
+   *  Giving it again is a no-op. */
   async addAccount(identityId: string, account: PlatformAccount): Promise<void> {
     const normal = normalized(account);
-    if (this.repository.insertAccount(identityId, normal, new Date()) !== null) {
-      throw new AccountTakenError(normal);
-    }
+    const refused = this.repository.insertAccount(identityId, normal, new Date());
+    if (refused === "unknown") throw new UnknownPersonError(identityId);
+    if (refused === "taken") throw new AccountTakenError(normal);
   }
 
   /** Makes `account` belong to nobody. */
@@ -65,7 +75,7 @@ export class Identities {
   }
 
   /** Changes the person's name or avatar. A field left out keeps its value, and
-   *  null clears it. */
+   *  null clears it. Does nothing for a person Rome does not know. */
   async update(
     identityId: string,
     patch: { name?: string | null; avatarUrl?: string | null },
