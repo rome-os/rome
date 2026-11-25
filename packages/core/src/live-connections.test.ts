@@ -1,6 +1,6 @@
 // A member removed while a connection of theirs is open. The
-// sockets with a test file of their own (/ws/events, /ws/node and
-// /ws/voice-conversation) are covered there.
+// sockets whose own test file opens them through the gate (/ws/events and
+// /ws/node) are covered there.
 
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -12,6 +12,7 @@ import { ENTRY_RECHECK_MS } from "./access/held-entry.js";
 import { attachDesktopProxy } from "./desktops/desktop-proxy-server.js";
 import { attachTerminalServer, TERMINAL_COMMAND_PRESETS } from "./terminal-server.js";
 import { createTestDb, type TestDb } from "./test/db.js";
+import { attachVoiceConversationServer } from "./voice-conversation/conversation-server.js";
 import { attachVoiceInputServer, type VoiceInputSource } from "./voice-input/index.js";
 
 const PRESET = "test-echo";
@@ -183,5 +184,66 @@ describe("voice input", () => {
     rs.advanceTimersByTime(ENTRY_RECHECK_MS);
     expect(await closed).toBe(1006);
     await rs.waitFor(() => expect(aborted).toBe(true));
+  });
+});
+
+describe("a voice conversation", () => {
+  it("closes at the recheck, and stops listening", async () => {
+    let aborted = false;
+    let sent = 0;
+    const handler = attachVoiceConversationServer(server, testDb.db, {
+      listening: {
+        available: () => true,
+        info: async () => ({ available: true, place: null }),
+        open: async () => ({
+          ok: true,
+          source: {
+            romeCloudSessionId: "session-1",
+            transcriber: {
+              providerId: "test",
+              model: "test",
+              place: { provider: "test", host: "stt.example" },
+              open: () => ({
+                sentBytes: 0,
+                sendAudio: () => {},
+                finish: () => {},
+                abort: () => {
+                  aborted = true;
+                },
+              }),
+            },
+          },
+        }),
+      },
+      speaker: {
+        open: async () => ({
+          ok: true,
+          provider: "soniox",
+          session: {
+            format: { encoding: "pcm_s16le", sampleRate: 24_000 },
+            say: () => {},
+            stop: () => [],
+            close: () => {},
+          },
+        }),
+      },
+      canTalkIn: async () => true,
+      send: async () => {
+        sent += 1;
+        throw new Error("not reached");
+      },
+      voiceTerms: async () => [],
+      dashboardAccess,
+    });
+    cleanups.push(() => handler.close());
+    fakeIntervals();
+    const { ws, closed, said } = await connect("/ws/voice-conversation");
+    ws.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+    await rs.waitFor(() => expect(said()).toContain("ready"));
+    removeMember();
+    rs.advanceTimersByTime(ENTRY_RECHECK_MS);
+    expect(await closed).toBe(1006);
+    await rs.waitFor(() => expect(aborted).toBe(true));
+    expect(sent).toBe(0);
   });
 });

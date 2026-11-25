@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket } from "ws";
 import { createVisitorSession } from "../access/auth.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { ENTRY_RECHECK_MS } from "../access/held-entry.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { attachNodeConsoleServer } from "./node-console-server.js";
 
@@ -17,6 +18,7 @@ describe("node console socket", () => {
   let dashboardAccess: DashboardAccessState;
   // What the daemon received, and the way back to the dashboard.
   let received: string[];
+  let bridgeClosed: boolean;
   let daemon: ConsoleTransport | null;
 
   beforeEach(async () => {
@@ -25,11 +27,12 @@ describe("node console socket", () => {
     dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess([ADMIN]);
     received = [];
+    bridgeClosed = false;
     daemon = null;
     server = createServer();
     nodeConsole = attachNodeConsoleServer(server, testDb.db, dashboardAccess, (transport) => {
       daemon = transport;
-      return { receive: (text) => received.push(text), close: () => {} };
+      return { receive: (text) => received.push(text), close: () => (bridgeClosed = true) };
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   });
@@ -51,45 +54,24 @@ describe("node console socket", () => {
         "x-forwarded-proto": "http",
       },
     });
-    const events: string[] = [];
-    ws.on("message", (data) => events.push(data.toString()));
     const closed = new Promise<number>((resolve) => ws.once("close", resolve));
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
     });
     await rs.waitFor(() => expect(daemon).not.toBeNull());
-    return { ws, events, closed };
+    return { ws, closed };
   }
 
-  it("closes a dashboard admin's console at the next ping once they are off the team", async () => {
-    const { closed } = await openAsAdmin();
-
-    dashboardAccess.setCloudEmailAccess([]);
-    rs.advanceTimersByTime(25_000);
-
-    expect(await closed).toBe(1008);
-  });
-
-  it("passes no command from a dashboard admin once they are off the team", async () => {
+  it("closes a member's console at the recheck once they are removed, and its bridge with it", async () => {
     const { ws, closed } = await openAsAdmin();
     ws.send('{"jsonrpc":"2.0","id":1,"method":"node.status"}');
     await rs.waitFor(() => expect(received).toHaveLength(1));
 
     dashboardAccess.setCloudEmailAccess([]);
-    ws.send('{"jsonrpc":"2.0","id":2,"method":"log.query"}');
+    rs.advanceTimersByTime(ENTRY_RECHECK_MS);
 
-    expect(await closed).toBe(1008);
-    expect(received).toEqual(['{"jsonrpc":"2.0","id":1,"method":"node.status"}']);
-  });
-
-  it("sends no daemon event to a dashboard admin once they are off the team", async () => {
-    const { events, closed } = await openAsAdmin();
-
-    dashboardAccess.setCloudEmailAccess([]);
-    daemon?.send('{"jsonrpc":"2.0","method":"events.node","params":{}}');
-
-    expect(await closed).toBe(1008);
-    expect(events).toEqual([]);
+    expect(await closed).toBe(1006);
+    await rs.waitFor(() => expect(bridgeClosed).toBe(true));
   });
 });

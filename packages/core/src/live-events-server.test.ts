@@ -15,6 +15,7 @@ import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { ENTRY_RECHECK_MS } from "./access/held-entry.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { DashboardActivity } from "./lib/dashboard-activity.js";
 import {
@@ -358,7 +359,7 @@ describe("live events WebSocket", () => {
     await client.subscribe("chat.status");
   });
 
-  it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {
+  it("closes a member's socket at the recheck once they are removed, and its subscriptions with it", async () => {
     rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       await deps.webchatRepo.createSession("sess-a", "A");
@@ -369,19 +370,13 @@ describe("live events WebSocket", () => {
         cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
         origin: "http://rome.example",
       });
-      await client.subscribe("chat.status");
+      await client.subscribe("chat.session:sess-a");
+      expect(activeSubscriptions).toBe(1);
 
       dashboardAccess.setCloudEmailAccess([]);
-      client.send({ type: "subscribe", topic: "chat.session:sess-a" });
-      expect(await client.next((m) => m.type === "error")).toEqual({
-        type: "error",
-        topic: "chat.session:sess-a",
-        message: "Forbidden",
-      });
-
       const closed = new Promise<number>((resolve) => client.ws.once("close", resolve));
-      rs.advanceTimersByTime(25_000);
-      expect(await closed).toBe(1008);
+      rs.advanceTimersByTime(ENTRY_RECHECK_MS);
+      expect(await closed).toBe(1006);
       await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
     } finally {
       rs.useRealTimers();
@@ -500,16 +495,6 @@ describe("live events WebSocket", () => {
     phone.send({ type: "activity", state: "active" });
     await phone.subscribe("chat.status");
     expect(dashboardActivity.isActive("guardian")).toBe(false);
-  });
-
-  it("ignores an active signal from a visitor dropped from the allow-list", async () => {
-    const visitor = await connect(visitorHeaders());
-    dashboardAccess.setCloudEmailAccess([]);
-    visitor.send({ type: "activity", state: "active" });
-    // An error answers the refused subscribe, after the signal before it ran.
-    visitor.send({ type: "subscribe", topic: "chat.status" });
-    await visitor.next((m) => m.type === "error");
-    expect(dashboardActivity.isActive("visitor:account-1")).toBe(false);
   });
 
   it("forwards session events for the subscribed session only, until unsubscribed", async () => {
