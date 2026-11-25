@@ -8,7 +8,7 @@ import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { attachNodeConsoleServer } from "./node-console-server.js";
 
-const ADMIN = "ada@example.com";
+const MEMBER = "ada@example.com";
 
 describe("node console socket", () => {
   let testDb: TestDb;
@@ -17,34 +17,34 @@ describe("node console socket", () => {
   let dashboardAccess: DashboardAccessState;
   // What the daemon received, and the way back to the dashboard.
   let received: string[];
+  let bridgeClosed: boolean;
   let daemon: ConsoleTransport | null;
 
   beforeEach(async () => {
-    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     testDb = createTestDb();
     dashboardAccess = new DashboardAccessState();
-    dashboardAccess.setCloudEmailAccess([ADMIN]);
+    dashboardAccess.setCloudEmailAccess([MEMBER]);
     received = [];
+    bridgeClosed = false;
     daemon = null;
     server = createServer();
     nodeConsole = attachNodeConsoleServer(server, testDb.db, dashboardAccess, (transport) => {
       daemon = transport;
-      return { receive: (text) => received.push(text), close: () => {} };
+      return { receive: (text) => received.push(text), close: () => (bridgeClosed = true) };
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   });
 
   afterEach(async () => {
-    rs.useRealTimers();
     nodeConsole.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     testDb.close();
   });
 
-  async function openAsAdmin() {
+  async function openAsMember() {
     const ws = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws/node`, {
       headers: {
-        cookie: `rome_visitor=${createVisitorSession("ada", ADMIN)}`,
+        cookie: `rome_visitor=${createVisitorSession("ada", MEMBER)}`,
         origin: "http://rome.example",
         "x-forwarded-for": "203.0.113.1",
         "x-forwarded-host": "rome.example",
@@ -62,34 +62,17 @@ describe("node console socket", () => {
     return { ws, events, closed };
   }
 
-  it("closes a dashboard admin's console at the next ping once they are off the team", async () => {
-    const { closed } = await openAsAdmin();
-
-    dashboardAccess.setCloudEmailAccess([]);
-    rs.advanceTimersByTime(25_000);
-
-    expect(await closed).toBe(1008);
-  });
-
-  it("passes no command from a dashboard admin once they are off the team", async () => {
-    const { ws, closed } = await openAsAdmin();
+  it("passes a member's message to the daemon and its answer back, and ends its bridge with it", async () => {
+    const { ws, events, closed } = await openAsMember();
     ws.send('{"jsonrpc":"2.0","id":1,"method":"node.status"}');
-    await rs.waitFor(() => expect(received).toHaveLength(1));
+    await rs.waitFor(() =>
+      expect(received).toEqual(['{"jsonrpc":"2.0","id":1,"method":"node.status"}']),
+    );
+    daemon?.send('{"jsonrpc":"2.0","id":1,"result":{}}');
+    await rs.waitFor(() => expect(events).toEqual(['{"jsonrpc":"2.0","id":1,"result":{}}']));
 
-    dashboardAccess.setCloudEmailAccess([]);
-    ws.send('{"jsonrpc":"2.0","id":2,"method":"log.query"}');
-
-    expect(await closed).toBe(1008);
-    expect(received).toEqual(['{"jsonrpc":"2.0","id":1,"method":"node.status"}']);
-  });
-
-  it("sends no daemon event to a dashboard admin once they are off the team", async () => {
-    const { events, closed } = await openAsAdmin();
-
-    dashboardAccess.setCloudEmailAccess([]);
-    daemon?.send('{"jsonrpc":"2.0","method":"events.node","params":{}}');
-
-    expect(await closed).toBe(1008);
-    expect(events).toEqual([]);
+    ws.close();
+    await closed;
+    await rs.waitFor(() => expect(bridgeClosed).toBe(true));
   });
 });

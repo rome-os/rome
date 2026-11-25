@@ -10,18 +10,15 @@
 // send pass through without a projection.
 //
 // Unlike the polling/gateway channels, email is PUSH-driven: there is no live
-// transport loop to report a terminal failure from. Two distinct signals reach
-// `fault`:
-//   - `ingestInbound`'s local HMAC verification fails (`bad_signature`) → the
-//     inboundSecret we hold no longer matches what Rome Cloud is signing with —
-//     a refused credential → CredentialRejected{ grant: "inbox" } → runtime
-//     renews once (route-driven ⇒ immediate fix), then degrades.
+// transport loop to report a terminal failure from. One signal reaches `fault`:
 //   - `adapter.start()` rejects → Disconnected → runtime backs off and
 //     rebuilds. start() does NOT provision: the registry only ever
 //     builds this adapter from complete grant material, so a start-time failure
 //     is a transport/connectivity problem, never a grant problem — the `inbox`
 //     credential is left untouched and the registry's own backoff loop retries
 //     automatically.
+// A deposit whose HMAC does not verify says nothing about the grant, since the
+// deposit is not known to be Rome Cloud's. It is refused and changes nothing.
 //
 // Provisioning is setup-driven: the `inbox` grant carries a
 // near-degenerate setup — the guardian's Connect click confirms, the
@@ -316,11 +313,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
                 if (typeof deposit.rawBody !== "string" || typeof deposit.signature !== "string") {
                   throw new Error("Invalid email ingress payload");
                 }
-                const result = await adapter.ingestInbound(deposit.rawBody, deposit.signature);
-                if (result.status === "rejected" && result.reason === "bad_signature") {
-                  faultSink?.(new CredentialRejected({ grant: "inbox" }));
-                }
-                return result;
+                return adapter.ingestInbound(deposit.rawBody, deposit.signature);
               });
               // start() only touches the network for the guardian-email best-
               // effort resolve (already try/catch'd inside EmailAdapter — never
