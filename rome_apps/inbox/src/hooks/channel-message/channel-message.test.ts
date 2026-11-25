@@ -293,12 +293,12 @@ describe("ChannelMessageHook", () => {
     expect(harness.run).not.toHaveBeenCalled();
 
     harness.get.mockImplementation(async ({ connectionId, chatId }) =>
-      snapshot(connectionId, chatId, { agentName: "envoy" }),
+      snapshot(connectionId, chatId, { agentName: "assistant" }),
     );
     await harness.emit(TELEGRAM_ID, message({ messageId: "routed" }));
     expect(harness.run).toHaveBeenCalledWith(
       "inbox:message_handler",
-      expect.objectContaining({ routedAgentName: "envoy" }),
+      expect.objectContaining({ routedAgentName: "assistant" }),
       expect.anything(),
     );
   });

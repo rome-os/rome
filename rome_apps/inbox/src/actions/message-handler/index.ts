@@ -5,7 +5,6 @@ import type {
   ActionResult,
   AgentRunnerInterface,
   AppActionRuntimeDeps,
-  ApprovalsRepository,
   Attachment,
   BondLevel,
   ChatId,
@@ -28,19 +27,6 @@ const log = createAppLogger("message-handler");
 // Dependencies injected via factory
 // ---------------------------------------------------------------------------
 
-/** Core's send gate, which the SDK does not describe yet. */
-export type SendGate = (request: {
-  destination: {
-    connectionId: string;
-    chatId: string;
-    place: "direct" | "group";
-    sameChatAsWake: boolean;
-    onlyGuardianReads: boolean;
-  };
-  recipient: { bondLevel: BondLevel } | null;
-  author: { agentName: string };
-}) => "send" | "check" | "ask_guardian" | "refuse";
-
 /** Core's wake gate, which the SDK does not describe yet. */
 export type WakeGate = (
   message: {
@@ -61,9 +47,7 @@ export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
 
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
-  sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
-  approvalsRepo: ApprovalsRepository;
   wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
@@ -90,7 +74,7 @@ interface MessageContext {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; structuredOutput?: unknown; turnId?: string }
+  | { success: true; content: string; turnId?: string }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -182,111 +166,6 @@ export function buildMessageContext(
   ].join("\n");
 }
 
-/** Who the envoy is told a reply goes to: the answered message's sender. */
-export interface EnvoyRecipient {
-  /** The name the message showed, which the sender chose. */
-  shownName: string;
-  /** The person Rome links to the sender's account, or null when none. */
-  person: string | null;
-  bondLevel: string;
-  threadType?: string;
-}
-
-const BOND_LEVEL_WORDS: Record<string, string> = {
-  guardian: "guardian",
-  "inner-circle": "inner circle",
-  acquaintance: "acquaintance",
-  other: "other",
-};
-
-/** The sender as the replying agent reads them, `Ada [Ada Lovelace, inner circle]`,
- *  the same form Rome labels each message the agent reads with (`whoSaid` in
- *  packages/core/src/chats/sender-labels.ts, which apps cannot import). */
-export function recipientLabel(recipient: EnvoyRecipient): string {
-  const who = recipient.person
-    ? `${recipient.person}, ${BOND_LEVEL_WORDS[recipient.bondLevel] ?? recipient.bondLevel}`
-    : "not linked";
-  return `${recipient.shownName} [${who}]`;
-}
-
-function placeOf(threadType: string | undefined): string {
-  if (threadType === "private") return "direct message";
-  if (threadType === "group") return "group chat";
-  return "chat";
-}
-
-async function envoyCheck(
-  runner: AgentRunnerInterface,
-  outgoingText: string,
-  originalMessage: string,
-  recipient: EnvoyRecipient,
-  replyingAgent: string,
-  workingDir?: string,
-): Promise<{ action: "approve" | "reject" | "require_approval"; reason?: string }> {
-  const place = placeOf(recipient.threadType);
-  const prompt = [
-    `Validate this outgoing message before it is sent.`,
-    ``,
-    `Message being answered, from ${recipientLabel(recipient)}:`,
-    originalMessage,
-    ``,
-    `The reply goes to that sender, in the same ${place} the message was sent in.`,
-    `The sender is not the guardian: the guardian's replies skip this check.`,
-    `Replying agent: ${replyingAgent}`,
-    ``,
-    `Proposed reply:`,
-    outgoingText,
-  ].join("\n");
-
-  const envoyResult = await collectAgentResult(
-    runner,
-    {
-      agentName: "envoy",
-      prompt,
-      workingDir,
-    },
-    undefined,
-    "envoy",
-  );
-
-  if (!envoyResult.success) {
-    log.warn("envoy validation failed; requiring approval", { error: envoyResult.error });
-    return {
-      action: "require_approval",
-      reason: `Envoy validation failed: ${envoyResult.error}`,
-    };
-  }
-
-  return readEnvoyVerdict(envoyResult.structuredOutput, envoyResult.content);
-}
-
-const ENVOY_VERDICTS = ["approve", "require_approval", "reject"] as const;
-type EnvoyVerdict = (typeof ENVOY_VERDICTS)[number];
-
-/**
- * The envoy's decision is its `verdict` field and nothing else. An answer
- * without a known verdict holds the message for the guardian.
- */
-function readEnvoyVerdict(
-  structuredOutput: unknown,
-  content: string,
-): { action: EnvoyVerdict; reason?: string } {
-  const answer =
-    structuredOutput && typeof structuredOutput === "object"
-      ? (structuredOutput as { verdict?: unknown; reason?: unknown })
-      : undefined;
-  const verdict = ENVOY_VERDICTS.find((v) => v === answer?.verdict);
-  if (!verdict) {
-    log.warn("envoy answered without a verdict; requiring approval", { content });
-    return {
-      action: "require_approval",
-      reason: `Envoy answered without a verdict: ${content}`,
-    };
-  }
-  const reason = typeof answer?.reason === "string" ? answer.reason : undefined;
-  return { action: verdict, ...(reason ? { reason } : {}) };
-}
-
 async function collectAgentResult(
   runner: AgentRunnerInterface,
   params: Parameters<AgentRunnerInterface["run"]>[0],
@@ -294,7 +173,6 @@ async function collectAgentResult(
   agentName?: string,
 ): Promise<CollectedAgentResult> {
   let response = "";
-  let structuredOutput: unknown;
   let lastError = "";
   let turnId: string | undefined;
   for await (const msg of runner.run(params)) {
@@ -303,7 +181,6 @@ async function collectAgentResult(
     }
     if (msg.type === "result") {
       response = msg.content;
-      structuredOutput = msg.structuredOutput;
     }
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
@@ -312,7 +189,7 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, structuredOutput, turnId };
+  return { success: true, content: response, turnId };
 }
 
 function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
@@ -361,7 +238,7 @@ async function resolveAgent<F extends string | null>(
 }
 
 // ---------------------------------------------------------------------------
-// The agent's turn: target agent -> envoy check -> send / approval gate
+// The agent's turn: target agent -> send
 // ---------------------------------------------------------------------------
 
 async function runTurnAndReply(
@@ -437,111 +314,17 @@ async function runTurnAndReply(
     return { status: "ok", data: { action: "no_response" } };
   }
 
-  const approval = { type: "outgoing_message" as const, requestedBy: targetAgent };
-  const payload = { response, channel, threadId, messageId, channelUserId };
-  const send = () =>
-    sendAnswer(deps, {
-      channel,
-      threadId,
-      text: response,
-      channelUserId,
-      replyToMessageId: messageId,
-      romeSessionId: chatId,
-      ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
-      knownToProvider: true,
-    });
-  const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
-  const recipient =
-    typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null;
-  const place = args.threadType === "private" ? "direct" : "group";
-  const decision = deps.sendGate({
-    destination: {
-      connectionId,
-      chatId: threadId,
-      place,
-      // The reply goes to the chat the message came from.
-      sameChatAsWake: true,
-      onlyGuardianReads: place === "direct" && recipient?.bondLevel === "guardian",
-    },
-    recipient,
-    author: { agentName: targetAgent },
+  await sendAnswer(deps, {
+    channel,
+    threadId,
+    text: response,
+    channelUserId,
+    replyToMessageId: messageId,
+    romeSessionId: chatId,
+    ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
+    knownToProvider: true,
   });
-  log.info("send gate decision", { decision, channel, channelUserId });
-
-  if (decision === "send") {
-    await send();
-    await deps.approvalsRepo.create({
-      ...approval,
-      description: "Skipped envoy (guardian)",
-      payload,
-      status: "auto_approved",
-    });
-    return { status: "ok", data: { action: "sent", response } };
-  }
-  if (decision === "ask_guardian") {
-    await deps.approvalsRepo.create({
-      ...approval,
-      description: "Held by the send gate",
-      payload,
-    });
-    return { status: "ok", data: { action: "pending_approval", response } };
-  }
-  if (decision === "refuse") {
-    await deps.approvalsRepo.create({
-      ...approval,
-      description: "Refused by the send gate",
-      payload,
-      status: "rejected",
-    });
-    return { status: "ok", data: { action: "rejected_by_send_gate" } };
-  }
-
-  log.info("running envoy check", { channel, channelUserId });
-  const envoyResult = await envoyCheck(
-    deps.agentRunner,
-    response,
-    text,
-    {
-      shownName: typeof args.displayName === "string" ? args.displayName : channelUserId,
-      person: senderPerson,
-      bondLevel,
-      threadType: typeof args.threadType === "string" ? args.threadType : undefined,
-    },
-    targetAgent,
-    workingDir,
-  );
-  log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
-
-  if (envoyResult.action === "approve") {
-    await send();
-    await deps.approvalsRepo.create({
-      ...approval,
-      description: envoyResult.reason ?? "Envoy approved",
-      payload,
-      status: "auto_approved",
-    });
-    return { status: "ok", data: { action: "sent", response } };
-  }
-
-  if (envoyResult.action === "require_approval") {
-    await deps.approvalsRepo.create({
-      ...approval,
-      description: envoyResult.reason ?? "Envoy flagged for approval",
-      payload,
-    });
-    return { status: "ok", data: { action: "pending_approval", response } };
-  }
-
-  await deps.approvalsRepo.create({
-    ...approval,
-    description: envoyResult.reason ?? "Envoy rejected",
-    payload,
-    status: "rejected",
-  });
-  return {
-    status: "ok",
-    data: { action: "rejected_by_envoy", reason: envoyResult.reason },
-  };
+  return { status: "ok", data: { action: "sent", response } };
 }
 
 // ---------------------------------------------------------------------------
@@ -731,9 +514,7 @@ export function createMessageHandlerAction(
           strangerPersonId: deps.strangerPersonId,
         });
 
-        const senderPerson =
-          person && person.id !== deps.strangerPersonId ? person.displayName : null;
-        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
+        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo };
 
         if (recorded) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
