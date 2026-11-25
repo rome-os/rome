@@ -62,7 +62,8 @@ export function voiceConversationRoutes(
     if (!parsed.success)
       return c.json({ error: "Pick a listed voice and a speed from 0.7 to 1.3" }, 400);
     const { voice, speed, language } = parsed.data;
-    const audio = await speakSample(deps.speaker, { voice, speed, language }, SAMPLE[language]);
+    // Spoken as a conversation speaks, so it sounds as the call will. Only its words follow the language.
+    const audio = await speakSample(deps.speaker, { voice, speed }, SAMPLE[language]);
     if (!audio) return c.json({ error: "The voice could not be played" }, 502);
     return new Response(audio, {
       headers: { "Content-Type": "audio/wav", "Cache-Control": "no-store" },

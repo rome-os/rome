@@ -182,8 +182,9 @@ describe("voice conversation settings", () => {
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("RIFF");
     expect(bytes.byteLength).toBe(44 + 480);
-    expect(choices).toEqual([{ voice: "Grace", speed: 0.9, language: "zh" }]);
-    expect(said).toHaveLength(1);
+    // It sounds as a conversation would: the language picks only the sentence.
+    expect(choices).toEqual([{ voice: "Grace", speed: 0.9 }]);
+    expect(said).toEqual(["你好，我是 Rome。今天想聊点什么？"]);
   });
 
   it("plays nothing where no conversation is offered, and says so when the voice cannot be had", async () => {

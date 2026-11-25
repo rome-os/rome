@@ -6,6 +6,35 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { VoiceConversationRows } from "./voice-conversation-rows";
 
+// The player a voice conversation plays its reply on: the test hears what reaches it.
+const player = rs.hoisted(() => ({
+  opened: 0,
+  closed: 0,
+  played: [] as Array<{ bytes: number; sampleRate: number }>,
+}));
+rs.mock("@/lib/voice-conversation/player", () => ({
+  createPcmPlayer: () => {
+    player.opened += 1;
+    return {
+      play: (chunk: ArrayBuffer, sampleRate: number) =>
+        player.played.push({ bytes: chunk.byteLength, sampleRate }),
+      clear: () => {},
+      level: () => 0,
+      ahead: () => 0.5,
+      close: () => {
+        player.closed += 1;
+      },
+    };
+  },
+}));
+
+/** A WAV file of `samples` 16-bit samples at 24 kHz, as the preview answers. */
+function wav(samples: number): Uint8Array {
+  const out = new Uint8Array(44 + samples * 2);
+  new DataView(out.buffer).setUint32(24, 24_000, true);
+  return out;
+}
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -13,10 +42,16 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup();
   rs.restoreAllMocks();
+  player.opened = 0;
+  player.closed = 0;
+  player.played = [];
 });
 
 /** Stands in for the voice conversation routes, and records what the rows asked of them. */
-function serve(available = true) {
+function serve(
+  available = true,
+  answer: { preview?: () => Promise<Response>; save?: () => Promise<void> } = {},
+) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let settings = { voice: "Iris", speed: 1 };
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -29,25 +64,25 @@ function serve(available = true) {
     calls.push({ method, path, body });
     if (path === "/api/voice-conversation") return Response.json({ available });
     if (path === "/api/voice-conversation/settings") {
-      if (method === "PUT") settings = body;
+      if (method === "PUT") {
+        await answer.save?.();
+        settings = body;
+      }
       return Response.json(settings);
     }
     if (path === "/api/voice-conversation/preview") {
-      return new Response(new Uint8Array(44), { headers: { "Content-Type": "audio/wav" } });
+      if (answer.preview) return answer.preview();
+      return new Response(wav(240), { headers: { "Content-Type": "audio/wav" } });
     }
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
-  URL.createObjectURL = rs.fn(() => "blob:sample");
-  URL.revokeObjectURL = rs.fn();
-  const played = rs.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-  rs.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const view = render(
     <QueryClientProvider client={client}>
       <VoiceConversationRows />
     </QueryClientProvider>,
   );
-  return { calls, played };
+  return { calls, view };
 }
 
 describe("the voice conversation rows in Settings", () => {
@@ -63,14 +98,14 @@ describe("the voice conversation rows in Settings", () => {
   });
 
   it("keeps a new speed and plays the voice at it", async () => {
-    const { calls, played } = serve();
+    const { calls } = serve();
     const user = userEvent.setup();
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Conversation speed" }).textContent).toBe("1×"),
     );
     await user.click(screen.getByRole("combobox", { name: "Conversation speed" }));
     await user.click(screen.getByRole("option", { name: "1.3×" }));
-    await waitFor(() => expect(played).toHaveBeenCalled());
+    await waitFor(() => expect(player.played).not.toHaveLength(0));
     expect(calls).toContainEqual({
       method: "PUT",
       path: "/api/voice-conversation/settings",
@@ -84,13 +119,13 @@ describe("the voice conversation rows in Settings", () => {
   });
 
   it("keeps a picked voice and plays it, naming only the voice in the field", async () => {
-    const { calls, played } = serve();
+    const { calls } = serve();
     const user = userEvent.setup();
     const field = () => screen.getByRole("combobox", { name: "Conversation voice" });
     await waitFor(() => expect(field().textContent).toBe("Iris"));
     await user.click(field());
     await user.click(screen.getByRole("option", { name: /Reid/ }));
-    await waitFor(() => expect(played).toHaveBeenCalled());
+    await waitFor(() => expect(player.played).not.toHaveLength(0));
     expect(calls).toContainEqual({
       method: "PUT",
       path: "/api/voice-conversation/settings",
@@ -100,14 +135,14 @@ describe("the voice conversation rows in Settings", () => {
   });
 
   it("plays a sample of the voice picked, and stops it", async () => {
-    const { calls, played } = serve();
+    const { calls } = serve();
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Conversation voice" }).textContent).toContain(
         "Iris",
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Play a sample" }));
-    await waitFor(() => expect(played).toHaveBeenCalled());
+    await waitFor(() => expect(player.played).not.toHaveLength(0));
     expect(calls.filter((call) => call.path.endsWith("/preview"))).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Stop the sample" }));
     expect(screen.getByRole("button", { name: "Play a sample" })).toBeTruthy();
@@ -120,5 +155,52 @@ describe("the voice conversation rows in Settings", () => {
     );
     expect(screen.queryByText("Conversation voice")).toBeNull();
     expect(calls.some((call) => call.path.endsWith("/settings"))).toBe(false);
+  });
+});
+
+describe("a sample in Settings", () => {
+  it("plays on the player opened by the click, at the sample's own rate", async () => {
+    serve();
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Conversation voice" }).textContent).toBe("Iris"),
+    );
+    await user.click(screen.getByRole("button", { name: "Play a sample" }));
+    // Opened in the click itself, before the sample is in.
+    expect(player.opened).toBe(1);
+    await waitFor(() => expect(player.played).toEqual([{ bytes: 480, sampleRate: 24_000 }]));
+  });
+
+  it("stays silent when Settings is left while the sample still loads", async () => {
+    let answer: (response: Response) => void = () => {};
+    const { view } = serve(true, {
+      preview: () => new Promise<Response>((resolve) => (answer = resolve)),
+    });
+    const user = userEvent.setup();
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Conversation voice" }).textContent).toBe("Iris"),
+    );
+    await user.click(screen.getByRole("button", { name: "Play a sample" }));
+    view.unmount();
+    expect(player.closed).toBe(1);
+    answer(new Response(wav(240)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(player.played).toEqual([]);
+  });
+
+  it("takes no new pick while one is saving, so an older save cannot replace it", async () => {
+    let saved: () => void = () => {};
+    serve(true, { save: () => new Promise<void>((resolve) => (saved = resolve)) });
+    const user = userEvent.setup();
+    const voice = () => screen.getByRole("combobox", { name: "Conversation voice" });
+    const speed = () => screen.getByRole("combobox", { name: "Conversation speed" });
+    await waitFor(() => expect(voice().textContent).toBe("Iris"));
+    await user.click(voice());
+    await user.click(screen.getByRole("option", { name: /Grace/ }));
+    await waitFor(() => expect(voice().hasAttribute("disabled")).toBe(true));
+    expect(speed().hasAttribute("disabled")).toBe(true);
+    saved();
+    await waitFor(() => expect(voice().hasAttribute("disabled")).toBe(false));
+    expect(voice().textContent).toBe("Grace");
   });
 });

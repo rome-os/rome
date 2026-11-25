@@ -26,8 +26,10 @@ import {
 } from "@/components/ui/select";
 import { useVoiceConversationInfo } from "@/hooks/use-voice-conversation-info";
 import { fetchJson } from "@/lib/fetch-json";
+import { createPcmPlayer, type PcmPlayer } from "@/lib/voice-conversation/player";
 
 const SETTINGS_URL = "/api/voice-conversation/settings";
+const WAV_HEADER_BYTES = 44;
 const settingsKey = ["voice-conversation", "settings"];
 
 /**
@@ -100,7 +102,8 @@ export function VoiceConversationRows() {
           </Button>
           <Select
             value={settings?.voice ?? ""}
-            disabled={!settings}
+            // One save at a time, so an older answer never replaces a newer pick.
+            disabled={!settings || mutation.isPending}
             onValueChange={(voice) => update({ voice: voice as VoiceConversationVoice }, true)}
           >
             <SelectTrigger
@@ -135,7 +138,7 @@ export function VoiceConversationRows() {
         <FormRowControl>
           <Select
             value={settings ? String(settings.speed) : ""}
-            disabled={!settings}
+            disabled={!settings || mutation.isPending}
             onValueChange={(speed) => update({ speed: Number(speed) }, true)}
           >
             <SelectTrigger
@@ -158,31 +161,44 @@ export function VoiceConversationRows() {
   );
 }
 
-/** Plays a sample of a voice at a speed. A new sample stops the one playing. */
+/**
+ * Plays a sample of a voice at a speed, on the player a voice conversation
+ * plays its reply on: opened from the click, so a browser that plays only
+ * from a gesture, as iOS Safari does, still plays the sample once it is in.
+ * A new sample stops the one playing.
+ */
 function useSample(language: "zh" | "en") {
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
-  const current = useRef<{ audio: HTMLAudioElement | null; abort: AbortController } | null>(null);
+  const current = useRef<{
+    player: PcmPlayer;
+    abort: AbortController;
+    timer?: ReturnType<typeof setTimeout>;
+  } | null>(null);
 
-  const stop = () => {
+  // Ends the sample, loading or playing, and changes no state, so it also runs as Settings goes away.
+  const release = () => {
     const was = current.current;
     current.current = null;
-    was?.abort.abort();
-    if (was?.audio) {
-      was.audio.pause();
-      URL.revokeObjectURL(was.audio.src);
-    }
+    if (!was) return;
+    was.abort.abort();
+    if (was.timer) clearTimeout(was.timer);
+    was.player.close();
+  };
+
+  const stop = () => {
+    release();
     setPlaying(false);
   };
 
   const play = (settings: VoiceConversationSettings) => {
-    stop();
-    const mine = { audio: null as HTMLAudioElement | null, abort: new AbortController() };
+    release();
+    const mine = { player: createPcmPlayer(), abort: new AbortController() } as NonNullable<
+      typeof current.current
+    >;
     current.current = mine;
     setPlaying(true);
     setFailed(false);
-    // Made now, from the click, so the browser lets it play once the sample is in.
-    const audio = new Audio();
     void fetch("/api/voice-conversation/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -191,25 +207,24 @@ function useSample(language: "zh" | "en") {
     })
       .then(async (response) => {
         if (!response.ok) throw new Error(String(response.status));
-        const blob = await response.blob();
+        const wav = await response.arrayBuffer();
         if (current.current !== mine) return;
-        audio.src = URL.createObjectURL(blob);
-        mine.audio = audio;
-        audio.onended = () => {
+        // A WAV file of mono 16-bit PCM: its sample rate, then its samples after the 44-byte header.
+        mine.player.play(wav.slice(WAV_HEADER_BYTES), new DataView(wav).getUint32(24, true));
+        mine.timer = setTimeout(() => {
           if (current.current === mine) stop();
-        };
-        await audio.play();
+        }, mine.player.ahead() * 1000);
       })
       .catch(() => {
         if (current.current !== mine) return;
-        current.current = null;
+        release();
         setPlaying(false);
         setFailed(true);
       });
   };
 
-  // Leaving Settings stops the sample.
-  useEffect(() => () => current.current?.audio?.pause(), []);
+  // Leaving Settings ends the sample, also one still loading.
+  useEffect(() => release, []);
 
   return { play, stop, playing, failed };
 }
