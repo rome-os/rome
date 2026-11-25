@@ -1,5 +1,5 @@
-// The one place what a connection delivers inward passes: a message or a
-// command. It asks the entry once for each, before any agent or app sees it,
+// The one place what a connection delivers inward passes: a message, a command
+// or a press. It asks the entry once for each, before any agent or app sees it,
 // and hands on only what someone let in said or did.
 // Vocabulary: docs/domains/participation.md#entry.
 
@@ -27,6 +27,8 @@ export interface Entrance<Person> {
     platform: string,
     commands: All & RunCommands<C>,
   ): All;
+  /** Runs `answer` to a press when whoever pressed is let in, else nothing. */
+  press(presser: EntryAccount, answer: () => Promise<void>): Promise<void>;
 }
 
 export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
@@ -50,6 +52,9 @@ export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
         suggest: async (command, option, typed) =>
           (await ranByOneLetIn(command)) ? commands.suggest(command, option, typed) : [],
       };
+    },
+    async press(presser, answer) {
+      if (await letIn(presser, "press")) await answer();
     },
   };
 }

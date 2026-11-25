@@ -272,7 +272,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       readdress: rs.fn(),
       linkStated: rs.fn(() => "id"),
     };
-    registry.register(feishuDeps(overrides, personRepo));
+    registry.register(feishuDeps(overrides));
     const manager = new SetupManager({
       registry,
       participant: linkGuardianOnConnect(personRepo as unknown as PeopleRepository),
@@ -291,7 +291,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     }) => Promise<FeishuPendingMaterial>;
   }
 
-  function feishuDeps(fakes: FeishuFakes, personRepo: unknown) {
+  function feishuDeps(fakes: FeishuFakes) {
     // A fake LarkChannel keeps the Talk epoch built post-grant off the network.
     const fakeLarkChannel = {
       async connect() {},
@@ -302,7 +302,6 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
     return createFeishuDescriptor({
       chatSettings: {} as never,
-      peopleRepo: personRepo as PeopleRepository,
       listAgents: () => [],
       createChannel: () => fakeLarkChannel as never,
       probeCredentials: fakes.probeCredentials ?? (async () => {}),

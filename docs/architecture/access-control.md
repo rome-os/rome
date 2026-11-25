@@ -27,7 +27,7 @@ Entry is the one question asked before anything from outside Rome runs: may this
 ### Invariants
 
 - A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
-- What a connection hands in passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once. A message is asked about before anything else hears it, and the answer stays on its event, so an app's `channel-message` hook hears only what someone let in said, whether as a recorded message (`packages/core/src/sessions/messages-said.ts`) or from a channel (`packages/core/src/app-host/entered-channels.ts`).
+- What a connection hands in, a message, a command or a press, passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once. A message is asked about before anything else hears it, and the answer stays on its event, so an app's `channel-message` hook hears only what someone let in said, whether as a recorded message (`packages/core/src/sessions/messages-said.ts`) or from a channel (`packages/core/src/app-host/entered-channels.ts`).
 - The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.
 

@@ -17,7 +17,6 @@ import { createLogger } from "../../../logger.js";
 import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import type * as connections from "../../message.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type {
   ChatDescriptor,
   ChatId,
@@ -55,7 +54,12 @@ export interface FeishuConfig {
   chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  peopleRepo?: PeopleRepository;
+  /** Reports that `presser` pressed a card or asked for one. Rome runs `answer`
+   *  when they are let in. Absent, nothing is answered. */
+  pressed?: (
+    presser: { platform: string; id: string },
+    answer: () => Promise<void>,
+  ) => Promise<void>;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
@@ -176,7 +180,7 @@ export class FeishuAdapter {
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  private readonly peopleRepo?: PeopleRepository;
+  private readonly pressed: NonNullable<FeishuConfig["pressed"]>;
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
@@ -200,7 +204,7 @@ export class FeishuAdapter {
     this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.peopleRepo = config.peopleRepo;
+    this.pressed = config.pressed ?? (async () => {});
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
@@ -315,7 +319,9 @@ export class FeishuAdapter {
 
     if (threadType === "group") {
       if (isSettingsRequest(text) && m.mentionedBot) {
-        await this.sendGroupConfigCard(m.chatId, m.messageId, m.senderId);
+        await this.pressed({ platform: this.platform, id: m.senderId }, () =>
+          this.sendGroupConfigCard(m.chatId, m.messageId),
+        );
         return;
       }
       // Whether Rome keeps the message, in a group switched off too, is
@@ -365,7 +371,9 @@ export class FeishuAdapter {
   private async handleCardAction(evt: CardActionEvent): Promise<void> {
     const value = evt.action.value;
     if (isFeishuGroupConfigAction(value)) {
-      await this.handleGroupConfigAction(evt);
+      await this.pressed({ platform: this.platform, id: evt.operator.openId }, () =>
+        this.handleGroupConfigAction(evt),
+      );
     }
   }
 
@@ -428,18 +436,8 @@ export class FeishuAdapter {
   private async sendGroupConfigCard(
     chatId: string,
     replyToMessageId: string,
-    channelUserId: string,
     error?: string,
   ): Promise<void> {
-    if (!(await this.isGuardian(channelUserId))) {
-      await this.channel.send(
-        chatId,
-        { markdown: "Only the linked guardian can configure this Feishu group." },
-        { replyTo: replyToMessageId },
-      );
-      return;
-    }
-
     const cfg = await this.getChannelConfig(chatId, true);
     await this.channel.send(
       chatId,
@@ -463,15 +461,6 @@ export class FeishuAdapter {
       );
       return;
     }
-    if (!(await this.isGuardian(evt.operator.openId))) {
-      await this.sendGroupConfigStatus(
-        evt.chatId,
-        evt.messageId,
-        "Only the linked guardian can change this group.",
-      );
-      return;
-    }
-
     const op = typeof value.op === "string" ? value.op : "save";
     const patch = this.buildGroupConfigPatch(op, value, evt.raw);
 
@@ -529,12 +518,6 @@ export class FeishuAdapter {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }
-
-  private async isGuardian(channelUserId: string): Promise<boolean> {
-    if (!this.peopleRepo) return false;
-    const person = await this.peopleRepo.byAccount({ platform: this.platform, id: channelUserId });
-    return person?.bondLevel === "guardian";
   }
 
   /** An empty or missing select leaves routing alone. Reset clears it. */

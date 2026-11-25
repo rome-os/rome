@@ -270,17 +270,8 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     why: "Email reads the guardian's address from People, until it gets a port.",
   },
   {
-    from: "connections/kinds/feishu/descriptor.ts",
-    to: ["people/model/people-repository.ts"],
-    why: "Feishu's descriptor hands the People repository to the kind, until it gets a port.",
-  },
-  {
     from: "connections/kinds/feishu/feishu.ts",
-    to: [
-      "chats/connected-accounts/account-agents.ts",
-      "participation/mention-only.ts",
-      "people/model/people-repository.ts",
-    ],
+    to: ["chats/connected-accounts/account-agents.ts", "participation/mention-only.ts"],
     why: "Feishu still reads a chat's agent and its mention-only rule, until those move up.",
   },
 ];

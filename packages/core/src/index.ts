@@ -2437,7 +2437,7 @@ async function main() {
   const connectionKinds: KindMount[] = [
     feishu({
       chatSettings,
-      peopleRepo,
+      pressed: entrance.press,
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
