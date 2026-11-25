@@ -321,14 +321,10 @@ describe("chat rules", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("offers no chat rules for the official Slack and Discord apps, and only Slack's chats share a session that resets after an hour", () => {
-    expect(everyKind().get("slack_app")?.chatRules).toEqual({
-      offers: [],
-      fixed: { "session.scope": "account", "session.reset": { mode: "idle", idleMinutes: 60 } },
-    });
-    expect(everyKind().get("discord_app")?.chatRules).toEqual({ offers: [] });
+  it("offers no chat rules for the official Slack and Discord apps, so their chats run at the defaults", () => {
     for (const kind of ["slack_app", "discord_app"]) {
       const rules = everyKind().get(kind)?.chatRules;
+      expect(rules).toEqual({ offers: [] });
       for (const place of ["direct", "group"] as const) {
         expect(chatRulesOf(rules!, place).offers).toEqual([]);
       }

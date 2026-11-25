@@ -38,10 +38,7 @@ describe("sessionOfMessage", () => {
 
   it("opens a message's chat in the session its scope names", async () => {
     const scopeOf = rs.fn(async (_chat: ChatRef) => "account" as const);
-    expect(await sessionOfMessage(scopeOf, MESSAGE, own)).toEqual({
-      continuityKey: "telegram:*",
-      audience: "shared",
-    });
+    expect(await sessionOfMessage(scopeOf, MESSAGE, own)).toEqual({ continuityKey: "telegram:*" });
     expect(scopeOf).toHaveBeenCalledWith({ connectionId: "telegram-1", chatId: "thread-1" });
     expect(await sessionOfMessage(async () => "chat", MESSAGE, own)).toEqual({
       continuityKey: own,

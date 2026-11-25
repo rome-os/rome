@@ -14,10 +14,6 @@ export interface SessionChat {
 export interface ChatSession {
   /** The key the session opens under. */
   continuityKey: string;
-  /** `shared` where the session answers more than one chat, so what a
-   *  private chat said never reaches the others as private. Absent, the
-   *  chat's own audience holds. */
-  audience?: "shared";
 }
 
 /**
@@ -27,15 +23,17 @@ export interface ChatSession {
  */
 export function sessionOfChat(chat: SessionChat, scope: ChatSessionScope): ChatSession {
   return scope === "account"
-    ? { continuityKey: `${chat.channel}${ACCOUNT_KEY_SUFFIX}`, audience: "shared" }
+    ? { continuityKey: `${chat.channel}${ACCOUNT_KEY_SUFFIX}` }
     : { continuityKey: `${chat.channel}:${chat.chatId}` };
 }
 
 const ACCOUNT_KEY_SUFFIX = ":*";
 
 /** Whether the session under `continuityKey` answers every chat of its
- *  account, so each turn belongs to the chat its own message was said in,
- *  never to the chat that opened the session. */
+ *  account. Each of its turns then belongs to the chat its own message was
+ *  said in, never to the chat that opened the session, and the session opens
+ *  shared however it opens, so what a private chat said never reaches the
+ *  others as private. */
 export function answersManyChats(continuityKey: string): boolean {
   return continuityKey.endsWith(ACCOUNT_KEY_SUFFIX);
 }

@@ -278,7 +278,7 @@ One thing a guardian can set on a chat, for each of Rome's accounts in it. There
 - A kind of connection only says which rules its chats offer the guardian, and may fix the value of a rule it does not offer. It cannot add a rule.
 - A chat runs on the kind's fixed value, else the guardian's choice where the kind offers the rule, else the default. A choice stored for a rule the kind does not offer is ignored.
 - A direct message offers only when its session starts afresh, and every message in it wakes the agent.
-- An official app offers no chat rule, so every one is at its default: the account's own agent answers, only when addressed. Rome's Slack app fixes two: its chats share the account's session, which starts afresh after an hour idle.
+- An official app offers no chat rule, so every one is at its default: the account's own agent answers, only when addressed.
 - The dashboard shows a connection's chat rules on that connection's page, and only the rules its kind offers.
 
 ## Reply rule
@@ -295,10 +295,10 @@ A [chat rule](#chat-rule) saying when an account's agent is woken: on every mess
 A [chat rule](#chat-rule) saying which session answers a chat: its own (`chat`, the default), or the one session of the connected account the chat is on (`account`), which answers every chat of that account.
 
 - [Participation](participation.md#speaker) picks the session from it when a turn starts. The agent runs the turn in the session it is given and does not know which chats share it.
-- A session that answers more than one chat is shared, whichever chat opened it: what a direct message said in it is read as said where others read it.
+- A session that answers more than one chat is shared, whichever chat opened it and however it is resumed: what a direct message said in it is read as said where others read it.
 - Each turn of such a session belongs to the chat its message was said in, never to the chat that opened the session: its message, its catch-up, its record and its reply are that chat's. Its turns run one at a time, so a long turn in one chat delays the next turn in every other.
 - The account's session starts afresh by the [session reset](#chat-rule) of the chat whose message opens it.
-- No kind offers it to the guardian. A kind may fix it, as Rome's Slack app does.
+- No kind offers it to the guardian or fixes it yet, so every chat has its own session.
 
 ## Message
 

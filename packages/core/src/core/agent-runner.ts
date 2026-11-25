@@ -231,8 +231,7 @@ export class AgentRunner {
     const askedKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
     const threadContext = await this.withChatId(params.threadContext);
-    // A message's chat may share its account's session, which reads as
-    // shared whichever chat opened it.
+    // A message's chat may share its account's session.
     const chatSession = explicitSessionId
       ? { continuityKey: askedKey }
       : await sessionOfMessage(
@@ -253,12 +252,13 @@ export class AgentRunner {
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
     const stated = await this.openingFor(openedKey ?? "", threadContext);
+    // A session that answers many chats opens shared, resumed by id or not.
     const opening = {
       ...stated,
-      ...(chatSession.audience
+      ...(answersManyChats(openedKey ?? "")
         ? {
-            audience: chatSession.audience,
-            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: chatSession.audience },
+            audience: "shared" as const,
+            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: "shared" },
           }
         : {}),
       kind: threadContext ? ("conversation" as const) : ("action" as const),

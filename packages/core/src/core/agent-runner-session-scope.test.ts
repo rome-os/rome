@@ -4,6 +4,15 @@ import type { Sessions } from "../agent/index.js";
 import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { AgentRunner } from "./agent-runner.js";
 
+/** What an opener states for a guardian's direct message: private. */
+const privateOpening = async () => ({
+  drawsCards: false,
+  guardianFacing: true,
+  toolEnv: { ROME_TURN_AUDIENCE: "private" },
+  spanAttributes: {},
+  audience: "private" as const,
+});
+
 /** A runner whose sessions record what each open asked for, and open none. */
 function recordingRunner(scope: "chat" | "account") {
   const opened: { key: unknown; audience: unknown; turnAudience: unknown }[] = [];
@@ -28,7 +37,7 @@ function recordingRunner(scope: "chat" | "account") {
     undefined,
     undefined,
     undefined,
-    undefined,
+    privateOpening,
     async () => scope,
   );
   return { runner, opened };
@@ -64,16 +73,61 @@ describe("the session a message's turn opens", () => {
     ]);
   });
 
-  it("opens the chat's own session where its scope is chat", async () => {
+  it("opens the chat's own session, with the chat's own audience, where its scope is chat", async () => {
     const { runner, opened } = recordingRunner("chat");
-    await runOnce(runner, "group");
-    expect(opened.map((o) => o.key)).toEqual([
-      { agentName: "core:concierge", channelThreadKey: "slack_app:D1" },
+    await runOnce(runner, "private");
+    expect(opened).toEqual([
+      {
+        key: { agentName: "core:concierge", channelThreadKey: "slack_app:D1" },
+        audience: "private",
+        turnAudience: "private",
+      },
     ]);
   });
 });
 
 describe("a session that answers every chat of its account", () => {
+  it("opens shared when it is resumed by id, as an approval from a direct message resumes it", async () => {
+    const resumed: { audience: unknown; turnAudience: unknown }[] = [];
+    const sessions = {
+      resume: async (
+        _ref: unknown,
+        opening: { audience?: unknown; toolEnv?: Record<string, unknown> },
+      ) => {
+        resumed.push({
+          audience: opening.audience,
+          turnAudience: opening.toolEnv?.ROME_TURN_AUDIENCE,
+        });
+        throw new Error("opened");
+      },
+    } as unknown as Sessions;
+    const runner = new AgentRunner(
+      sessions,
+      { find: () => undefined } as never,
+      { continuityKeyOfSession: async () => "slack_app:*" } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      privateOpening,
+    );
+    const run = runner.run({
+      agentName: "core:concierge",
+      prompt: "approved",
+      sessionId: "account-session",
+      threadContext: {
+        channel: "slack_app",
+        connectionId: "slack-1",
+        threadId: "D1",
+        threadType: "private",
+        senderBondLevel: "guardian",
+        romeSessionId: "rome-D1",
+      },
+    });
+    await expect(run[Symbol.asyncIterator]().next()).rejects.toThrow("opened");
+    expect(resumed).toEqual([{ audience: "shared", turnAudience: "shared" }]);
+  });
+
   it("runs each chat's turn in that chat, not in the chat that opened the session", async () => {
     const turns: (string | undefined)[] = [];
     const session = {

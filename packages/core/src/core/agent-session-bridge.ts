@@ -232,8 +232,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // that lets it go (docs/concepts/sessions.md#session-in-use).
         let acquired: AgentSession | undefined;
         try {
-          // A message's chat may share its account's session, which reads
-          // as shared whichever chat opened it.
+          // A message's chat may share its account's session.
           const chatSession = req.sessionId
             ? { continuityKey: req.key.channelThreadKey }
             : await sessionOfMessage(
@@ -253,7 +252,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           // even when its turns take a private caller's audience. A session
           // already live keeps the reading it opened with.
           const audience = narrowerAudience(
-            chatSession.audience ?? stated.audience,
+            // A session that answers many chats opens shared, resumed by id or not.
+            answersManyChats(openedKey ?? "") ? "shared" : stated.audience,
             ctx.callerActionContext?.audience ?? "shared",
           );
           const opening = {

@@ -9,10 +9,7 @@ describe("sessionOfChat", () => {
   });
 
   it("gives every chat of an account one shared session under scope account", () => {
-    expect(sessionOfChat(chat, "account")).toEqual({
-      continuityKey: "slack_app:*",
-      audience: "shared",
-    });
+    expect(sessionOfChat(chat, "account")).toEqual({ continuityKey: "slack_app:*" });
     expect(sessionOfChat({ channel: "slack_app", chatId: "D9" }, "account")).toEqual(
       sessionOfChat(chat, "account"),
     );
