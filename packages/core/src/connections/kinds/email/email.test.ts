@@ -196,7 +196,7 @@ describe("EmailAdapter.ingestInbound", () => {
 
     // A spoofed From for a mapped non-guardian contact (e.g. inner-circle).
     // Without the namespace the raw address would resolve to that person and
-    // reach the trusted path, bypassing sentinel.
+    // be let in.
     const event = buildEvent({
       from: [{ email: "contact@elsewhere.com" }],
       authentication: { authenticated: false, spam: false, blocked: false },
