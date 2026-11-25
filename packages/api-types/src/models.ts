@@ -104,21 +104,6 @@ export function canonicalModelSelection(value: unknown): ModelSelectionId | null
     : null;
 }
 
-/** Structured requests name exact native IDs, not the legacy choice vocabulary. */
-export function selectionFromIdentity(value: unknown): ModelSelectionId | null {
-  if (!value || typeof value !== "object") return null;
-  const identity = value as Partial<ModelIdentity>;
-  if (typeof identity.providerId !== "string" || typeof identity.modelId !== "string") return null;
-  const key = modelIdentityKey(identity as ModelIdentity);
-  return isModelSelectionId(key) ? key : null;
-}
-
-export function modelIdentityOf(value: unknown): ModelIdentity | null {
-  const id = canonicalModelSelection(value);
-  const entry = MODEL_CATALOG.find((entry) => entry.id === id);
-  return entry ? { providerId: entry.providerId, modelId: entry.modelId } : null;
-}
-
 // Extra concrete historical names are display-only, not selectable aliases.
 const HISTORICAL_MODEL_NAMES: Record<string, string> = {
   "claude-opus-5-5": "Opus 5.5",
@@ -145,52 +130,11 @@ export function modelDisplayName(modelId: string): string {
   );
 }
 
-/** Native inputs are not menu choices: never reinterpret an upstream alias as a saved selection. */
-export function fixedNativeModel(providerId: string, modelId: string): string {
-  const unversioned = [
-    "opus",
-    "sonnet",
-    "haiku",
-    "fable",
-    "default",
-    "auto",
-    "claude-opus",
-    "claude-sonnet",
-    "claude-haiku",
-    "claude-fable",
-  ];
-  const aliasBase = modelId.replace(/\[[^\]]*\]$/, "").toLowerCase();
-  if (
-    !modelId ||
-    /\s/u.test(modelId) ||
-    unversioned.includes(aliasBase) ||
-    /(?:^|[-/:])latest$/.test(aliasBase)
-  ) {
-    throw new Error(`A fixed native model ID is required for ${providerId}: ${modelId}`);
-  }
-  return modelId;
-}
-
-/** The compatibility string and structured identity must agree when sent together. */
-export function readModelSelectionInput(input: unknown): ModelSelectionId | "auto" | undefined {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("Model selection input must be an object");
-  }
-  const fields = input as { largeModelSelection?: unknown; modelSelection?: unknown };
-  const legacy = fields.largeModelSelection;
-  const structured = fields.modelSelection;
-  if (legacy === undefined && structured === undefined) return undefined;
-  const legacyId = legacy === "auto" ? "auto" : canonicalModelSelection(legacy);
-  const id =
-    structured === undefined
-      ? legacyId
-      : structured === null
-        ? "auto"
-        : selectionFromIdentity(structured);
-  if (!id || (legacy !== undefined && legacyId !== id)) {
-    throw new Error(
-      "An exact model identity is required; conflicting or unknown selections are rejected",
-    );
-  }
+/** Read legacy choices only at input boundaries. Unknown choices never become Auto. */
+export function readModelSelectionInput(value: unknown): ModelSelectionId | "auto" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "auto") return value;
+  const id = canonicalModelSelection(value);
+  if (!id) throw new Error("A known fixed model selection is required");
   return id;
 }

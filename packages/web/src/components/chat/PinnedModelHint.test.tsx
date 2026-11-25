@@ -31,7 +31,7 @@ describe("pinnedHintText", () => {
         {
           by: "owner",
           providerId: "anthropic",
-          selection: "claude-haiku",
+          selection: "anthropic/claude-haiku-5-5",
           model: "claude-haiku-5-5",
         },
         t,
@@ -40,7 +40,12 @@ describe("pinnedHintText", () => {
     // No concrete model yet: the selector's name for the pick.
     expect(
       pinnedHintText(
-        { by: "owner", providerId: "anthropic", selection: "claude-haiku", model: null },
+        {
+          by: "owner",
+          providerId: "anthropic",
+          selection: "anthropic/claude-haiku-5-5",
+          model: null,
+        },
         t,
       ),
     ).toBe("You picked Haiku 5.5");
@@ -71,7 +76,7 @@ describe("backToDefaultBody", () => {
         {
           by: "owner",
           providerId: "anthropic",
-          selection: "claude-haiku",
+          selection: "anthropic/claude-haiku-5-5",
           model: "claude-haiku-5-5",
         },
         "openai",
@@ -154,7 +159,12 @@ describe("PinnedModelHint", () => {
     mockApi(Response.json({ error: "Not available" }, { status: 404 }));
     const onFollowed = rs.fn();
     renderHint(
-      { by: "owner", providerId: "anthropic", selection: "claude-haiku", model: null },
+      {
+        by: "owner",
+        providerId: "anthropic",
+        selection: "anthropic/claude-haiku-5-5",
+        model: null,
+      },
       onFollowed,
     );
     await userEvent.click(screen.getByRole("button", { name: "Back to default" }));

@@ -1,4 +1,3 @@
-import { fixedNativeModel } from "@rome/api-types/models";
 import { z } from "zod";
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from "@rome-os/app-runtime";
 import { ArtifactLocalNameSchema } from "./artifact-name.js";
@@ -151,13 +150,6 @@ export const AgentConfigSchema = z
   })
   .strict()
   .superRefine((raw, ctx) => {
-    if (raw.modelId !== undefined && raw.provider) {
-      try {
-        fixedNativeModel(raw.provider, raw.modelId);
-      } catch (error) {
-        ctx.addIssue({ code: "custom", path: ["modelId"], message: String(error) });
-      }
-    }
     if (raw.modelId !== undefined) {
       if (!raw.provider) {
         ctx.addIssue({
@@ -221,7 +213,6 @@ export const AgentConfigSchema = z
       ...rest,
       ...(tier ? { tier } : {}),
       ...(provider ? { providerId: provider } : {}),
-      ...(raw.modelId && provider ? { modelId: fixedNativeModel(provider, raw.modelId) } : {}),
       ...(ownTurns === undefined ? {} : { deprecatedRunsOwnTurns: ownTurns }),
     };
   });

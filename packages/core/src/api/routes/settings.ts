@@ -1,4 +1,4 @@
-import { canonicalModelSelection, fixedNativeModel } from "@rome/api-types/models";
+import { canonicalModelSelection } from "@rome/api-types/models";
 import { AGENT_REPORTS_ENABLED_KEY } from "../../instance/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
@@ -103,19 +103,6 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       }
       // The helper owns the persist/clear for this key; don't double-write it.
       delete body[GUARDIAN_TIMEZONE_SETTING_KEY];
-    }
-
-    if (body.tierModelMappings && typeof body.tierModelMappings === "object") {
-      try {
-        for (const [provider, tiers] of Object.entries(body.tierModelMappings)) {
-          if (!tiers || typeof tiers !== "object") continue;
-          for (const model of Object.values(tiers)) {
-            if (typeof model === "string" && model.trim()) fixedNativeModel(provider, model.trim());
-          }
-        }
-      } catch (error) {
-        return c.json({ error: String(error) }, 400);
-      }
     }
 
     if ("webchatLargeModel" in body && body.webchatLargeModel !== "auto") {

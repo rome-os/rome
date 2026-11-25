@@ -1,4 +1,3 @@
-import { canonicalModelSelection } from "@rome/api-types/models";
 import {
   forwardRef,
   useCallback,
@@ -408,7 +407,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const signedInProviders = useSignedInProviders();
     const modelOptions = (value: string) => runnableLargeModelOptions(signedInProviders, value);
     const modelRows = (value: string) => {
-      value = canonicalModelSelection(value) ?? value;
       return showAllModels
         ? modelOptions(value)
         : modelOptions(value).filter(
@@ -416,9 +414,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           );
     };
     const modelLabel = (id: string) => {
-      const option = LARGE_MODEL_OPTIONS.find(
-        (option) => option.id === (canonicalModelSelection(id) ?? id),
-      );
+      const option = LARGE_MODEL_OPTIONS.find((option) => option.id === id);
       return option ? modelOptionLabel(option, t("modelSelector.options.auto")) : id;
     };
 
@@ -568,9 +564,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="max-h-80 w-48 overflow-y-auto">
                         <DropdownMenuRadioGroup
-                          value={
-                            canonicalModelSelection(modelSelection.value) ?? modelSelection.value
-                          }
+                          value={modelSelection.value}
                           onValueChange={modelSelection.onChange}
                         >
                           {modelRows(modelSelection.value).map((option) => (

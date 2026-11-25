@@ -576,3 +576,23 @@ it("does not match another provider or strip a context suffix when reversing an 
   expect(selectionOfModel("claude-opus-4-8[1m]", "openai")).toBeNull();
   expect(selectionOfModel("claude-opus-4-8", "anthropic")).toBeNull();
 });
+
+it.each([
+  "claude-opus-5-5",
+  "claude-sonnet-4-5-20250929",
+])("holds off-catalog %s without changing its exact session pin or blocking other chats", async (model) => {
+  const { providers, row, selected } = await setup({
+    lastModel: { plain: { providerId: "anthropic", model } },
+  });
+  await providers.beforeDefaultChange({
+    from: "anthropic",
+    to: "openai",
+    by: "guardian",
+    moveExisting: false,
+  });
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(selected.some(([id]) => id === "plain")).toBe(false);
+  expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
+  expect((await row("fast")).by).toBe("kept");
+  await expect(providers.follow("plain")).resolves.not.toThrow();
+});

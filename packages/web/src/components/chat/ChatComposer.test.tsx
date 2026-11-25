@@ -1318,7 +1318,7 @@ describe("composer model picker in an open chat", () => {
       {
         onSend,
         showModelSelector: true,
-        chatModelSelection: { value: "gpt-6-luna", onChange },
+        chatModelSelection: { value: "openai/gpt-6-luna", onChange },
       },
       { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
     );

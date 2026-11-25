@@ -14,7 +14,7 @@ describe("runnable models", () => {
     expect(modelFamily("auto")).toBeNull();
     expect(modelFamily("claude-opus-5-5[1m]")).toBe("anthropic");
     expect(modelFamily("gpt-6.1-sol")).toBe("openai");
-    expect(modelFamily("claude-future-model")).toBeNull();
+    expect(modelFamily("claude-future-model")).toBe("anthropic");
   });
 
   it("runs ChatGPT models on a ChatGPT sign-in or on Rome credits", () => {
@@ -38,4 +38,10 @@ describe("runnable models", () => {
     expect(ids).toContain("openai/gpt-6-luna");
     expect(ids).not.toContain("openai/gpt-6-astra");
   });
+});
+
+it("keeps historical notification families without rewriting their execution IDs", () => {
+  expect(modelFamily("gpt-5.5")).toBe("openai");
+  expect(modelFamily("claude-sonnet-4-6")).toBe("anthropic");
+  expect(modelFamily("opaque-vendor-model")).toBeNull();
 });

@@ -332,7 +332,6 @@ export interface NewChatBody {
   projectName?: string | null;
   projectPath?: string | null;
   largeModelSelection?: string;
-  modelSelection?: unknown;
   reasoningEffort?: string;
   agentName?: string | null;
   deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
@@ -3087,7 +3086,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
   const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
     try {
-      body.largeModelSelection = readModelSelectionInput(body);
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
     } catch (error) {
       return answer({ error: String(error) }, 400);
     }
@@ -3432,7 +3431,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const body = await c.req.json<unknown>().catch(() => undefined);
     let requested;
     try {
-      requested = readModelSelectionInput(body && typeof body === "object" ? body : {});
+      requested = readModelSelectionInput(
+        body && typeof body === "object"
+          ? (body as { largeModelSelection?: unknown }).largeModelSelection
+          : undefined,
+      );
     } catch (error) {
       return c.json({ error: String(error) }, 400);
     }
@@ -4143,7 +4146,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     text?: string;
     personaId?: string;
     largeModelSelection?: string;
-    modelSelection?: unknown;
     reasoningEffort?: string;
     files?: IncomingWebchatUpload[];
     /**
@@ -4196,11 +4198,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (contentType.includes("multipart/form-data")) {
       const form = await c.req.formData().catch(() => null);
       if (!form) return {};
-      for (const key of ["largeModelSelection", "modelSelection"]) {
-        const value = form.get(key);
-        if (value !== null && typeof value !== "string")
-          throw new Error("Model identity fields must be text");
-      }
+      const choice = form.get("largeModelSelection");
+      if (choice !== null && typeof choice !== "string")
+        throw new Error("Model selection must be text");
       const getString = (key: string) => {
         const value = form.get(key);
         return typeof value === "string" ? value : undefined;
@@ -4234,9 +4234,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         text: getString("text"),
         personaId: getString("personaId"),
         largeModelSelection: getString("largeModelSelection"),
-        modelSelection: form.has("modelSelection")
-          ? JSON.parse(getString("modelSelection")!)
-          : undefined,
         reasoningEffort: getString("reasoningEffort"),
         skillName: getString("skillName"),
         files,
@@ -4269,7 +4266,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     } = {},
   ): Promise<RouteAnswer> => {
     try {
-      body.largeModelSelection = readModelSelectionInput(body);
+      body.largeModelSelection = readModelSelectionInput(body.largeModelSelection);
     } catch (error) {
       return answer({ error: String(error) }, 400);
     }

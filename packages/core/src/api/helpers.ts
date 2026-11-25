@@ -1,4 +1,3 @@
-import { modelIdentityOf, canonicalModelSelection } from "@rome/api-types/models";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentEvent } from "../types.js";
@@ -133,14 +132,7 @@ export function toWebchatSessionResponse(
     id: session.id,
     name: session.name,
     personaId: session.personaId ?? null,
-    largeModelSelection:
-      canonicalModelSelection(session.largeModelSelection) ?? session.largeModelSelection ?? null,
-    modelSelection: modelIdentityOf(session.largeModelSelection),
-    ...(session.largeModelSelection &&
-    session.largeModelSelection !== "auto" &&
-    !canonicalModelSelection(session.largeModelSelection)
-      ? { modelSelectionError: `Unknown stored model selection: ${session.largeModelSelection}` }
-      : {}),
+    largeModelSelection: session.largeModelSelection ?? null,
     // Whether the chat follows the default provider, and when it does not, the
     // model it is pinned to: its owner's pick, or one a card or a change of the
     // default kept. docs/domains/agents.md#pinned-chat

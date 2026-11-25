@@ -3,70 +3,39 @@ import {
   MODEL_CATALOG,
   LEGACY_MODEL_SELECTIONS,
   canonicalModelSelection,
-  fixedNativeModel,
   modelDisplayName,
   modelIdentityKey,
-  modelIdentityOf,
   readModelSelectionInput,
 } from "../packages/api-types/src/models.js";
 
 describe("fixed model identity", () => {
-  it.each(Object.entries(LEGACY_MODEL_SELECTIONS))("freezes old choice %s at %s", (old, key) => {
-    expect(canonicalModelSelection(old)).toBe(key);
-    expect(modelIdentityKey(modelIdentityOf(old)!)).toBe(key);
-    expect(canonicalModelSelection(key)).toBe(key);
+  it.each(Object.entries(LEGACY_MODEL_SELECTIONS))("reads old choice %s as %s", (old, key) => {
+    expect(readModelSelectionInput(old)).toBe(key);
+    expect(readModelSelectionInput(key)).toBe(key);
   });
-  it("preserves context suffixes, dots, dates and unknown values", () => {
-    expect(modelIdentityOf("claude-opus")).toEqual({
-      providerId: "anthropic",
-      modelId: "claude-opus-4-8[1m]",
-    });
-    expect(fixedNativeModel("anthropic", "claude-opus-5-5")).toBe("claude-opus-5-5");
-    expect(fixedNativeModel("anthropic", "claude-sonnet-4-5-20250929")).toBe(
-      "claude-sonnet-4-5-20250929",
+  it("keeps the original Opus target and exact context and decimal notation", () => {
+    expect(canonicalModelSelection("claude-opus")).toBe("anthropic/claude-opus-4-8[1m]");
+    expect(canonicalModelSelection("gpt-6-1-sol")).toBe("openai/gpt-6.1-sol");
+    expect(canonicalModelSelection("anthropic/claude-opus-4-8")).toBeNull();
+    expect(modelIdentityKey({ providerId: "vendor", modelId: "org/model-20250929[1m]" })).toBe(
+      "vendor/org/model-20250929[1m]",
     );
-    expect(fixedNativeModel("openai", "gpt-6.1-sol:high")).toBe("gpt-6.1-sol:high");
-    expect(fixedNativeModel("anthropic", "future-model[1m]")).toBe("future-model[1m]");
-    expect(canonicalModelSelection("unknown")).toBeNull();
-    expect(modelDisplayName("unknown")).toBe("unknown");
-    expect(modelDisplayName("opus")).toBe("opus");
-    expect(() =>
-      readModelSelectionInput({
-        modelSelection: { providerId: "anthropic", modelId: "claude-opus-5-5" },
-      }),
-    ).toThrow();
+    for (const entry of MODEL_CATALOG) expect(modelIdentityKey(entry)).toBe(entry.id);
+    expect(new Set(MODEL_CATALOG.map(modelIdentityKey)).size).toBe(MODEL_CATALOG.length);
   });
   it.each([
     "opus",
-    "OPUS",
-    "opus[1m]",
-    "claude-opus-latest[1m]",
-    "sonnet",
     "default",
-    "gpt-latest",
-  ])("does not offer floating native alias %s", (alias) => {
-    expect(() => fixedNativeModel("anthropic", alias)).toThrow();
-    expect(() =>
-      readModelSelectionInput({ modelSelection: { providerId: "anthropic", modelId: alias } }),
-    ).toThrow();
+    "latest",
+    "unknown",
+    null,
+    {},
+  ])("rejects unknown new choice %j without guessing a model", (value) => {
+    expect(() => readModelSelectionInput(value)).toThrow();
   });
-  it("qualifies provider-native IDs without confusing nested slashes", () => {
-    expect(
-      modelIdentityKey({ providerId: "openrouter", modelId: "anthropic/claude-opus-4.8" }),
-    ).toBe("openrouter/anthropic/claude-opus-4.8");
-    expect(new Set(MODEL_CATALOG.map(modelIdentityKey)).size).toBe(MODEL_CATALOG.length);
-    for (const entry of MODEL_CATALOG) expect(modelIdentityKey(entry)).toBe(entry.id);
-  });
-  it("accepts structured identities and legacy values only when both agree", () => {
-    const identity = { providerId: "anthropic", modelId: "claude-opus-4-8[1m]" };
-    expect(
-      readModelSelectionInput({ largeModelSelection: "claude-opus", modelSelection: identity }),
-    ).toBe("anthropic/claude-opus-4-8[1m]");
-    expect(() =>
-      readModelSelectionInput({ largeModelSelection: "claude-opus-5-5", modelSelection: identity }),
-    ).toThrow();
-    expect(() => readModelSelectionInput({ largeModelSelection: "unknown" })).toThrow();
-    expect(readModelSelectionInput({ modelSelection: null })).toBe("auto");
-    expect(readModelSelectionInput({})).toBeUndefined();
+  it("keeps Auto a strategy and unknown runtime names unchanged", () => {
+    expect(readModelSelectionInput("auto")).toBe("auto");
+    expect(readModelSelectionInput(undefined)).toBeUndefined();
+    expect(modelDisplayName("unknown")).toBe("unknown");
   });
 });

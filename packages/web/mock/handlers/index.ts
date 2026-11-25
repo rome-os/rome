@@ -1,4 +1,4 @@
-import { readModelSelectionInput, modelIdentityOf } from "@rome/api-types/models";
+import { readModelSelectionInput } from "@rome/api-types/models";
 import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
@@ -1927,11 +1927,12 @@ export const handlers = [
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     try {
-      const id = readModelSelectionInput(await request.json());
+      const id = readModelSelectionInput(
+        ((await request.json()) as { largeModelSelection?: unknown }).largeModelSelection,
+      );
       if (!id)
         return HttpResponse.json({ error: "A model selection is required" }, { status: 400 });
       found.largeModelSelection = id === "auto" ? null : id;
-      found.modelSelection = modelIdentityOf(id);
     } catch (error) {
       return HttpResponse.json({ error: String(error) }, { status: 400 });
     }

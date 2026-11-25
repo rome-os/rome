@@ -1,4 +1,3 @@
-import { canonicalModelSelection } from "@rome/api-types/models";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, MoreHorizontal, X } from "lucide-react";
@@ -54,7 +53,6 @@ export function ModelSelectorMenu({
   signedIn = null,
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
-  value = canonicalModelSelection(value) ?? value;
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);

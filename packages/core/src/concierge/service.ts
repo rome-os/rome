@@ -895,8 +895,8 @@ export class ConciergeService {
 
   /**
    * Before a turn in chat `chatId`: a model Rome chose for it follows the
-   * default provider at the same strength, and a Concierge chat on an older
-   * default moves to the strong model. A model its owner picked stays. Returns
+   * default provider at the same strength. A saved choice with no recorded
+   * provenance stays on its original target. Returns
    * the provider the chat moved from and to, or null when it stayed.
    */
   async followDefault(

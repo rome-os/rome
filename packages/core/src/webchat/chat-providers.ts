@@ -1,4 +1,3 @@
-import { canonicalModelSelection } from "@rome/api-types/models";
 // Which provider a chat runs on when it does not follow the default: the
 // guardian switched only this chat from a card, or changed the default
 // without moving the chats already there. Such a chat is pinned to a model
@@ -67,8 +66,7 @@ export function pinnedModelOf(
   chat: { largeModelSelection?: string | null; largeModelSelectionBy?: string | null },
   held?: AccountedProviderId,
 ): PinnedModel | null {
-  const stored =
-    canonicalModelSelection(chat.largeModelSelection) ?? chat.largeModelSelection ?? null;
+  const stored = chat.largeModelSelection ?? null;
   const by = chat.largeModelSelectionBy ?? null;
   if (isModelSelectionId(stored)) {
     const selection = MODEL_SELECTIONS[stored];
@@ -197,22 +195,19 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     agentName: string | null,
     stored: string | null,
     provider: AccountedProviderId,
-  ): Promise<ModelSelectionId> => {
-    if (stored && !isModelSelectionId(stored))
-      throw new Error(`Unknown stored model selection: ${stored}`);
+  ): Promise<ModelSelectionId | null> => {
+    // A hold can preserve a session pin without inventing a menu selection.
+    if (stored && !isModelSelectionId(stored)) return null;
     const codexAccount = deps.accounts.read().openai?.account;
+    const last = isModelSelectionId(stored)
+      ? null
+      : await deps.lastModel?.(chatId, agentName).catch(() => null);
     const ran = isModelSelectionId(stored)
       ? stored
-      : await deps.lastModel?.(chatId, agentName).then(
-          (last) => {
-            if (!last) return null;
-            const exact = selectionOfModel(last.model, last.providerId);
-            if (!exact && last.providerId === provider)
-              throw new Error(`Cannot replace the fixed model ${last.model} with a catalog model`);
-            return exact;
-          },
-          () => null,
-        );
+      : last
+        ? selectionOfModel(last.model, last.providerId)
+        : null;
+    if (last?.providerId === provider && !ran) return null;
     if (ran) {
       if (MODEL_SELECTIONS[ran].providerId === provider) return ran;
       return selectionOfStrength(provider, strengthOfSelection(ran, codexAccount), codexAccount);
@@ -270,6 +265,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     provider: AccountedProviderId,
   ) => {
     const selection = await on(chatId, agentName, stored, provider);
+    if (selection === null) return null;
     await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "kept");
     deps.selectModel(chatId, agentName, selection);
     return selection;

@@ -5074,73 +5074,34 @@ describe("Webchat API", () => {
       }
     });
 
-    it("round-trips structured fixed identities, legacy picks, conflicts and unknown saved values", async () => {
+    it("stores one qualified key, freezes legacy picks, and retains unknown saved values", async () => {
       await deps.settingsRepo.set("enableModelSelector", true);
       const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-      const pick = (body: unknown) =>
-        app.request(`/chat/sessions/${sessionId}/model`, {
+      const id = await newSession(app);
+      const pick = (value: string) =>
+        app.request(`/chat/sessions/${id}/model`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ largeModelSelection: value }),
         });
-      const identity = { providerId: "anthropic", modelId: "claude-opus-4-8[1m]" };
-      const selected = await pick({ modelSelection: identity });
-      expect(selected.status).toBe(200);
-      expect(await selected.json()).toMatchObject({
-        largeModelSelection: "anthropic/claude-opus-4-8[1m]",
-        modelSelection: identity,
-      });
-      expect((await deps.webchatRepo.getSession(sessionId))?.largeModelSelection).toBe(
-        "anthropic/claude-opus-4-8[1m]",
-      );
-      expect(
-        (
-          await pick({
-            largeModelSelection: "anthropic/claude-opus-5-5[1m]",
-            modelSelection: identity,
-          })
-        ).status,
-      ).toBe(400);
-      expect(
-        (await pick({ modelSelection: { providerId: "anthropic", modelId: "opus" } })).status,
-      ).toBe(400);
-      const legacy = await pick({ largeModelSelection: "claude-sonnet" });
-      expect(await legacy.json()).toMatchObject({
-        largeModelSelection: "anthropic/claude-sonnet-5-5",
-        modelSelection: { providerId: "anthropic", modelId: "claude-sonnet-5-5" },
-      });
-      expect((await pick({ largeModelSelection: "auto", modelSelection: null })).status).toBe(200);
+      for (const value of ["claude-opus", "anthropic/claude-opus-4-8[1m]"]) {
+        expect(await (await pick(value)).json()).toMatchObject({
+          largeModelSelection: "anthropic/claude-opus-4-8[1m]",
+        });
+      }
+      expect((await pick("opus")).status).toBe(400);
+      expect((await pick("unknown")).status).toBe(400);
       await deps.webchatRepo.updateSessionLargeModelSelection(
-        sessionId,
+        id,
         "unrecognized-old-choice",
         "owner",
       );
-      const loaded = await app.request(`/chat/sessions/${sessionId}`);
-      expect(await loaded.json()).toMatchObject({
+      expect(await (await app.request(`/chat/sessions/${id}`)).json()).toMatchObject({
         largeModelSelection: "unrecognized-old-choice",
-        modelSelection: null,
-        modelSelectionError: expect.stringContaining("unrecognized-old-choice"),
       });
     });
 
-    it("rejects empty or non-text multipart identities instead of dropping them to Auto", async () => {
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-      for (const value of ["", new File(["not an identity"], "model.txt")]) {
-        const body = new FormData();
-        body.set("text", "Keep my draft");
-        body.set("modelSelection", value);
-        const sent = await app.request(`/chat/sessions/${sessionId}/turns`, {
-          method: "POST",
-          body,
-        });
-        expect(sent.status).toBe(400);
-        expect((await deps.webchatRepo.getSession(sessionId))?.largeModelSelection).toBeNull();
-      }
-    });
-
-    it("starts a chat with the complete structured native target, without a floating alias", async () => {
+    it("keeps the same qualified key through JSON creation and multipart validation", async () => {
       await deps.settingsRepo.set("enableModelSelector", true);
       const app = createWebchatRuntime(deps).routes;
       const created = await app.request("/chat/sessions", {
@@ -5149,14 +5110,23 @@ describe("Webchat API", () => {
         body: JSON.stringify({
           name: "Fixed",
           projectPath: "default",
-          modelSelection: { providerId: "openai", modelId: "gpt-6.1-sol" },
+          largeModelSelection: "openai/gpt-6.1-sol",
         }),
       });
       expect(created.status).toBe(200);
-      expect(await created.json()).toMatchObject({
-        largeModelSelection: "openai/gpt-6.1-sol",
-        modelSelection: { providerId: "openai", modelId: "gpt-6.1-sol" },
-      });
+      const chat = (await created.json()) as { id: string; largeModelSelection: string };
+      expect(chat.largeModelSelection).toBe("openai/gpt-6.1-sol");
+      for (const value of ["", new File(["not a choice"], "model.txt")]) {
+        const body = new FormData();
+        body.set("text", "Keep my draft");
+        body.set("largeModelSelection", value);
+        expect(
+          (await app.request(`/chat/sessions/${chat.id}/turns`, { method: "POST", body })).status,
+        ).toBe(400);
+        expect((await deps.webchatRepo.getSession(chat.id))?.largeModelSelection).toBe(
+          "openai/gpt-6.1-sol",
+        );
+      }
     });
 
     it("stores an open chat's model pick and hands it to the next turn's acquire", async () => {

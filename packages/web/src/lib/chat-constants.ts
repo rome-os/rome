@@ -1,4 +1,4 @@
-import { canonicalModelSelection, MODEL_CATALOG } from "@rome/api-types/models";
+import { MODEL_CATALOG } from "@rome/api-types/models";
 import type { DefaultModelProvider } from "@rome/api-types/chat";
 import type { ReasoningEffort } from "./chat-types";
 import { LARGE_MODEL_OPTIONS } from "./model-options";
@@ -14,7 +14,7 @@ export const DEFAULT_LARGE_MODEL_SELECTION = "auto";
 // guardian actually reaches for, so this list is hand-picked (see #180): the
 // automatic choice plus the latest-generation flagship of each provider family
 // — Claude Opus 5.5 and GPT-6 Astra (the newest OpenAI generation in the
-// catalog above). Every other model stays one "show all" click (or a few
+// shared catalog). Every other model stays one "show all" click (or a few
 // keystrokes) away, and a deliberately pinned model is always shown too, so
 // nothing is stranded. Revisit this set once real usage data exists.
 //
@@ -28,12 +28,12 @@ export const COMMON_LARGE_MODEL_IDS: ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[
   "openai/gpt-6-astra",
 ];
 
-/** The provider of a catalog identity or exact native ID; unknown IDs have no inferred provider. */
+/** Display family only, never an execution identity or an access check. */
 export function modelFamily(modelId: string): "anthropic" | "openai" | null {
-  const id = canonicalModelSelection(modelId);
-  return (
-    MODEL_CATALOG.find((entry) => entry.id === id || entry.modelId === modelId)?.providerId ?? null
-  );
+  const native = MODEL_CATALOG.find((entry) => entry.id === modelId)?.modelId ?? modelId;
+  if (native.startsWith("claude-")) return "anthropic";
+  if (native.startsWith("gpt-")) return "openai";
+  return null;
 }
 
 /**
@@ -59,7 +59,6 @@ export function runnableLargeModelOptions(
   signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
   selected: string,
 ): ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]> {
-  selected = canonicalModelSelection(selected) ?? selected;
   return LARGE_MODEL_OPTIONS.filter(
     (option) => option.id === selected || canRunModel(option.id, signedIn),
   );

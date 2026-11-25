@@ -4,7 +4,7 @@
 import type { WebChatRepository } from "./repository.js";
 import { findOwnWebChat } from "../core/session-conversation.js";
 import {
-  canonicalModelSelection,
+  isModelSelectionId,
   MODEL_SELECTIONS,
   type ModelSelection,
   type ModelSelectionId,
@@ -30,13 +30,10 @@ export class ChatSessionSettings implements SessionSettings {
     const chat = await findOwnWebChat(this.deps.webchatRepo, sessionId);
     const saved = chat?.largeModelSelection;
     if (saved == null || saved === "auto") return null;
-    const canonical = canonicalModelSelection(saved);
-    if (!canonical) throw new Error(`Unknown stored model selection: ${saved}`);
+    if (!isModelSelectionId(saved)) throw new Error(`Unknown stored model selection: ${saved}`);
     // A model Rome chose follows the default provider; one its owner picked stays.
     const id =
-      chat?.largeModelSelectionBy === "auto" && this.deps.follow
-        ? this.deps.follow(canonical)
-        : canonical;
+      chat?.largeModelSelectionBy === "auto" && this.deps.follow ? this.deps.follow(saved) : saved;
     return MODEL_SELECTIONS[id];
   }
 

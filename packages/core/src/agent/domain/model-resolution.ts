@@ -1,4 +1,3 @@
-import { canonicalModelSelection, fixedNativeModel } from "@rome/api-types/models";
 // Model resolution: which provider and model a run uses. The ask is a tier or
 // an exact model, and resolveModel answers it from facts the resolver reads.
 // A provider must be usable first, then its login must allow the model.
@@ -136,7 +135,7 @@ function tierModel(
 ): string {
   if (providerId === "mock") return MOCK_TIER_MODELS[tier];
   const chosen = tierModels?.[providerId]?.[tier];
-  if (chosen) return fixedNativeModel(providerId, chosen);
+  if (chosen) return chosen;
   return providerId === "openai" ? codexTierModel(tier, codex) : CLAUDE_TIER_MODELS[tier];
 }
 
@@ -189,8 +188,6 @@ export function resolveModel(
   request: ModelResolutionRequest,
   facts: ModelResolutionFacts,
 ): ModelResolutionOutcome {
-  if (request.kind === "exact")
-    request = { ...request, model: fixedNativeModel(request.providerId, request.model) };
   const { reports } = facts;
   // A Rome credits login serves Codex only while credits are the default, or,
   // with no default set, while no AI account is logged in. Any other ask reads
@@ -359,9 +356,7 @@ function modelAsk(
 ): ModelResolutionRequest {
   if (selectionId) {
     // A one-off override runs the selection's strength on that provider.
-    const saved = canonicalModelSelection(selectionId);
-    if (!saved) throw new Error(`Unknown model selection: ${selectionId}`);
-    const id = override ? followingSelection(saved, override) : saved;
+    const id = override ? followingSelection(selectionId, override) : selectionId;
     const { providerId, model } = MODEL_SELECTIONS[id];
     return { kind: "exact", providerId, model };
   }
@@ -373,7 +368,7 @@ function modelAsk(
     return {
       kind: "exact",
       providerId: agent.providerId,
-      model: fixedNativeModel(agent.providerId, agent.modelId),
+      model: agent.modelId,
     };
   }
   if (!agent.tier) {

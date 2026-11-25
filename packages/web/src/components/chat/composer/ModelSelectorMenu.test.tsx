@@ -1,4 +1,3 @@
-import { canonicalModelSelection } from "@rome/api-types/models";
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -180,11 +179,11 @@ describe("ModelSelectorMenu sign-ins", () => {
 });
 
 it.each([
-  ["en", "claude-opus", "Opus 4.8"],
-  ["zh-CN", "claude-opus", "Opus 4.8"],
-  ["en", "claude-sonnet", "Sonnet 5.5"],
-  ["zh-CN", "claude-haiku", "Haiku 5.5"],
-  ["en", "claude-fable", "Fable 5.1"],
+  ["en", "anthropic/claude-opus-4-8[1m]", "Opus 4.8"],
+  ["zh-CN", "anthropic/claude-opus-4-8[1m]", "Opus 4.8"],
+  ["en", "anthropic/claude-sonnet-5-5", "Sonnet 5.5"],
+  ["zh-CN", "anthropic/claude-haiku-5-5", "Haiku 5.5"],
+  ["en", "anthropic/claude-fable-5-1[1m]", "Fable 5.1"],
 ])("keeps stored %s/%s selected with its exact version", async (language, value, label) => {
   await i18n.changeLanguage(language);
   const props = { ...baseProps(), value };
@@ -196,7 +195,7 @@ it.each([
       screen.getByRole("button", { name: language === "en" ? "Model" : "模型" }).textContent,
     ).toContain(label);
     await userEvent.setup().click(row);
-    expect(props.onChange).toHaveBeenCalledWith(canonicalModelSelection(value));
+    expect(props.onChange).toHaveBeenCalledWith(value);
   } finally {
     view.unmount();
     await i18n.changeLanguage("en");

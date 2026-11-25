@@ -242,7 +242,11 @@ describe("ConciergeComposer", () => {
 
   it.each([true, false])("opens the model submenu with selector=%s", async (selector) => {
     const onChange = rs.fn();
-    renderComposer({ modelSelection: { value: "claude-sonnet", onChange } }, undefined, selector);
+    renderComposer(
+      { modelSelection: { value: "anthropic/claude-sonnet-5-5", onChange } },
+      undefined,
+      selector,
+    );
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     screen.getByRole("button", { name: "Add files or change the model" }).focus();
     await userEvent.keyboard("{Enter}");
