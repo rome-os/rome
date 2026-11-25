@@ -5,6 +5,8 @@
 
 import type { ChildProcess } from "node:child_process";
 import type { IpcCallContext, IpcRpc } from "../apps/actions/ipc.js";
+import { walkToRoot } from "../agent/index.js";
+import { parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
   ChatRef,
@@ -139,6 +141,16 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private isTextPrivate?: (agentName: string, channel: string) => boolean,
   ) {}
 
+  /** Whether the dashboard chat `session` runs in was deleted: the session outlives it. */
+  private async chatIsGone(session: AgentSession): Promise<boolean> {
+    const root = parseSessionKey(walkToRoot(session.key.channelThreadKey));
+    return (
+      root.kind === "webchat" &&
+      this.webchatRepo !== undefined &&
+      !(await this.webchatRepo.getSession(root.chatId))
+    );
+  }
+
   attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
       registerActionSubprocessHost(rpc, this.actionWorkerCoordinator, child);
@@ -220,6 +232,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               );
           acquired = session;
           noteOpenerChat(session, namedChat);
+          if (req.sessionId && (await this.chatIsGone(session))) {
+            throw new Error(`Agent session "${req.sessionId}" was not found`);
+          }
           // An action's worker may only fill a link the session lacks, never
           // move one.
           await openedInChat(this.webchatRepo, session, namedChat, { replace: false });

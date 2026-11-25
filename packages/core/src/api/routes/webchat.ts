@@ -5,7 +5,7 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
-import { ownerOf } from "../../webchat/owner.js";
+import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
   type ConciergeService,
@@ -4362,13 +4362,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
       }
       const source = automatedInputSource(automated);
+      // An action's loopback send names its person by kind alone. One made
+      // for someone the chat may not belong to is not its owner's request.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      const anothers =
+        actorKind === "visitor" ||
+        (actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);
       void concierge
         .runSystemTurn(
           sessionId,
           automatedInputPrompt(
             source,
             text,
-            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+            !anothers && fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
           ),
           {
             quiet: true,

@@ -24,14 +24,14 @@ export const DASHBOARD_PLATFORM = platformOf(WEBCHAT_CHANNEL);
  *  own reply, so prompts carry no unseen messages. */
 export const WEBCHAT_SURFACE: ChannelSurface = { interactiveCards: true, promptContext: false };
 
-/** Who reads or writes dashboard chats from an action: the person accountable for the turn, and the chat it runs in. */
+/** Who reads dashboard chats from an action: the person accountable for the turn, and the chat it runs in. */
 export interface DashboardCaller {
   actor?: SessionActor;
   chatId: string | null;
 }
 
 /**
- * The caller of a read or a send made through the worker boundary by an
+ * The caller of a read made through the worker boundary by an
  * app's action. An action run in this process carries it in its own context
  * instead.
  */
@@ -84,7 +84,10 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
   return {
     name: WEBCHAT_CHANNEL,
     send: {
-      send: (chatId, message) => adapter.send(chatId, message),
+      send: async (chatId, message) => {
+        if (!(await webchatRepo.getSession(chatId))) throw new Error(`No dashboard chat ${chatId}`);
+        return adapter.send(chatId, message);
+      },
       direct: null,
       activity: null,
     },

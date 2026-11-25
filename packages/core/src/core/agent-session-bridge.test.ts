@@ -340,8 +340,22 @@ describe("AgentSessionBridge resuming a session by its id", () => {
         });
       summon("as-member", { kind: "visitor", accountId: "a", email: "a@example.com" });
       await rs.waitFor(() => expect(sent).toHaveLength(1));
-      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
+      const guardian = { kind: "guardian", userId: "seat", via: "cookie" };
+      summon("as-guardian", guardian);
       await rs.waitFor(() => expect(sent).toHaveLength(2));
+      // A session whose chat was deleted is not found.
+      await repo.deleteSession("concierge");
+      summon("deleted", guardian);
+      await rs.waitFor(() =>
+        expect(
+          child.sent.find(
+            (m) =>
+              (m as { reqId?: string }).reqId === "deleted" &&
+              (m as { type?: string }).type === "rpc_response",
+          ),
+        ).toHaveProperty("error"),
+      );
+      expect(sent).toHaveLength(2);
     } finally {
       testDb.close();
     }

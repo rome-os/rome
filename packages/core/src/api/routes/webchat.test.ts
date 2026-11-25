@@ -551,6 +551,9 @@ describe("Webchat API", () => {
     await expect(
       asMember(() => channel.send!.send("concierge" as never, { text: "hi" })),
     ).resolves.toBeTruthy();
+    await expect(channel.send!.send("gone" as never, { text: "hi" })).rejects.toThrow(
+      "No dashboard chat gone",
+    );
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
@@ -9930,8 +9933,42 @@ describe("Webchat API", () => {
       );
 
       expect(res.status).toBe(202);
-      expect(runSystemTurn).toHaveBeenCalled();
+      expect(runSystemTurn).toHaveBeenCalledWith(
+        "concierge",
+        expect.not.stringContaining("from_owner"),
+        expect.anything(),
+      );
       expect(await deps.webchatRepo.getMessages("concierge")).toEqual([]);
+    });
+
+    it("marks no one else's input as a member's own in the member's Concierge chat", async () => {
+      const { runSystemTurn, runtime } = await setup();
+      await deps.webchatRepo.createSession(
+        "ann-chat",
+        "Ann",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey: "visitor:ann" },
+      );
+      const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+      for (const automatedSource of ["agent:core:main", "routine:Daily summary"]) {
+        const res = await runWithSessionActor(loopback, () =>
+          runtime.routes.request("/chat/sessions/ann-chat/turns", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: "Go.", automatedSource, automatedActorKind: "guardian" }),
+          }),
+        );
+        expect(res.status).toBe(202);
+      }
+      const prompts = runSystemTurn.mock.calls.map((call) => (call as unknown[])[1] as string);
+      expect(prompts).toHaveLength(2);
+      for (const prompt of prompts) expect(prompt).not.toContain("from_owner");
     });
 
     it("runs an agent account's post the same way, named by the agent", async () => {
