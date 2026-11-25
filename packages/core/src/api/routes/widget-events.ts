@@ -34,8 +34,9 @@ interface CoreIo {
   connections(): Promise<ConnectionStatus[]>;
   /** The device connections, as `GET /api/device-connections` lists them to the caller. */
   deviceConnections(): Promise<DeviceConnection[]>;
-  /** The linked devices, as `GET /api/devices` lists them to the caller, or
-   *  null when they cannot be read. */
+  /** The linked devices, as `GET /api/devices/list` lists them to the caller,
+   *  or null when they cannot be read. The same list as the `deviceIds` the
+   *  add-device card was sent with. */
   devices(): Promise<Array<{ id: string; name: string }> | null>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
@@ -434,7 +435,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
         },
         devices: async () => {
           const res = await deps.forward(
-            new Request(new URL("/api/devices", c.req.url), { headers }),
+            new Request(new URL("/api/devices/list", c.req.url), { headers }),
             c.env,
           );
           const listed = (await res.json().catch(() => null)) as {

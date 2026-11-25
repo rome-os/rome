@@ -61,8 +61,9 @@ function setup(
       state: { status: "awaiting-redirect", url: "https://cloud.example/authorize?state=s1" },
     },
   },
-  /** The devices `GET /api/devices` lists, or null when it fails. */
-  devices: Array<{ id: string; name: string }> | null = [],
+  /** The account's devices as Rome Cloud lists them, revoked ones too, or
+   *  null when Cloud cannot be read. */
+  devices: Array<{ id: string; name: string; revoked?: true }> | null = [],
 ) {
   const setups: SetupStartRequest[] = [];
   const forwarded: {
@@ -106,10 +107,15 @@ function setup(
       if (request.method === "GET" && new URL(request.url).pathname === "/api/device-connections") {
         return Response.json({ connections: deviceConnections });
       }
+      // The device service's status keeps every item Cloud lists and answers
+      // an empty list when Cloud fails; the list drops revoked devices.
       if (request.method === "GET" && new URL(request.url).pathname === "/api/devices") {
+        return Response.json({ connection: "online", devices: devices ?? [] });
+      }
+      if (request.method === "GET" && new URL(request.url).pathname === "/api/devices/list") {
         return devices
-          ? Response.json({ connection: "online", devices })
-          : Response.json({ error: "Rome Cloud is unavailable" }, { status: 503 });
+          ? Response.json({ devices: devices.filter((device) => !device.revoked) })
+          : Response.json({ error: "unavailable" }, { status: 503 });
       }
       forwarded.push({
         url: new URL(request.url).pathname,
@@ -1077,7 +1083,7 @@ describe("an event on the add-device card", () => {
   const MAC = { id: "mac", name: "MacBook Pro" };
   const LAPTOP = { id: "new", name: "New laptop" };
   const card = (
-    devices: Array<{ id: string; name: string }> | null,
+    devices: Array<{ id: string; name: string; revoked?: true }> | null,
     props: Record<string, unknown> = { deviceIds: ["mac"] },
   ) =>
     setup(
@@ -1108,6 +1114,15 @@ describe("an event on the add-device card", () => {
       expect(res.status).toBe(409);
       expect(forwarded).toEqual([]);
     }
+  });
+
+  it("never takes a revoked device the account still lists for a new one", async () => {
+    const { fire, forwarded } = card([MAC, { id: "old", name: "Old phone", revoked: true }]);
+    expect((await fire("m", { name: "check" })).status).toBe(409);
+    expect(await (await fire("m", { name: "open-devices" })).json()).toEqual({
+      open: "http://localhost/settings/devices",
+    });
+    expect(forwarded).toEqual([]);
   });
 
   it("never answers by itself for a card sent without the devices", async () => {
