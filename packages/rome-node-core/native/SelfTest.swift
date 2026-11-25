@@ -129,6 +129,39 @@ final class SelfTest {
         try expect(!unlock.update(focused: true, at: 1), "regaining focus restarts the delay")
         try expect(!unlock.update(focused: true, at: 1.2), "prior focus time does not count")
         try expect(unlock.update(focused: true, at: 2), "consent unlocks after a full second of renewed focus")
+
+        unlock = ConsentUnlock()
+        try expect(!unlock.update(focused: true, at: 0), "consent starts locked before repeated clicks")
+        for timestamp in stride(from: 0.25, through: 1.25, by: 0.25) {
+            let enabled = unlock.update(focused: true, at: timestamp)
+            try expect(!enabled, "repeated clicks keep consent locked past one focused second")
+            unlock.mouseDown(at: timestamp, clickCount: 1, enabled: enabled)
+        }
+        try expect(!unlock.update(focused: true, at: 1.25), "the last click restarts the delay")
+        try expect(!unlock.update(focused: true, at: 2.24), "consent needs a full quiet second")
+        try expect(unlock.update(focused: true, at: 2.25), "one focused second without clicks unlocks consent")
+
+        unlock.mouseDown(at: 2.25, clickCount: 1, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 1),
+                   "a click exactly one double-click interval after a locked click is rejected")
+        try expect(!unlock.update(focused: true, at: 2.25), "rejecting a close click relocks consent")
+        try expect(unlock.update(focused: true, at: 3.25), "consent unlocks after the restarted delay")
+
+        unlock.mouseDown(at: 3.25, clickCount: 2, enabled: true)
+        try expect(!unlock.accept(currentClickCount: nil, doubleClickInterval: 0.5),
+                   "a recorded double-click is rejected even when the current event has changed")
+        try expect(!unlock.update(focused: true, at: 3.25), "rejecting a double-click relocks consent")
+        try expect(unlock.update(focused: true, at: 4.25), "consent unlocks after a quiet second")
+
+        unlock.mouseDown(at: 4.25, clickCount: 1, enabled: true)
+        unlock.mouseDown(at: 4.5, clickCount: 1, enabled: true)
+        try expect(!unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
+                   "a single click too close to another unlocked click is rejected")
+        try expect(!unlock.update(focused: true, at: 4.5), "the close single click relocks consent")
+        try expect(unlock.update(focused: true, at: 5.5), "consent unlocks after the final quiet second")
+        unlock.mouseDown(at: 5.5, clickCount: 1, enabled: true)
+        try expect(unlock.accept(currentClickCount: 1, doubleClickInterval: 0.5),
+                   "a single click past the double-click interval approves consent")
     }
 
     private func decode(_ data: Data) throws -> ([String: Any], Data) {

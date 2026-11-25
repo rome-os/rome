@@ -30,15 +30,43 @@ enum ConsentOcclusion {
 
 struct ConsentUnlock {
     private var focusedSince: TimeInterval?
+    private var lastMouseDown: TimeInterval?
+    private var pendingClick: (count: Int, interval: TimeInterval?)?
+
+    mutating func reset() {
+        focusedSince = nil
+        pendingClick = nil
+    }
 
     mutating func update(focused: Bool, at uptime: TimeInterval) -> Bool {
         guard focused else {
-            focusedSince = nil
+            reset()
             return false
         }
         let since = focusedSince ?? uptime
         focusedSince = since
         return uptime - since >= 1
+    }
+
+    mutating func mouseDown(at timestamp: TimeInterval, clickCount: Int, enabled: Bool) {
+        let interval = lastMouseDown.map { timestamp - $0 }
+        lastMouseDown = timestamp
+        guard enabled else {
+            reset()
+            return
+        }
+        pendingClick = (clickCount, interval)
+    }
+
+    mutating func accept(currentClickCount: Int?, doubleClickInterval: TimeInterval) -> Bool {
+        let singleClick = pendingClick.map { click in
+            click.count == 1 && (click.interval ?? .infinity) > doubleClickInterval
+        } ?? (currentClickCount == nil)
+        guard singleClick, (currentClickCount ?? 1) == 1 else {
+            reset()
+            return false
+        }
+        return true
     }
 }
 
@@ -48,6 +76,7 @@ final class DesktopSession: NSObject {
 
     private static let windowServerPath = canonicalPath("/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer")
     private let admission: Admission
+    private var unlock = ConsentUnlock()
     private var statusItem: NSStatusItem?
     private var windowItem: NSMenuItem?
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -105,11 +134,19 @@ final class DesktopSession: NSObject {
         window.makeFirstResponder(deny)
 
         let app = NSApplication.shared
-        var unlock = ConsentUnlock()
+        unlock = ConsentUnlock()
         let reset: @MainActor @Sendable () -> Void = {
-            unlock = ConsentUnlock()
+            self.unlock.reset()
             allow.isEnabled = false
         }
+        guard let mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { event in
+            MainActor.assumeIsolated {
+                self.unlock.mouseDown(at: event.timestamp, clickCount: event.clickCount, enabled: allow.isEnabled)
+            }
+            return event
+        }) else { return false }
+        defer { NSEvent.removeMonitor(mouseMonitor) }
+
         let raise: @MainActor @Sendable () -> Void = {
             // AppKit can assign the modal-panel level when it presents the alert.
             if window.level != level { window.level = level }
@@ -138,8 +175,8 @@ final class DesktopSession: NSObject {
                     app.abortModal()
                     return
                 }
-                allow.isEnabled = unlock.update(focused: visibility == .raised && window.isKeyWindow && app.isActive,
-                                                at: ProcessInfo.processInfo.systemUptime)
+                allow.isEnabled = self.unlock.update(focused: visibility == .raised && window.isKeyWindow && app.isActive,
+                                                     at: ProcessInfo.processInfo.systemUptime)
             }
         }
         RunLoop.main.add(timer, forMode: .modalPanel)
@@ -158,7 +195,18 @@ final class DesktopSession: NSObject {
 
     @objc private func answerConsent(_ sender: NSButton) {
         guard sender.isEnabled else { return }
-        NSApplication.shared.stopModal(withCode: .init(rawValue: sender.tag))
+        let app = NSApplication.shared
+        if sender.tag == NSApplication.ModalResponse.alertSecondButtonReturn.rawValue {
+            // AppKit can deliver a control action after currentEvent has changed.
+            let clickCount = app.currentEvent.flatMap { event in
+                event.type == .leftMouseDown || event.type == .leftMouseUp ? event.clickCount : nil
+            }
+            guard unlock.accept(currentClickCount: clickCount, doubleClickInterval: NSEvent.doubleClickInterval) else {
+                sender.isEnabled = false
+                return
+            }
+        }
+        app.stopModal(withCode: .init(rawValue: sender.tag))
     }
 
     private static func visibility(_ window: NSWindow) -> ConsentVisibility {
