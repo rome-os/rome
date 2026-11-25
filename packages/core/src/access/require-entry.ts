@@ -4,7 +4,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { mayEnter } from "./entry.js";
-import { currentSessionActor, type SessionActor } from "./session-actor.js";
+import { currentSessionActor, type SessionActor, sessionOwnerKey } from "./session-actor.js";
 import type { TeamActor } from "./team.js";
 
 type AllowList = Pick<DashboardAccessState, "isCloudEmailAllowed" | "hasCloudEmailAccess">;
@@ -38,6 +38,11 @@ export function enteredPerson(c: Context): TeamActor {
   const person = c.get(ENTERED) as TeamActor | undefined;
   if (!person) throw new Error(`${c.req.path} is not behind the entry step`);
   return person;
+}
+
+/** The owner key of the person {@link requireEntry} let in, as chats keep it. */
+export function enteredOwnerKey(c: Context): string {
+  return sessionOwnerKey(enteredPerson(c));
 }
 
 /** What someone who may not enter is answered, at the edge and at the step. */

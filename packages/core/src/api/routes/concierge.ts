@@ -7,8 +7,7 @@ import {
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { enteredPerson } from "../../access/require-entry.js";
-import { sessionOwnerKey } from "../../access/session-actor.js";
+import { enteredOwnerKey } from "../../access/require-entry.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -44,18 +43,13 @@ export function streamEvents(
   });
 }
 
-/** Whose Concierge the caller reaches: the guardian's, or a member's own. */
-export function callerOwner(c: Context): string {
-  return sessionOwnerKey(enteredPerson(c));
-}
-
 export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">): Hono {
   const app = new Hono();
 
   // The caller's main Concierge chat, created on first use, and how many
   // agent messages it got since it was last read. 404 without the Concierge service.
   app.get("/concierge/session", async (c) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) {
       return c.json({ error: "Concierge is not available" }, 404);
@@ -68,7 +62,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   // The caller's Concierge chats: the main chat, created on first use, then
   // the topic chats, each with its unread count. 404 without the Concierge service.
   app.get("/concierge/chats", async (c) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) {
       return c.json({ error: "Concierge is not available" }, 404);
@@ -92,7 +86,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   // unarchive. 404 for the main chat, another person's chat and without the
   // Concierge service.
   app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
     const chatId = c.req.param("chatId");
@@ -109,7 +103,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
 
   // Starts a topic chat for the caller on their main chat's model. 404 without the Concierge service.
   app.post("/concierge/chats", async (c) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) {
       return c.json({ error: "Concierge is not available" }, 404);
@@ -129,7 +123,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   // of the live events socket, for a tab that cannot open the socket: the
   // caller's chats only.
   app.get("/concierge/activity/events", async (c) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const activity = deps.concierge?.activity;
     if (!activity) {
       return c.json({ error: "Concierge is not available" }, 404);
@@ -142,7 +136,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   // list returns, read by native clients. The caller's follows and rules;
   // 404 without the Concierge service.
   const followingOf = async (c: Context) => {
-    const owner = callerOwner(c);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) {
       return { error: c.json({ error: "Concierge is not available" }, 404) };
