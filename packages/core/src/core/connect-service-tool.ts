@@ -61,6 +61,7 @@ export function connectServiceTools(input: {
   return [
     {
       name: "connect_service",
+      formerNames: ["connect_account"],
       endsTurn: widgetsShow,
       description: input.devicesOnly
         ? `Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that reads a device, when they ask to connect one, or when a reply or a device says \`not_connected\` or \`live_off\`. It answers at once that a kind already works, with no card, so call it instead of asking whether a device is connected. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. ${NOT_A_DEVICE}`

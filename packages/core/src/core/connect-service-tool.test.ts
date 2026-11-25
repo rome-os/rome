@@ -22,6 +22,8 @@ describe("connect_service", () => {
   it("ends the turn on the connect card where cards show", async () => {
     const { tool, result } = await call("card", { kind: "github" });
     expect(tool?.endsTurn).toBe(true);
+    // A model thread started before the rename may still call it so.
+    expect(tool?.formerNames).toEqual(["connect_account"]);
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
       pendingInteraction: true,
       render: { componentId: "connect-card", props: { kind: "github" }, builtin: true },

@@ -801,6 +801,67 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("answers a resumed thread's call by a tool's former name and traces it by its name now", async () => {
+    let dynamicResponse: unknown;
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/resume") {
+        return { thread: { id: "old-thread", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        const payload = requestParams as { threadId: string };
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: payload.threadId, turn: { id: "old-turn" } });
+        // The thread's catalog is the one it started with, under the old name.
+        const item = {
+          type: "dynamicToolCall",
+          id: "call-old",
+          tool: "connect_old",
+          arguments: {},
+        };
+        n("item/started", { item, threadId: payload.threadId, turnId: "old-turn" });
+        dynamicResponse = await captured.onServerRequest?.("item/tool/call", {
+          threadId: payload.threadId,
+          turnId: "old-turn",
+          callId: "call-old",
+          namespace: null,
+          tool: "connect_old",
+          arguments: {},
+        });
+        n("item/completed", { item, threadId: payload.threadId, turnId: "old-turn" });
+        n("turn/completed", {
+          threadId: payload.threadId,
+          turn: { id: "old-turn", status: "completed" },
+        });
+      }
+      return {};
+    });
+    const handler = rs.fn(async () => ({ content: [{ type: "text" as const, text: "card" }] }));
+    const renamed = {
+      name: "connect_new",
+      formerNames: ["connect_old"],
+      description: "Shows a card.",
+      inputSchema: { type: "object", properties: {} },
+      handler,
+    };
+
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession({
+      ...buildParams({ tools: { sessionTools: [renamed] } }),
+      thread: { kind: "resume", modelThreadId: "old-thread" },
+    });
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "connect" });
+    const messages = await collected;
+
+    expect(dynamicResponse).toMatchObject({ success: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+    const traced = messages
+      .filter((m) => m.type === "tool_use" || m.type === "tool_result")
+      .map((m) => (m as { tool?: string }).tool);
+    expect(traced).toEqual(["connect_new", "connect_new"]);
+    await session.close();
+  });
+
   it("fails closed when an isolated native fork calls a tool inherited from its source", async () => {
     const sourceExecuteSubagent = rs.fn(async () => "source result");
     let dynamicResponse: unknown;
