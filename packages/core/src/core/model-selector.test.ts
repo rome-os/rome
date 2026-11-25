@@ -16,12 +16,12 @@ describe("webchat model selector", () => {
       model: "claude-opus-4-8[1m]",
     });
     expect(resolveWebchatLargeModelSelection("claude-opus-5-5")).toMatchObject({
-      id: "claude-opus-5-5",
+      id: "anthropic/claude-opus-5-5[1m]",
       providerId: "anthropic",
       model: "claude-opus-5-5[1m]",
     });
     expect(resolveWebchatLargeModelSelection("claude-opus-5")).toMatchObject({
-      id: "claude-opus-5",
+      id: "anthropic/claude-opus-5[1m]",
       providerId: "anthropic",
       model: "claude-opus-5[1m]",
     });
@@ -49,7 +49,7 @@ describe("webchat model selector", () => {
       model: "gpt-6-astra",
     });
     expect(resolveWebchatLargeModelSelection("gpt-6-1-sol")).toMatchObject({
-      id: "gpt-6-1-sol",
+      id: "openai/gpt-6.1-sol",
       providerId: "openai",
       model: "gpt-6.1-sol",
     });
@@ -75,10 +75,11 @@ describe("webchat model selector", () => {
     });
   });
 
-  it("falls back to the default selection for unknown values", () => {
-    expect(normalizeWebchatLargeModelSelectionId("bogus")).toBe(
-      DEFAULT_WEBCHAT_LARGE_MODEL_SELECTION,
+  it("fails closed on unknown values instead of choosing Auto", () => {
+    expect(() => normalizeWebchatLargeModelSelectionId("bogus")).toThrow(
+      "Unknown stored model selection",
     );
-    expect(resolveWebchatLargeModelSelection("bogus")).toBeNull();
+    expect(() => resolveWebchatLargeModelSelection("bogus")).toThrow();
+    expect(normalizeWebchatLargeModelSelectionId(null)).toBe(DEFAULT_WEBCHAT_LARGE_MODEL_SELECTION);
   });
 });

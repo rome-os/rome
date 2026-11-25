@@ -15,12 +15,16 @@ export type ModelStrength = "fast" | "strong";
 
 /** Codex's quick model the account may use: Luna, else Terra. */
 export function codexFastSelection(account: ModelAccountReport["account"]): ModelSelectionId {
-  return accountAllowsModel(account, CODEX_LUNA_MODEL) ? "gpt-6-luna" : "gpt-5-6-terra";
+  return accountAllowsModel(account, CODEX_LUNA_MODEL)
+    ? "openai/gpt-6-luna"
+    : "openai/gpt-5.6-terra";
 }
 
 /** Codex's strongest model the account may use: Sol, else Terra. */
 export function codexStrongSelection(account: ModelAccountReport["account"]): ModelSelectionId {
-  return accountAllowsModel(account, CODEX_SOL_MODEL) ? "gpt-6-1-sol" : "gpt-5-6-terra";
+  return accountAllowsModel(account, CODEX_SOL_MODEL)
+    ? "openai/gpt-6.1-sol"
+    : "openai/gpt-5.6-terra";
 }
 
 /** The model of `strength` on a provider: Sonnet or Opus on Claude, by the account on Codex. */
@@ -29,8 +33,9 @@ export function selectionOfStrength(
   strength: ModelStrength,
   codexAccount?: ModelAccountReport["account"],
 ): ModelSelectionId {
-  if (provider === "anthropic") return strength === "fast" ? "claude-sonnet" : "claude-opus-5-5";
-  if (!codexAccount) return strength === "fast" ? "gpt-6-luna" : "gpt-6-1-sol";
+  if (provider === "anthropic")
+    return strength === "fast" ? "anthropic/claude-sonnet-5-5" : "anthropic/claude-opus-5-5[1m]";
+  if (!codexAccount) return strength === "fast" ? "openai/gpt-6-luna" : "openai/gpt-6.1-sol";
   return strength === "fast"
     ? codexFastSelection(codexAccount)
     : codexStrongSelection(codexAccount);
@@ -45,7 +50,7 @@ export function strengthOfSelection(
   id: ModelSelectionId,
   codexAccount?: ModelAccountReport["account"],
 ): ModelStrength {
-  if (id === "gpt-5-6-terra" && codexAccount && codexStrongSelection(codexAccount) === id) {
+  if (id === "openai/gpt-5.6-terra" && codexAccount && codexStrongSelection(codexAccount) === id) {
     return "strong";
   }
   return /sonnet|haiku|luna|terra/.test(id) ? "fast" : "strong";

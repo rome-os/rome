@@ -49,6 +49,7 @@ import {
   LARGE_MODEL_OPTIONS,
   runnableLargeModelOptions,
 } from "@/lib/chat-constants";
+import { modelOptionLabel } from "@/lib/model-options";
 import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { isImeCompositionEvent, shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
@@ -405,19 +406,17 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     // Only models a signed-in provider can run, plus the chat's own pick.
     const signedInProviders = useSignedInProviders();
     const modelOptions = (value: string) => runnableLargeModelOptions(signedInProviders, value);
-    const modelRows = (value: string) =>
-      showAllModels
+    const modelRows = (value: string) => {
+      return showAllModels
         ? modelOptions(value)
         : modelOptions(value).filter(
             (option) => COMMON_LARGE_MODEL_IDS.includes(option.id) || option.id === value,
           );
-    const modelLabel = (id: string) =>
-      t(
-        (
-          LARGE_MODEL_OPTIONS.find((option) => option.id === id) ??
-          LARGE_MODEL_OPTIONS.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!
-        ).labelKey,
-      );
+    };
+    const modelLabel = (id: string) => {
+      const option = LARGE_MODEL_OPTIONS.find((option) => option.id === id);
+      return option ? modelOptionLabel(option, t("modelSelector.options.auto")) : id;
+    };
 
     return (
       <>
@@ -572,7 +571,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                             <DropdownMenuRadioItem key={option.id} value={option.id}>
                               {option.id === DEFAULT_LARGE_MODEL_SELECTION
                                 ? t("modelSelector.options.autoFollowsDefault")
-                                : t(option.labelKey)}
+                                : modelOptionLabel(option, t("modelSelector.options.auto"))}
                             </DropdownMenuRadioItem>
                           ))}
                         </DropdownMenuRadioGroup>
