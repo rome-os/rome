@@ -12,16 +12,24 @@ export const ACCOUNT_CODE_PREFIX = "ROME";
 const GROUP = `[${ACCOUNT_CODE_ALPHABET}]{${ACCOUNT_CODE_GROUP_LENGTH}}`;
 const CODE = `${ACCOUNT_CODE_PREFIX}-${GROUP}-${GROUP}`;
 const CODE_SHAPE = new RegExp(`^${CODE}$`);
-const CODE_ANYWHERE = new RegExp(CODE, "g");
+// The `i` flag matches as upper-casing the text would: the alphabet holds no
+// letter whose lower case folds onto another letter of it.
+const CODE_ANYWHERE = new RegExp(CODE, "gi");
+// What a person wraps around a code they paste alone: spaces, punctuation,
+// quotes and backticks, and Telegram's `/start ` when they follow a link.
+const START_COMMAND = /^\/start\s+/i;
+const WRAPPING = /^[\s\p{P}`]+|[\s\p{P}`]+$/gu;
 
-/** `text` as a code is compared: case and surrounding spaces do not count. */
+/** `text` as a code is compared: case does not count, nor what a person wraps
+ *  around a code they send alone (surrounding spaces, punctuation, quotes and
+ *  backticks, and a leading `/start `). */
 export function normalizedAccountCode(text: string): string {
-  return text.trim().toUpperCase();
+  return text.trim().replace(START_COMMAND, "").replace(WRAPPING, "").toUpperCase();
 }
 
 /** Whether a text is shaped like a code, so a caller can tell a code from an
  *  ordinary message without a database read. The whole text must be the code,
- *  ignoring case and surrounding spaces. */
+ *  as {@link normalizedAccountCode} compares it. */
 export function looksLikeAccountCode(text: string): boolean {
   return CODE_SHAPE.test(normalizedAccountCode(text));
 }
@@ -29,5 +37,5 @@ export function looksLikeAccountCode(text: string): boolean {
 /** Every code-shaped token in `text`, wherever it sits, as a code is
  *  compared. Empty for a text that holds none. */
 export function accountCodesIn(text: string): string[] {
-  return text.toUpperCase().match(CODE_ANYWHERE) ?? [];
+  return (text.match(CODE_ANYWHERE) ?? []).map((code) => code.toUpperCase());
 }

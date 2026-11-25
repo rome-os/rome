@@ -33,6 +33,9 @@ describe("Discord message text", () => {
     expect(discordInboundText("<@123> ROME-7KQ2M9-XAB3CD", () => "Rome")).toBe(
       "ROME-7KQ2M9-XAB3CD",
     );
+    expect(discordInboundText("<@123> `ROME-7KQ2M9-XAB3CD`", () => "Rome")).toBe(
+      "`ROME-7KQ2M9-XAB3CD`",
+    );
     expect(discordInboundText("<@123> ROME-7KQ2M9-XAB3CD please", () => "Rome")).toBe(
       "@Rome ROME-7KQ2M9-XAB3CD please",
     );

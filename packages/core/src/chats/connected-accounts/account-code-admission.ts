@@ -2,7 +2,8 @@
  * The steps that hear an [account code](docs/domains/identity.md#account-code)
  * in a message. A code Rome has seen in any message, heard live or read back
  * from a platform, is dead before anyone else is handed that message, so a
- * code is harmless wherever it is read later. Only a direct message to an
+ * code is harmless wherever it is read later. What Rome has seen is all it
+ * hands on: the text, the quoted message and the platform's raw payload. Only a direct message to an
  * [own account](docs/domains/chats.md#own-account) of Rome's whose whole text
  * is the code redeems it: that message is kept from the chat, so no
  * subscriber, agent or app hears it and it is not recorded, and Rome answers
@@ -22,7 +23,7 @@ import {
   UnknownAccountCodeError,
 } from "../../identity/application/account-codes.js";
 import { AccountTakenError } from "../../identity/identity.js";
-import { accountCodesIn } from "../../lib/account-code-shape.js";
+import { accountCodesIn, normalizedAccountCode } from "../../lib/account-code-shape.js";
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
 import type { Admission, ReadBack } from "./admission.js";
@@ -53,14 +54,15 @@ export interface AccountCodeAdmissionDeps {
 
 /**
  * Redeems a code that is the whole text of a direct message to an own account
- * for the sender's account, answers, and keeps the message from the chat. In
- * every other message it voids every code-shaped token in the text, and
- * admits the message unless it is a code alone in a shared chat on an own
- * account. Admits every message that holds no code without a database read.
+ * for the sender's account, answers, and keeps the message from the chat. It
+ * voids every other code the message carries, and in every other message
+ * every code, and admits the message unless its text is a code alone in a
+ * shared chat on an own account. Admits every message that carries no code
+ * without a database read.
  */
 export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission {
   return async (connectionId, connectionKind, message) => {
-    const codes = accountCodesIn(message.text);
+    const codes = accountCodesSeenIn(message);
     if (codes.length === 0) return true;
     const ownAccount = deps.linkOf(connectionKind) === "own_account";
     const direct = message.thread?.kind === "dm";
@@ -70,6 +72,11 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
       log.info("account code voided", { connectionId, codes: codes.length });
       return !(ownAccount && wholeText);
     }
+    // The text's own code shows again in the raw payload; it is the one redeemed.
+    const sent = normalizedAccountCode(message.text);
+    const others = codes.filter((code) => code !== sent);
+    for (const code of others) await accountCodeVoided(deps.codes, code);
+    if (others.length > 0) log.info("account code voided", { connectionId, codes: others.length });
     const account = {
       platform: deps.platformOf(connectionId, message),
       accountId: message.senderId,
@@ -91,7 +98,7 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
 }
 
 /**
- * Voids every code-shaped token in every message a history read answers, on
+ * Voids every code every message a history read answers carries, on
  * every kind of connection, so a code Rome missed live, such as one said
  * where Rome's account hears only mentions or edited in later, is dead before
  * the page is handed on. A page with no code-shaped token costs no database
@@ -99,11 +106,52 @@ export function accountCodeAdmission(deps: AccountCodeAdmissionDeps): Admission 
  */
 export function accountCodeReadBack(deps: Pick<AccountCodeAdmissionDeps, "codes">): ReadBack {
   return async (messages) => {
-    const codes = new Set(messages.flatMap((message) => accountCodesIn(message.text)));
+    const codes = new Set(messages.flatMap(accountCodesSeenIn));
     if (codes.size === 0) return;
     for (const code of codes) await accountCodeVoided(deps.codes, code);
     log.info("account code voided in a history read", { codes: codes.size });
   };
+}
+
+/**
+ * Every code-shaped token in what Rome hands on with `message`: its text, the
+ * text of the message it quotes, and the platform's raw payload, where a
+ * reply can carry a quote no named field holds, such as Telegram's
+ * `reply_to_message`. Empty for a message that carries none.
+ */
+export function accountCodesSeenIn(message: ChannelMessage): string[] {
+  const codes = new Set(accountCodesIn(message.text));
+  for (const code of accountCodesIn(message.replyTo?.content ?? "")) codes.add(code);
+  if (message.raw !== undefined) {
+    for (const code of accountCodesIn(serialized(message.raw))) codes.add(code);
+  }
+  return [...codes];
+}
+
+/**
+ * `raw` as JSON, to search for codes: a code is letters, digits and dashes, so
+ * JSON leaves it as typed. A platform's own objects serialize through their
+ * `toJSON`. A big integer reads as its digits, and an object met again, as in
+ * a cycle, is skipped, since its text was searched the first time.
+ */
+function serialized(raw: unknown): string {
+  const met = new WeakSet<object>();
+  try {
+    return (
+      JSON.stringify(raw, (_key, value: unknown) => {
+        if (typeof value === "bigint") return value.toString();
+        if (typeof value === "object" && value !== null) {
+          if (met.has(value)) return undefined;
+          met.add(value);
+        }
+        return value;
+      }) ?? ""
+    );
+  } catch {
+    // A `toJSON` that throws. The error may quote the payload, so it is not logged.
+    log.warn("raw payload could not be searched for account codes");
+    return "";
+  }
 }
 
 async function redeemed(

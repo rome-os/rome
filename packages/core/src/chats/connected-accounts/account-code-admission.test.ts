@@ -22,6 +22,21 @@ import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js
 
 const ANN_SLACK = { platform: "slack", accountId: "T1:U7" };
 
+/** A Telegram Bot API reply in a direct message, as the bot kind keeps it in
+ *  `raw`: the message it answers comes along in `reply_to_message`. */
+function telegramReply(text: string, quoted: string) {
+  const chat = { id: 7001, type: "private", first_name: "Ann" };
+  const from = { id: 7001, is_bot: false, first_name: "Ann" };
+  return {
+    message_id: 42,
+    date: 1764064800,
+    chat,
+    from,
+    text,
+    reply_to_message: { message_id: 41, date: 1764064790, chat, from, text: quoted },
+  };
+}
+
 function message(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
     channel: "slack_app",
@@ -166,20 +181,7 @@ describe("account code admission", () => {
     const reply = message("did that work?", {
       messageId: "42",
       replyTo: { messageId: "41" },
-      raw: {
-        message_id: 42,
-        date: 1764064800,
-        chat: { id: 7001, type: "private", first_name: "Ann" },
-        from: { id: 7001, is_bot: false, first_name: "Ann" },
-        text: "did that work?",
-        reply_to_message: {
-          message_id: 41,
-          date: 1764064790,
-          chat: { id: 7001, type: "private", first_name: "Ann" },
-          from: { id: 7001, is_bot: false, first_name: "Ann" },
-          text: code,
-        },
-      },
+      raw: telegramReply("did that work?", code),
     });
     await deliver(reply);
     expect(heard).toEqual([reply]);
@@ -187,6 +189,66 @@ describe("account code admission", () => {
     await deliver(message(code, { messageId: "43", senderId: "T1:U8" }));
     expect(await identity.personOf({ platform: "slack", accountId: "T1:U8" })).toBeNull();
     expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.taken, ACCOUNT_CODE_ANSWERS.used]);
+  });
+
+  for (const [where, quoting] of [
+    [
+      "only in a Telegram reply's raw payload",
+      (code: string) => ({ replyTo: { messageId: "41" }, raw: telegramReply("look", code) }),
+    ],
+    [
+      "only in the quoted message",
+      (code: string) => ({ replyTo: { messageId: "41", content: code } }),
+    ],
+  ] as const) {
+    it(`voids a code Rome never saw before, quoted ${where}, before handing the reply on unchanged`, async () => {
+      const { ctx, identity, deliver, heard, answers } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
+      const reply = message("look", { messageId: "42", ...quoting(code) });
+      let deadWhenHeard = false;
+      const ordered = new OrderedAdmission(
+        accountCodeAdmission({
+          codes: ctx,
+          linkOf: () => "own_account",
+          registry: { get: () => ({}) } as unknown as Pick<ConnectionRegistry, "get">,
+          platformOf: () => ANN_SLACK.platform,
+        }),
+      );
+
+      await ordered.deliver({ id: "conn", connectionKind: "telegram" }, reply, async (h) => {
+        heard.push(h);
+        deadWhenHeard = await accountCodeRedeemed(ctx, code, ANN_SLACK).then(
+          () => false,
+          (error) => error instanceof AccountCodeUsedError,
+        );
+      });
+
+      expect(heard).toEqual([reply]);
+      expect(deadWhenHeard).toBe(true);
+      await deliver(message(code, { messageId: "m2" }));
+      expect(await identity.personOf(ANN_SLACK)).toBeNull();
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+    });
+  }
+
+  it("redeems a code sent alone whose Telegram raw payload holds it, and voids another code the reply quotes", async () => {
+    const { ctx, identity, deliver, heard, answers } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const bo = await identity.createPerson({ accounts: [] });
+    const { code: annCode } = await accountCodeIssued(ctx, ann.id);
+    const { code: boCode } = await accountCodeIssued(ctx, bo.id);
+
+    await deliver(
+      message(annCode, { replyTo: { messageId: "41" }, raw: telegramReply(annCode, boCode) }),
+    );
+
+    expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
+    expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.added]);
+    expect(heard).toEqual([]);
+    await expect(
+      accountCodeRedeemed(ctx, boCode, { platform: "slack", accountId: "T1:U8" }),
+    ).rejects.toBeInstanceOf(AccountCodeUsedError);
   });
 
   it("voids a code said in a shared chat without answering, and the code then fails in a direct message", async () => {
@@ -240,7 +302,10 @@ describe("account code admission", () => {
       },
     });
     const { deliver, heard, sent } = setup(untouchable);
-    const ordinary = message("lunch at noon?");
+    const ordinary = message("lunch at noon?", {
+      replyTo: { messageId: "41", content: "hi" },
+      raw: telegramReply("lunch at noon?", "hi"),
+    });
 
     await deliver(ordinary);
 
@@ -250,8 +315,26 @@ describe("account code admission", () => {
 
   for (const [said, text] of [
     ["the code and a full stop", (code: string) => `${code}.`],
-    ["the code after other words", (code: string) => `here: ${code}`],
+    ["the code in backticks", (code: string) => `\`${code}\``],
+    ["the code in quotes", (code: string) => `"${code}"`],
     ["a Telegram start command with the code", (code: string) => `/start ${code}`],
+  ] as const) {
+    it(`redeems ${said} in a direct message as the code sent alone`, async () => {
+      const { ctx, identity, deliver, heard, answers } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
+
+      await deliver(message(text(code)));
+
+      expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.added]);
+      expect(heard).toEqual([]);
+    });
+  }
+
+  for (const [said, text] of [
+    ["the code after other words", (code: string) => `here: ${code}`],
+    ["the code and a word after it", (code: string) => `${code} thanks`],
   ] as const) {
     it(`hears ${said} in a direct message as an ordinary message, and voids the code`, async () => {
       const { ctx, identity, deliver, heard, answers } = setup();
@@ -288,6 +371,19 @@ describe("account code admission", () => {
       expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
     });
   }
+
+  it("keeps a code in backticks said alone in a shared chat from the chat, and voids it", async () => {
+    const { ctx, identity, deliver, heard, answers } = setup();
+    const ann = await identity.createPerson({ accounts: [] });
+    const { code } = await accountCodeIssued(ctx, ann.id);
+
+    await deliver(group(`\`${code}\``, "m1"));
+    expect(heard).toEqual([]);
+
+    await deliver(message(code, { messageId: "m2" }));
+    expect(await identity.personOf(ANN_SLACK)).toBeNull();
+    expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+  });
 
   it("voids every code in one message said in a shared chat", async () => {
     const { ctx, identity, deliver, heard, answers } = setup();
@@ -412,6 +508,30 @@ describe("a history read from the platform", () => {
     expect(page[1].text).toBe(code);
     await dead(code);
   });
+
+  for (const [where, quoting] of [
+    [
+      "only in a Telegram reply's raw payload",
+      (code: string) => ({ replyTo: { messageId: "m1" }, raw: telegramReply("look", code) }),
+    ],
+    [
+      "only in the quoted message",
+      (code: string) => ({ replyTo: { messageId: "m1", content: code } }),
+    ],
+  ] as const) {
+    it(`voids a code Rome never saw, quoted ${where}, and hands the page on unchanged`, async () => {
+      const { codes, identity, platform, read, dead } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, ann.id);
+      const reply = { ...said("look", 2), ...quoting(code) };
+      platform.push(said("hi", 1), reply);
+
+      const page = await read();
+
+      expect(page).toEqual([reply, said("hi", 1)]);
+      await dead(code);
+    });
+  }
 
   it("makes no database read for a page with no code", async () => {
     const { platform, read } = setup(true);

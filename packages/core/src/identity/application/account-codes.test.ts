@@ -206,6 +206,15 @@ describe("account codes", () => {
     expect(await accountCodeRedeemed(ctx, typed, ANN_SLACK)).toEqual({ personId: ann.id });
   });
 
+  it("takes a code wrapped in punctuation, quotes, backticks or after /start for the code", async () => {
+    const { ctx, ann } = await setup();
+    const { code } = await accountCodeIssued(ctx, ann.id);
+    const wrapped = [`${code}.`, `\`${code}\``, `"${code}"`, `“${code}”`, `/start ${code}`];
+
+    for (const text of wrapped) expect(looksLikeAccountCode(text)).toBe(true);
+    expect(await accountCodeRedeemed(ctx, `\`${code}\`.`, ANN_SLACK)).toEqual({ personId: ann.id });
+  });
+
   it("does not take a code inside a longer text for a code", async () => {
     const { ctx, identity, ann } = await setup();
     const { code } = await accountCodeIssued(ctx, ann.id);
