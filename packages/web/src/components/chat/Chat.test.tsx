@@ -677,6 +677,19 @@ afterEach(() => {
   MockEventSource.instances = [];
 });
 
+describe("a pinned chat", () => {
+  it("shows a member the way back to the default", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: null,
+      pinnedAgentMention: null,
+      archivedAt: null,
+      pinnedModel: { by: "kept", providerId: "openai", selection: null, model: "gpt-6-luna" },
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(await screen.findByTestId("pinned-model-hint")).toBeTruthy();
+  });
+});
+
 describe("the sibling composer floor's wheel path", () => {
   it("scrolls the list for a wheel over the floor but leaves zoom and horizontal gestures alone", async () => {
     renderChat(<Chat sessionId="session-1" />);
