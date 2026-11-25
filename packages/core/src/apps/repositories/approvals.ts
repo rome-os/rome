@@ -253,22 +253,39 @@ export class ApprovalsRepository {
     return { outcome: "resolved", approval: resolved };
   }
 
-  /** The pending action_execution approval whose card owns the journal entry
-   *  at `sequence` under `rootExecutionId` — the entry it named when recorded,
-   *  or the single pending row its snapshot holds for the call when recorded
-   *  before the binding existed. No live card yields null. */
-  async findPendingForEntry(
+  /** The action_execution approval whose card owns the journal entry at
+   *  `sequence`, limited to cards that can still produce its outcome. */
+  async findActiveForEntry(
     rootExecutionId: string,
     sequence: number,
     actionName: string,
+  ): Promise<ApprovalRow | null> {
+    return this.findEntryApproval(rootExecutionId, sequence, actionName, true);
+  }
+
+  /** Any action_execution approval whose card owns the journal entry at
+   *  `sequence`, including terminal cards used to recognize approval-gated
+   *  work already completed under a sibling card. */
+  async findCardForEntry(
+    rootExecutionId: string,
+    sequence: number,
+    actionName: string,
+  ): Promise<ApprovalRow | null> {
+    return this.findEntryApproval(rootExecutionId, sequence, actionName, false);
+  }
+
+  private async findEntryApproval(
+    rootExecutionId: string,
+    sequence: number,
+    actionName: string,
+    activeOnly: boolean,
   ): Promise<ApprovalRow | null> {
     const rows = await this.db
       .select()
       .from(approvals)
       .where(
         and(
-          eq(approvals.type, "action_execution"),
-          eq(approvals.status, "pending"),
+          activeOnly ? activeActionExecutionApproval() : eq(approvals.type, "action_execution"),
           sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
           sql`json_extract(${approvals.payload}, '$.actionName') = ${actionName}`,
         ),

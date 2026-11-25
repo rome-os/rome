@@ -40,6 +40,7 @@ import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";
 import { ApprovalHandler, executionRequester } from "../../apps/actions/approval-handler.js";
+import { hashArgs } from "../../apps/actions/replay.js";
 import { createBackendTurnRunner } from "../../app-host/backend-turn.js";
 import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
@@ -371,8 +372,14 @@ async function buildHarness(
   let cleaned = false;
 
   const seed: TestRomeSeed = {
-    pendingActionApproval: (payload) =>
-      repos.approvals.create({
+    pendingActionApproval: (payload) => {
+      const args =
+        payload?.args && typeof payload.args === "object" && !Array.isArray(payload.args)
+          ? (payload.args as Record<string, unknown>)
+          : {};
+      const actionName = typeof payload?.actionName === "string" ? payload.actionName : "";
+      const generatesJournal = payload !== null && !Object.hasOwn(payload, "replayJournal");
+      return repos.approvals.create({
         type: "action_execution",
         requestedBy: "testkit",
         description:
@@ -380,14 +387,31 @@ async function buildHarness(
             ? `Execute ${payload.actionName}`
             : "test approval",
         payload: payload && {
-          // The engine records the root call with every approval; a seed that
-          // names only the approved call is its own root, with nothing to replay.
-          rootActionName: payload.actionName,
-          rootArgs: payload.args,
-          replayJournal: [],
+          // The engine records the root call with every approval. A seed that
+          // names only the approved call is its own root, with its pending row
+          // bound to the card just as the engine binds it.
+          rootActionName: actionName,
+          rootArgs: args,
+          rootExecutionId: randomUUID(),
+          ...(generatesJournal
+            ? {
+                journalSequence: 0,
+                replayJournal: [
+                  {
+                    sequence: 0,
+                    actionName,
+                    argsHash: hashArgs(args),
+                    args,
+                    result: null,
+                    status: "pending_approval",
+                  },
+                ],
+              }
+            : {}),
           ...payload,
         },
-      }),
+      });
+    },
     approvedActionApproval: async (payload) => {
       const id = await seed.pendingActionApproval(payload);
       const resolved = await repos.approvals.resolvePending(id, "approve", "test-guardian");

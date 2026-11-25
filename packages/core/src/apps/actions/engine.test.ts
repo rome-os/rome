@@ -2527,15 +2527,9 @@ describe("ActionEngine", () => {
         status: "completed",
         result: { status: "ok", data: "done" },
       });
-      // The replayed execution is currently double-journaled: besides the
-      // in-place update above, it is re-appended as a fresh completed entry.
-      expect(journal).toHaveLength(2);
-      expect(journal[1]).toMatchObject({
-        sequence: 1,
-        actionName: "child",
-        status: "completed",
-        result: { status: "ok", data: "done" },
-      });
+      // The replayed execution updates the row it owns instead of appending a
+      // fresh completed copy that a later call could mistake for history.
+      expect(journal).toHaveLength(1);
     });
 
     it("advances replayIndex after each matched entry", async () => {

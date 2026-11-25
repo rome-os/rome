@@ -302,12 +302,210 @@ describe("Approval flow integration", () => {
     expect(replayA).toEqual({ status: "ok", data: ["ok", "ok"] });
 
     // No second card for the already-executed sibling and no duplicate
-    // journal sequence was recorded. Executed entries are also re-appended
-    // as fresh completed rows, a pre-existing quirk of replay.
+    // journal sequence was recorded.
     expect(await approvalsRepo.findPending()).toHaveLength(0);
     const journal = await journalRepo.loadJournal(rootExecutionId);
     expect(journal.every((e) => e.status === "completed")).toBe(true);
     expect(new Set(journal.map((e) => e.sequence)).size).toBe(journal.length);
+  });
+
+  it("refreshes an unguarded call recorded after the approved entry", async () => {
+    let value = 0;
+    const write = makeAction("write", {
+      requiresApproval: true,
+      execute: async () => {
+        value = 1;
+        return { status: "ok" };
+      },
+    });
+    const read = makeAction("read", {
+      execute: async () => ({ status: "ok", data: value }),
+    });
+    const parent = makeAction("parent", {
+      execute: async () => {
+        await callAction("write", {});
+        const readResult = await callAction("read", {});
+        return { status: "ok", data: readResult.status === "ok" ? readResult.data : null };
+      },
+    });
+
+    const engine = new ActionEngine(makeRegistry(parent, write, read), {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    const approvalId = recorded.approval.approvalId;
+    const approval = await approvalsRepo.findById(approvalId);
+    const payload = approval!.payload as { journalSequence: number; rootExecutionId: string };
+    await approvalsRepo.resolvePending(approvalId, "approve", "guardian");
+
+    const replayed = await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${approvalId}`,
+        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
+        replayRootExecutionId: payload.rootExecutionId,
+        approvedSequence: payload.journalSequence,
+      },
+    );
+
+    expect(replayed).toEqual({ status: "ok", data: 1 });
+    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
+    expect(journal).toHaveLength(2);
+    expect(journal.map((entry) => [entry.sequence, entry.status])).toEqual([
+      [0, "completed"],
+      [1, "completed"],
+    ]);
+  });
+
+  it("asks approval again for a new identical call after the approved entry", async () => {
+    const exec = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+    const child = makeAction("child", { requiresApproval: true, execute: exec });
+    const parent = makeAction("parent", {
+      execute: async () => {
+        const first = await callAction("child", { id: 1 });
+        if (first.status === "pending_approval") {
+          return { status: "ok", data: "first-pending" };
+        }
+        const second = await callAction("child", { id: 1 });
+        return { status: "ok", data: [first.status, second.status] };
+      },
+    });
+
+    const engine = new ActionEngine(makeRegistry(parent, child), {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    const firstCard = (await approvalsRepo.findPending())[0];
+    const payload = firstCard.payload as { journalSequence: number; rootExecutionId: string };
+    await approvalsRepo.resolvePending(firstCard.id, "approve", "guardian");
+    exec.mockClear();
+
+    const replayed = await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${firstCard.id}`,
+        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
+        replayRootExecutionId: payload.rootExecutionId,
+        approvedSequence: payload.journalSequence,
+      },
+    );
+
+    expect(exec).toHaveBeenCalledTimes(1);
+    if (replayed.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${replayed.status}`);
+    }
+    const pending = await approvalsRepo.findPending();
+    expect(pending).toHaveLength(1);
+    expect((pending[0].payload as { journalSequence?: number }).journalSequence).toBe(1);
+    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
+    expect(journal.map((entry) => entry.status)).toEqual(["completed", "pending_approval"]);
+  });
+
+  it("runs a new post-approval call without recording a divergence", async () => {
+    const guarded = makeAction("guarded", { requiresApproval: true });
+    const after = makeAction("after");
+    const parent = makeAction("parent", {
+      execute: async () => {
+        const first = await callAction("guarded", {});
+        if (first.status === "pending_approval") {
+          return { status: "ok", data: "first-pending" };
+        }
+        await callAction("after", {});
+        return { status: "ok" };
+      },
+    });
+
+    const engine = new ActionEngine(makeRegistry(parent, guarded, after), {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    const card = (await approvalsRepo.findPending())[0];
+    const payload = card.payload as { journalSequence: number; rootExecutionId: string };
+    await approvalsRepo.resolvePending(card.id, "approve", "guardian");
+
+    await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${card.id}`,
+        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
+        replayRootExecutionId: payload.rootExecutionId,
+        approvedSequence: payload.journalSequence,
+      },
+    );
+
+    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
+    expect(journal.some((entry) => entry.status === "diverged")).toBe(false);
+  });
+
+  it("parks on an approved sibling whose execution is still active", async () => {
+    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+    const childA = makeAction("child_a", { requiresApproval: true, execute: execA });
+    const childB = makeAction("child_b", { requiresApproval: true, execute: execB });
+    const parent = makeAction("parent", {
+      execute: async () => {
+        const resultA = await callAction("child_a", {});
+        if (resultA.status === "error") return { status: "error", error: resultA.error };
+        const resultB = await callAction("child_b", {});
+        return { status: "ok", data: [resultA.status, resultB.status] };
+      },
+    });
+
+    const engine = new ActionEngine(makeRegistry(parent, childA, childB), {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
+
+    const recorded = await engine.run("parent", {}, { initiator: "test" });
+    if (recorded.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    }
+    const pending = await approvalsRepo.findPending();
+    const cardOf = (actionName: string) =>
+      pending.find((row) => (row.payload as { actionName?: string }).actionName === actionName)!;
+    const cardA = cardOf("child_a");
+    const cardB = cardOf("child_b");
+    await approvalsRepo.resolvePending(cardA.id, "approve", "guardian");
+    const payloadB = cardB.payload as { journalSequence: number; rootExecutionId: string };
+
+    const replayed = await engine.run(
+      "parent",
+      {},
+      {
+        initiator: `approval:${cardB.id}`,
+        replayJournal: await journalRepo.loadJournal(payloadB.rootExecutionId),
+        replayRootExecutionId: payloadB.rootExecutionId,
+        approvedSequence: payloadB.journalSequence,
+      },
+    );
+
+    if (replayed.status !== "pending_approval") {
+      throw new Error(`expected pending_approval, got ${replayed.status}`);
+    }
+    expect(replayed.approval.approvalId).toBe(cardA.id);
+    expect(execB).toHaveBeenCalledTimes(1);
   });
 
   it("runs one pending entry once when concurrent calls share one resolved card", async () => {

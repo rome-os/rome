@@ -72,6 +72,8 @@ export function formatResultForAgent(result: ActionResult): string {
 }
 
 export class ApprovalHandler {
+  private replayTails = new Map<string, Promise<void>>();
+
   constructor(
     private approvalsRepo: ApprovalsRepository,
     private journalRepo: ExecutionJournalRepository,
@@ -196,6 +198,24 @@ export class ApprovalHandler {
     return withoutSessionActor(() => this.runApprovedAction(approvalId, payload, emit));
   }
 
+  /** Two replays of one root must not interleave: the next card has to read
+   *  the journal only after the previous replay finished writing it. */
+  private runSerializedRootReplay<T>(rootExecutionId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.replayTails.get(rootExecutionId) ?? Promise.resolve();
+    const current = previous.then(run);
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.replayTails.set(rootExecutionId, tail);
+    void tail.then(() => {
+      if (this.replayTails.get(rootExecutionId) === tail) {
+        this.replayTails.delete(rootExecutionId);
+      }
+    });
+    return current;
+  }
+
   private async runApprovedAction(
     approvalId: string,
     payload: ApprovalPayload,
@@ -241,35 +261,33 @@ export class ApprovalHandler {
         );
         return;
       }
-      // Replay from the live journal, not the card's frozen snapshot: a
-      // sibling resolved under another card since may already hold a recorded
-      // outcome, and consuming its entry in replay mode keeps the call from
-      // recording (and running) a second time. The snapshot stays as the
-      // fallback for a payload whose journal row is gone.
-      const liveJournal = await this.journalRepo.loadJournal(payload.rootExecutionId);
-      const replayJournal =
-        liveJournal.length >= payload.replayJournal.length && liveJournal.length > 0
-          ? liveJournal
-          : payload.replayJournal;
-      const runContext: ActionRunContext = {
-        initiator: `approval:${approvalId}`,
-        ...(requester ? { actor: requester } : {}),
-        replayJournal,
-        replayRootExecutionId: payload.rootExecutionId,
-        approvedSequence,
-        channelContext: payload.channelContext,
-        sharedContext: payload.sharedContext,
-        sessionId: payload.sessionId,
-        agentName: payload.agentName,
-        channelThreadKey: payload.channelThreadKey,
-        ...(payload.turnId ? { turnId: payload.turnId } : {}),
-        ...(payload.audience ? { audience: payload.audience } : {}),
-      };
-      const result = await this.actionEngine.run(
-        payload.rootActionName,
-        payload.rootArgs,
-        runContext,
-      );
+      const result = await this.runSerializedRootReplay(payload.rootExecutionId, async () => {
+        // Replay from the live journal, not the card's frozen snapshot: a
+        // sibling resolved under another card since may already hold a recorded
+        // outcome, and consuming its entry in replay mode keeps the call from
+        // recording (and running) a second time. The snapshot stays as the
+        // fallback for a payload whose journal row is gone.
+        const liveJournal = await this.journalRepo.loadJournal(payload.rootExecutionId);
+        const replayJournal =
+          liveJournal.length >= payload.replayJournal.length && liveJournal.length > 0
+            ? liveJournal
+            : payload.replayJournal;
+        const runContext: ActionRunContext = {
+          initiator: `approval:${approvalId}`,
+          ...(requester ? { actor: requester } : {}),
+          replayJournal,
+          replayRootExecutionId: payload.rootExecutionId,
+          approvedSequence,
+          channelContext: payload.channelContext,
+          sharedContext: payload.sharedContext,
+          sessionId: payload.sessionId,
+          agentName: payload.agentName,
+          channelThreadKey: payload.channelThreadKey,
+          ...(payload.turnId ? { turnId: payload.turnId } : {}),
+          ...(payload.audience ? { audience: payload.audience } : {}),
+        };
+        return this.actionEngine.run(payload.rootActionName, payload.rootArgs, runContext);
+      });
 
       emit?.({
         type: "tool_result",

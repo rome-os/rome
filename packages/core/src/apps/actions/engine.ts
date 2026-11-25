@@ -780,6 +780,7 @@ export class ActionEngine {
       replayStore.journal = [...context.replayJournal];
       replayStore.approvedSequence = context.approvedSequence;
       preloadedEntryCount = replayStore.journal.length;
+      replayStore.preloadedEntryCount = preloadedEntryCount;
       const maxSeq = replayStore.journal.reduce((max, e) => Math.max(max, e.sequence), -1);
       replayStore.nextSequence = maxSeq + 1;
       const first = replayStore.journal[0];
@@ -904,6 +905,28 @@ export class ActionEngine {
     return result;
   }
 
+  /** Completed entries through the approved call are exactly-once history.
+   *  Later ones are stale unless a sibling approval owned them, in which case
+   *  running them again would duplicate an approved effect. */
+  private async canReuseCompletedEntry(entry: JournalEntry, store: ReplayStore): Promise<boolean> {
+    if (store.approvedSequence === undefined || entry.sequence <= store.approvedSequence) {
+      return true;
+    }
+    const card = await this.approvalsRepo.findCardForEntry(
+      store.rootExecutionId,
+      entry.sequence,
+      entry.actionName,
+    );
+    return card !== null;
+  }
+
+  private advanceReplayIndex(store: ReplayStore): void {
+    store.replayIndex++;
+    if (store.replayIndex >= (store.preloadedEntryCount ?? store.journal.length)) {
+      store.mode = "record";
+    }
+  }
+
   private async handleNestedCall(
     action: Action,
     args: Record<string, unknown>,
@@ -924,32 +947,74 @@ export class ActionEngine {
 
       if (entry && entry.actionName === action.config.name && entry.argsHash === argsHash) {
         if (entry.status === "completed" && entry.result !== null) {
-          store.replayIndex++;
-          log.info("replay: returning cached result", {
+          const reuse = await this.canReuseCompletedEntry(entry, store);
+          if (reuse) {
+            this.advanceReplayIndex(store);
+            log.info("replay: returning cached result", {
+              action: action.config.name,
+              sequence: entry.sequence,
+            });
+            return entry.result;
+          }
+
+          // This entry ran before the approved call, so its result can be
+          // stale now. Run the same logical call again and update its row
+          // rather than appending a second replayable copy of it.
+          this.advanceReplayIndex(store);
+          log.info("replay: refreshing call recorded before approval", {
             action: action.config.name,
             sequence: entry.sequence,
           });
-          return entry.result;
+          let freshApproval: CallApproval;
+          try {
+            freshApproval = await this.approvalOf(action, args, store, context);
+          } catch (err) {
+            return { status: "error", error: approvalFailure(action.config.name, err) };
+          }
+          if (freshApproval.asks) {
+            const pending = await this.recordPendingApprovalForEntry(
+              action.config.name,
+              args,
+              entry,
+              store,
+              context,
+              freshApproval,
+            );
+            return { status: "pending_approval", approval: pending };
+          }
+          const result = await this.executeNestedInvocation(
+            action,
+            args,
+            store,
+            context,
+            observer,
+            actionEventObserver,
+            { appendToJournal: false },
+          );
+          entry.result = result;
+          entry.status = "completed";
+          await this.updateJournalEntry(store.rootExecutionId, entry.sequence, result, "completed");
+          return result;
         }
 
         if (entry.status === "pending_approval") {
           if (entry.sequence !== store.approvedSequence) {
             // The resolved card this replay runs under owns one journal
             // entry; a pending entry it does not own stays unauthorized —
-            // the call parks on the card that already waits for it.
-            store.replayIndex++;
+            // the call parks on the card that can still produce its outcome.
+            this.advanceReplayIndex(store);
             log.info("replay: pending entry is not the resolved card's, left unauthorized", {
               action: action.config.name,
               sequence: entry.sequence,
             });
-            const card = await this.approvalsRepo.findPendingForEntry(
+            const card = await this.approvalsRepo.findActiveForEntry(
               store.rootExecutionId,
               entry.sequence,
               entry.actionName,
             );
             if (!card) {
               // No live card owns this entry — it was rejected, expired or
-              // consumed — so nothing left can approve the call. Refuse it
+              // consumed, so nothing left can approve the call. Refuse it
               // instead of reporting a pending approval on a card that does
               // not exist.
               return {
@@ -971,7 +1036,7 @@ export class ActionEngine {
           });
           // Reserve the entry's slot before the execution await: a concurrent
           // call must not run this same entry a second time under one card.
-          store.replayIndex++;
+          this.advanceReplayIndex(store);
           const result = await this.executeNestedInvocation(
             action,
             args,
@@ -979,22 +1044,16 @@ export class ActionEngine {
             context,
             observer,
             actionEventObserver,
+            { appendToJournal: false },
           );
           entry.result = result;
           entry.status = "completed";
           await this.updateJournalEntry(store.rootExecutionId, entry.sequence, result, "completed");
-          // Keep replaying while the journal still holds entries after this
-          // one: a sibling resolved under another card may already have a
-          // recorded outcome to consume, and replaying past it keeps the
-          // call from recording (and running) again.
-          if (store.replayIndex >= store.journal.length) {
-            store.mode = "record";
-          }
           return result;
         }
 
         if (entry.status === "diverged") {
-          store.replayIndex++;
+          this.advanceReplayIndex(store);
           store.mode = "record";
           log.info("replay: skipping previously diverged entry", {
             action: action.config.name,
@@ -1062,6 +1121,7 @@ export class ActionEngine {
     context?: ActionRunContext,
     observer?: ActionRunObserver,
     actionEventObserver?: ActionInvocationObserver,
+    options: { appendToJournal?: boolean } = {},
   ): Promise<ActionResult> {
     const parentStore = actionExecutionContext.getStore();
     const executionId = context?.executionId ?? uuid();
@@ -1104,14 +1164,16 @@ export class ActionEngine {
       actionEventObserver,
     );
 
-    store.journal.push({
-      sequence: store.nextSequence++,
-      actionName: action.config.name,
-      argsHash: hashArgs(args),
-      args,
-      result,
-      status: "completed",
-    });
+    if (options.appendToJournal !== false) {
+      store.journal.push({
+        sequence: store.nextSequence++,
+        actionName: action.config.name,
+        argsHash: hashArgs(args),
+        args,
+        result,
+        status: "completed",
+      });
+    }
 
     return result;
   }
@@ -2219,7 +2281,7 @@ export class ActionEngine {
   private async updateJournalEntry(
     rootExecutionId: string,
     sequence: number,
-    result: ActionResult,
+    result: ActionResult | null,
     status: string,
   ): Promise<void> {
     try {
@@ -2257,21 +2319,56 @@ export class ActionEngine {
     context: ActionRunContext | undefined,
     approval: CallApproval & { asks: true },
   ): Promise<PendingApproval> {
+    const argsHash = hashArgs(args);
     const seq = store.nextSequence++;
     store.journal.push({
       sequence: seq,
       actionName,
-      argsHash: hashArgs(args),
+      argsHash,
       args,
       result: null,
       status: "pending_approval",
     });
 
+    return this.createPendingApprovalRef(actionName, args, seq, store, context, approval);
+  }
+
+  /** Turn an already journaled logical call back into the pending row its
+   *  fresh approval card owns, instead of appending a duplicate row. */
+  private async recordPendingApprovalForEntry(
+    actionName: string,
+    args: Record<string, unknown>,
+    entry: JournalEntry,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
+  ): Promise<PendingApproval> {
+    entry.result = null;
+    entry.status = "pending_approval";
+    await this.updateJournalEntry(store.rootExecutionId, entry.sequence, null, "pending_approval");
+    return this.createPendingApprovalRef(
+      actionName,
+      args,
+      entry.sequence,
+      store,
+      context,
+      approval,
+    );
+  }
+
+  private async createPendingApprovalRef(
+    actionName: string,
+    args: Record<string, unknown>,
+    journalSequence: number,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
+  ): Promise<PendingApproval> {
     const description = `Action "${actionName}" requires guardian approval`;
     const approvalId = await this.createApprovalRecord(
       actionName,
       args,
-      seq,
+      journalSequence,
       description,
       store,
       context,

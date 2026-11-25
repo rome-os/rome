@@ -34,6 +34,9 @@ export interface ReplayStore {
    *  pending entry stays unauthorized. Undefined on a plain run and on a
    *  replay whose resolved entry could not be named — which binds nothing. */
   approvedSequence?: number;
+  /** How many leading entries came from the loaded journal. Entries appended
+   *  during this run are new work, never replay history. */
+  preloadedEntryCount?: number;
   /** Set on a root that main runs in-process as a coordination action. Such a
    * root may not call other actions, since a nested call would run app code
    * in main; the engine refuses the call instead. */
