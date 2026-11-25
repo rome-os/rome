@@ -19,46 +19,8 @@ import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
 import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
+import { appApiAppId, dashboardAppId as dashboardAppIdOf, isPublicPath } from "../ways-in.js";
 import type { ApiDeps } from "../deps.js";
-
-// `/api/*` endpoints the Caddy `forward_auth` probe waves through without
-// a cookie check — login flow, health/uptime probes, OAuth/MCP callbacks
-// that carry their own auth. Patterns ending in `/*` match the prefix +
-// any deeper path; bare patterns match exactly.
-const PUBLIC_API_PATHS = [
-  "/api/auth/*",
-  // Subsumed by `/api/auth/*` above, but listed explicitly so the public
-  // cloud-login surface is auditable here: the GET callback is a
-  // top-level browser navigation back from Rome Cloud and must clear the
-  // forward_auth probe without a session cookie.
-  "/api/auth/cloud/*",
-  "/api/auth/visitor/*",
-  "/api/health",
-  "/api/health/*",
-  "/api/uptime",
-  "/api/uptime/*",
-  // The unauthenticated SPA bootstrap probe.
-  "/api/bootstrap",
-  "/api/onboard/*",
-  "/api/instance/enroll/*",
-  // A blank warm-pool instance adopts its tenant identity here, before any
-  // guardian exists. Exact path: the request needs a provisioned instance token
-  // that Rome Cloud accepts, and the route refuses anything but a blank,
-  // unlinked, hosted instance.
-  "/api/instance/adopt",
-  "/api/oauth/*",
-  // The connect return leg. The desktop shell hands provider sign-in to the
-  // system browser (the Electron window has no platform authenticator, so a
-  // passkey second factor cannot complete there), and that browser carries no
-  // guardian cookie. Exact path, not a prefix: the rest of /api/setups/* stays
-  // private. `state` only correlates the leg back to a setup still parked at
-  // `awaiting-redirect` — the credential exchange itself needs the handoff, the
-  // PKCE verifier and the instance token, none of which cross this boundary.
-  "/api/setups/return",
-  // Share Chat — login-free public read of a frozen chat snapshot. The
-  // token in the path is the credential; management stays under /api/chat/*.
-  "/api/share/*",
-];
 
 // Any absolute origin works: only the path is read back.
 const ROUTING_ORIGIN = "http://verify.invalid";
@@ -89,32 +51,6 @@ export function resolveRoutedUri(forwardedUri: string): string | null {
   }
   if (url.pathname !== rawPath) return null;
   return `${getPath(new Request(url))}${query}`;
-}
-
-/**
- * Decide whether the original request (carried in `X-Forwarded-Uri`) is
- * reachable from the public edge without a session cookie.
- *
- * Non-`/api/*` paths — SPA routes (`/dashboard`, `/login`, …), Vite
- * assets, root-mounted surfaces like `/webhooks/*` (X-API-Key auth) and
- * `/app-assets/*` (static) — are all public. The SPA itself handles
- * redirect-to-login on the client when it sees no session.
- *
- * `/api/*` paths default to private; only those listed in
- * `PUBLIC_API_PATHS` are waved through.
- */
-function isPublicPath(forwardedUri: string): boolean {
-  const path = forwardedUri.split("?")[0];
-  if (!path.startsWith("/api/")) return true;
-  for (const pattern of PUBLIC_API_PATHS) {
-    if (pattern.endsWith("/*")) {
-      const base = pattern.slice(0, -2);
-      if (path === base || path.startsWith(`${base}/`)) return true;
-    } else if (path === pattern) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function isResolvedApiApp(
@@ -178,35 +114,8 @@ function isAppApiPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
  * dashboard surface for any app that declared a noAuth webhook.
  */
 function isAppDashboardPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
-  const appId = decodeDashboardAppId(forwardedUri);
+  const appId = dashboardAppIdOf(forwardedUri);
   return appId !== null && isLinkPublicApp(appId, deps);
-}
-
-function decodeDashboardAppId(forwardedUri: string): string | null {
-  const path = forwardedUri.split("?")[0];
-  // Host-owned paths must not inherit either public or app-scoped email access.
-  const match = path.match(/^\/api\/apps\/([^/]+)\/(.+)$/);
-  if (!match || /^publish\/?$/.test(match[2])) return null;
-
-  try {
-    return decodeAppIdPathSegment(match[1]);
-  } catch (err) {
-    if (err instanceof InvalidAppApiPathError) return null;
-    throw err;
-  }
-}
-
-function decodePublicAppApiAppId(forwardedUri: string): string | null {
-  const path = forwardedUri.split("?")[0];
-  const match = path.match(/^\/api\/app-api\/([^/]+)(?:\/.*)?$/);
-  if (!match) return null;
-
-  try {
-    return decodeAppIdPathSegment(match[1]);
-  } catch (err) {
-    if (err instanceof InvalidAppApiPathError) return null;
-    throw err;
-  }
 }
 
 function decodeAppAssetAppId(forwardedUri: string): string | null {
@@ -464,12 +373,12 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     if (forwardedUri) {
-      const dashboardAppId = decodeDashboardAppId(forwardedUri);
+      const dashboardAppId = dashboardAppIdOf(forwardedUri);
       if (dashboardAppId && listsEmails(dashboardAppId, deps) && isAppManifestPath(forwardedUri)) {
         return c.body(null, 204);
       }
 
-      const appId = dashboardAppId ?? decodePublicAppApiAppId(forwardedUri);
+      const appId = dashboardAppId ?? appApiAppId(forwardedUri);
       if (appId && listsEmails(appId, deps)) {
         if (allowFullDashboardSession()) return c.body(null, 204);
         const viewer = getVisitorSession();
