@@ -1,15 +1,14 @@
 // The Email descriptor. Email is push-driven (no live transport
-// loop), so its fault mapping is exercised through the two out-of-band signals
+// loop), so its fault mapping is exercised through the out-of-band signal
 // documented in email.ts:
 //   1. descriptor shape — one `inbox` grant, a talker needing it.
 //   2. registry-level: import unlocks talk; send()/ingestInbound() round-trip
 import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 //      through the wrapped EmailAdapter.
-//   3. fault mapping: ingestInbound's bad_signature verdict → CredentialRejected
-//      { grant: "inbox" }; adapter.start() rejecting (Rome Cloud outage) →
+//   3. fault mapping: ingestInbound's bad_signature verdict is no fault; adapter.start() rejecting (Rome Cloud outage) →
 //      Disconnected.
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
-//      degrades the inbox grant (renew-once via setup-driven "needs-fix").
+//      leaves the inbox grant and the connection as they were.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
@@ -227,7 +226,7 @@ function buildTalker(
 }
 
 describe("email Talker fault mapping", () => {
-  it("maps ingestInbound's bad_signature verdict to CredentialRejected{ grant: 'inbox' }", async () => {
+  it("refuses a deposit whose signature does not verify, without a fault", async () => {
     const provider = makeProvider();
     const h = buildTalker(provider);
     h.start();
@@ -236,9 +235,7 @@ describe("email Talker fault mapping", () => {
     const result = await h.ingest(raw, "not-the-right-signature");
 
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
-    expect(h.faults).toHaveLength(1);
-    expect(h.faults[0]).toBeInstanceOf(CredentialRejected);
-    expect((h.faults[0] as CredentialRejected).grant).toBe("inbox");
+    expect(h.faults).toEqual([]);
   });
 
   it("does not fault on a well-signed, well-formed deposit", async () => {
@@ -487,7 +484,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(received).toHaveLength(1);
   });
 
-  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ fix)", async () => {
+  it("keeps the inbox grant and the connection after a deposit whose signature does not verify", async () => {
     const provider = makeProvider();
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
@@ -501,8 +498,12 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
     await flush();
 
-    expect(conn.isUnlocked("chat")).toBe(false);
-    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
-    expect(conn.auth.grants().inbox).toBe("degraded");
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
+    expect(conn.auth.grants().inbox).toBe("authorized");
+
+    const next = (await registry.ingest(conn.id, { rawBody: raw, signature: sign(raw) })) as {
+      status: string;
+    };
+    expect(next.status).toBe("dispatched");
   });
 });
