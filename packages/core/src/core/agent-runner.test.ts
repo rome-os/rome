@@ -2041,6 +2041,42 @@ describe("AgentRunner", () => {
       expect(onDashboard).not.toBe("claude-haiku-5-5");
     });
 
+    it("runs an agent that names an exact model on its place's tier there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) => (thread?.channel === "telegram" ? { tier: "small" } : null),
+      });
+      const definition = agentLoader.find("test-main")!.definition as AgentDefinition;
+      const own = { ...definition };
+      Object.assign(definition, { modelId: "exact-model", providerId: "mock" });
+      delete definition.tier;
+      try {
+        for (const [channel, threadId] of [
+          ["telegram", "exact-1"],
+          ["webchat", "exact-2"],
+        ]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-main",
+              prompt: "Hi",
+              channelThreadKey: `${channel}:${threadId}`,
+              threadContext: { channel, threadId },
+            }),
+          );
+        }
+      } finally {
+        delete definition.modelId;
+        delete definition.providerId;
+        Object.assign(definition, own);
+      }
+      const [onBot, onDashboard] = provider.sessions.map((session) => session.config.model);
+      expect(onBot).toBe("claude-haiku-5-5");
+      expect(onDashboard).toBe("exact-model");
+    });
+
     it("lets the session's tools read its place while the session first opens", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const places: Array<string | undefined> = [];

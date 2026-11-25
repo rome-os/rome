@@ -1182,7 +1182,7 @@ function sessionSetupOf(
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
-    definition: place?.tier ? { ...config, tier: place.tier } : config,
+    definition: place?.tier ? onTier(config, place.tier) : config,
     widgets,
     systemPrompt: () =>
       deps.systemPrompts.build(promptAgent, { contextSuffix: init.contextSuffix, widgets }),
@@ -4782,6 +4782,12 @@ class AgentSessionImpl implements AgentSession {
 // Helpers
 
 /** The subagents this agent may hand work to, as its definition names them. */
+/** `definition` asking for `tier` alone: the model and provider it named give way. */
+function onTier(definition: AgentDefinition, tier: ModelTier): AgentDefinition {
+  const { modelId: _model, providerId: _provider, ...rest } = definition;
+  return { ...rest, tier };
+}
+
 function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] {
   return (config.allowedSubagents ?? []).map((name) => ({
     name,
