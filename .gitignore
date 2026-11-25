@@ -57,7 +57,3 @@ AGENT_LOG.md
 
 # Channel scenario traces (pnpm test:channels)
 .channel-traces/
-
-# Deferred test facilities kept locally per package for follow-up PRs (never committed)
-.deferred-tests/
-
