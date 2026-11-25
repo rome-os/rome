@@ -37,12 +37,8 @@ describe("accountEntry", () => {
     expect(await enter(OWNER)).toEqual({ kind: "entered", person: GUARDIAN });
   });
 
-  it("lets in a member as their sign-in, and as their person before they sign in", async () => {
-    const before = await enter(ADA);
-    expect(before).toMatchObject({
-      kind: "entered",
-      person: { kind: "visitor", email: "ada@example.com" },
-    });
+  it("lets in a member as their sign-in, and refuses one whose sign-in it cannot find", async () => {
+    expect(await enter(ADA)).toEqual({ kind: "refused" });
     await new VisitorProfilesRepository(testDb.db).record("cloud-ada", {
       email: "Ada@Example.com",
       avatarUrl: null,
