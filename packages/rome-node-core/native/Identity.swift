@@ -10,47 +10,77 @@ struct Failure: Error {
     init(_ code: String) { self.code = code }
 }
 
+struct ProcessGeneration: Equatable {
+    let uniqueID: UInt64
+    let idVersion: UInt32
+
+    static func read(_ pid: pid_t) throws -> Self {
+        // XNU's proc_uniqidentifierinfo ABI is absent from the public SDK.
+        let flavor: Int32 = 17 // PROC_PIDUNIQIDENTIFIERINFO
+        let size: Int32 = 56
+        return try withUnsafeTemporaryAllocation(byteCount: Int(size), alignment: 8) { bytes in
+            guard pid > 0, proc_pidinfo(pid, flavor, 0, bytes.baseAddress, size) == size else {
+                throw Failure("process_identity_unavailable")
+            }
+            return Self(uniqueID: bytes.load(fromByteOffset: 16, as: UInt64.self),
+                        idVersion: bytes.load(fromByteOffset: 32, as: UInt32.self))
+        }
+    }
+}
+
 struct ProcessIdentity: Equatable {
     let pid: pid_t
     let uid: uid_t
     let seconds: UInt64
     let microseconds: UInt64
     let executable: String
+    let generation: ProcessGeneration
+
+    private static func sample(_ pid: pid_t) throws -> proc_bsdinfo {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+              info.pbi_pid == UInt32(pid), info.pbi_start_tvsec > 0, info.pbi_start_tvusec < 1_000_000 else {
+            throw Failure("process_identity_unavailable")
+        }
+        return info
+    }
 
     static func read(_ pid: pid_t) throws -> Self {
-        func sample() throws -> proc_bsdinfo {
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard pid > 0, proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
-                  info.pbi_pid == UInt32(pid), info.pbi_start_tvsec > 0, info.pbi_start_tvusec < 1_000_000 else {
-                throw Failure("process_identity_unavailable")
-            }
-            return info
-        }
-
-        let before = try sample()
+        let generation = try ProcessGeneration.read(pid)
+        let before = try sample(pid)
         var buffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let length = buffer.withUnsafeMutableBytes { proc_pidpath(pid, $0.baseAddress, UInt32($0.count)) }
-        let after = try sample()
+        let after = try sample(pid)
         guard length > 0, let end = buffer.firstIndex(of: 0), end == Int(length),
               let path = String(bytes: buffer[..<end], encoding: .utf8), path.hasPrefix("/"),
               before.pbi_uid == after.pbi_uid, before.pbi_ruid == after.pbi_ruid,
               before.pbi_start_tvsec == after.pbi_start_tvsec,
-              before.pbi_start_tvusec == after.pbi_start_tvusec else {
+              before.pbi_start_tvusec == after.pbi_start_tvusec,
+              try ProcessGeneration.read(pid) == generation else {
             throw Failure("process_identity_unavailable")
         }
         return Self(pid: pid, uid: after.pbi_uid, seconds: after.pbi_start_tvsec,
-                    microseconds: after.pbi_start_tvusec, executable: path)
+                    microseconds: after.pbi_start_tvusec, executable: path, generation: generation)
     }
 
     func verify() throws {
         guard (try? Self.read(pid)) == self else { throw Failure("process_identity_changed") }
+    }
+
+    func verifyPeer() throws {
+        guard let current = try? Self.sample(pid), current.pbi_uid == uid,
+              current.pbi_start_tvsec == seconds, current.pbi_start_tvusec == microseconds,
+              (try? ProcessGeneration.read(pid)) == generation else {
+            throw Failure("process_identity_changed")
+        }
     }
 }
 
 struct Peer {
     let identity: ProcessIdentity
     let audit: Data
+    let signingSummary: String?
 
     static func authenticate(_ fd: Int32, expecting expected: ProcessIdentity, signed: Bool) throws -> Self {
         var uid: uid_t = 0, gid: gid_t = 0, pid: pid_t = 0
@@ -62,23 +92,34 @@ struct Peer {
               pidSize == MemoryLayout.size(ofValue: pid), pid == expected.pid,
               getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &tokenSize) == 0,
               tokenSize == MemoryLayout.size(ofValue: token),
-              token.val.1 == uid, token.val.2 == gid, token.val.5 == UInt32(pid) else {
+              token.val.1 == uid, token.val.2 == gid, token.val.5 == UInt32(pid),
+              token.val.7 == expected.generation.idVersion else {
             throw Failure("peer_rejected")
         }
 
         try expected.verify()
-        // The kernel pins the audit token to this connection for its lifetime.
+        // Keep the token from authentication as a snapshot of the admitted peer.
         let audit = withUnsafeBytes(of: token) { Data($0) }
+        var signingSummary: String?
         if signed {
             var code: SecCode?
+            var staticCode: SecStaticCode?
+            var rawInfo: CFDictionary?
             let attributes = [kSecGuestAttributeAudit as String: audit] as CFDictionary
             guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
-                  let code, SecCodeCheckValidity(code, [], nil) == errSecSuccess else {
+                  let code, SecCodeCheckValidity(code, [], nil) == errSecSuccess,
+                  SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+                  SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation),
+                                                &rawInfo) == errSecSuccess,
+                  let info = rawInfo as? [String: Any],
+                  let identifier = info[kSecCodeInfoIdentifier as String] as? String else {
                 throw Failure("peer_rejected")
             }
+            let team = info[kSecCodeInfoTeamIdentifier as String] as? String
+            signingSummary = "\(String(reflecting: identifier))\nTeam ID: \(team ?? "Unavailable")"
             try expected.verify()
         }
-        return Self(identity: expected, audit: audit)
+        return Self(identity: expected, audit: audit, signingSummary: signingSummary)
     }
 }
 
@@ -113,7 +154,7 @@ private struct Bootstrap: Decodable {
     }
 }
 
-final class StateDirectory {
+final class StateDirectory: Sendable {
     let path: String
     let fd: Int32
     let identity: FileIdentity

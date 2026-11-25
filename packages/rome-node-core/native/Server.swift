@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-final class Admission {
+final class Admission: @unchecked Sendable {
     private let lock = NSLock()
     private var active = false
     private var hasBinding = false
@@ -38,9 +38,9 @@ final class Admission {
         }
     }
 
-    func terminate() {
+    func terminate(_ reason: String = "session_stopped") {
         lock.withLock {
-            reason = reason ?? "session_stopped"
+            self.reason = self.reason ?? reason
             exiting = true
         }
     }
@@ -104,7 +104,7 @@ func sendBytes(_ fd: Int32, _ data: Data) throws {
     }
 }
 
-final class Listener {
+final class Listener: Sendable {
     let state: StateDirectory
     let socket: FileIdentity
     let fd: Int32
@@ -157,7 +157,7 @@ final class Listener {
     }
 }
 
-final class Connection {
+final class Connection: @unchecked Sendable {
     let fd: Int32
     let listener: Listener
     let peer: Peer
@@ -181,23 +181,30 @@ final class Connection {
 
     deinit { close(fd) }
 
-    func end() {
-        _ = admission.stop("connection_closed")
+    func end(_ reason: String = "connection_closed") {
+        _ = admission.stop(reason)
         shutdown(fd, SHUT_RDWR)
     }
 
     func verify() throws {
+        do { try checkLive() }
+        catch {
+            end((error as? Failure)?.code ?? "connection_closed")
+            throw error
+        }
+    }
+
+    func checkLive(allowInput: Bool = true) throws {
+        try peer.identity.verifyPeer()
         var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        guard !admission.terminating, listener.intact, (try? peer.identity.verify()) != nil,
+        guard !admission.terminating, listener.intact,
               poll(&event, 1, 0) >= 0, Int32(event.revents) & (POLLHUP | POLLERR | POLLNVAL) == 0 else {
-            end()
             throw Failure("connection_closed")
         }
         guard event.revents & Int16(POLLIN) != 0 else { return }
         var byte: UInt8 = 0
         let peek = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
-        guard peek > 0 || (peek < 0 && [EAGAIN, EWOULDBLOCK, EINTR].contains(errno)) else {
-            end()
+        guard (allowInput && peek > 0) || (peek < 0 && [EAGAIN, EWOULDBLOCK, EINTR].contains(errno)) else {
             throw Failure("connection_closed")
         }
     }
@@ -238,46 +245,76 @@ final class Connection {
     }
 }
 
+// A provider must stop waiting when canContinue returns false.
+typealias ConsentProvider = @Sendable (_ peer: Peer, _ canContinue: @escaping @Sendable () -> Bool) -> Bool
+
 func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
-           admission: Admission, desktop: Bool) throws {
+           admission: Admission, desktop: DesktopSession?, consent: ConsentProvider) throws {
     defer { listener.removeSocket() }
-    let (fd, peer) = try listener.acceptHost(host, admission: admission, signed: desktop)
+    let (fd, peer) = try listener.acceptHost(host, admission: admission, signed: desktop != nil)
     let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
     defer { connection.end() }
 
-    let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
-    let handshakeDeadline = DispatchTime.now() + .seconds(5)
-    let authenticated = DispatchSemaphore(value: 0)
-    watchdog.setEventHandler {
-        guard (try? connection.verify()) != nil, DispatchTime.now() >= handshakeDeadline else { return }
-        if authenticated.wait(timeout: .now()) == .timedOut {
-            connection.end()
-        } else {
-            authenticated.signal()
-        }
+    let watchdogQueue = DispatchQueue(label: "rome.computer-use.watchdog", qos: .userInitiated)
+    func watch(_ check: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        timer.setEventHandler(handler: check)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
+        timer.resume()
+        return timer
     }
-    watchdog.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
-    watchdog.resume()
-    defer { watchdog.cancel() }
 
-    let instance = UUID().uuidString
-    let first = try connection.next()
+    let handshakeDeadline = DispatchTime.now() + .seconds(5)
+    let first: Request = try {
+        let timer = watch {
+            if DispatchTime.now() >= handshakeDeadline { connection.end() }
+            else { try? connection.verify() }
+        }
+        defer {
+            timer.cancel()
+            // Drain the deadline check before entering the consent phase.
+            watchdogQueue.sync {}
+        }
+        return try connection.next()
+    }()
+
+    guard DispatchTime.now() < handshakeDeadline else { throw Failure("connection_closed") }
     guard first.v == 1, first.method == "handshake",
           let rawNonce = first.params?.nonce, let nonce = Data(base64Encoded: rawNonce),
           let rawProof = first.params?.proof, let proof = Data(base64Encoded: rawProof),
-          handshake.verify(proof, role: "host", nonce: nonce) else {
+          handshake.verifyHost(proof, nonce: nonce) else {
         try connection.sendNow(Wire.failure(first.id, "authentication_failed"))
         return
     }
+    let instance = UUID().uuidString
+    let helper = getpid()
+    let helperProof = handshake.helperProof(helper: helper, nonce: nonce, instance: instance)
+    let consentDeadline = DispatchTime.now() + .seconds(60)
+    let canContinue: @Sendable () -> Bool = {
+        do {
+            // Preserve the write side so a peer that half-closes can receive the denial.
+            try connection.checkLive(allowInput: false)
+            try admission.check()
+            return DispatchTime.now() < consentDeadline
+        } catch {
+            if (error as? Failure)?.code == "process_identity_changed" { connection.end("process_identity_changed") }
+            return false
+        }
+    }
+    guard canContinue(), consent(peer, canContinue), canContinue() else {
+        _ = admission.stop("consent_denied")
+        try? sendBytes(fd, Wire.failure(first.id, "consent_denied"))
+        return
+    }
     try connection.sendNow(Wire.reply(first.id, result: [
-        "instance": instance, "pid": getpid(),
-        "proof": handshake.proof("helper", nonce: nonce, instance: instance).base64EncodedString(),
+        "instance": instance, "pid": helper, "proof": helperProof.base64EncodedString(),
     ]))
-    authenticated.signal()
+    let watchdog = watch { try? connection.verify() }
+    defer { watchdog.cancel() }
 
     let access = DesktopAccess()
     // A console scan can block without delaying the transport watchdog.
-    let accessWatchdog = desktop ? DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated)) : nil
+    let accessWatchdog = desktop != nil ? DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated)) : nil
     accessWatchdog?.setEventHandler {
         guard admission.needsAccessCheck else { return }
         do { try access.check() }
@@ -320,10 +357,11 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 let state = admission.stop()
                 try connection.send(Wire.reply(request.id, result: state))
             case "windows", "bind", "observe", "act":
-                guard desktop else { throw Failure("desktop_disabled") }
+                guard let desktop else { throw Failure("desktop_disabled") }
                 try connection.verify()
                 try admission.begin()
                 worker.async {
+                    let previousLabel = windows.bindingLabel
                     let response: Data?
                     do {
                         let args = request.params
@@ -348,6 +386,8 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                     } catch {
                         response = try? Wire.failure(request.id, (error as? Failure)?.code ?? "internal_error")
                     }
+                    let label = windows.bindingLabel
+                    if label != previousLabel { DispatchQueue.main.async { desktop.updateBinding(label) } }
                     admission.finish(hasBinding: windows.hasBinding)
                     if let response { try? connection.send(response) }
                 }
@@ -355,7 +395,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 throw Failure("method_unavailable")
             }
         } catch let failure as Failure {
-            if failure.code == "connection_closed" { return }
+            if failure.code == "connection_closed" || failure.code == "process_identity_changed" { return }
             try connection.send(Wire.failure(request.id, failure.code))
         }
     }

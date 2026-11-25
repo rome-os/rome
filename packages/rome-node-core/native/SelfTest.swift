@@ -42,13 +42,13 @@ final class SelfTest {
         try rejects("process_identity_unavailable") { _ = try ProcessIdentity.read(Int32.max) }
         for fake in [
             ProcessIdentity(pid: me.pid, uid: me.uid, seconds: me.seconds + 1,
-                            microseconds: me.microseconds, executable: me.executable),
+                            microseconds: me.microseconds, executable: me.executable, generation: me.generation),
             ProcessIdentity(pid: me.pid, uid: me.uid, seconds: me.seconds,
-                            microseconds: me.microseconds + 1, executable: me.executable),
+                            microseconds: me.microseconds + 1, executable: me.executable, generation: me.generation),
             ProcessIdentity(pid: me.pid, uid: me.uid + 1, seconds: me.seconds,
-                            microseconds: me.microseconds, executable: me.executable),
+                            microseconds: me.microseconds, executable: me.executable, generation: me.generation),
             ProcessIdentity(pid: me.pid, uid: me.uid, seconds: me.seconds,
-                            microseconds: me.microseconds, executable: "/unknown"),
+                            microseconds: me.microseconds, executable: "/unknown", generation: me.generation),
         ] {
             try rejects("process_identity_changed") { try fake.verify() }
         }
@@ -170,7 +170,7 @@ final class SelfTest {
         defer { pair.forEach { close($0) } }
         let me = try ProcessIdentity.read(getpid())
         let other = ProcessIdentity(pid: me.pid + 1, uid: me.uid, seconds: me.seconds,
-                                    microseconds: me.microseconds, executable: me.executable)
+                                    microseconds: me.microseconds, executable: me.executable, generation: me.generation)
         let first = try Peer.authenticate(pair[0], expecting: me, signed: false)
         let second = try Peer.authenticate(pair[1], expecting: me, signed: false)
         try expect(first.audit == second.audit && first.identity == me, "both endpoints bind to audit identity")
@@ -181,6 +181,81 @@ final class SelfTest {
         try runServer(path, socket: socket, mode: .replaceSocket)
         try runServer(path, socket: socket, mode: .disconnect)
         try runServer(path, socket: socket, mode: .terminate)
+        try runServer(path, socket: socket, mode: .consentDenied)
+        try runServer(path, socket: socket, mode: .consentDisconnect)
+        try runServer(path, socket: socket, mode: .consentTerminate)
+        try runServer(path, socket: socket, mode: .consentStop)
+        try execConnection(path, executable: me.executable)
+    }
+
+    private func execConnection(_ path: String, executable: String) throws {
+        let admission = Admission()
+        let listener = try Listener(state: StateDirectory(path))
+        defer { listener.removeSocket() }
+        let command = Pipe()
+        let ready = Pipe()
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: executable)
+        child.arguments = ["--self-test-exec-peer", path + "/helper.sock"]
+        child.standardInput = command
+        child.standardOutput = ready
+        try child.run()
+        defer {
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+            child.waitUntilExit()
+        }
+        func marker(_ expected: UInt8) throws {
+            let fd = ready.fileHandleForReading.fileDescriptor
+            var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            try expect(poll(&event, 1, 3_000) > 0, "exec fixture responds")
+            try expect(try readBytes(fd, count: 1) == Data([expected]), "exec fixture reaches expected phase")
+        }
+        try marker(1)
+        let original = try ProcessIdentity.read(child.processIdentifier)
+        let (fd, peer) = try listener.acceptHost(original, admission: admission, signed: false)
+        let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
+        try connection.verify()
+        try command.fileHandleForWriting.write(contentsOf: Data([1]))
+        try marker(2)
+        let current = try ProcessIdentity.read(child.processIdentifier)
+        try expect(current.pid == original.pid && current.uid == original.uid &&
+                   current.executable == original.executable && current.seconds == original.seconds &&
+                   current.microseconds == original.microseconds, "same-path exec preserves the legacy identity")
+        try expect(current.generation.idVersion != original.generation.idVersion, "exec advances the audit PID version")
+        try rejects("process_identity_changed") { try connection.verify() }
+        try rejects("process_identity_changed") { try admission.begin() }
+        child.waitUntilExit()
+        try expect(child.terminationStatus == 0, "the inherited socket observes the server closing it")
+        print("Same-path exec with an inherited socket is rejected.")
+    }
+
+    static func execPeer(_ socket: String) throws -> Never {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0, try socketAddress(socket, { connect(fd, $0, $1) }) == 0 else {
+            throw Failure("self-test: exec fixture connection")
+        }
+        try FileHandle.standardOutput.write(contentsOf: Data([1]))
+        _ = try readBytes(STDIN_FILENO, count: 1)
+        let executable = try ProcessIdentity.read(getpid()).executable
+        var arguments = [strdup(executable), strdup("--self-test-exec-ready"), strdup(String(fd)), nil]
+        defer { arguments.forEach { free($0) } }
+        _ = arguments.withUnsafeMutableBufferPointer { execv(executable, $0.baseAddress!) }
+        throw Failure("self-test: same-path exec failed")
+    }
+
+    static func inheritedSocket(_ fd: Int32) throws {
+        var address = sockaddr_un()
+        var length = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let connected = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getpeername(fd, $0, &length) }
+        }
+        guard connected == 0 else { throw Failure("self-test: missing inherited connection") }
+        try FileHandle.standardOutput.write(contentsOf: Data([2]))
+        var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        var byte: UInt8 = 0
+        guard poll(&event, 1, 3_000) > 0, recv(fd, &byte, 1, MSG_DONTWAIT) == 0 else {
+            throw Failure("self-test: inherited connection stayed open")
+        }
     }
 
     private func writeBootstrap(_ path: String, _ data: Data) throws {
@@ -237,7 +312,34 @@ final class SelfTest {
         try rejects("authentication_failed") { _ = try state.consumeBootstrap() }
     }
 
-    private enum Mode { case wrongProof, localStop, replaceSocket, disconnect, terminate }
+    static func consentProvider(_ mode: String, path: String) throws -> ConsentProvider {
+        switch mode {
+        case "allow": return { _, _ in true }
+        case "deny": return { _, _ in false }
+        case "unexpected": return { _, _ in exit(99) }
+        case "wait":
+            return { _, canContinue in
+                if !FileManager.default.createFile(atPath: path + "/consent-waiting", contents: Data()) { return false }
+                while canContinue() { usleep(10_000) }
+                return true
+            }
+        default: throw Failure("self-test: invalid consent fixture")
+        }
+    }
+
+    private enum Mode {
+        case wrongProof, localStop, replaceSocket, disconnect, terminate
+        case consentDenied, consentDisconnect, consentTerminate, consentStop
+
+        var provider: String {
+            switch self {
+            case .wrongProof: "unexpected"
+            case .consentDenied: "deny"
+            case .consentDisconnect, .consentTerminate, .consentStop: "wait"
+            default: "allow"
+            }
+        }
+    }
 
     private func runServer(_ path: String, socket: String, mode: Mode) throws {
         let key = SymmetricKey(size: .bits256)
@@ -251,7 +353,7 @@ final class SelfTest {
         let pidOutput = Pipe()
         child.executableURL = URL(fileURLWithPath: "/bin/sh")
         child.arguments = ["-c", #""$@" >/dev/null & server=$!; printf '%s\n' "$server"; exec >&-; wait "$server""#,
-                           "rome-native-test", host.executable, "--self-test-server", path]
+                           "rome-native-test", host.executable, "--self-test-server", path, mode.provider]
         child.standardInput = FileHandle.nullDevice
         child.standardOutput = pidOutput
         try child.run()
@@ -299,8 +401,7 @@ final class SelfTest {
         let peer = try Peer.authenticate(fd, expecting: target, signed: false)
         try expect(peer.identity == target, "host verifies helper peer")
 
-        func rpc(_ method: String, params: [String: Any] = [:]) throws -> [String: Any] {
-            try sendBytes(fd, Wire.frame(["v": 1, "id": method, "method": method, "params": params]))
+        func response(_ method: String) throws -> [String: Any] {
             let (length, binary) = try Wire.lengths(readBytes(fd, count: 8), request: false)
             let data = try readBytes(fd, count: length)
             guard binary == 0, let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -308,19 +409,52 @@ final class SelfTest {
             return result
         }
 
-        let handshake = Handshake(key: key, host: host.pid, helper: pid)
+        func rpc(_ method: String, params: [String: Any] = [:]) throws -> [String: Any] {
+            try sendBytes(fd, Wire.frame(["v": 1, "id": method, "method": method, "params": params]))
+            return try response(method)
+        }
+
         let nonce = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        let proof = mode == .wrongProof ? Data(count: 32) : handshake.proof("host", nonce: nonce)
-        let reply = try rpc("handshake", params: ["nonce": nonce.base64EncodedString(), "proof": proof.base64EncodedString()])
+        func mac(_ fields: [String]) -> Data {
+            let payload = Data((["rome-computer-use-v1"] + fields).joined(separator: "\n").utf8)
+            return Data(HMAC<SHA256>.authenticationCode(for: payload, using: key))
+        }
+        let nonceText = nonce.base64EncodedString()
+        let proof = mode == .wrongProof ? Data(count: 32) : mac(["host", String(host.pid), nonceText])
+        try sendBytes(fd, Wire.frame(["v": 1, "id": "handshake", "method": "handshake", "params": [
+            "nonce": nonceText, "proof": proof.base64EncodedString(),
+        ]]))
+        if mode.provider == "wait" {
+            let marker = path + "/consent-waiting"
+            let deadline = DispatchTime.now() + .seconds(2)
+            while !FileManager.default.fileExists(atPath: marker), DispatchTime.now() < deadline { usleep(10_000) }
+            try expect(unlink(marker) == 0, "provider waits after authentication")
+            if mode == .consentDisconnect {
+                var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                try expect(poll(&event, 1, 5_100) == 0, "consent can outlast the five-second handshake deadline")
+                try expect(shutdown(fd, SHUT_WR) == 0, "disconnect while retaining the receive side")
+            } else {
+                try expect(kill(pid, mode == .consentStop ? SIGUSR1 : SIGTERM) == 0, "signal during consent")
+            }
+        }
+        let reply = try response("handshake")
         if mode == .wrongProof {
             try expect((reply["error"] as? [String: String])?["code"] == "authentication_failed", "refuse invalid proof")
+        } else if mode.provider != "allow" {
+            try expect(reply["v"] as? Int == 1 && reply["ok"] as? Bool == false &&
+                       (reply["error"] as? [String: String])?["code"] == "consent_denied", "reject session after \(mode)")
+            var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            var byte: UInt8 = 0
+            try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0,
+                       "consent denial seals and closes the session")
+            print("Consent denial and shutdown verified for \(mode).")
         } else {
             let result = reply["result"] as? [String: Any]
             guard let instance = result?["instance"] as? String, let proofString = result?["proof"] as? String,
                   let proof = Data(base64Encoded: proofString) else { throw Failure("self-test: handshake result") }
             try expect(result?["pid"] as? Int32 == pid, "handshake pid")
-            try expect(handshake.verify(proof, role: "helper", nonce: nonce, instance: instance), "helper proof")
-            try expect(!handshake.verify(proof, role: "host", nonce: nonce), "proofs are role separated")
+            try expect(proof == mac(["helper", String(host.pid), String(pid), nonceText, instance]), "helper proof")
+            try expect(proof != mac(["host", String(host.pid), nonceText]), "proofs are role separated")
             let disabled = try rpc("windows")
             try expect((disabled["error"] as? [String: String])?["code"] == "desktop_disabled", "test helper cannot contact desktop")
             if mode == .localStop {

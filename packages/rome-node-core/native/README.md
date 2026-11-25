@@ -6,7 +6,8 @@ It uses public Accessibility and ScreenCaptureKit APIs on macOS 14 or later.
 
 ## Build and verify
 
-Run these commands from the repository root.
+Run these commands from the repository root with Node 24 on PATH for the
+socket interoperability test.
 
 ```sh
 script=packages/rome-node-core/scripts/computer-use.swift
@@ -51,12 +52,15 @@ path so macOS can retain permissions across upgrades.
    use `NSWorkspace.openApplication` to launch the app and get its PID.
 4. Connect to `STATE_DIR/helper.sock` from the declared host process. The
    helper exposes the socket with mode `0600`. It checks the peer UID and PID
-   with `getpeereid` and `LOCAL_PEERPID`, then validates `LOCAL_PEERTOKEN`
-   with Security and pins it to the connection. A native host can apply the
-   same kernel checks to the helper.
+   with `getpeereid` and `LOCAL_PEERPID`, then validates the code associated
+   with `LOCAL_PEERTOKEN`. It matches the audit token's PID version against
+   the kernel process record. A native host can apply the same kernel checks
+   to the helper.
 5. Send `handshake` with a fresh 32-byte random `nonce` and the host `proof`.
-   Encode both as standard Base64. Verify the returned PID and helper proof
-   before sending another request. Use constant-time MAC comparison.
+   Encode both as standard Base64. The request requires only the host PID.
+   After the local user allows the session, use the returned PID and instance
+   to verify the helper proof with a constant-time MAC comparison. Send
+   additional requests only after successful verification.
 
 The helper takes an exclusive `flock` on the pinned directory inode. It opens
 `bootstrap.json` without following symlinks and verifies its owner, type, mode,
@@ -73,19 +77,49 @@ following fields as UTF-8, joined by one LF byte with no final newline.
 | 1 | `rome-computer-use-v1` | `rome-computer-use-v1` |
 | 2 | `host` | `helper` |
 | 3 | Decimal host PID | Decimal host PID |
-| 4 | Decimal helper PID | Decimal helper PID |
-| 5 | Standard Base64 nonce | Standard Base64 nonce |
+| 4 | Standard Base64 nonce | Decimal helper PID |
+| 5 | | Standard Base64 nonce |
 | 6 | | Returned `instance` UUID |
 
-The helper waits up to 10 seconds for the declared host to connect and up to 5 seconds
-for its handshake. A socket or directory replacement, peer identity change, or
-transport loss seals admission and ends the helper. Start a fresh instance to
-reconnect. Remove the per-launch state directory after the helper exits.
+The helper waits up to 10 seconds for the declared host to connect and up to
+5 seconds for the handshake request. After verifying the host proof and computing
+the helper proof, a production helper waits up to 60 seconds for the local user
+to approve. Allow for both time limits when waiting for the handshake response.
+The helper sends `consent_denied` on denial, timeout, lock, stop signal or
+disconnect whenever the socket can still carry the reply. Admission closes
+and the helper exits in each case.
+
+A socket or directory replacement, peer identity change or transport loss
+seals admission and ends the helper. The helper samples the kernel process
+unique ID and PID version every 100 ms and before window operations. A
+same-path exec can preserve the PID, start time and socket descriptor. A
+changed PID version still invalidates that connection. Start a fresh instance
+to reconnect. Remove the per-launch state directory after the helper exits.
 
 `scripts/computer-use.swift test` runs the native handshake tests against
-`--self-test-server STATE_DIR`. A separate launcher starts the helper so
+`--self-test-server STATE_DIR ALLOW_MODE`. A separate launcher starts the helper so
 the tests cover the same bootstrap and socket flow with a non-parent host.
-The test server checks kernel peer identity and HMAC with desktop access disabled.
+The test server checks kernel peer identity and HMAC with desktop access disabled
+and uses an injected consent decision. A Node 24 client verifies the wire
+contract using the helper PID from the response.
+
+## Threat model
+
+macOS grants Accessibility and Screen Recording to the helper as a separate
+TCC responsible process. A generic `node` binary can run arbitrary JavaScript,
+including package install scripts. Rome's Electron app disables library
+validation to load native modules. A valid process signature does not
+identify the code making the request, and a process running as the same user
+can create bootstrap files of its own.
+
+The per-launch secret and HMAC bind the Unix socket handshake to its host.
+After verifying the host's kernel identity and HMAC, the helper displays the
+requesting process name, PID, canonical executable path and signing summary
+in a local confirmation dialog. **Deny** is the default. **Allow Session**
+authorizes that one connection and displays a persistent **Rome Computer Use**
+menu bar item with the host, the current window and **Stop Computer Use**.
+The helper limits observation and actions to one bound window and revalidates
+the Accessibility root and element membership before dispatch.
 
 ## Frames
 
@@ -148,7 +182,8 @@ One slot serves `windows`, `bind`, `observe` and `act`. An overlapping
 request for that slot gets `busy`. `status` and `cancel` use the socket
 reader and can reply out of order while a window operation is busy.
 `kill -USR1 HELPER_PID` provides a local stop, and `SIGTERM` seals admission
-and exits. Session switching, sleep, and the console guard also seal
+and exits. **Stop Computer Use** also seals admission and exits. Locking the
+screen, session switching, sleep and the console guard seal
 admission. The console guard uses public session fields, display state and
 visible window levels. It runs during window operations and once per second
 while a slot or binding is active.
@@ -164,11 +199,12 @@ represents OS rollback.
 | `invalid_frame`, `frame_limit` | The transport cannot use the frame. The helper closes the connection. |
 | `invalid_request`, `unsupported_version`, `method_unavailable` | Invalid request shape, version or method |
 | `authentication_failed`, `connection_closed` | Failed handshake or a connection that lost its authority |
+| `consent_denied` | The local user declined or the consent window expired or was interrupted |
 | `desktop_disabled` | Compile-only helper |
 | `console_unavailable`, `accessibility_permission_required` | Unavailable graphical session or missing Accessibility grant |
 | `screen_recording_permission_required` | Missing grant for the requested capture, or loss of a grant seen by this helper |
 | `session_stopped`, `busy` | Admission is closed or the window slot is occupied |
-| `window_unavailable`, `process_identity_changed` | The helper cannot verify the window or its process |
+| `window_unavailable`, `process_identity_changed` | The helper cannot verify the window, its process, or the host process |
 | `binding_unavailable`, `element_unavailable` | Missing binding, stale ref or a node outside the window |
 | `action_unavailable`, `invalid_value`, `action_rejected` | The action, input or target rejected the request |
 | `action_outcome_unknown` | An AX timeout after dispatch. Observe the window before deciding what to do next. |

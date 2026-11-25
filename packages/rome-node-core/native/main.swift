@@ -21,12 +21,13 @@ func signedApp() -> Bool {
         code.map { SecStaticCodeCheckValidity($0, SecCSFlags(rawValue: kSecCSStrictValidate), requirement) == errSecSuccess } == true
 }
 
-func launch(path: String, desktop: Bool) throws -> Never {
+@MainActor
+func launch(path: String, desktop: Bool, testConsent: ConsentProvider? = nil) throws -> Never {
     let state = try StateDirectory(path)
     // Serialize bootstrap consumption and socket ownership on the pinned directory inode.
     guard flock(state.fd, LOCK_EX | LOCK_NB) == 0 else { throw Failure("state_directory_busy") }
     let (host, key) = try state.consumeBootstrap()
-    let handshake = Handshake(key: key, host: host.pid, helper: getpid())
+    let handshake = Handshake(key: key, host: host.pid)
     let admission = Admission()
     signal(SIGUSR1, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
@@ -42,20 +43,25 @@ func launch(path: String, desktop: Bool) throws -> Never {
     }
 
     let app = desktop ? NSApplication.shared : nil
-    app?.setActivationPolicy(.prohibited)
-    let center = desktop ? NSWorkspace.shared.notificationCenter : nil
-    let notifications = [NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification,
-                         NSWorkspace.screensDidSleepNotification].compactMap { name in
-        center?.addObserver(forName: name, object: nil, queue: nil) { _ in
-            _ = admission.stop("console_unavailable")
+    let session: DesktopSession?
+    let consent: ConsentProvider
+    if let app {
+        guard app.setActivationPolicy(.accessory) else { throw Failure("console_unavailable") }
+        let ui = DesktopSession(admission: admission)
+        session = ui
+        consent = { peer, canContinue in
+            DispatchQueue.main.sync { ui.confirm(peer, canContinue: canContinue) }
         }
+    } else {
+        session = nil
+        consent = testConsent ?? { _, _ in false }
     }
 
     DispatchQueue.global(qos: .userInitiated).async {
         let code: Int32
         do {
             try serve(listener: Listener(state: state), host: host, handshake: handshake,
-                      admission: admission, desktop: desktop)
+                      admission: admission, desktop: session, consent: consent)
             code = 0
         } catch {
             let reason = (error as? Failure)?.code ?? "internal_error"
@@ -63,7 +69,7 @@ func launch(path: String, desktop: Bool) throws -> Never {
             code = 1
         }
         signals.forEach { $0.cancel() }
-        notifications.forEach { center?.removeObserver($0) }
+        if let session { DispatchQueue.main.sync { session.close() } }
         exit(code)
     }
 
@@ -78,14 +84,24 @@ do {
         try SelfTest.run()
         exit(0)
     }
-    if arguments.count == 2, arguments[0] == "--self-test-server" {
-        try launch(path: arguments[1], desktop: false)
+    if arguments.count == 3, arguments[0] == "--self-test-server" {
+        try MainActor.assumeIsolated {
+            try launch(path: arguments[1], desktop: false,
+                       testConsent: SelfTest.consentProvider(arguments[2], path: arguments[1]))
+        }
+    }
+    if arguments.count == 2, arguments[0] == "--self-test-exec-peer" {
+        try SelfTest.execPeer(arguments[1])
+    }
+    if arguments.count == 2, arguments[0] == "--self-test-exec-ready", let fd = Int32(arguments[1]) {
+        try SelfTest.inheritedSocket(fd)
+        exit(0)
     }
     throw Failure("desktop_disabled")
     #else
     guard arguments.count == 2, arguments[0] == "--serve" else { throw Failure("invalid_request") }
     guard signedApp() else { throw Failure("desktop_disabled") }
-    try launch(path: arguments[1], desktop: true)
+    try MainActor.assumeIsolated { try launch(path: arguments[1], desktop: true) }
     #endif
 } catch {
     FileHandle.standardError.write(Data("\((error as? Failure)?.code ?? String(describing: error))\n".utf8))

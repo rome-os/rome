@@ -19,7 +19,7 @@ func uniqueRoot(_ row: WindowRow, rows: [WindowRow], roots: [CGRect]) -> Int? {
     return matches.first
 }
 
-final class DesktopAccess {
+final class DesktopAccess: @unchecked Sendable {
     private let lock = NSLock()
     private var screenGranted = false
 
@@ -94,7 +94,8 @@ private func validBounds(_ bounds: CGRect) -> Bool {
         bounds.width > 0 && bounds.height > 0
 }
 
-final class Windows {
+// The serial window worker owns all mutable window state.
+final class Windows: @unchecked Sendable {
     private struct Match {
         let row: WindowRow
         let identity: ProcessIdentity
@@ -106,6 +107,7 @@ final class Windows {
         let id = UUID().uuidString
         let instance: String
         let match: Match
+        let label: String
         var refs: [String: AXUIElement] = [:]
         var expires: TimeInterval = 0
     }
@@ -113,6 +115,7 @@ final class Windows {
     // Only the window worker reads or writes the binding.
     private var binding: Binding?
     var hasBinding: Bool { binding != nil }
+    var bindingLabel: String? { binding?.label }
     let instance: String
     let access: DesktopAccess
     let live: () throws -> Void
@@ -211,8 +214,11 @@ final class Windows {
         guard let row = rows.first(where: { $0.id == id }),
               let match = matches(rows, pid: row.pid, deadline: ProcessInfo.processInfo.systemUptime + 0.5)
                 .first(where: { $0.row.id == id }) else { throw Failure("window_unavailable") }
-        let value = Binding(instance: instance, match: match)
         let metadata = metadata(match)
+        let app = metadata["appName"] as? String ?? match.identity.executable
+        let title = metadata["title"] as? String ?? ""
+        let label = title.isEmpty ? app : "\(app) — \(title)"
+        let value = Binding(instance: instance, match: match, label: "Window \(id): \(label)")
         try live()
         binding = value
         return ["binding": value.id, "window": metadata]

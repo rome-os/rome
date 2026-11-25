@@ -121,19 +121,18 @@ enum Wire {
 struct Handshake {
     let key: SymmetricKey
     let host: pid_t
-    let helper: pid_t
 
-    private func message(_ role: String, nonce: Data, instance: String? = nil) -> Data {
-        let fields = ["rome-computer-use-v1", role, String(host), String(helper), nonce.base64EncodedString()]
-        return Data((fields + (instance.map { [$0] } ?? [])).joined(separator: "\n").utf8)
+    private func message(_ fields: [String]) -> Data {
+        Data((["rome-computer-use-v1"] + fields).joined(separator: "\n").utf8)
     }
 
-    func proof(_ role: String, nonce: Data, instance: String? = nil) -> Data {
-        Data(HMAC<SHA256>.authenticationCode(for: message(role, nonce: nonce, instance: instance), using: key))
-    }
-
-    func verify(_ proof: Data, role: String, nonce: Data, instance: String? = nil) -> Bool {
+    func verifyHost(_ proof: Data, nonce: Data) -> Bool {
         nonce.count == 32 && proof.count == 32 && HMAC<SHA256>.isValidAuthenticationCode(
-            proof, authenticating: message(role, nonce: nonce, instance: instance), using: key)
+            proof, authenticating: message(["host", String(host), nonce.base64EncodedString()]), using: key)
+    }
+
+    func helperProof(helper: pid_t, nonce: Data, instance: String) -> Data {
+        let payload = message(["helper", String(host), String(helper), nonce.base64EncodedString(), instance])
+        return Data(HMAC<SHA256>.authenticationCode(for: payload, using: key))
     }
 }

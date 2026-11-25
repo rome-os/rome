@@ -199,6 +199,7 @@ func test(_ app: URL) throws {
     }
     let root = try temporaryDirectory("/private/tmp/rome-native-build.XXXXXX", failure: "Cannot make test directory.")
     defer { try? files.removeItem(at: root) }
+    try testNodeHandshake(app, state: root)
     let installed = root.appendingPathComponent(appName, isDirectory: true)
     try rejects("The arm64 helper app or its executable is missing.") { try validate(installed, release: true) }
     try rejects("A compile-only helper cannot be released or installed.") { try validate(app, release: true) }
@@ -222,6 +223,87 @@ func test(_ app: URL) throws {
     }
     try rejects("The release helper needs a valid Developer ID Application signature.") { try validate(installed, release: true) }
     print("Bundle checks passed (build lock, staging, atomic replacement, absent and unsigned release rejection).")
+}
+
+func testNodeHandshake(_ app: URL, state: URL) throws {
+    let source = #"""
+        import assert from 'node:assert/strict';
+        import { spawn } from 'node:child_process';
+        import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+        import { once } from 'node:events';
+        import { existsSync, realpathSync, writeFileSync } from 'node:fs';
+        import { createConnection } from 'node:net';
+        import { setTimeout as delay } from 'node:timers/promises';
+
+        const [executable, state] = process.argv.slice(1);
+        const socketPath = state + '/helper.sock';
+        const key = randomBytes(32);
+        const nonce = randomBytes(32).toString('base64');
+        const mac = (...fields) => createHmac('sha256', key)
+          .update(['rome-computer-use-v1', ...fields].join('\n')).digest();
+        writeFileSync(state + '/bootstrap.json', JSON.stringify({
+          secret: key.toString('hex'), hostPid: process.pid, hostExecutable: realpathSync(process.execPath),
+        }), { flag: 'wx', mode: 0o600 });
+
+        const helper = spawn(executable, ['--self-test-server', state, 'allow'], { stdio: 'inherit' });
+        const exited = once(helper, 'exit');
+        exited.catch(() => {});
+        let socket;
+        const timeout = setTimeout(() => {
+          socket?.destroy(new Error('Node handshake timed out'));
+          helper.kill('SIGKILL');
+        }, 6_000);
+        try {
+          for (let attempt = 0; attempt < 200; attempt++) {
+            if (existsSync(socketPath)) {
+              socket = createConnection(socketPath);
+              try {
+                await once(socket, 'connect');
+                break;
+              } catch (error) {
+                socket.destroy();
+                socket = undefined;
+                if (error.code !== 'ENOENT' && error.code !== 'ECONNREFUSED') throw error;
+              }
+            }
+            await delay(10);
+          }
+          assert(socket, 'Connect to helper.');
+          const body = Buffer.from(JSON.stringify({
+            v: 1, id: 'node-host', method: 'handshake',
+            params: { nonce, proof: mac('host', process.pid, nonce).toString('base64') },
+          }));
+          const header = Buffer.alloc(8);
+          header.writeUInt32BE(body.length);
+          socket.write(Buffer.concat([header, body]));
+
+          let frame = Buffer.alloc(0);
+          for await (const chunk of socket) {
+            frame = Buffer.concat([frame, chunk]);
+            if (frame.length >= 8 && frame.length >= 8 + frame.readUInt32BE(0)) break;
+          }
+          assert(frame.length >= 8, 'Receive handshake frame.');
+          assert.equal(frame.readUInt32BE(0), frame.length - 8);
+          assert.equal(frame.readUInt32BE(4), 0);
+          const { v, id, ok, result } = JSON.parse(frame.subarray(8));
+          assert.equal(v, 1);
+          assert.equal(id, 'node-host');
+          assert.equal(ok, true);
+          const { instance, pid, proof } = result;
+          assert(Number.isSafeInteger(pid) && pid > 0);
+          assert.match(instance, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+          assert(timingSafeEqual(Buffer.from(proof, 'base64'), mac('helper', process.pid, pid, nonce, instance)));
+          assert.equal(pid, helper.pid);
+          assert.deepEqual(await exited, [0, null]);
+          console.log(`Node ${process.versions.node} completed the handshake without using the helper PID in the request.`);
+        } finally {
+          clearTimeout(timeout);
+          socket?.destroy();
+          if (helper.exitCode === null && helper.signalCode === null) helper.kill('SIGKILL');
+          await exited.catch(() => {});
+        }
+        """#
+    try run("/usr/bin/env", ["node", "--input-type=module", "-e", source, executable(app).path, state.path])
 }
 
 func main() throws {
