@@ -11,7 +11,6 @@ import { ChatTaskList } from "../../concierge/task-list.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import type { ApiDeps } from "../deps.js";
-import { enteredOwnerKey } from "../../access/require-entry.js";
 import { streamEvents } from "./concierge.js";
 import { updateRoutine } from "../../routines/update.js";
 
@@ -48,23 +47,27 @@ export function chatTaskListOf(deps: TaskListApiDeps): ChatTaskList | null {
   return list;
 }
 
-/**
- * Whether Concierge chat `chatId` is `owner`'s and not archived: only its
- * owner reaches its task list, and to anyone else it does not exist.
- */
-export async function ownsConciergeChat(
+/** Whose Concierge chat `chatId` is: its owner, or null when it is none or archived. */
+async function ownerOfTaskList(
   concierge: ConciergeService,
   chatId: string,
-  owner: string,
-): Promise<boolean> {
-  return (
-    (await concierge.conciergeChat(chatId)) !== null &&
-    (await concierge.ownerOfChat(chatId)) === owner
-  );
+): Promise<string | null> {
+  return (await concierge.conciergeChat(chatId)) ? concierge.ownerOfChat(chatId) : null;
 }
 
-/** Emits `tasks_changed` whenever chat `chatId`'s task list may have changed. */
-export function subscribeChatTasks(
+/**
+ * How to subscribe to chat `chatId`'s task list, or null when it has none.
+ * Subscribed, it emits `tasks_changed` whenever the list may have changed.
+ */
+export async function chatTaskEvents(
+  deps: TaskListApiDeps,
+  chatId: string,
+): Promise<((emit: LiveEventEmit) => () => void) | null> {
+  const owner = deps.concierge ? await ownerOfTaskList(deps.concierge, chatId) : null;
+  return owner === null ? null : (emit) => subscribeChatTasks(deps, chatId, owner, emit);
+}
+
+function subscribeChatTasks(
   deps: TaskListApiDeps,
   chatId: string,
   owner: string,
@@ -84,25 +87,25 @@ export function subscribeChatTasks(
  * A Concierge chat's task list: its task chats and what runs for it on its
  * own, and the actions of its rows: Stop a task chat at work, cancel a
  * reminder, unfollow, and pause, resume or delete a routine. Every route is
- * its owner's only: another caller's chat, or an archived one, is not found,
- * and an action reaches only a row the chat's list shows.
+ * any member's: an archived chat is not found, and an action reaches only a
+ * row the chat's list shows.
  * docs/domains/chats.md#task-list
  */
 export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
   const app = new Hono();
 
-  /** The chat's owner and the Concierge, or the response that refuses the caller. */
+  /** The chat's owner and the Concierge, or the response when there is no such chat. */
   const gate = async (
     c: Context,
   ): Promise<
     { concierge: ConciergeService; list: ChatTaskList; chatId: string; owner: string } | Response
   > => {
-    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     const list = chatTaskListOf(deps);
     if (!concierge || !list) return c.json({ error: "Concierge is not available" }, 404);
     const chatId = c.req.param("chatId") ?? "";
-    if (!(await ownsConciergeChat(concierge, chatId, owner))) {
+    const owner = await ownerOfTaskList(concierge, chatId);
+    if (owner === null) {
       return c.json({ error: "No such Concierge chat" }, 404);
     }
     return { concierge, list, chatId, owner };

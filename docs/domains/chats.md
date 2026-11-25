@@ -237,7 +237,7 @@ A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[na
 
 The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?": its task chats, and the reminders, routines and follows that run for it, in one list. The dashboard labels it Tasks. Its owner opens it from the Tasks button in the chat's header, which has a dot while a task chat needs its owner. The agent's logo opens nothing. On a phone it opens in a sheet. The iOS app shows it as the Tasks tab of the Agent page, which the header's Tasks button opens on that tab, and its mascot opens as it was last.
 
-- It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and an action on another person's chat is refused as if the chat did not exist. A common chat has none for now.
+- It opens and takes its actions from the guardian and every dashboard admin, like the chat, and what it shows and changes is its owner's. A common chat has none for now.
 - It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a follow and a routine show as their own record says.
 - It lists only the chat's own work: its task chats, the reminders it set, its follows, and the routines that work for it or for one of its task chats.
 - It is one list of groups, with no tabs or filters, and a group with no rows is left out:

@@ -80,17 +80,15 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
     return c.json({ chats } satisfies ConciergeChatsResponse);
   });
 
-  // What archiving or deleting one of the caller's topic chats moves to the
-  // main chat: its follows and open tasks, and, while it is archived, the
+  // What archiving or deleting a topic chat moves to its owner's main chat: its follows and open tasks, and, while it is archived, the
   // follows its archive moved. An archived topic chat answers too, for its
-  // unarchive. 404 for the main chat, another person's chat and without the
-  // Concierge service.
+  // unarchive. 404 for the main chat and without the Concierge service.
   app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
-    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
     const chatId = c.req.param("chatId");
-    if (!(await concierge.isTopicChatOf(chatId, owner))) {
+    const owner = await concierge.ownerOfTopicChat(chatId);
+    if (owner === null) {
       return c.json({ error: "No such topic chat" }, 404);
     }
     const { follows, openTasks, movedFollows } = await concierge.followsAndTasksOf(chatId, owner);
@@ -155,18 +153,17 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
     }
   });
 
-  // The guardian connected a service from a connect card in one of their
-  // Concierge chats: the Concierge hears of it there, quietly, and goes on. The
+  // A member connected a service from a connect card in a Concierge chat: the Concierge hears of it there, quietly, and goes on. The
   // service must be connected as the list reads it now, so a call cannot make
   // the Concierge believe something that is not so.
   app.post("/concierge/chats/:chatId/service-connected", async (c) => {
-    const { concierge, following, owner, error } = await followingOf(c);
+    const { concierge, following, error } = await followingOf(c);
     if (error) return error;
     const chatId = c.req.param("chatId");
-    if (
-      !(await concierge.conciergeChat(chatId)) ||
-      (await concierge.ownerOfChat(chatId)) !== owner
-    ) {
+    const owner = (await concierge.conciergeChat(chatId))
+      ? await concierge.ownerOfChat(chatId)
+      : null;
+    if (owner === null) {
       return c.json({ error: "No such Concierge chat" }, 404);
     }
     const body = await c.req

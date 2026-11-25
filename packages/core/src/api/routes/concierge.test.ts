@@ -252,7 +252,7 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
     mount(
       testDb,
       {
-        isTopicChatOf: async (id: string, owner: string) => topics.get(id) === owner,
+        ownerOfTopicChat: async (id: string) => topics.get(id) ?? null,
         followsAndTasksOf: async (id: string, owner: string) => {
           asked.push([id, owner]);
           return {
@@ -270,7 +270,7 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
   });
   afterEach(() => testDb.close());
 
-  it("answers the caller's own topic chat's follows, open tasks and moved follows, without the task chat", async () => {
+  it("answers a topic chat's follows, open tasks and moved follows, without the task chat", async () => {
     const res = await app().request("/concierge/chats/topic-1/follows-and-tasks", guardian);
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
@@ -290,16 +290,19 @@ describe("GET /concierge/chats/:chatId/follows-and-tasks", () => {
     expect(asked).toEqual([["archived-topic", "guardian"]]);
   });
 
-  it("answers 404 for the main chat, another person's topic chat and a chat that is not there", async () => {
+  it("answers 404 for the main chat and a chat that is not there, and answers every member for a topic chat", async () => {
     const get = (id: string, who: object = guardian) =>
       app().request(`/concierge/chats/${id}/follows-and-tasks`, who);
     expect((await get("concierge")).status).toBe(404);
-    // Ann's chat is not the guardian's, and the guardian's is not Ann's.
-    expect((await get("ann-topic")).status).toBe(404);
-    expect((await get("topic-1", ann)).status).toBe(404);
     expect((await get("nope")).status).toBe(404);
     expect(asked).toEqual([]);
-    expect((await get("ann-topic", ann)).status).toBe(200);
+    expect((await get("ann-topic")).status).toBe(200);
+    expect((await get("topic-1", ann)).status).toBe(200);
+    // Each moves to its owner's main chat, whoever asks.
+    expect(asked).toEqual([
+      ["ann-topic", "visitor:acct-ann"],
+      ["topic-1", "guardian"],
+    ]);
     expect((await get("topic-1", { headers: {} })).status).toBe(401);
   });
 });
@@ -379,10 +382,13 @@ describe("POST /concierge/chats/:chatId/service-connected", () => {
     expect(serviceConnected).not.toHaveBeenCalled();
   });
 
-  it("404s a chat that is not a Concierge chat of the caller", async () => {
+  it("404s a chat that is no Concierge chat", async () => {
     expect((await post("gone", { service: "mail" })).status).toBe(404);
-    // Ann's own Concierge is not the guardian's chat.
-    expect((await post("concierge", { service: "mail" }, ann)).status).toBe(404);
     expect(serviceConnected).not.toHaveBeenCalled();
+  });
+
+  it("tells a Concierge of a service any member connected in its chat", async () => {
+    expect((await post("concierge", { service: "mail" }, ann)).status).toBe(202);
+    expect(serviceConnected).toHaveBeenCalledWith("concierge", "mail");
   });
 });

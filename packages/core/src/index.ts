@@ -1633,8 +1633,7 @@ async function main() {
         placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
-        taskOwner: async (taskId) =>
-          (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
+        hasTask: async (taskId) => (await concierge.deps.tasks.repo.get(taskId)) !== null,
         deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
         guardianLanguage: async () => {
           const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);

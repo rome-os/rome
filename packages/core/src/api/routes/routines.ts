@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { publicRoutineRow } from "../../db/repositories/routines.js";
 import { ownerOfChat } from "../../webchat/owner.js";
-import { enteredOwnerKey } from "../../access/require-entry.js";
 import { resolveOneOffDate } from "../../routines/schedule-trigger-provider.js";
 import { resolveGuardianTimezone } from "../../instance/timezone.js";
 import type { ApiDeps } from "../deps.js";
@@ -95,7 +94,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
               ? deps.concierge.ownerOfChat(body.chatId)
               : ownerOfChat((id) => deps.webchatRepo.getSession(id), body.chatId))
           : null;
-      if (chatOwner !== enteredOwnerKey(c)) return c.json({ error: "No such chat" }, 404);
+      if (chatOwner === null) return c.json({ error: "No such chat" }, 404);
       madeIn = body.chatId;
     }
 
