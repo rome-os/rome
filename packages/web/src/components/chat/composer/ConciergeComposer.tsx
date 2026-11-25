@@ -108,6 +108,8 @@ export interface ConciergeComposerProps {
   onVoiceTurn?: (text: string, inputId: string) => void;
   /** A voice conversation ended on its own, for `reason`. */
   onVoiceStopped?: (reason: ConversationStopReason) => void;
+  /** Creates the chat a draft's voice conversation talks in, and answers its id. */
+  startChat?: () => Promise<string>;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -135,6 +137,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       onVoiceHeard,
       onVoiceTurn,
       onVoiceStopped,
+      startChat,
       modelSelection,
       onSend,
     },
@@ -210,6 +213,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       chatId,
       onTurn: onVoiceTurn,
       onStopped: onVoiceStopped,
+      startChat,
       // Words the conversation ended before sending wait in the field, for the
       // guardian to send or not. They are saved as the draft at once, as the
       // field may be going away with the chat.

@@ -11,7 +11,7 @@ import { ConciergeComposer } from "./ConciergeComposer";
 
 // The conversation itself: the test plays Rome.
 const conversation = rs.hoisted(() => ({
-  started: [] as string[],
+  started: [] as Array<string | (() => Promise<string>)>,
   handlers: null as null | {
     onState(state: string): void;
     onEnded(reason: string | null, unsent: string): void;
@@ -24,8 +24,11 @@ const conversation = rs.hoisted(() => ({
   unsent: "",
 }));
 rs.mock("@/lib/voice-conversation/conversation", () => ({
-  startVoiceConversation: (chatId: string, handlers: typeof conversation.handlers) => {
-    conversation.started.push(chatId);
+  startVoiceConversation: (
+    chat: string | (() => Promise<string>),
+    handlers: typeof conversation.handlers,
+  ) => {
+    conversation.started.push(chat);
     conversation.handlers = handlers;
     return {
       end: () => {
@@ -57,10 +60,12 @@ afterEach(() => {
 function renderComposer(
   available: boolean,
   ref = createRef<ChatComposerHandle>(),
-  voice: {
+  chat: {
+    chatId: string | null;
+    startChat?: () => Promise<string>;
     onVoiceHeard?: (text: string) => void;
     onVoiceTurn?: (text: string, inputId: string) => void;
-  } = {},
+  } = { chatId: "concierge" },
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://rome.test").pathname;
@@ -70,15 +75,17 @@ function renderComposer(
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const tree = (props: typeof chat) => (
     <MemoryRouter>
       <QueryClientProvider client={client}>
         <ReplyDraftHarness>
-          <ConciergeComposer ref={ref} chatId="concierge" onSend={() => {}} {...voice} />
+          <ConciergeComposer ref={ref} {...props} onSend={() => {}} />
         </ReplyDraftHarness>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const view = render(tree(chat));
+  return { ...view, rerender: (props: typeof chat) => view.rerender(tree(props)) };
 }
 
 describe("voice conversation in the Concierge's message field", () => {
@@ -86,6 +93,28 @@ describe("voice conversation in the Concierge's message field", () => {
     renderComposer(true);
     expect(await screen.findByRole("button", { name: "Voice conversation" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
+  });
+
+  it("offers the button in a new topic chat, which the conversation creates and stays in", async () => {
+    const startChat = async () => "topic-1";
+    const { rerender } = renderComposer(true, undefined, { chatId: null, startChat });
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    expect(conversation.started).toEqual([startChat]);
+
+    // The draft becomes the chat it created: the conversation carries on.
+    rerender({ chatId: "topic-1", startChat });
+    expect(conversation.ended).toBe(0);
+    expect(document.querySelector("[data-voice-conversation-capsule]")).toBeTruthy();
+
+    // Moving to another chat ends it.
+    rerender({ chatId: "topic-2", startChat });
+    expect(conversation.ended).toBe(1);
+  });
+
+  it("offers no button in a draft that cannot start a chat", async () => {
+    renderComposer(true, undefined, { chatId: null });
+    await screen.findByRole("button", { name: "Start voice input" });
+    expect(screen.queryByRole("button", { name: "Voice conversation" })).toBeNull();
   });
 
   it("offers no button while voice mode is off", async () => {
@@ -128,6 +157,7 @@ describe("voice conversation in the Concierge's message field", () => {
     const heard: string[] = [];
     const turns: Array<[string, string]> = [];
     renderComposer(true, undefined, {
+      chatId: "concierge",
       onVoiceHeard: (text) => heard.push(text),
       onVoiceTurn: (text, inputId) => turns.push([text, inputId]),
     });
@@ -194,6 +224,7 @@ describe("voice conversation in the Concierge's message field", () => {
   it("takes the words not sent yet out of the chat when the composer goes away", async () => {
     const heard: string[] = [];
     const { unmount } = renderComposer(true, undefined, {
+      chatId: "concierge",
       onVoiceHeard: (text) => heard.push(text),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
