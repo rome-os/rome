@@ -71,12 +71,23 @@ export class IdentityRepository {
     });
   }
 
-  /** Gives `account` to `identityId` unless another person holds it. Returns
-   *  the holder's id when someone else holds it, else null. */
-  insertAccount(identityId: string, account: PlatformAccount, now: Date): string | null {
+  /** Gives `account` to `identityId` unless no such person exists or another
+   *  person holds it. Returns `"unknown"` or `"taken"` for those, having
+   *  written nothing, else null. */
+  insertAccount(
+    identityId: string,
+    account: PlatformAccount,
+    now: Date,
+  ): "unknown" | "taken" | null {
     return this.db.transaction((tx) => {
+      const known = tx
+        .select({ id: identities.id })
+        .from(identities)
+        .where(eq(identities.id, identityId))
+        .get();
+      if (!known) return "unknown";
       const holder = holderOf(tx, account);
-      if (holder !== null) return holder === identityId ? null : holder;
+      if (holder !== null) return holder === identityId ? null : "taken";
       tx.insert(identityAccounts)
         .values({ ...account, identityId, createdAt: now })
         .run();
