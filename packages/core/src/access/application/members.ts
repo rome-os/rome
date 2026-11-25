@@ -118,6 +118,21 @@ export async function guardianSeatRebound(
 }
 
 /**
+ * Gives the guardian's person `account`, which People has just linked to the
+ * guardian as their own. An account another person holds moves to the
+ * guardian, and the move is logged. Does nothing when there is no guardian
+ * person yet: the backfill at the next startup gives it then. Safe to call
+ * again with the same account.
+ */
+export async function guardianAccountLinked(
+  { identity, access }: MemberContext,
+  account: Account,
+): Promise<void> {
+  const guardianId = (await access.members()).find((m) => m.role === "guardian")?.personId;
+  if (guardianId) await giveGuardian(identity, guardianId, account);
+}
+
+/**
  * Makes the person behind `email` a member, creating the person with the
  * email as their only account when nobody holds it. A person who already has
  * a role keeps it, so the guardian's own email answers the guardian. Throws

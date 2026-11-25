@@ -280,4 +280,32 @@ describe("SetupManager", () => {
     });
     await expect(mgr.start(PLACEHOLDER, "bot")).rejects.toBeInstanceOf(NoSetupError);
   });
+
+  it("tells the participant a connect committed after the grant, when it joined one", async () => {
+    const { registry, imports } = fakeRegistry(discordSetup);
+    const order: string[] = [];
+    const committed = rs.fn(async () => {
+      order.push(`committed after ${imports.length} grant`);
+    });
+    let joins = true;
+    const mgr = new SetupManager({
+      registry,
+      participant: {
+        prepare: async () => (joins ? () => {} : undefined),
+        committed,
+      },
+    });
+
+    const joined = await mgr.start(PLACEHOLDER, "bot");
+    await mgr.provideInput(joined.cid, { token: "abc" });
+    joins = false;
+    const skipped = await mgr.start(PLACEHOLDER, "bot");
+    await mgr.provideInput(skipped.cid, { token: "def" });
+
+    expect(order).toEqual(["committed after 1 grant"]);
+    expect(committed).toHaveBeenCalledWith({
+      platform: "discord",
+      connectedBy: { id: "guardian-1" },
+    });
+  });
 });

@@ -159,7 +159,11 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { invitedEmailsSaved, memberContext } from "./access/application/members.js";
+import {
+  guardianAccountLinked,
+  invitedEmailsSaved,
+  memberContext,
+} from "./access/application/members.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -311,7 +315,11 @@ import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { botsOfPeople } from "./people/bots-of-people.js";
-import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
+import {
+  type GuardianLinked,
+  linkGuardianOnConnect,
+  linkGuardianToAccount,
+} from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
@@ -518,6 +526,10 @@ async function main() {
   // The members as persons with a role (docs/domains/access.md), on top of
   // Identity. Kept beside the allow-list and the seat, and nothing reads them yet.
   const memberSteps = memberContext(db);
+  // Each account People links to the guardian while Rome runs reaches the
+  // guardian's person at once, not only at the next startup's backfill.
+  const guardianLinked: GuardianLinked = (account) =>
+    guardianAccountLinked(memberSteps, { platform: account.platform, accountId: account.id });
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -809,7 +821,7 @@ async function main() {
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    participant: linkGuardianOnConnect(peopleRepo),
+    participant: linkGuardianOnConnect(peopleRepo, guardianLinked),
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -2381,6 +2393,7 @@ async function main() {
     settingsRepo,
     chatSettings,
     peopleRepo,
+    guardianLinked,
     whatsAppSyncSink: refreshingAfter(
       whatsAppStoreRepo,
       ["upsertContacts", "upsertChats"],
@@ -2400,11 +2413,13 @@ async function main() {
       }),
     // The account that connected is the guardian's own, so People links it.
     onWhatsAppAccountConnected: (selfJid) => {
-      linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
-        log.error("failed to auto-map guardian on WhatsApp connect", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      linkGuardianToAccount(peopleRepo, "whatsapp", selfJid, { linked: guardianLinked }).catch(
+        (err) => {
+          log.error("failed to auto-map guardian on WhatsApp connect", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        },
+      );
     },
     mailProvider,
     // Keep the system prompt's "our own inbox address" ref pointed at the

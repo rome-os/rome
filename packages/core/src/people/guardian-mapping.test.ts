@@ -4,6 +4,7 @@ import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-reposit
 import type { PeopleRepository } from "./model/people-repository.js";
 import {
   applyGuardianMappingWithinTx,
+  linkGuardianOnConnect,
   linkGuardianToAccount,
   planGuardianMapping,
 } from "./guardian-mapping.js";
@@ -194,5 +195,62 @@ describe("guardian channel mapping", () => {
     expect(await linkGuardianToAccount(repo, "telegram", "tg-alice")).toBe(false);
     expect(await planGuardianMapping(repo, "telegram", "tg-alice")).toEqual({ op: "noop" });
     expect(await accounts("telegram")).toEqual([]);
+  });
+
+  describe("telling who keeps the guardian's accounts", () => {
+    it("tells each account it links or re-points, and none it leaves alone", async () => {
+      const linked = rs.fn(async () => {});
+      await repo.linkStated(
+        { platform: "whatsapp", id: "15551234567:8@s.whatsapp.net" },
+        "guardian",
+      );
+
+      await linkGuardianToAccount(repo, "whatsapp", "15551234567@s.whatsapp.net", { linked });
+      await linkGuardianToAccount(repo, "telegram", "tg-guardian", { linked });
+      await linkGuardianToAccount(repo, "telegram", "tg-guardian", { linked });
+
+      expect(linked.mock.calls).toEqual([
+        [{ platform: "whatsapp", id: "15551234567@s.whatsapp.net" }],
+        [{ platform: "telegram", id: "tg-guardian" }],
+      ]);
+    });
+
+    it("keeps the link when telling it fails", async () => {
+      const linked = rs.fn(async () => {
+        throw new Error("identity unavailable");
+      });
+
+      expect(await linkGuardianToAccount(repo, "email", "owner@example.com", { linked })).toBe(
+        true,
+      );
+      expect(await accounts("email")).toEqual(["owner@example.com"]);
+    });
+
+    it("tells a connect's account once it is the guardian's, and never a delegate's", async () => {
+      const linked = rs.fn(async () => {});
+      const participant = linkGuardianOnConnect(repo, linked);
+      await repo.linkStated({ platform: "discord", id: "discord-own" }, "guardian");
+      await repo.linkDelegate({ platform: "discord", id: "discord-agent" }, "guardian");
+
+      for (const id of ["discord-own", "discord-agent", "discord-nobody"]) {
+        await participant.committed?.({ platform: "discord", connectedBy: { id } });
+      }
+
+      expect(linked.mock.calls).toEqual([[{ platform: "discord", id: "discord-own" }]]);
+    });
+
+    it("resolves a connect's telling when it fails", async () => {
+      const participant = linkGuardianOnConnect(
+        repo,
+        rs.fn(async () => {
+          throw new Error("identity unavailable");
+        }),
+      );
+      await repo.linkStated({ platform: "discord", id: "discord-own" }, "guardian");
+
+      await expect(
+        participant.committed?.({ platform: "discord", connectedBy: { id: "discord-own" } }),
+      ).resolves.toBeUndefined();
+    });
   });
 });

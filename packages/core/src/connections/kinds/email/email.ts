@@ -19,7 +19,7 @@ import {
 } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../people/model/people-repository.js";
-import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
+import { type GuardianLinked, linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
@@ -80,6 +80,8 @@ export interface EmailAdapterDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
   peopleRepo: PeopleRepository;
+  /** Told the guardian's address each time People links it to the guardian. */
+  guardianLinked?: GuardianLinked;
   config: EmailInboxCoordinates;
   /**
    * Resolve the account owner's (guardian's) email from Rome Cloud when none is
@@ -148,6 +150,7 @@ export class EmailAdapter {
   private readonly provider: MailProvider;
   private readonly settingsRepo: SettingsRepository;
   private readonly peopleRepo: PeopleRepository;
+  private readonly guardianLinked: GuardianLinked | undefined;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
   private readonly inboundDedup = new InboundDedup();
 
@@ -173,6 +176,7 @@ export class EmailAdapter {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
     this.peopleRepo = deps.peopleRepo;
+    this.guardianLinked = deps.guardianLinked;
     this.address = deps.config.address;
     this.inboundSecret = deps.config.inboundSecret;
     // guardianEmail is durable settings config, resolved from the settings row
@@ -233,7 +237,9 @@ export class EmailAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await linkGuardianToAccount(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+      await linkGuardianToAccount(this.peopleRepo, "email", this.guardianEmail, {
+        linked: this.guardianLinked,
+      }).catch((err) => {
         log.warn("failed to preset guardian email mapping", {
           error: err instanceof Error ? err.message : String(err),
         });

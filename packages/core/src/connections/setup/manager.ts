@@ -320,13 +320,12 @@ export class SetupManager {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
       if (signal.aborted) throw new SetupAbortError();
-      const joined =
-        given.connectedBy && this.#deps.participant
-          ? await this.#deps.participant.prepare({
-              platform: platformOf(target.connectionKind),
-              connectedBy: given.connectedBy,
-            })
-          : undefined;
+      const connect = given.connectedBy && {
+        platform: platformOf(target.connectionKind),
+        connectedBy: given.connectedBy,
+      };
+      const participant = this.#deps.participant;
+      const joined = connect && participant ? await participant.prepare(connect) : undefined;
       const opts = {
         ...(joined ? { inTx: joined } : {}),
         ...(target.another ? { another: true } : {}),
@@ -345,6 +344,7 @@ export class SetupManager {
           },
         },
       );
+      if (joined && connect) await participant?.committed?.(connect);
       return { connectionId: connection.id, ...(ended ? { ended } : {}) };
     });
   }

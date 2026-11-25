@@ -7,6 +7,13 @@ import { createLogger } from "../logger.js";
 const log = createLogger("guardian-mapping");
 
 /**
+ * Told each account People has just linked to the guardian as their own, once
+ * the link is written. A rejection is logged and the link stands. A delegate
+ * link is never told.
+ */
+export type GuardianLinked = (account: Account) => Promise<void>;
+
+/**
  * Link the guardian to their own account on a platform.
  *
  * Called on connect for kinds of connection that report the guardian's own
@@ -16,12 +23,13 @@ const log = createLogger("guardian-mapping");
  * With `addOnly`, the account is one more of the guardian's, as each Discord
  * account the guardian binds to Rome's Discord bot is: it is added beside the
  * guardian's other accounts on the platform, and none of them is re-pointed.
+ * `linked` is told the account whenever the result is `true`.
  */
 export async function linkGuardianToAccount(
   repo: PeopleRepository,
   platform: string,
   accountId: string,
-  opts: { addOnly?: boolean } = {},
+  opts: { addOnly?: boolean; linked?: GuardianLinked } = {},
 ): Promise<boolean> {
   const account: Account = { platform, id: accountId };
   const existing = await repo.byAccount(account);
@@ -51,6 +59,7 @@ export async function linkGuardianToAccount(
         to: accountId,
         personId: guardian.id,
       });
+      await tell(opts.linked, account);
       return true;
     }
     // Nothing holds the guardian read above against the write, so a link write
@@ -66,7 +75,21 @@ export async function linkGuardianToAccount(
 
   await repo.linkStated(account, guardian.id);
   log.info("auto-mapped guardian to account", { platform, accountId, personId: guardian.id });
+  await tell(opts.linked, account);
   return true;
+}
+
+// The link is written by now, so a failure to pass it on must not fail it.
+// The error is logged by name, since a message can carry the account.
+async function tell(linked: GuardianLinked | undefined, account: Account): Promise<void> {
+  try {
+    await linked?.(account);
+  } catch (err) {
+    log.warn("guardian's account link not passed on", {
+      platform: account.platform,
+      error: err instanceof Error ? err.name : "unknown",
+    });
+  }
 }
 
 /**
@@ -189,8 +212,14 @@ export function applyGuardianMappingWithinTx(
  * holds on the platform may be an older id for this account, and is re-pointed.
  * A fix that reached another account leaves the first account the guardian's,
  * so its link stays and the new account is added beside it.
+ *
+ * Once the connect commits, `linked` is told the account if it is the
+ * guardian's then.
  */
-export function linkGuardianOnConnect(repo: PeopleRepository): ConnectParticipant {
+export function linkGuardianOnConnect(
+  repo: PeopleRepository,
+  linked?: GuardianLinked,
+): ConnectParticipant {
   return {
     async prepare({ platform, connectedBy }) {
       const plan = await planGuardianMapping(repo, platform, connectedBy.id, {
@@ -207,6 +236,24 @@ export function linkGuardianOnConnect(repo: PeopleRepository): ConnectParticipan
             ? { op: "add", guardianId: plan.guardianId }
             : plan,
         );
+    },
+    async committed({ platform, connectedBy }) {
+      const account: Account = { platform, id: connectedBy.id };
+      try {
+        // A planned re-point can find its account gone and write nothing, so
+        // what the transaction left is read back rather than assumed.
+        const holder = await repo.byAccount(account);
+        if (holder?.bondLevel !== "guardian") return;
+        const link = holder.links.find((l) => l.platform === platform && l.id === account.id);
+        if (!link || link.delegate) return;
+      } catch (err) {
+        log.warn("guardian's account link not read back after connect", {
+          platform,
+          error: err instanceof Error ? err.name : "unknown",
+        });
+        return;
+      }
+      await tell(linked, account);
     },
   };
 }

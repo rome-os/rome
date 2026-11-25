@@ -218,9 +218,13 @@ interface ReportedConnect {
  * either fails the connect and leaves nothing written. `reachesAnotherAccount`
  * is true when a fix reached another account than the connection held, so
  * Connections ended that connection and made a new one.
+ *
+ * `committed` runs after a connect whose transaction ran the write has
+ * committed, and must not reject: the connect has happened by then.
  */
 export interface ConnectParticipant {
   prepare(
     connect: ReportedConnect,
   ): Promise<((tx: DrizzleTx, grant: { reachesAnotherAccount: boolean }) => void) | undefined>;
+  committed?(connect: ReportedConnect): Promise<void>;
 }

@@ -3,6 +3,7 @@ import { identities, members } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { GuardianRemovalError } from "../access.js";
 import {
+  guardianAccountLinked,
   guardianSeatCreated,
   guardianSeatRebound,
   invitedEmailsSaved,
@@ -147,6 +148,41 @@ describe("members", () => {
 
       expect(await roleOfAccount(ctx, NEW_EMAIL)).toBe("guardian");
       expect((await ctx.identity.personOf(OWNER_EMAIL))?.id).toBe(ada.id);
+    });
+  });
+
+  describe("guardianAccountLinked", () => {
+    const WHATSAPP = { platform: "whatsapp", accountId: "15551234567@s.whatsapp.net" };
+
+    it("gives the guardian the account, and a second call changes nothing", async () => {
+      const { ctx } = setup();
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL] });
+
+      await guardianAccountLinked(ctx, WHATSAPP);
+      await guardianAccountLinked(ctx, WHATSAPP);
+
+      expect(await roleOfAccount(ctx, WHATSAPP)).toBe("guardian");
+      expect((await listMembers(ctx))[0]?.accounts).toEqual([OWNER_EMAIL, WHATSAPP]);
+    });
+
+    it("moves an account another person holds to the guardian", async () => {
+      const { ctx, identity } = setup();
+      await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL] });
+      const other = await identity.createPerson({ accounts: [WHATSAPP] });
+
+      await guardianAccountLinked(ctx, WHATSAPP);
+
+      expect(await roleOfAccount(ctx, WHATSAPP)).toBe("guardian");
+      expect(await identity.accountsOf(other.id)).toEqual([]);
+    });
+
+    it("does nothing while there is no guardian", async () => {
+      const { ctx, db } = setup();
+
+      await guardianAccountLinked(ctx, WHATSAPP);
+
+      expect(await roleOfAccount(ctx, WHATSAPP)).toBeNull();
+      expect(db.select().from(identities).all()).toEqual([]);
     });
   });
 

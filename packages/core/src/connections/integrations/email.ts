@@ -32,6 +32,7 @@
 // Rome Cloud sign-in, and the first boot of an older seat that never had email,
 // make the same write without the click (`autoConnectEmail`).
 
+import type { Account } from "@rome-os/app-runtime";
 import type { TalkFeatures } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
@@ -109,6 +110,8 @@ export interface EmailDescriptorDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
   peopleRepo: PeopleRepository;
+  /** Told the guardian's address each time People links it to the guardian. */
+  guardianLinked?: (account: Account) => Promise<void>;
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
@@ -294,6 +297,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             provider: deps.provider,
             settingsRepo: deps.settingsRepo,
             peopleRepo: deps.peopleRepo,
+            guardianLinked: deps.guardianLinked,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
           });

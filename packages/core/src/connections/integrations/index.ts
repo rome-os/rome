@@ -1,5 +1,6 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
+import type { Account } from "@rome-os/app-runtime";
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
@@ -50,6 +51,8 @@ export interface BuiltinConnectionDeps {
   discordCommandsOf?: (connectionId: string) => Commands;
   /** Told the WhatsApp account's canonical self JID each time it connects. */
   onWhatsAppAccountConnected: (selfJid: string) => void;
+  /** Told each account People links to the guardian from a connection. */
+  guardianLinked?: (account: Account) => Promise<void>;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
@@ -90,6 +93,7 @@ export function registerBuiltinConnections(
       provider: deps.mailProvider,
       settingsRepo: deps.settingsRepo,
       peopleRepo: deps.peopleRepo,
+      guardianLinked: deps.guardianLinked,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),
