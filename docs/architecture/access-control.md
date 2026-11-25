@@ -26,7 +26,7 @@ Entry is the one question asked before anything from outside Rome runs: may this
 
 ### Invariants
 
-- Every dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade.
+- A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
 - The answer holds for the moment of the call. Nothing keeps it.
 - A person Rome cannot tell never enters.
 
