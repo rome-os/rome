@@ -68,6 +68,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceConversation } from "./use-voice-conversation";
+import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
 import { spokenInsertion, useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
@@ -105,6 +106,8 @@ export interface ConciergeComposerProps {
   onVoiceHeard?: (text: string) => void;
   /** A voice conversation sent the guardian's turn as the message `inputId`. */
   onVoiceTurn?: (text: string, inputId: string) => void;
+  /** A voice conversation ended on its own, for `reason`. */
+  onVoiceStopped?: (reason: ConversationStopReason) => void;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -131,6 +134,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       chatId,
       onVoiceHeard,
       onVoiceTurn,
+      onVoiceStopped,
       modelSelection,
       onSend,
     },
@@ -205,6 +209,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const conversation = useVoiceConversation({
       chatId,
       onTurn: onVoiceTurn,
+      onStopped: onVoiceStopped,
       // Words the conversation ended before sending wait in the field, for the
       // guardian to send or not. They are saved as the draft at once, as the
       // field may be going away with the chat.
@@ -217,8 +222,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     // The guardian's words not sent yet, for the chat to show as they grow.
     // Hidden while Rome's sentence shows: what is heard then may be its own voice.
     const voiceHeard = conversation.active && !conversation.caption ? conversation.heard : "";
+    // A composer going away, as when the chat is archived, takes the words with it.
     useEffect(() => {
       onVoiceHeard?.(voiceHeard);
+      return () => onVoiceHeard?.("");
     }, [voiceHeard, onVoiceHeard]);
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;

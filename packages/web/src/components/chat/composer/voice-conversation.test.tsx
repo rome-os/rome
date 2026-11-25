@@ -191,6 +191,18 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(reopened.value).toBe("Also remind me at seven");
   });
 
+  it("takes the words not sent yet out of the chat when the composer goes away", async () => {
+    const heard: string[] = [];
+    const { unmount } = renderComposer(true, undefined, {
+      onVoiceHeard: (text) => heard.push(text),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    act(() => conversation.handlers?.onHeard?.("Book a"));
+    expect(heard.at(-1)).toBe("Book a");
+    unmount();
+    expect(heard.at(-1)).toBe("");
+  });
+
   it("ends the conversation when the host hides the composer without unmounting it", async () => {
     const ref = createRef<ChatComposerHandle>();
     renderComposer(true, ref);

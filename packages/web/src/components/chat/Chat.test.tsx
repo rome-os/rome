@@ -69,6 +69,7 @@ const conciergeInsertText = rs.hoisted(() => rs.fn());
 const conciergeVoice = rs.hoisted(() => ({
   heard: null as null | ((text: string) => void),
   turn: null as null | ((text: string, inputId: string) => void),
+  stopped: null as null | ((reason: "chat-refused") => void),
 }));
 import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
@@ -477,12 +478,14 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       placeholder?: string;
       onVoiceHeard?: (text: string) => void;
       onVoiceTurn?: (text: string, inputId: string) => void;
+      onVoiceStopped?: (reason: "chat-refused") => void;
     },
     ref,
   ) {
     const draft = useReplyDraft();
     conciergeVoice.heard = props.onVoiceHeard ?? null;
     conciergeVoice.turn = props.onVoiceTurn ?? null;
+    conciergeVoice.stopped = props.onVoiceStopped ?? null;
     useImperativeHandle(ref, () => ({
       insertText: conciergeInsertText,
       addFiles: conciergeAddFiles,
@@ -3291,6 +3294,16 @@ describe("Chat voice conversation words", () => {
     const rows = screen.getAllByTestId("user-row");
     expect(rows.map((row) => row.getAttribute("data-timeline-anchor"))).toEqual(["spoken-1"]);
     expect(screen.getByTestId("user-text").textContent).toContain("Book a table for four");
+  });
+
+  it("loads the chat again without a turn the chat refused, as it was never stored", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(conciergeVoice.turn).not.toBeNull());
+    act(() => conciergeVoice.turn?.("Book a table", "spoken-1"));
+    expect(screen.getAllByTestId("user-row")).toHaveLength(1);
+
+    act(() => conciergeVoice.stopped?.("chat-refused"));
+    await waitFor(() => expect(screen.queryAllByTestId("user-row")).toHaveLength(0));
   });
 });
 

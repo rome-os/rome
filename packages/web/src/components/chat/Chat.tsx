@@ -126,6 +126,7 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { VoiceHeardBubble } from "@/components/chat/VoiceHeardBubble";
+import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
 import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
@@ -2240,6 +2241,17 @@ export function Chat({
     });
   }, []);
 
+  // A chat that refused the voice conversation's turn stored nothing: the
+  // chat loads again without the message that showed it as sent.
+  const voiceStopped = useCallback(
+    (reason: ConversationStopReason) => {
+      const sessionId = mainSessionIdRef.current;
+      if (reason !== "chat-refused" || !sessionId) return;
+      void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+    },
+    [loadMessages],
+  );
+
   // Send a turn into the active session. The composer owns the input state
   // (text/uploads/options); this handler builds the POST and delegates the
   // turn lifecycle to runTurnLifecycle.
@@ -3391,6 +3403,7 @@ export function Chat({
                         chatId={mainSessionId}
                         onVoiceHeard={setVoiceHeard}
                         onVoiceTurn={showVoiceTurn}
+                        onVoiceStopped={voiceStopped}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                         placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}
