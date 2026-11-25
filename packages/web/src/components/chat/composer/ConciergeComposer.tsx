@@ -67,7 +67,7 @@ import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
 import { useVoiceConversation } from "./use-voice-conversation";
-import { useVoiceInput } from "./use-voice-input";
+import { spokenInsertion, useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
 import {
@@ -195,7 +195,17 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const runSendRef = useRef<() => Promise<void>>(async () => {});
     // A voice conversation with the Concierge, in this chat. Its capsule sits
     // above the box, and its mute and end take the place of send.
-    const conversation = useVoiceConversation({ chatId });
+    const conversation = useVoiceConversation({
+      chatId,
+      // Words the conversation ended before sending wait in the field, for the
+      // guardian to send or not. They are saved as the draft at once, as the
+      // field may be going away with the chat.
+      onUnsent: (text) => {
+        const next = inputText + spokenInsertion(inputText, text);
+        draft.keep(next);
+        setInputText(next);
+      },
+    });
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
