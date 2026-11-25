@@ -209,9 +209,10 @@ export function withoutSessionActor<T>(fn: () => T): T {
 
 /**
  * Annotate-only middleware: captures session material and exposes the actor
- * ambiently for the request. Never gates — auth enforcement stays at the Caddy
- * edge (`/api/auth/verify`); this exists so any action run during the request
- * is attributable without every route threading identity by hand.
+ * ambiently for the request. Never gates: the entry step does
+ * (docs/architecture/access-control.md#entry). This exists so any action run
+ * during the request is attributable without every route threading identity by
+ * hand.
  */
 export function sessionActorMiddleware(db: DrizzleDb): MiddlewareHandler {
   return (c, next) => {
