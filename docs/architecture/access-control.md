@@ -29,7 +29,7 @@ Entry is the one question asked before anything from outside Rome runs: may this
 - A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
 - The answer holds for the moment of the call. Nothing keeps it.
 - A person Rome cannot tell never enters.
-- A live connection holds its entry. `gateUpgrade` closes a dashboard WebSocket within 25 seconds of its person being removed. Live events, the node console and voice conversation still ask on their own as well. App WebSockets follow [app access](#policies) instead.
+- A live connection holds its entry. `gateUpgrade` closes a dashboard WebSocket within 25 seconds of its person being removed. What serves the connection only cleans up when it closes. App WebSockets follow [app access](#policies) instead.
 
 ## Request flow
 
