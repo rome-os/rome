@@ -58,7 +58,8 @@ export function registerGmailActions(
       if (found.length !== 1)
         return {
           status: "error",
-          error: "Gmail connection is ambiguous. Fix Google in Settings → Connections.",
+          error:
+            "gmail_connection_broken: Gmail connection is ambiguous. Fix Google in Settings → Connections.",
         };
       const scopes = (await connections.grantOf(found[0].id))?.profile?.scopes;
       if (
@@ -81,7 +82,8 @@ export function registerGmailActions(
       if (found.length !== 1 || !found[0].act)
         return {
           status: "error",
-          error: "Gmail connection unavailable. Fix Google in Settings → Connections.",
+          error:
+            "gmail_connection_broken: Gmail connection unavailable. Fix Google in Settings → Connections.",
         };
       try {
         return response(
@@ -101,7 +103,7 @@ export function registerGmailActions(
       name: GMAIL_SEND_ACTION,
       type: "system",
       description:
-        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Google connection: with none, send through the Composio Gmail connection's tools. gmail_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Google in Settings → Connections. gmail_connection_changed means the connectionId is stale: read the profile again and follow its answer. Never answer gmail_send_not_granted by sending through Composio or another mailbox.",
+        "Send one plain-text Gmail message through Rome-managed Google, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /gmail/v1/users/me/profile with core:gmail_read to get connectionId and From emailAddress. For a reply, supply inReplyTo (the original Message-ID header), threadId from the thread read, and a matching subject. No attachments, Cc, Bcc, draft mutation or raw MIME. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Google connection: with none, send through the Composio Gmail connection's tools. gmail_send_not_granted means the connection lacks send permission, and gmail_connection_broken that it is broken: ask the guardian to reconnect Google in Settings → Connections. gmail_connection_changed means the connectionId is stale: read the profile again and follow its answer. Never answer gmail_send_not_granted or gmail_connection_broken by sending through Composio or another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -151,7 +153,7 @@ export function registerGmailActions(
         return {
           status: "error",
           error:
-            "The approved Google connection is unavailable. Reconnect Google in Settings → Connections. Nothing was sent.",
+            "gmail_connection_broken: The approved Google connection is unavailable. Reconnect Google in Settings → Connections. Nothing was sent.",
         };
       const scopes = (await connections.grantOf(connection.id))?.profile?.scopes;
       if (

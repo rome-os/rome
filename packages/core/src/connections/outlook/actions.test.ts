@@ -73,7 +73,7 @@ describe("Outlook actions", () => {
       await read(harness([{ id: "broken", state: () => "broken", act: null }]).actions),
     ).toMatchObject({
       status: "error",
-      error: expect.not.stringContaining("outlook_not_connected:"),
+      error: expect.stringMatching(/^outlook_connection_broken: /),
     });
   });
 

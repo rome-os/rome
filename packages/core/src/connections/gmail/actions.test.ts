@@ -75,7 +75,7 @@ describe("Gmail actions", () => {
         .execute({ path: "/gmail/v1/users/me/profile" }),
     ).toMatchObject({
       status: "error",
-      error: expect.not.stringContaining("gmail_not_connected:"),
+      error: expect.stringMatching(/^gmail_connection_broken: /),
     });
   });
 

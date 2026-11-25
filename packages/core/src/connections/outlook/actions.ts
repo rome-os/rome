@@ -72,7 +72,8 @@ export function registerOutlookActions(
       if (found.length !== 1)
         return {
           status: "error",
-          error: "Outlook connection is ambiguous. Fix Microsoft in Settings → Connections.",
+          error:
+            "outlook_connection_broken: Outlook connection is ambiguous. Fix Microsoft in Settings → Connections.",
         };
       // A grant that never had mail access leaves Outlook on Composio, even when broken.
       const scopes = (await connections.grantOf(found[0].id))?.profile?.scopes;
@@ -86,7 +87,8 @@ export function registerOutlookActions(
       if (!found[0].act)
         return {
           status: "error",
-          error: "Outlook connection is unavailable. Fix Microsoft in Settings → Connections.",
+          error:
+            "outlook_connection_broken: Outlook connection is unavailable. Fix Microsoft in Settings → Connections.",
         };
       const parsed = outlookReadSchema.safeParse(args);
       if (!parsed.success)
@@ -113,7 +115,7 @@ export function registerOutlookActions(
       name: OUTLOOK_SEND_ACTION,
       type: "system",
       description:
-        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections. outlook_connection_changed means the connectionId is stale: read /v1.0/me again and follow its answer. Never answer outlook_send_not_granted by sending through Composio or another mailbox.",
+        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission, and outlook_connection_broken that it is broken: ask the guardian to reconnect Microsoft in Settings → Connections. outlook_connection_changed means the connectionId is stale: read /v1.0/me again and follow its answer. Never answer outlook_send_not_granted or outlook_connection_broken by sending through Composio or another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -161,7 +163,7 @@ export function registerOutlookActions(
         return {
           status: "error",
           error:
-            "The approved Microsoft connection is unavailable. Reconnect Microsoft in Settings → Connections. Nothing was sent.",
+            "outlook_connection_broken: The approved Microsoft connection is unavailable. Reconnect Microsoft in Settings → Connections. Nothing was sent.",
         };
       const scopes = (await connections.grantOf(connection.id))?.profile?.scopes;
       if (!hasScope(scopes, "Mail.Send") || !hasScope(scopes, "User.Read")) {
