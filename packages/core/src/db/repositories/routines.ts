@@ -94,12 +94,18 @@ export function routineChatOf(
   args: Record<string, unknown>,
   madeIn?: string,
 ): string | null {
-  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
-  const value = arg ? args[arg] : undefined;
-  if (typeof value === "string" && value) return value;
+  const named = chatNamedByArgs(actionName, args);
+  if (named) return named;
   if (madeIn) return madeIn;
   const context = actionExecutionContext.getStore()?.channelContext;
   return context?.channel === "webchat" && context.threadId ? context.threadId : null;
+}
+
+/** The chat a routine's args send into, or null when they name none. */
+export function chatNamedByArgs(actionName: string, args: Record<string, unknown>): string | null {
+  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
+  const value = arg ? args[arg] : undefined;
+  return typeof value === "string" && value ? value : null;
 }
 
 /** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
@@ -109,6 +115,12 @@ export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "shar
 export const PERSONAL_DATA_ROUTINE_REFUSED =
   "personal_data_private_only: A routine that reads personal data (Apple Health and other synced " +
   "data) must work for a private chat, such as one of the guardian's own dashboard chats.";
+
+/** Whether a routine bound to `actionName` reads personal data, by its
+ *  canonical name or the local name an agent may write. */
+function readsPersonalData(actionName: string): boolean {
+  return isPersonalDataAction(actionName) || isPersonalDataAction(`core:${actionName}`);
+}
 
 export class RoutinesRepository {
   /**
@@ -328,7 +340,7 @@ export class RoutinesRepository {
         ? routineChatOf(data.actionName, data.args, data.madeIn)
         : data.chatId;
     // Refused when it is made, not on every fire.
-    if (isPersonalDataAction(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
+    if (readsPersonalData(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
     }
     const createdBy = await routineCreator(this.db, data);
@@ -365,7 +377,7 @@ export class RoutinesRepository {
   ) {
     if (
       data.actionName !== undefined &&
-      isPersonalDataAction(data.actionName) &&
+      readsPersonalData(data.actionName) &&
       (await this.audienceOf(id)) !== "private"
     ) {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);

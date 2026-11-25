@@ -36,6 +36,9 @@ import type {
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
+// Digest keys are `concierge-digest:<HH:mm>`; follow keys are
+// `concierge-follow:<source>:<target>:<eventName>`.
+import { DIGEST_KEY_PREFIX, FOLLOW_KEY_PREFIX } from "../routines/synced-routine-key.js";
 import { resolveGuardianTimezone } from "../instance/timezone.js";
 import { createLogger } from "../logger.js";
 import {
@@ -73,8 +76,6 @@ const log = createLogger("concierge-following");
 export const CONCIERGE_FOLLOW_ACTION = "core:concierge_follow_event";
 /** The action each digest routine fires. */
 export const CONCIERGE_DIGEST_ACTION = "core:concierge_digest";
-/** Routine keys of the digest: `concierge-digest:<HH:mm>`. */
-const DIGEST_KEY_PREFIX = "concierge-digest:";
 /** Delivered items are kept this long, so triage knows what was told. */
 const KEEP_DELIVERED_MS = 30 * 24 * 60 * 60_000;
 /** What triage reads of what was told: this far back, and at most this many lines. */
@@ -94,8 +95,6 @@ export const CONCIERGE_FOLLOWING_ACTIONS = {
   list: "core:concierge_following_list",
   configure: "core:concierge_following_configure",
 } as const;
-/** Routine keys of follows: `concierge-follow:<source>:<target>:<eventName>`. */
-const ROUTINE_KEY_PREFIX = "concierge-follow:";
 /** The guardian setting that holds the rules and the follows. */
 export const CONCIERGE_FOLLOWING_SETTING_KEY = "conciergeFollowing";
 /** Who claims a shared subscription, for the connector's release (rome-os/rome#1658). */
@@ -474,7 +473,7 @@ const RECONCILE_DELAY_MS = 60_000;
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
 
 const routineKey = (source: string, target: string, eventName: string) =>
-  `${ROUTINE_KEY_PREFIX}${source}:${target}:${eventName}`;
+  `${FOLLOW_KEY_PREFIX}${source}:${target}:${eventName}`;
 
 const failure = (name: string, outcome: ActionOutcome) =>
   outcome.error ?? `${name} returned ${outcome.status}`;
@@ -912,7 +911,7 @@ export function startConciergeFollowing(
   /** Follow routines made before they kept no payload stop keeping it. */
   const keepNoPayloads = async () => {
     for (const routine of await deps.routines.listRoutines()) {
-      if (!routine.key?.startsWith(ROUTINE_KEY_PREFIX) || routine.keepTriggerPayload === false) {
+      if (!routine.key?.startsWith(FOLLOW_KEY_PREFIX) || routine.keepTriggerPayload === false) {
         continue;
       }
       await deps.routines.update(routine.id, { keepTriggerPayload: false });
@@ -1018,7 +1017,7 @@ export function startConciergeFollowing(
         });
       }
     }
-    const prefix = `${ROUTINE_KEY_PREFIX}${follow.source}:${follow.target}:`;
+    const prefix = `${FOLLOW_KEY_PREFIX}${follow.source}:${follow.target}:`;
     for (const routine of await deps.routines.listRoutines()) {
       if (!routine.key?.startsWith(prefix)) continue;
       if (!wanted.has(routine.key.slice(prefix.length))) await removeRoutine(routine.id);
@@ -1331,7 +1330,7 @@ export function startConciergeFollowing(
         const source = (await readSources().catch(() => [])).find((s) => s.source === sourceName);
         if (source) await syncRoutines(source, { source: sourceName, target: followed }, others);
       } else {
-        const prefix = `${ROUTINE_KEY_PREFIX}${sourceName}:${followed}:`;
+        const prefix = `${FOLLOW_KEY_PREFIX}${sourceName}:${followed}:`;
         for (const routine of await deps.routines.listRoutines()) {
           if (!routine.key?.startsWith(prefix)) continue;
           await removeRoutine(routine.id);

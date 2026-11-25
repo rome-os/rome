@@ -52,7 +52,12 @@ describe("the Concierge agent", () => {
 
   it("reads a device itself through the device actions, with no task chat", () => {
     expect(concierge.actions).toEqual(
-      expect.arrayContaining(["core:device_describe", "core:device_run"]),
+      expect.arrayContaining([
+        "system:read_devices",
+        "system:run_on_device",
+        "core:device_describe",
+        "core:device_run",
+      ]),
     );
     expect(prompt).toContain(
       "Call the actions listed for you with `execute_action`: they are not tasks.",

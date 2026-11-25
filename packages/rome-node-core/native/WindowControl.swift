@@ -644,6 +644,44 @@ final class NativeWindow: @unchecked Sendable {
         }
     }
 
+    private enum OnScreenAXResolution {
+        case exact(Set<CGWindowID>)
+        case transientFailure
+        case unavailable
+    }
+
+    private func resolveOnScreenAXWindows(pid: pid_t, deadline: TimeInterval) -> OnScreenAXResolution {
+        let initialRemaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard initialRemaining > 0 else { return .transientFailure }
+        do {
+            let roots = try readWindowRoots(pid: pid, allowOffscreen: false, timeout: Float(min(0.08, initialRemaining)))
+            var mapped: [CGWindowID] = []
+            mapped.reserveCapacity(roots.count)
+            for root in roots {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                guard remaining > 0 else { return .transientFailure }
+                AXUIElementSetMessagingTimeout(root, Float(min(0.04, remaining)))
+                do {
+                    mapped.append(try AXSnapshotReader.verifyExactWindow(root, pid: pid))
+                } catch let failure as NativeFailure {
+                    if failure.details["windowError"] as? Int32 == AXError.cannotComplete.rawValue ||
+                       failure.details["ownerError"] as? Int32 == AXError.cannotComplete.rawValue {
+                        return .transientFailure
+                    }
+                } catch {}
+            }
+            let unique = Set(Dictionary(grouping: mapped, by: { $0 }).compactMap { $0.value.count == 1 ? $0.key : nil })
+            return .exact(unique)
+        } catch let failure as NativeFailure {
+            if failure.details["axError"] as? Int32 == AXError.cannotComplete.rawValue {
+                return .transientFailure
+            }
+            return .unavailable
+        } catch {
+            return .unavailable
+        }
+    }
+
     func windows(epoch: UInt64) throws -> [String: Any] {
         guard AXIsProcessTrusted() else { throw NativeFailure("accessibility_permission_required") }
         _ = try NativeFocus.consoleState()
@@ -660,10 +698,18 @@ final class NativeWindow: @unchecked Sendable {
             // The host publishes negotiated bind options. An older host can pass these rows through.
             var windowCapabilities = Self.capabilities(semanticOnly: allowOffscreen)
             windowCapabilities.removeValue(forKey: "foregroundNavigationFallback")
-            result.append(["windowRef": ref, "title": row[kCGWindowName as String] as? String ?? "",
-                           "appName": NSRunningApplication(processIdentifier: binding.pid)?.localizedName ?? "",
-                           "bundleId": binding.bundleId, "frame": frame, "capabilities": windowCapabilities])
+            let app = NSRunningApplication(processIdentifier: binding.pid)
+            let bundleName = app?.bundleURL?.deletingPathExtension().lastPathComponent ?? ""
+            var item: [String: Any] = [
+                "windowRef": ref, "title": row[kCGWindowName as String] as? String ?? "",
+                "appName": app?.localizedName ?? "",
+                "bundleId": binding.bundleId, "frame": frame, "capabilities": windowCapabilities,
+            ]
+            if !bundleName.isEmpty { item["bundleName"] = bundleName }
+            result.append(item)
         }
+        var axWindowsByPID: [pid_t: OnScreenAXResolution] = [:]
+        let onScreenDeadline = ProcessInfo.processInfo.systemUptime + 0.5
         for row in rows {
             guard result.count < 128,
                   (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
@@ -671,6 +717,20 @@ final class NativeWindow: @unchecked Sendable {
                   let number = (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                   let frame = try? AXSnapshotReader.onScreenBounds(row),
                   let binding = try? ProcessBinding.read(pid) else { continue }
+            let resolution: OnScreenAXResolution
+            if let cached = axWindowsByPID[pid] {
+                resolution = cached
+            } else if ProcessInfo.processInfo.systemUptime < onScreenDeadline {
+                resolution = resolveOnScreenAXWindows(pid: pid, deadline: onScreenDeadline)
+                axWindowsByPID[pid] = resolution
+            } else {
+                resolution = .transientFailure
+            }
+            switch resolution {
+            case .exact(let ids): guard ids.contains(number) else { continue }
+            case .unavailable: continue
+            case .transientFailure: break
+            }
             add(row, binding: binding, window: number, frame: frame, allowOffscreen: false)
         }
         if result.count < 128 {
@@ -726,7 +786,7 @@ final class NativeWindow: @unchecked Sendable {
         return matches[0]
     }
 
-    private func readWindowRoots(pid: pid_t, allowOffscreen: Bool) throws -> [AXUIElement] {
+    private func readWindowRoots(pid: pid_t, allowOffscreen: Bool, timeout: Float = 0.08) throws -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
         if allowOffscreen {
             // Some apps return an empty AXWindows list in another Space while retaining their main window.
@@ -746,7 +806,7 @@ final class NativeWindow: @unchecked Sendable {
             }
             return roots
         }
-        AXUIElementSetMessagingTimeout(app, 0.08)
+        AXUIElementSetMessagingTimeout(app, max(0.005, timeout))
         var count: CFIndex = 0, raw: CFArray?
         let countError = AXUIElementGetAttributeValueCount(app, kAXWindowsAttribute as CFString, &count)
         guard countError == .success, count > 0, count <= 128 else {

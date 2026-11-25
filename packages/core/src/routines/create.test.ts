@@ -1638,52 +1638,36 @@ describe("create_routine — naming the action", () => {
   const registry = {
     has: (n: string) => n === "coding:coding_task",
     isExplicit: () => false,
-    suggest: (n: string) => (n === "coding_task" ? "coding:coding_task" : undefined),
+    getCanonicalName: (n: string) =>
+      n === "coding_task" || n === "coding:coding_task" ? "coding:coding_task" : undefined,
     validateArgs: () => null,
   };
 
-  it("names the full ID of a bare target only to an agent that holds it", async () => {
-    const attempt = (holds: boolean) =>
-      actionExecutionContext.run(
-        {
-          executionId: "exec",
-          rootExecutionId: "root",
-          initiator: "agent:main",
-          agentName: "main",
-        },
-        () =>
-          createRoutine(nightly("coding_task"), {
-            routinesRepo: repo,
-            actionRegistry: registry,
-            agentRunner: { hasAction: () => holds },
-            routineEngine: makeFakeEngine(),
-            resolveOneOffDate,
-          }),
-      );
+  it("saves the action's full ID when asked by its bare name", async () => {
+    const result = await createRoutine(nightly("coding_task"), {
+      routinesRepo: repo,
+      actionRegistry: registry,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
 
-    const held = await attempt(true);
-    const notHeld = await attempt(false);
-
-    if (held.status !== "error" || notHeld.status !== "error") throw new Error("expected errors");
-    expect(held.error).toContain('Did you mean "coding:coding_task"?');
-    expect(notHeld.error).not.toContain("coding:coding_task");
-    expect(await repo.findAll()).toHaveLength(0);
+    const id = (result as { data: { routineId: string } }).data.routineId;
+    expect((await repo.findById(id))?.actionName).toBe("coding:coding_task");
   });
 
-  it("names the full ID of a bare target to a person on the Routines page", async () => {
-    const result = await createRoutine(
-      nightly("coding_task"),
-      {
-        routinesRepo: repo,
-        actionRegistry: registry,
-        routineEngine: makeFakeEngine(),
-        resolveOneOffDate,
+  it("refuses the bare name of an action only the guardian's own message can call", async () => {
+    const result = await createRoutine(nightly("pause_routine"), {
+      routinesRepo: repo,
+      actionRegistry: {
+        ...allActions,
+        getCanonicalName: (name: string) => `system:${name}`,
       },
-      { kind: "person" },
-    );
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
 
-    if (result.status !== "error") throw new Error("expected an error");
-    expect(result.error).toContain('Did you mean "coding:coding_task"?');
+    expect(result.status).toBe("error");
+    expect(await repo.findAll()).toHaveLength(0);
   });
 
   it.each([
