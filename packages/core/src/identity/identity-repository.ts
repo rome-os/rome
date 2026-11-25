@@ -8,19 +8,19 @@ import { identities, identityAccounts } from "../db/schema.js";
 type Exec = DrizzleDb | DrizzleTx;
 
 /** An account, by its platform and the platform's own id. */
-export interface PlatformAccount {
+export interface Account {
   platform: string;
   accountId: string;
 }
 
 /** A person Rome knows. */
-export interface Identity {
+export interface Person {
   id: string;
   name: string | null;
   avatarUrl: string | null;
 }
 
-const IDENTITY_COLUMNS = {
+const PERSON_COLUMNS = {
   id: identities.id,
   name: identities.name,
   avatarUrl: identities.avatarUrl,
@@ -31,10 +31,17 @@ const IDENTITY_COLUMNS = {
 export class IdentityRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  personOf(account: PlatformAccount): Identity | null {
+  person(personId: string): Person | null {
+    return (
+      this.db.select(PERSON_COLUMNS).from(identities).where(eq(identities.id, personId)).get() ??
+      null
+    );
+  }
+
+  personOf(account: Account): Person | null {
     return (
       this.db
-        .select(IDENTITY_COLUMNS)
+        .select(PERSON_COLUMNS)
         .from(identityAccounts)
         .innerJoin(identities, eq(identities.id, identityAccounts.identityId))
         .where(accountIs(account))
@@ -42,28 +49,28 @@ export class IdentityRepository {
     );
   }
 
-  accountsOf(identityId: string): PlatformAccount[] {
+  accountsOf(personId: string): Account[] {
     return this.db
       .select({ platform: identityAccounts.platform, accountId: identityAccounts.accountId })
       .from(identityAccounts)
-      .where(eq(identityAccounts.identityId, identityId))
+      .where(eq(identityAccounts.identityId, personId))
       .orderBy(identityAccounts.platform, identityAccounts.accountId)
       .all();
   }
 
-  /** Inserts `identity` with `accounts` as theirs, unless one of the accounts
+  /** Inserts `person` with `accounts` as theirs, unless one of the accounts
    *  belongs to someone. Returns the first such account, having written
    *  nothing, or null once both are written. */
-  insert(identity: Identity, accounts: PlatformAccount[], now: Date): PlatformAccount | null {
+  insert(person: Person, accounts: Account[], now: Date): Account | null {
     return this.db.transaction((tx) => {
       const taken = accounts.find((account) => holderOf(tx, account) !== null);
       if (taken) return taken;
       tx.insert(identities)
-        .values({ ...identity, createdAt: now })
+        .values({ ...person, createdAt: now })
         .run();
       for (const account of accounts) {
         tx.insert(identityAccounts)
-          .values({ ...account, identityId: identity.id, createdAt: now })
+          .values({ ...account, identityId: person.id, createdAt: now })
           .onConflictDoNothing()
           .run();
       }
@@ -71,53 +78,49 @@ export class IdentityRepository {
     });
   }
 
-  /** Gives `account` to `identityId` unless no such person exists or another
+  /** Gives `account` to `personId` unless no such person exists or another
    *  person holds it. Returns `"unknown"` or `"taken"` for those, having
    *  written nothing, else null. */
-  insertAccount(
-    identityId: string,
-    account: PlatformAccount,
-    now: Date,
-  ): "unknown" | "taken" | null {
+  insertAccount(personId: string, account: Account, now: Date): "unknown" | "taken" | null {
     return this.db.transaction((tx) => {
       const known = tx
         .select({ id: identities.id })
         .from(identities)
-        .where(eq(identities.id, identityId))
+        .where(eq(identities.id, personId))
         .get();
       if (!known) return "unknown";
       const holder = holderOf(tx, account);
-      if (holder !== null) return holder === identityId ? null : "taken";
+      if (holder !== null) return holder === personId ? null : "taken";
       tx.insert(identityAccounts)
-        .values({ ...account, identityId, createdAt: now })
+        .values({ ...account, identityId: personId, createdAt: now })
         .run();
       return null;
     });
   }
 
-  deleteAccount(account: PlatformAccount): void {
+  deleteAccount(account: Account): void {
     this.db.delete(identityAccounts).where(accountIs(account)).run();
   }
 
-  update(identityId: string, patch: { name?: string | null; avatarUrl?: string | null }): void {
+  update(personId: string, patch: { name?: string | null; avatarUrl?: string | null }): void {
     if (patch.name === undefined && patch.avatarUrl === undefined) return;
-    this.db.update(identities).set(patch).where(eq(identities.id, identityId)).run();
+    this.db.update(identities).set(patch).where(eq(identities.id, personId)).run();
   }
 
   /** Deletes the person. Their accounts go with them by the foreign key. */
-  delete(identityId: string): void {
-    this.db.delete(identities).where(eq(identities.id, identityId)).run();
+  delete(personId: string): void {
+    this.db.delete(identities).where(eq(identities.id, personId)).run();
   }
 }
 
-function accountIs(account: PlatformAccount) {
+function accountIs(account: Account) {
   return and(
     eq(identityAccounts.platform, account.platform),
     eq(identityAccounts.accountId, account.accountId),
   );
 }
 
-function holderOf(exec: Exec, account: PlatformAccount): string | null {
+function holderOf(exec: Exec, account: Account): string | null {
   return (
     exec
       .select({ identityId: identityAccounts.identityId })

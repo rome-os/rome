@@ -1,6 +1,6 @@
 # Identity
 
-Which person is behind an account. Every other part asks Identity and works with the person it answers, never with an account alone.
+Which person is behind an account. Every other part asks Identity and works with the person it answers, never with an account alone. In code, the `Identity` class in [`packages/core/src/identity/identity.ts`](../../packages/core/src/identity/identity.ts) answers it, with the types `Person` and `Account`.
 
 ## Person
 
