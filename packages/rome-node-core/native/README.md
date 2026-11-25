@@ -85,9 +85,9 @@ The helper waits up to 10 seconds for the declared host to connect and up to
 5 seconds for the handshake request. After verifying the host proof and computing
 the helper proof, a production helper waits up to 60 seconds for the local user
 to approve. Allow for both time limits when waiting for the handshake response.
-The helper sends `consent_denied` on denial, timeout, lock, stop signal or
-disconnect whenever the socket can still carry the reply. Admission closes
-and the helper exits in each case.
+The helper sends `consent_denied` on denial, dialog coverage, timeout, lock,
+stop signal or disconnect whenever the socket can still carry the reply.
+Admission closes and the helper exits in each case.
 
 A socket or directory replacement, peer identity change or transport loss
 seals admission and ends the helper. The helper samples the kernel process
@@ -116,10 +116,16 @@ The per-launch secret and HMAC bind the Unix socket handshake to its host.
 After verifying the host's kernel identity and HMAC, the helper displays the
 requesting process name, PID, canonical executable path and signing summary
 in a local confirmation dialog. **Deny** is the default. **Allow Session**
-authorizes that one connection and displays a persistent **Rome Computer Use**
-menu bar item with the host, the current window and **Stop Computer Use**.
-The helper limits observation and actions to one bound window and revalidates
-the Accessibility root and element membership before dispatch.
+becomes available after the dialog stays focused and clear for one second.
+An overlapping window above the dialog from another process ends confirmation,
+except for the system cursor. The helper checks again before accepting approval.
+
+**Allow Session** lets the host list eligible open windows and their titles.
+The host can switch which window it reads and controls throughout the session.
+The persistent **Rome Computer Use** menu bar item shows the host and the
+current window. Choose **Stop Computer Use** there to end the session at any time.
+The helper limits observation and actions to one bound window and checks the
+Accessibility root and element membership before dispatch.
 
 ## Frames
 

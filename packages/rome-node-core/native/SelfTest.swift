@@ -13,6 +13,7 @@ final class SelfTest {
         let test = SelfTest()
         try test.identity()
         try test.windows()
+        try test.consent()
         try test.frames()
         try test.admission()
         try test.transport()
@@ -86,6 +87,48 @@ final class SelfTest {
         try rejects("screen_recording_permission_required") { try access.recording(granted: false, required: true) }
         try access.recording(granted: true, required: true)
         try rejects("screen_recording_permission_required") { try access.recording(granted: false, required: false) }
+    }
+
+    private func consent() throws {
+        let prompt = CGRect(x: 140, y: 260, width: 320, height: 220)
+        let helper: pid_t = 42
+        let server: pid_t = 43
+        let other: pid_t = 44
+        let cursor = CGWindowLevelForKey(.cursorWindow)
+        let layerKey = kCGWindowLayer as String
+        func row(_ pid: pid_t, _ bounds: CGRect, layer: Int32 = 0, owner: String = "Other App",
+                 alpha: Double = 1) -> [String: Any] {
+            [kCGWindowOwnerPID as String: pid, kCGWindowBounds as String: bounds.dictionaryRepresentation,
+             layerKey: layer, kCGWindowOwnerName as String: owner, kCGWindowAlpha as String: alpha]
+        }
+        func clear(_ above: ArraySlice<[String: Any]>?, bounds: CGRect? = prompt) -> Bool {
+            ConsentOcclusion.clear(alertBounds: bounds, above: above, helperPID: helper) { $0 == server }
+        }
+        try expect(ConsentOcclusion.alertLevel > Int(CGWindowLevelForKey(.statusWindow)) &&
+                   ConsentOcclusion.alertLevel > Int(CGWindowLevelForKey(.popUpMenuWindow)) &&
+                   DesktopAccess.visibleLayersClear([[layerKey: ConsentOcclusion.alertLevel]]),
+                   "consent is above menus and status windows without blocking the console")
+        try expect(!clear([row(other, prompt)]), "overlapping window from another process blocks consent")
+        try expect(!clear([row(other, prompt, alpha: 0)]), "transparent click-through window blocks consent")
+        try expect(clear([row(other, prompt.offsetBy(dx: 400, dy: 0))]), "nonoverlapping window leaves consent clear")
+        try expect(clear([row(other, .zero), row(helper, prompt)]), "empty and helper-owned windows leave consent clear")
+        try expect(clear([row(server, prompt, layer: cursor, owner: "Window Server")]), "system cursor leaves consent clear")
+        try expect(!clear([row(server, prompt, owner: "Window Server")]), "other Window Server layers block consent")
+        try expect(!clear([row(other, prompt, layer: cursor, owner: "Window Server")]), "cursor exemption requires the Window Server PID")
+        try expect(!clear(nil) && !clear([], bounds: nil) && !clear([[kCGWindowOwnerPID as String: other]]),
+                   "missing window data fails closed")
+
+        var unlock = ConsentUnlock()
+        try expect(!unlock.update(focused: true, at: 0), "consent starts locked")
+        try expect(!unlock.update(focused: true, at: 0.99), "consent stays locked for the first second")
+        try expect(unlock.update(focused: true, at: 1), "consent unlocks after one focused second")
+        try expect(!unlock.update(focused: false, at: 1.1), "focus loss relocks consent immediately")
+        unlock = ConsentUnlock()
+        try expect(!unlock.update(focused: true, at: 0), "a new confirmation starts locked")
+        try expect(!unlock.update(focused: false, at: 0.8), "focus loss clears the partial delay")
+        try expect(!unlock.update(focused: true, at: 1), "regaining focus restarts the delay")
+        try expect(!unlock.update(focused: true, at: 1.2), "prior focus time does not count")
+        try expect(unlock.update(focused: true, at: 2), "consent unlocks after a full second of renewed focus")
     }
 
     private func decode(_ data: Data) throws -> ([String: Any], Data) {
