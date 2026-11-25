@@ -1,10 +1,9 @@
-// Serves the model a session's tools in their groups. A tool turns a
+// Serves the model a session's tools in their four groups. A tool turns a
 // model's call into a call on a port and the answer into a tool result. What
 // this agent may call, running an action or a subagent and scheduling a wake-up
 // stay with those ports. Agent model: docs/concepts/agents.md.
 
 import type { AgentActions } from "../domain/agent-action.js";
-import type { AgentComputerUse } from "../domain/computer-use.js";
 import type { AgentLog } from "../domain/agent-log.js";
 import type {
   RomeTool,
@@ -20,7 +19,6 @@ import { askUserTools, type DeferTool } from "./ask-user-tools.js";
 import { romeToolRunner } from "./rome-tool-runner.js";
 import { skillTools } from "./skill-tools.js";
 import { subagentTools } from "./subagent-tools.js";
-import { computerTools } from "./computer-tools.js";
 
 export interface RomeToolsOptions {
   /** The turns the tools serve. */
@@ -36,7 +34,6 @@ export interface RomeToolsOptions {
   sessionTools?: readonly RomeTool[];
   /** The agent's `ask_question` card says which message it replies to. */
   repliesTo?: boolean;
-  computerUse?: AgentComputerUse;
 }
 
 function toDefinition({
@@ -64,7 +61,6 @@ export function createRomeTools(options: RomeToolsOptions): RomeTools {
     subagents: subagentTools(subagents, run),
     skills: skillTools(skills, run),
     ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, repliesTo, run }),
-    computer: computerTools(options.computerUse, turn),
   };
 
   return {

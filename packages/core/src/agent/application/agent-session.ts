@@ -50,13 +50,7 @@ import {
   forkSessionTools,
 } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import {
-  type ComputerUseGrant,
-  type TurnFacts,
-  type PushLevel,
-  type TurnActor,
-  sameActor,
-} from "../domain/turn-facts.js";
+import { type TurnFacts, type PushLevel, type TurnActor, sameActor } from "../domain/turn-facts.js";
 import { type Audience, turnAudience } from "../domain/turn-audience.js";
 import {
   NO_ROME_TOOLS,
@@ -97,7 +91,6 @@ import {
   resolveAgentPolicy,
 } from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
-import type { AgentComputerUse } from "../domain/computer-use.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
 import { type WakeUp } from "../domain/defer.js";
@@ -304,8 +297,6 @@ export interface SendTurnOptions {
    * arrives. Absent, the turn acts for no one.
    */
   actor?: TurnActor;
-  /** Private, one-turn authority supplied by the trusted input entry point. */
-  computerUseGrant?: ComputerUseGrant;
   /**
    * The audience of the turn that started this one, such as a subagent's
    * caller. The turn is never more private than it.
@@ -396,7 +387,6 @@ interface ManagerDeps {
   modelResolver: ModelResolver;
   /** The actions each agent may call, run for the turn that calls them. */
   actions: AgentActions;
-  computerUse?: AgentComputerUse;
   /** Schedules a deferred wake back into a turn's thread. */
   defer: Pick<DeferTool, "schedule">;
   /** Where each session's own tools come from. */
@@ -991,7 +981,6 @@ interface TurnExecRefs {
   /** Who the running turn acts for; its subagents' turns act for the same person. */
   getActor: () => TurnActor | undefined;
   isLive?: () => boolean;
-  getComputerUseGrant?: () => ComputerUseGrant | undefined;
   captureTaskInputLiveness?: () => () => boolean;
   /** Who can read the running turn; its subagents' turns are never more private. */
   getAudience: () => Audience;
@@ -1190,7 +1179,6 @@ function sessionSetupOf(
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,
       repliesTo: policy.delegatesWork,
-      computerUse: deps.computerUse,
     });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
@@ -1679,7 +1667,6 @@ async function openSession(
     bindTurnCtx: inCurrentTurnCtx,
     getActor: () => impl.currentTurnActorRef,
     isLive: () => impl.currentTurnLiveRef,
-    getComputerUseGrant: () => impl.currentComputerUseGrant,
     captureTaskInputLiveness: () => impl.captureTaskInputLiveness(),
     getAudience: () => impl.currentTurnAudienceRef,
   };
@@ -1714,7 +1701,6 @@ async function openSession(
     pushLevel,
     actor: refs.getActor,
     live: () => refs.isLive?.() === true,
-    ...(refs.getComputerUseGrant ? { computerUseGrant: refs.getComputerUseGrant } : {}),
     captureTaskInputLiveness: refs.captureTaskInputLiveness,
     audience: refs.getAudience,
     reportedTask,
@@ -2324,16 +2310,6 @@ interface TurnSink {
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
-  computerUseGrant?: ComputerUseGrant;
-  hadComputerUseGrant?: true;
-  expectedInputId?: string;
-  computerUseInput?: {
-    inputId: string;
-    report: NonNullable<SubmitOptions["onInputStatus"]>;
-    writes?: Promise<void>;
-    settled?: boolean;
-  };
-  providerInputStarted?: boolean;
   /** Who can read the turn, read once when it starts. */
   audience: Audience;
   reportedTask?: string;
@@ -2564,10 +2540,6 @@ class AgentSessionImpl implements AgentSession {
   private lastContextTokens?: number;
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
-  /** Whether any turn in this session was admitted with a computer-use grant. */
-  private hadComputerUseGrant = false;
-  /** Steered inputs the provider retained across a turn boundary and has not yet adopted/consumed. */
-  private readonly retainedProviderInputs = new Set<string>();
   private selectionId?: ModelSelectionId;
   /** A model the next turn runs instead, once: an overload swap. */
   private oneTurnSelection?: ModelSelectionId;
@@ -2717,19 +2689,6 @@ class AgentSessionImpl implements AgentSession {
       !this.currentSink.lifecycleInterrupted &&
       !this.closing
     );
-  }
-
-  get currentComputerUseGrant(): ComputerUseGrant | undefined {
-    const sink = this.currentSink;
-    if (
-      !sink?.providerInputStarted ||
-      sink.turnId !== this.currentTurnId ||
-      !this.currentTurnLiveRef
-    )
-      return undefined;
-    if (sink.computerUseGrant && Date.now() >= sink.computerUseGrant.expiresAt)
-      sink.computerUseGrant = undefined;
-    return sink.computerUseGrant;
   }
 
   captureTaskInputLiveness(): () => boolean {
@@ -2935,7 +2894,6 @@ class AgentSessionImpl implements AgentSession {
         resumeThreadId,
       );
       this.modelSession = next;
-      this.retainedProviderInputs.clear();
       this.modelSessionAvailable = true;
       if (resumeThreadId === undefined) {
         // Another provider: the new thread has seen nothing of this chat.
@@ -2987,31 +2945,11 @@ class AgentSessionImpl implements AgentSession {
         }
         const { msg, reasoningEffort, position } = splitProviderFacts(event);
         if (msg.type === "input_status") {
-          if (msg.state === "queued") {
-            this.retainedProviderInputs.add(msg.inputId);
-          } else if (msg.state === "consumed") {
-            this.retainedProviderInputs.delete(msg.inputId);
-            if (sink.computerUseGrant) {
-              if (
-                msg.inputId === sink.expectedInputId &&
-                !sink.lifecycleInterrupted &&
-                Date.now() < sink.computerUseGrant.expiresAt
-              ) {
-                sink.providerInputStarted = true;
-              } else {
-                sink.computerUseGrant = undefined;
-                sink.providerInputStarted = false;
-              }
-            }
-          }
           await this.inputs.observe(msg, sink.turnId);
-          if (sink.computerUseInput?.inputId === msg.inputId && msg.state === "consumed")
-            await this.reportComputerUseInput(sink, "consumed");
           this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
           continue;
         }
         if (msg.type === "result" || msg.type === "error") {
-          sink.computerUseGrant = undefined;
           this.deps.turnUsage.modelTurnAccounted(msg.accounting, this.attribution);
           await this.inputs.seal(sink.turnId);
         }
@@ -3452,15 +3390,6 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private finalizeTurn(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
-    sink.computerUseGrant = undefined;
-    sink.providerInputStarted = false;
-    if (sink.hadComputerUseGrant) {
-      void this.deps.computerUse?.cancelTurn?.(this.sessionId, sink.turnId).catch(() => undefined);
-    }
-    void this.reportComputerUseInput(
-      sink,
-      terminal.type === "result" && !sink.lifecycleInterrupted ? "consumed" : "failed",
-    );
     if (this.currentSink === sink) {
       this.finalizeTurnSpans(sink, terminal);
     }
@@ -3477,24 +3406,6 @@ class AgentSessionImpl implements AgentSession {
     this.dispatchTurnFinished(sink, terminal);
     this.recordTurnUsage(sink, terminal);
     this.closeSink(sink);
-  }
-
-  private reportComputerUseInput(sink: TurnSink, state: "queued" | "consumed" | "failed") {
-    const input = sink.computerUseInput;
-    if (!input || input.settled) return;
-    if (state !== "queued") input.settled = true;
-    input.writes = (input.writes ?? Promise.resolve())
-      .then(() =>
-        input.report({ type: "input_status", inputId: input.inputId, turnId: sink.turnId, state }),
-      )
-      .catch((error: unknown) => {
-        this.log.warn("could not record computer-use input status", {
-          sessionId: this.sessionId,
-          turnId: sink.turnId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    return input.writes;
   }
 
   private recordTurnUsage(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
@@ -4094,32 +4005,8 @@ class AgentSessionImpl implements AgentSession {
   }
 
   submit(input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt {
-    if (this.status === "closed") {
-      this.release();
-      throw new Error(`AgentSession ${this.sessionId} is closed`);
-    }
+    if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
     const { priority = "next", onInputStatus, ...turnOptions } = options;
-    if (turnOptions.computerUseGrant !== undefined && priority !== "after") {
-      this.release();
-      throw new Error("A computer-use grant requires a separate turn.");
-    }
-    if (!isQueueInput(priority)) {
-      const landed = afterLanding(this.turnMutex.isLocked());
-      let handle: AgentTurnHandle;
-      try {
-        handle = this.startTurn(input, turnOptions, onInputStatus);
-      } finally {
-        // Either the turn now holds the session or admission threw before
-        // starting one; in both cases the caller's hold ends here.
-        this.release();
-      }
-      return {
-        ...(input.inputId ? { inputId: input.inputId } : {}),
-        turnId: handle.id,
-        landed,
-        turn: Promise.resolve(handle),
-      };
-    }
     // Observe before the queue synchronously stops a superseded turn. A changed
     // scope revokes old callbacks even if another input restores it before delivery.
     const sameScope = this.observeTaskInputScope(turnOptions);
@@ -4131,17 +4018,24 @@ class AgentSessionImpl implements AgentSession {
     ) {
       this.currentSink.taskInputContinues = true;
     }
-    let receipt: AgentInputReceipt;
-    try {
-      receipt = this.inputs.submit(
-        { ...input, inputId: input.inputId ?? uuidv7() },
-        { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
-      );
-    } finally {
-      // Either the queued input now holds the session or submission threw;
-      // in both cases the caller's hold ends here.
+    if (!isQueueInput(priority)) {
+      const landed = afterLanding(this.turnMutex.isLocked());
+      const handle = this.startTurn(input, turnOptions);
+      // The turn now holds the session, so the caller's hold ends.
       this.release();
+      return {
+        ...(input.inputId ? { inputId: input.inputId } : {}),
+        turnId: handle.id,
+        landed,
+        turn: Promise.resolve(handle),
+      };
     }
+    const receipt = this.inputs.submit(
+      { ...input, inputId: input.inputId ?? uuidv7() },
+      { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
+    );
+    // The queued input now holds the session, so the caller's hold ends.
+    this.release();
     // The queue ends its own turn. A system turn (a backend continuation) runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;
@@ -4163,39 +4057,9 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** Starts a turn behind the running one: an `after` input's, or the input queue's. */
-  private startTurn(
-    input: AgentTurnInput,
-    options?: SendTurnOptions,
-    onInputStatus?: SubmitOptions["onInputStatus"],
-  ): AgentTurnHandle {
+  private startTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
-    }
-    const audience = turnAudience(options?.threadContext ?? this.threadContext, {
-      actor: options?.actor,
-      parent: options?.parentAudience,
-      place: this.placeAudience,
-    });
-    const grant = options?.computerUseGrant;
-    if (
-      grant !== undefined &&
-      (!grant ||
-        this.closing ||
-        this.isSubagent ||
-        this.kind !== "conversation" ||
-        options?.initiatedBy === "system" ||
-        options?.lifecycleParent !== undefined ||
-        options?.reportedTask !== undefined ||
-        options?.actor?.kind !== "guardian" ||
-        audience !== "private" ||
-        typeof grant.deviceId !== "string" ||
-        !grant.deviceId ||
-        !Number.isSafeInteger(grant.expiresAt) ||
-        grant.expiresAt <= Date.now())
-    )
-      throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
-    if (grant && (!input.inputId || input.inputId.trim().length === 0)) {
-      throw new Error("A computer-use grant requires an inputId.");
     }
     this.observeTaskInputScope(options);
     // turnId is allocated here, at the bottom of the agent
@@ -4230,20 +4094,11 @@ class AgentSessionImpl implements AgentSession {
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
-      computerUseGrant:
-        grant &&
-        Object.freeze({
-          deviceId: grant.deviceId,
-          expiresAt: grant.expiresAt,
-          ...(grant.isCurrent ? { isCurrent: grant.isCurrent } : {}),
-          ...(grant.allowPreemption === true ? { allowPreemption: true as const } : {}),
-        }),
-      ...(grant ? { hadComputerUseGrant: true as const } : {}),
-      ...(input.inputId ? { expectedInputId: input.inputId } : {}),
-      ...(grant && input.inputId && onInputStatus
-        ? { computerUseInput: { inputId: input.inputId, report: onInputStatus } }
-        : {}),
-      audience,
+      audience: turnAudience(options?.threadContext ?? this.threadContext, {
+        actor: options?.actor,
+        parent: options?.parentAudience,
+        place: this.placeAudience,
+      }),
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
@@ -4256,7 +4111,6 @@ class AgentSessionImpl implements AgentSession {
       outputSchemaSuspended: false,
       usageRecorded: false,
     };
-    if (grant) this.hadComputerUseGrant = true;
 
     // Open the per-turn `agent:*` root span here (not inside runOneTurn) so
     // it spans the turnMutex async seam — external callers can then wrap
@@ -4291,42 +4145,40 @@ class AgentSessionImpl implements AgentSession {
     // Admitted from here until the turn ends, whatever its priority: the
     // session is in use while it waits for the turn lock.
     this.admitted += 1;
-    void this.reportComputerUseInput(sink, "queued");
 
-    // Hand the turn off to the per-session turn mutex. Turns adopting a
-    // provider-retained steer run ahead of un-sent turns so the provider's
-    // native queue drains into its own ungranted turn before any granted turn
-    // opens. Real work (publishing session_init, sending user input, awaiting
-    // result) runs asynchronously in `runOneTurn`; the events iterable above
-    // stays empty until then. Caller can already read `turnId` synchronously.
-    // The callback swallows its own failures, so `runExclusive` never rejects
-    // here — the fire-and-forget promise is intentionally discarded.
-    const mutexPriority =
-      input.inputId && this.retainedProviderInputs.has(input.inputId) ? 2 : input.inputId ? 1 : 0;
+    // Hand the turn off to the per-session FIFO turn mutex. Real work
+    // (publishing session_init, sending user input, awaiting result) runs
+    // asynchronously in `runOneTurn`; the events iterable above stays empty
+    // until then. Caller can already read `turnId` synchronously. The callback
+    // swallows its own failures, so `runExclusive` never rejects here — the
+    // fire-and-forget promise is intentionally discarded.
     void this.turnMutex
-      .runExclusive(async () => {
-        try {
-          await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
-        } catch (err) {
-          // Safety net: if runOneTurn threw before reaching its own finally
-          // (e.g. synchronous failure before the modelSession call), the
-          // agent span may still be open. End it so the trace closes.
-          if (!span.isRecording || span.isRecording()) {
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: err instanceof Error ? err.message : String(err),
-            });
-            if (err instanceof Error) span.recordException(err);
-            span.end();
+      .runExclusive(
+        async () => {
+          try {
+            await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
+          } catch (err) {
+            // Safety net: if runOneTurn threw before reaching its own finally
+            // (e.g. synchronous failure before the modelSession call), the
+            // agent span may still be open. End it so the trace closes.
+            if (!span.isRecording || span.isRecording()) {
+              span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: err instanceof Error ? err.message : String(err),
+              });
+              if (err instanceof Error) span.recordException(err);
+              span.end();
+            }
+            // Surface failure on the sink so consumers' for-await ends cleanly.
+            this.failTurn(
+              sink,
+              toModelResolutionErrorPayload(err) ??
+                (err instanceof Error ? err.message : String(err)),
+            );
           }
-          // Surface failure on the sink so consumers' for-await ends cleanly.
-          this.failTurn(
-            sink,
-            toModelResolutionErrorPayload(err) ??
-              (err instanceof Error ? err.message : String(err)),
-          );
-        }
-      }, mutexPriority)
+        },
+        input.inputId ? 1 : 0,
+      )
       .finally(() => {
         this.admitted -= 1;
         this.emitStatus();
@@ -4360,7 +4212,6 @@ class AgentSessionImpl implements AgentSession {
       await this.ensureModelSessionForTurn(true);
     }
     if (sink.lifecycleInterrupted) {
-      this.retainedProviderInputs.clear();
       await this.modelSession.interrupt("user-stop");
       this.ensureTurnStart(sink);
       this.finalizeTurn(sink, { type: "result", content: "" });
@@ -4663,7 +4514,6 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         if (sink.lifecycleInterrupted) {
-          this.retainedProviderInputs.clear();
           await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
           return;
@@ -4671,21 +4521,7 @@ class AgentSessionImpl implements AgentSession {
         modelRan = true;
         try {
           await context.with(turnCtx, async () => {
-            const grant = sink.computerUseGrant;
             await this.inputs.beforeSend(turnId);
-            if (grant) {
-              await sink.computerUseInput?.writes;
-              if (sink.done) return;
-              if (sink.lifecycleInterrupted || this.closing) {
-                sink.lifecycleInterrupted = true;
-                this.finalizeTurn(sink, { type: "result", content: "" });
-                return;
-              }
-              if (Date.now() >= grant.expiresAt) {
-                this.failTurn(sink, "The computer-use grant expired before the input could start.");
-                return;
-              }
-            }
             // The login kind this turn is sent under; Codex holds a queued turn to it.
             sink.loginKind = this.modelSession.loginKind;
             await this.modelSession.sendUserInput({
@@ -4694,7 +4530,6 @@ class AgentSessionImpl implements AgentSession {
               images: input.images,
               reasoningEffort: mwInput.reasoningEffort,
             });
-            if (input.inputId) this.retainedProviderInputs.delete(input.inputId);
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
@@ -4876,20 +4711,14 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
-    sink.computerUseGrant = undefined;
-    sink.providerInputStarted = false;
     if (reason !== SUPERSEDED_INTERRUPT_REASON) {
       this.taskInputEpoch++;
       sink.stoppedByGuardian = true;
     }
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
-    this.retainedProviderInputs.clear();
     await Promise.all([
       this.modelSession.interrupt(reason),
-      this.hadComputerUseGrant
-        ? this.deps.computerUse?.cancelSession?.(this.sessionId).catch(() => undefined)
-        : undefined,
       Promise.allSettled(
         [...sink.subagentCallsByToolUse.values()].map(({ call }) => call.cancel(reason)),
       ),
@@ -4911,7 +4740,6 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") return;
     this.taskInputEpoch++;
     this.inputs.close();
-    this.retainedProviderInputs.clear();
     this.closingPromise = (async () => {
       this.log.info("agent session closing", {
         sessionId: this.sessionId,
@@ -4919,9 +4747,6 @@ class AgentSessionImpl implements AgentSession {
         reason,
       });
       const currentSink = this.currentSink;
-      const computerStopped = this.hadComputerUseGrant
-        ? this.deps.computerUse?.cancelSession?.(this.sessionId).catch(() => undefined)
-        : undefined;
       if (currentSink) {
         await Promise.allSettled(
           [...currentSink.subagentCallsByToolUse.values()].map(({ call }) =>
@@ -4936,7 +4761,6 @@ class AgentSessionImpl implements AgentSession {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      await computerStopped;
       this.status = "closed";
       this.emitStatus();
       if (currentSink) {
