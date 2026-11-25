@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceConversationServerMessage } from "@rome/api-types/voice-conversation";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
-import * as gateModule from "../access/ws-guardian-gate.js" with { rstest: "importActual" };
 import type { DrizzleDb } from "../db/index.js";
 import type { Transcriber, TranscriptionListener } from "../voice-input/transcriber.js";
 import type { SpeakerListener } from "../voice-output/speaker.js";
@@ -21,10 +20,9 @@ const gate = rs.hoisted(() => ({
   caller: null as
     | null
     | { kind: "guardian" }
-    | { kind: "dashboard-admin"; accountId: string; email: string },
+    | { kind: "visitor"; accountId: string; email: string },
 }));
 rs.mock("../access/ws-guardian-gate.js", () => ({
-  ...gateModule,
   gateUpgrade: async (_req: unknown, socket: import("node:stream").Duplex) => {
     if (gate.caller) return gate.caller;
     socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
@@ -510,12 +508,12 @@ describe("voice conversation socket", () => {
     });
 
     it("lets a dashboard admin in on the guardian's voice input list", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      gate.caller = { kind: "visitor", accountId: "ada", email: "ada@example.com" };
       expect(await upgrade(true, true)).toEqual({ status: 101, asked: 1 });
     });
 
     it("ends a dashboard admin's conversation once the allow-list drops them", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      gate.caller = { kind: "visitor", accountId: "ada", email: "ada@example.com" };
       const allowList = { emails: ["ada@example.com"] };
       const http: Server = createServer();
       const voice = attachVoiceConversationServer(http, {} as DrizzleDb, {
@@ -549,7 +547,7 @@ describe("voice conversation socket", () => {
     });
 
     it("follows the chat only for the phone app's conversation", async () => {
-      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      gate.caller = { kind: "visitor", accountId: "ada", email: "ada@example.com" };
       const followedBy = async (headers: Record<string, string>) => {
         const following: string[] = [];
         const ear = standInTranscriber();
