@@ -1318,7 +1318,7 @@ describe("composer model picker in an open chat", () => {
       {
         onSend,
         showModelSelector: true,
-        chatModelSelection: { value: "gpt-6-luna", onChange },
+        chatModelSelection: { value: "openai/gpt-6-luna", onChange },
       },
       { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
     );
@@ -1328,7 +1328,7 @@ describe("composer model picker in an open chat", () => {
     await user.click(trigger);
     await user.click(await screen.findByRole("option", { name: /Opus 5\.5/ }));
 
-    expect(onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    expect(onChange).toHaveBeenCalledWith("anthropic/claude-opus-5-5[1m]");
     // The chat stores its pick; the default for new chats is left alone.
     expect(fetchSpy.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(
       false,
@@ -1354,7 +1354,7 @@ describe("composer model picker in an open chat", () => {
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: "hello" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSend.mock.calls[0][0].largeModelSelection).toBe("claude-opus-5-5");
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBe("anthropic/claude-opus-5-5[1m]");
   });
 });
 

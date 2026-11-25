@@ -79,6 +79,45 @@ export interface TalkReactions {
   remove(chatId: ChatId, messageId: string, emoji: string): Promise<void>;
 }
 
+/** Messages to one account of the platform, which no other account reads. */
+export interface TalkPrivateMessaging {
+  /**
+   * Delivers `text` to account `accountId` so that no other account can read
+   * it. `chatId` is the chat the text answers, and `accountId` is the sender
+   * id the kind reports on a delivered `Message`. The kind chooses where the
+   * platform shows it. `options.replyToMessageId` names the message the text
+   * answers, as `OutgoingMessage.replyToMessageId` does, so a kind that shows
+   * the text in the chat shows it beside that message, in its thread when it
+   * is in one. Resolves once the platform took the message, and rejects with
+   * {@link PrivateMessageRefused} when the platform cannot show that account
+   * a private message.
+   */
+  sendOnlyTo(
+    chatId: ChatId,
+    accountId: string,
+    text: string,
+    options?: PrivateMessageOptions,
+  ): Promise<void>;
+}
+
+/** Where a private message sits among the chat's messages. */
+export interface PrivateMessageOptions {
+  /** The message the private message answers, one of the kind's message ids. */
+  replyToMessageId?: string;
+}
+
+/** The platform cannot show the account a private message, as when it takes
+ *  no direct messages or is not in the chat. Nothing was delivered. */
+export class PrivateMessageRefused extends Error {
+  readonly accountId: string;
+
+  constructor(accountId: string, reason: string, options?: { cause?: unknown }) {
+    super(`cannot send account ${accountId} a private message: ${reason}`, options);
+    this.name = "PrivateMessageRefused";
+    this.accountId = accountId;
+  }
+}
+
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
@@ -89,6 +128,7 @@ export interface TalkFeatureMap {
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
+  privateMessaging: TalkPrivateMessaging;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;

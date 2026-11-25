@@ -19,6 +19,7 @@ import {
   DEFAULT_LARGE_MODEL_SELECTION,
   runnableLargeModelOptions,
 } from "@/lib/chat-constants";
+import { modelOptionLabel } from "@/lib/model-options";
 
 // A value no model id can collide with, so the "show all" row and the model
 // rows never share a cmdk key.
@@ -62,14 +63,17 @@ export function ModelSelectorMenu({
   // "Auto" follows the default provider, so its row says so.
   const options = useMemo(
     () =>
-      runnableLargeModelOptions(signedIn, value).map((option) => ({
-        ...option,
-        label: t(option.labelKey),
-        rowLabel:
-          option.id === DEFAULT_LARGE_MODEL_SELECTION
-            ? t("modelSelector.options.autoFollowsDefault")
-            : t(option.labelKey),
-      })),
+      runnableLargeModelOptions(signedIn, value).map((option) => {
+        const label = modelOptionLabel(option, t("modelSelector.options.auto"));
+        return {
+          ...option,
+          label,
+          rowLabel:
+            option.id === DEFAULT_LARGE_MODEL_SELECTION
+              ? t("modelSelector.options.autoFollowsDefault")
+              : label,
+        };
+      }),
     [t, signedIn, value],
   );
 
@@ -78,9 +82,11 @@ export function ModelSelectorMenu({
   // Resolved from `options` (not raw LARGE_MODEL_OPTIONS) so the trigger renders
   // the same translated label as the rows, with no second lookup path.
   // "auto" belongs to no provider, so it is always among the options.
-  const selected =
-    options.find((option) => option.id === value) ??
-    options.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
+  const selected = options.find((option) => option.id === value) ?? {
+    id: value,
+    label: value,
+    rowLabel: value,
+  };
 
   const trimmedQuery = query.trim().toLowerCase();
 

@@ -8,6 +8,12 @@ import {
 } from "./guardian-auth-state.js";
 import type { ProveIdentityResult } from "../instance/instance-identity.js";
 import { guardianAuth } from "../db/schema.js";
+import {
+  guardianSeatCreated,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+} from "./application/members.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 
 describe("getGuardianAuthState", () => {
@@ -187,6 +193,24 @@ describe("resolveAndRecordAccount", () => {
     expect(warnings.some((line) => line.includes("account mismatch"))).toBe(false);
   });
 
+  it("moves the guardian's person to the email the matching account now reports", async () => {
+    await seedGuardian(null);
+    await resolveAndRecordAccount(testDb.db, {
+      prove: provesAs(ok("acct-A", { email: "old@example.com" })),
+    });
+    await resolveAndRecordAccount(testDb.db, {
+      prove: provesAs(ok("acct-A", { email: "new@example.com" })),
+    });
+
+    const ctx = memberContext(testDb.db);
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
+    ).toBeNull();
+    expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
+      [{ platform: "rome-cloud-email", accountId: "new@example.com" }],
+    ]);
+  });
+
   it("leaves accountId unchanged when Rome Cloud is unreachable", async () => {
     await seedGuardian(null);
     await resolveAndRecordAccount(testDb.db, { prove: provesAs({ status: "unreachable" }) });
@@ -282,5 +306,23 @@ describe("setGuardianAccount", () => {
       email: "new@example.com",
       avatarUrl: "https://example.com/new-avatar.png",
     });
+  });
+
+  it("moves the guardian's person off the old email onto the rebound one", async () => {
+    await seedGuardian("acct-old", "old@example.com");
+    const ctx = memberContext(testDb.db);
+    const linked = { platform: "slack", accountId: "T1:U1" };
+    await guardianSeatCreated(ctx, {
+      accounts: [{ platform: "rome-cloud-email", accountId: "old@example.com" }, linked],
+    });
+
+    await setGuardianAccount(testDb.db, "acct-new", "New@Example.com");
+
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
+    ).toBeNull();
+    expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
+      [{ platform: "rome-cloud-email", accountId: "new@example.com" }, linked],
+    ]);
   });
 });

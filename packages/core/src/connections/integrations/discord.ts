@@ -391,6 +391,11 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                   userId,
                 )) as import("@rome-os/app-runtime").ChatId,
             },
+            // In the account's direct message, whatever chat or message the
+            // text answers.
+            privateMessaging: {
+              sendOnlyTo: (_chatId, accountId, text) => adapter.sendOnlyTo(accountId, text),
+            },
             inboundMedia,
             activity,
             directory,

@@ -29,8 +29,8 @@ export class ChatSessionSettings implements SessionSettings {
     if (!this.deps.webchatRepo) return null;
     const chat = await findOwnWebChat(this.deps.webchatRepo, sessionId);
     const saved = chat?.largeModelSelection;
-    // Anything else, "auto" included, leaves the choice to Rome.
-    if (!isModelSelectionId(saved)) return null;
+    if (saved == null || saved === "auto") return null;
+    if (!isModelSelectionId(saved)) throw new Error(`Unknown stored model selection: ${saved}`);
     // A model Rome chose follows the default provider; one its owner picked stays.
     const id =
       chat?.largeModelSelectionBy === "auto" && this.deps.follow ? this.deps.follow(saved) : saved;

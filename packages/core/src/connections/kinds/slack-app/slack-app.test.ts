@@ -46,6 +46,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     openDirectMessage: rs.fn(async () => "D_NEW"),
     addReaction: rs.fn(async () => {}),
     removeReaction: rs.fn(async () => {}),
+    postEphemeral: rs.fn(async () => {}),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: TEAM })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),
@@ -761,6 +762,89 @@ describe("Slack app Web API", () => {
     await expect(
       api.postMessage(TEAM, { channel: "C_GONE", markdown: "hi" }),
     ).rejects.toMatchObject({ code: "channel_not_found" });
+  });
+});
+
+describe("Slack app messages only one member sees", () => {
+  it("asks the Worker for chat.postEphemeral naming the chat, the thread and the member", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return Response.json({ ok: true, message_ts: "1.0" });
+    }) as typeof fetch;
+    const api = createSlackAppWebApi("http://slack-gateway.test", fetchImpl, async () => "jwt");
+
+    await api.postEphemeral(TEAM, {
+      channel: "C1",
+      user: "U_ALICE",
+      markdown: "Sign in here",
+      threadTs: "1700000000.000001",
+    });
+
+    expect(calls).toEqual([
+      {
+        url: "http://slack-gateway.test/v1/slack/chat.postEphemeral",
+        body: {
+          channel: "C1",
+          user: "U_ALICE",
+          markdown_text: "Sign in here",
+          thread_ts: "1700000000.000001",
+        },
+      },
+    ]);
+  });
+
+  it("posts it in the thread of the message it answers, to the member the sender id names, and nothing in the chat", async () => {
+    const api = fakeApi();
+    const { adapter: a } = adapter(fakeMailbox(), api);
+    await a.start();
+
+    await a.sendOnlyTo("C1" as never, `${TEAM}/U_ALICE`, "Sign in here", {
+      replyToMessageId: "1700000000.000001:1700000000.000002",
+    });
+
+    expect(api.postEphemeral).toHaveBeenCalledWith(
+      TEAM,
+      {
+        channel: "C1",
+        user: "U_ALICE",
+        markdown: "Sign in here",
+        threadTs: "1700000000.000001",
+      },
+      expect.anything(),
+    );
+    expect(api.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("posts an answer to a message at the top of the chat in the chat, starting no thread", async () => {
+    const api = fakeApi();
+    const { adapter: a } = adapter(fakeMailbox(), api);
+    await a.start();
+
+    await a.sendOnlyTo("C1" as never, `${TEAM}/U_ALICE`, "Sign in here", {
+      replyToMessageId: "1700000000.000001",
+    });
+
+    expect(api.postEphemeral).toHaveBeenCalledWith(
+      TEAM,
+      { channel: "C1", user: "U_ALICE", markdown: "Sign in here", threadTs: undefined },
+      expect.anything(),
+    );
+  });
+
+  it("refuses a member who is not in the chat as a refused private message", async () => {
+    const api = fakeApi({
+      postEphemeral: rs.fn(async () => {
+        throw new SlackApiError("user_not_in_channel");
+      }),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api);
+    await a.start();
+
+    await expect(
+      a.sendOnlyTo("C1" as never, `${TEAM}/U_ALICE`, "Sign in here"),
+    ).rejects.toMatchObject({ name: "PrivateMessageRefused", accountId: `${TEAM}/U_ALICE` });
+    expect(api.postMessage).not.toHaveBeenCalled();
   });
 });
 

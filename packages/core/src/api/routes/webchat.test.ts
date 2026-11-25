@@ -2677,7 +2677,11 @@ describe("Webchat API", () => {
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       // A stored selection does not change the key the runtime session is under.
-      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol", "owner");
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        session.id,
+        "openai/gpt-5.6-sol",
+        "owner",
+      );
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
     });
   });
@@ -3420,7 +3424,7 @@ describe("Webchat API", () => {
       "Calendar",
       undefined,
       undefined,
-      "claude-sonnet",
+      "anthropic/claude-sonnet-5-5",
       undefined,
       "core:concierge",
     );
@@ -3431,7 +3435,7 @@ describe("Webchat API", () => {
     expect(key).toEqual({ agentName: "core:concierge", channelThreadKey: "webchat:topic-1" });
     expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1", { replace: true });
     expect(init).toMatchObject({
-      selectionId: "claude-sonnet",
+      selectionId: "anthropic/claude-sonnet-5-5",
       threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
     });
     expect(String(init?.contextSuffix)).toContain("## Guardian");
@@ -4988,7 +4992,11 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         followDefault: async (chatId: string) => {
-          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna", "owner");
+          await deps.webchatRepo.updateSessionLargeModelSelection(
+            chatId,
+            "openai/gpt-6-luna",
+            "owner",
+          );
           return null;
         },
         conciergeChat: async () => null,
@@ -4998,7 +5006,7 @@ describe("Webchat API", () => {
         "Quota",
         undefined,
         undefined,
-        "claude-sonnet",
+        "anthropic/claude-sonnet-5-5",
         undefined,
         "core:concierge",
       );
@@ -5013,7 +5021,7 @@ describe("Webchat API", () => {
       expect(sent.status).toBe(200);
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.objectContaining({ selectionId: "openai/gpt-6-luna" }),
       );
     });
 
@@ -5047,7 +5055,7 @@ describe("Webchat API", () => {
           "Quota",
           undefined,
           undefined,
-          id === "concierge" ? "claude-opus-5-5" : "claude-sonnet",
+          id === "concierge" ? "anthropic/claude-opus-5-5[1m]" : "anthropic/claude-sonnet-5-5",
           undefined,
           id === "concierge" ? "core:concierge" : "main",
           undefined,
@@ -5066,15 +5074,70 @@ describe("Webchat API", () => {
         const stream = await (await app.request(`/chat/turns/${turnId}/stream`)).text();
         if (id === "ordinary-quota") expect(stream).toContain("quota_exhausted");
         expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
-          id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+          id === "concierge" ? "openai/gpt-6.1-sol" : "anthropic/claude-sonnet-5-5",
         );
         expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
           expect.anything(),
           expect.objectContaining({
-            selectionId: id === "concierge" ? "gpt-6-1-sol" : "claude-sonnet",
+            selectionId: id === "concierge" ? "openai/gpt-6.1-sol" : "anthropic/claude-sonnet-5-5",
             // A Concierge chat runs at its agent's effort, whatever the send asks.
             reasoningEffort: id === "concierge" ? undefined : "high",
           }),
+        );
+      }
+    });
+
+    it("stores one qualified key, freezes legacy picks, and retains unknown saved values", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      const app = createWebchatRuntime(deps).routes;
+      const id = await newSession(app);
+      const pick = (value: string) =>
+        app.request(`/chat/sessions/${id}/model`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ largeModelSelection: value }),
+        });
+      for (const value of ["claude-opus", "anthropic/claude-opus-4-8[1m]"]) {
+        expect(await (await pick(value)).json()).toMatchObject({
+          largeModelSelection: "anthropic/claude-opus-4-8[1m]",
+        });
+      }
+      expect((await pick("opus")).status).toBe(400);
+      expect((await pick("unknown")).status).toBe(400);
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        id,
+        "unrecognized-old-choice",
+        "owner",
+      );
+      expect(await (await app.request(`/chat/sessions/${id}`)).json()).toMatchObject({
+        largeModelSelection: "unrecognized-old-choice",
+      });
+    });
+
+    it("keeps the same qualified key through JSON creation and multipart validation", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      const app = createWebchatRuntime(deps).routes;
+      const created = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Fixed",
+          projectPath: "default",
+          largeModelSelection: "openai/gpt-6.1-sol",
+        }),
+      });
+      expect(created.status).toBe(200);
+      const chat = (await created.json()) as { id: string; largeModelSelection: string };
+      expect(chat.largeModelSelection).toBe("openai/gpt-6.1-sol");
+      for (const value of ["", new File(["not a choice"], "model.txt")]) {
+        const body = new FormData();
+        body.set("text", "Keep my draft");
+        body.set("largeModelSelection", value);
+        expect(
+          (await app.request(`/chat/sessions/${chat.id}/turns`, { method: "POST", body })).status,
+        ).toBe(400);
+        expect((await deps.webchatRepo.getSession(chat.id))?.largeModelSelection).toBe(
+          "openai/gpt-6.1-sol",
         );
       }
     });
@@ -5102,13 +5165,15 @@ describe("Webchat API", () => {
         expect.objectContaining({ selectionId: null }),
       );
 
-      const picked = await pick("gpt-6-luna");
+      const picked = await pick("openai/gpt-6-luna");
       expect(picked.status).toBe(200);
-      await expect(picked.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-luna" });
+      await expect(picked.json()).resolves.toMatchObject({
+        largeModelSelection: "openai/gpt-6-luna",
+      });
       await drainTurn(app, await send("second"));
       expect(deps.agentSessionManager.open).toHaveBeenLastCalledWith(
         expect.anything(),
-        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+        expect.objectContaining({ selectionId: "openai/gpt-6-luna" }),
       );
 
       // Auto clears the pick, and the next acquire clears it on a live session.
@@ -5123,7 +5188,7 @@ describe("Webchat API", () => {
       expect((await pick("gpt-99")).status).toBe(400);
       expect((await pick(null)).status).toBe(400);
       await deps.settingsRepo.set("enableModelSelector", false);
-      expect((await pick("gpt-6-luna")).status).toBe(409);
+      expect((await pick("openai/gpt-6-luna")).status).toBe(409);
       await deps.webchatRepo.createSession("concierge", "Concierge");
       const conciergePick = await app.request("/chat/sessions/concierge/model", {
         method: "PATCH",
@@ -5132,7 +5197,7 @@ describe("Webchat API", () => {
       });
       expect(conciergePick.status).toBe(200);
       expect((await deps.webchatRepo.getSession("concierge"))?.largeModelSelection).toBe(
-        "gpt-6-luna",
+        "openai/gpt-6-luna",
       );
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
@@ -7032,6 +7097,37 @@ describe("Webchat API", () => {
       );
     });
 
+    it("stores written feedback without forking an unknown saved model choice", async () => {
+      const runForked = rs.fn();
+      deps.agentRunner = { run: deps.agentRunner.run.bind(deps.agentRunner), runForked };
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        SESSION_ID,
+        "unknown-old-choice",
+        "owner",
+      );
+      await deps.webchatRepo.addMessage(
+        "unknown-feedback-user",
+        SESSION_ID,
+        "user",
+        JSON.stringify([{ type: "text", content: "Rated exchange" }]),
+        TURN_ID,
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const response = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: "negative", comment: "Please keep this feedback" }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        feedback: { comment: "Please keep this feedback" },
+      });
+      expect(runForked).not.toHaveBeenCalled();
+      expect((await deps.webchatRepo.getSession(SESSION_ID))?.largeModelSelection).toBe(
+        "unknown-old-choice",
+      );
+    });
+
     it("stores feedback but skips processing when the rated exchange has no chat text", async () => {
       // TURN_ID is anchored by a trace row only (see anchorTurn). Without a
       // persisted user/assistant exchange the fork prompt cannot quote the
@@ -7842,7 +7938,11 @@ describe("Webchat API", () => {
 
     it("runs a branch's own stored selection on its next send, not the first message's", async () => {
       await deps.settingsRepo.set("enableModelSelector", true);
-      await deps.webchatRepo.updateSessionLargeModelSelection(PROMOTED_ID, "gpt-6-luna", "kept");
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        PROMOTED_ID,
+        "openai/gpt-6-luna",
+        "kept",
+      );
       rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
       let selectionId: unknown = "unset";
       deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
@@ -7871,7 +7971,7 @@ describe("Webchat API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
       });
-      expect(selectionId).toBe("gpt-6-luna");
+      expect(selectionId).toBe("openai/gpt-6-luna");
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {

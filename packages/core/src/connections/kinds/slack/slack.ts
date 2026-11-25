@@ -93,14 +93,20 @@ export function slackMessageId(ts: string, threadTs?: string): string {
   return threadTs && threadTs !== ts ? `${threadTs}:${ts}` : ts;
 }
 
+/** The thread message `messageId` was said in, or undefined for a message at
+ *  the top of its chat. */
+export function threadOfMessage(messageId?: string): string | undefined {
+  if (!messageId) return undefined;
+  const separator = messageId.indexOf(":");
+  return separator === -1 ? undefined : messageId.slice(0, separator);
+}
+
 /** The thread a reply to `messageId` goes into. A message in a thread is
  *  answered in that thread, and one at the top of a channel starts a thread
  *  under it. A direct message outside a thread is answered in place. */
 export function replyThreadOf(channelId: string, messageId?: string): string | undefined {
   if (!messageId) return undefined;
-  const separator = messageId.indexOf(":");
-  if (separator !== -1) return messageId.slice(0, separator);
-  return channelId.startsWith("D") ? undefined : messageId;
+  return threadOfMessage(messageId) ?? (channelId.startsWith("D") ? undefined : messageId);
 }
 
 /** A chat's channel, and the thread an older thread-keyed chat id names. A

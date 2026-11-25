@@ -217,3 +217,91 @@ describe("DiscordAdapter.send", () => {
     await expect(adapter.send(channel.id as ChatId, { text: "Hi" })).rejects.toBe(unknown);
   });
 });
+
+describe("DiscordAdapter.sendOnlyTo", () => {
+  /** The adapter over a shared chat and the member's direct message, noting
+   *  what is sent to each. */
+  function privately(
+    dmSend = rs.fn().mockResolvedValue({ id: "dm-message-1" }),
+    createDM = rs.fn().mockResolvedValue({ id: "dm-alice", send: dmSend }),
+  ) {
+    const shared = { id: "guild-chat-1", send: rs.fn() };
+    const fetch = rs.fn().mockResolvedValue(shared);
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, { client: { users: { createDM }, channels: { fetch } } });
+    return { adapter, createDM, dmSend, shared, fetch };
+  }
+
+  it("opens the direct message with that member and sends there, and nothing in the shared chat", async () => {
+    const { adapter, createDM, dmSend, shared, fetch } = privately();
+
+    await adapter.sendOnlyTo("alice", "Sign in here");
+
+    expect(createDM).toHaveBeenCalledWith("alice");
+    expect(dmSend).toHaveBeenCalledWith({ content: "Sign in here" });
+    expect(shared.send).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  /** Discord's refusal with error `code`, as its API answers a direct
+   *  message, or opening one when `path` is `/users/@me/channels`. */
+  function refusal(
+    code: number,
+    message: string,
+    status = 403,
+    path = "/channels/dm-alice/messages",
+  ) {
+    return new DiscordAPIError({ code, message }, code, status, "POST", path, {});
+  }
+
+  it("refuses a member whose direct messages are closed as a refused private message", async () => {
+    const closed = refusal(50007, "Cannot send messages to this user");
+    const { adapter, shared } = privately(rs.fn().mockRejectedValue(closed));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
+      name: "PrivateMessageRefused",
+      accountId: "alice",
+    });
+    expect(shared.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member who shares no server with the bot as a refused private message", async () => {
+    const noServer = refusal(
+      50278,
+      "Cannot send messages to this user due to having no mutual guilds",
+    );
+    const { adapter, shared } = privately(rs.fn().mockRejectedValue(noServer));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
+      name: "PrivateMessageRefused",
+      accountId: "alice",
+    });
+    expect(shared.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member Discord will not open a direct message with as a refused private message", async () => {
+    const otherBot = refusal(
+      50007,
+      "Cannot send messages to this user",
+      400,
+      "/users/@me/channels",
+    );
+    const dmSend = rs.fn();
+    const { adapter, shared } = privately(dmSend, rs.fn().mockRejectedValue(otherBot));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
+      name: "PrivateMessageRefused",
+      accountId: "alice",
+      cause: otherBot,
+    });
+    expect(dmSend).not.toHaveBeenCalled();
+    expect(shared.send).not.toHaveBeenCalled();
+  });
+
+  it("passes on a failure to open the direct message that is not about the member", async () => {
+    const tooBusy = refusal(20029, "Server send rate limit reached", 429, "/users/@me/channels");
+    const { adapter } = privately(rs.fn(), rs.fn().mockRejectedValue(tooBusy));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toBe(tooBusy);
+  });
+});
