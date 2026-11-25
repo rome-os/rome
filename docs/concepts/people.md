@@ -151,7 +151,7 @@ A send names its account and Rome's account, and fails loudly. It is one call to
 
 ## Bond levels
 
-A bond level is the trust tier assigned to a [person](#person). It determines how deeply the system remembers them and whether their messages are trusted by default.
+A bond level is the trust tier assigned to a [person](#person). It determines how deeply the system remembers them.
 
 | Level | Examples | Memory depth |
 |---|---|---|

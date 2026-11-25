@@ -1725,12 +1725,11 @@ export interface RoutineDraftSpec {
 /**
  * Optional per-message routing overrides resolved by the channel adapter from
  * its channel-level configuration. When present, the downstream message handler
- * uses these to override the default trusted-path target agent. Untrusted
- * messages still go through sentinel regardless.
+ * uses these to override the default target agent.
  */
 export interface MessageRouting {
   /**
-   * Name of the agent to route this message to on the trusted path. Falls back
+   * Name of the agent to route this message to. Falls back
    * to the default ("main") when undefined or when the named agent is not
    * present in the catalog.
    */
@@ -3150,6 +3149,8 @@ export interface ApprovalsRepository {
   }): Promise<string>;
 }
 
+/** @deprecated Rome no longer has a sentinel agent, so nothing new is logged.
+ *  Entries an earlier release wrote still read. */
 export interface SentinelLogEntry {
   id: string;
   channel: string;
@@ -3161,6 +3162,7 @@ export interface SentinelLogEntry {
   createdAt: Date;
 }
 
+/** @deprecated See {@link SentinelLogEntry}. */
 export interface SentinelLogRepository {
   create(data: {
     messageId: string;
@@ -3182,11 +3184,14 @@ export interface SentinelLogRepository {
 
 export type SettingsRepository = AppSettingsRepository;
 
+/** @deprecated Rome decides whose message wakes an agent before an app hears
+ *  it, so an app has no policy to evaluate. */
 export interface PolicyRule {
   action: "allow" | "block" | "require_approval" | "sentinel_review";
   conditions?: Record<string, unknown>;
 }
 
+/** @deprecated See {@link PolicyRule}. */
 export interface PolicyContext {
   channel: string;
   sender: { id: string; bondLevel: string } | null;
@@ -3195,6 +3200,7 @@ export interface PolicyContext {
   threadType?: string;
 }
 
+/** @deprecated See {@link PolicyRule}. */
 export interface PolicyEngine {
   evaluate(context: PolicyContext): Promise<PolicyRule>;
 }
@@ -3398,8 +3404,8 @@ export interface EventCatalogReader {
 }
 
 /** A system-initiated turn re-enters an established session rather than
- * handling an inbound message. Unlike inbound, it skips the trust pipeline
- * (policy / sentinel / person) — trust was settled when the session began. */
+ * handling an inbound message. It asks nobody to be let in, since
+ * whoever started the session was. */
 export interface BackendTurnParams {
   /** Agent whose session is continued. */
   agentName: string;
