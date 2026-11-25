@@ -18,8 +18,14 @@ afterEach(() => {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-const issued = (code: string, msFromNow: number) =>
-  json({ code, expiresAt: new Date(Date.now() + msFromNow).toISOString() });
+/** A code as the server gives it: `seconds` to live, and `expiresAt` on the
+ *  server's clock, which this browser's clock need not match. */
+const issued = (code: string, seconds: number, serverNow = Date.now()) =>
+  json({
+    code,
+    expiresAt: new Date(serverNow + seconds * 1000).toISOString(),
+    expiresInSeconds: seconds,
+  });
 
 function renderPage(...responses: Response[]) {
   const fetch = rs.spyOn(globalThis, "fetch");
@@ -48,7 +54,7 @@ describe("ConnectAccountPage", () => {
   it("shows the code, the time it has left, the steps, and copies it", async () => {
     const writeText = rs.fn(async (_text: string) => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const fetch = renderPage(issued("ROME-ABCDEF-GHJKMN", 10 * 60_000));
+    const fetch = renderPage(issued("ROME-ABCDEF-GHJKMN", 600));
     getCode();
 
     expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
@@ -69,9 +75,37 @@ describe("ConnectAccountPage", () => {
     expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
+  it("shows a new code's full time on its first paint, however long the page was open", async () => {
+    rs.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ["setInterval", "clearInterval", "performance"],
+    });
+    renderPage(issued("ROME-ABCDEF-GHJKMN", 600));
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2 * 60_000);
+    });
+    getCode();
+    expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
+    expect(screen.getByText("Stops working in 10:00")).toBeTruthy();
+  });
+
+  it("shows a fresh code when the browser clock runs 15 minutes fast", async () => {
+    const serverNow = Date.now();
+    rs.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
+    rs.setSystemTime(serverNow + 15 * 60_000);
+    renderPage(issued("ROME-ABCDEF-GHJKMN", 600, serverNow));
+    getCode();
+    expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
+    expect(screen.getByText(/Stops working in (10:00|9:59)/)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("says the code expired once its time runs out, and gets a new one", async () => {
-    rs.useFakeTimers({ shouldAdvanceTime: true });
-    renderPage(issued("ROME-ABCDEF-GHJKMN", 3_000), issued("ROME-PQRSTV-WXYZ23", 10 * 60_000));
+    rs.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ["setInterval", "clearInterval", "performance"],
+    });
+    renderPage(issued("ROME-ABCDEF-GHJKMN", 3), issued("ROME-PQRSTV-WXYZ23", 600));
     getCode();
     expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
 
@@ -87,7 +121,7 @@ describe("ConnectAccountPage", () => {
   });
 
   it("says a failed request failed, and lets the person ask again", async () => {
-    renderPage(json({ error: "boom" }, 500), issued("ROME-ABCDEF-GHJKMN", 10 * 60_000));
+    renderPage(json({ error: "boom" }, 500), issued("ROME-ABCDEF-GHJKMN", 600));
     getCode();
     expect(await screen.findByText("Could not get a code")).toBeTruthy();
     expect(screen.queryByText("boom")).toBeNull();
@@ -98,9 +132,17 @@ describe("ConnectAccountPage", () => {
   });
 
   it("tells a sign-in that belongs to nobody to ask the guardian", async () => {
-    renderPage(json({ error: "This sign-in belongs to no person" }, 403));
+    renderPage(json({ error: "This sign-in belongs to no person", code: "no_person" }, 403));
     getCode();
     expect(await screen.findByText("Could not get a code")).toBeTruthy();
     expect(screen.getByText(/Ask the guardian to invite your email/)).toBeTruthy();
+  });
+
+  it("gives only the failure for any other refusal", async () => {
+    renderPage(json({ error: "Cross-site requests are not allowed." }, 403));
+    getCode();
+    expect(await screen.findByText("Could not get a code")).toBeTruthy();
+    expect(screen.queryByText(/Ask the guardian/)).toBeNull();
+    expect(screen.queryByText(/Cross-site/)).toBeNull();
   });
 });

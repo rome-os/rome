@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy } from "lucide-react";
-import type { AccountCodeIssued } from "@rome/api-types";
+import type { AccountCodeIssued, AccountCodeNoPerson } from "@rome/api-types";
 import { Measure, Section, SectionTitle } from "@rome-os/ui/page";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -9,40 +9,56 @@ import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageBody, PageHeader, PageShell } from "@/shell/PageShell";
 
-/** Why asking for a code failed. A 403 means the session is nobody's person. */
+/** Why asking for a code failed. */
 type Failure = "no-person" | "failed";
 
-async function requestCode(): Promise<AccountCodeIssued | Failure> {
+/** A code and the `performance.now()` its response arrived at. */
+interface Received {
+  issued: AccountCodeIssued;
+  arrivedAt: number;
+}
+
+async function requestCode(): Promise<Received | Failure> {
   try {
     const response = await fetch("/api/account-codes", {
       method: "POST",
       credentials: "include",
       cache: "no-store",
     });
-    if (response.status === 403) return "no-person";
+    if (response.status === 403) {
+      const body = (await response.json().catch(() => null)) as Partial<AccountCodeNoPerson> | null;
+      return body?.code === "no_person" ? "no-person" : "failed";
+    }
     if (!response.ok) return "failed";
-    return (await response.json()) as AccountCodeIssued;
+    const issued = (await response.json()) as AccountCodeIssued;
+    return { issued, arrivedAt: performance.now() };
   } catch {
     return "failed";
   }
 }
 
-/** Seconds until `expiresAt`, ticking each second, never below zero. */
-function useSecondsLeft(expiresAt: string | null): number | null {
-  const [now, setNow] = useState(() => Date.now());
+/**
+ * Seconds the received code has left, ticking each second, never below zero.
+ * Counts from when the response arrived on the monotonic clock, so a browser
+ * clock that is wrong does not change it.
+ */
+function useSecondsLeft(received: Received | null): number | null {
+  const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
-    if (expiresAt === null) return;
-    setNow(Date.now());
-    const deadline = Date.parse(expiresAt);
+    if (received === null) return;
+    const deadline = received.arrivedAt + received.issued.expiresInSeconds * 1000;
     const timer = window.setInterval(() => {
-      const current = Date.now();
+      const current = performance.now();
       setNow(current);
       if (current >= deadline) window.clearInterval(timer);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [expiresAt]);
-  if (expiresAt === null) return null;
-  return Math.max(0, Math.ceil((Date.parse(expiresAt) - now) / 1000));
+  }, [received]);
+  if (received === null) return null;
+  // A `now` read before the response arrived counts as no time gone, so the
+  // first paint of a new code shows its full time.
+  const elapsedMs = Math.max(0, now - received.arrivedAt);
+  return Math.max(0, Math.ceil(received.issued.expiresInSeconds - elapsedMs / 1000));
 }
 
 function minutesAndSeconds(seconds: number): string {
@@ -58,12 +74,13 @@ function minutesAndSeconds(seconds: number): string {
 export default function ConnectAccountPage() {
   const { t } = useTranslation("settings");
   useDocumentTitle(t("connectAccount.title"));
-  const [issued, setIssued] = useState<AccountCodeIssued | null>(null);
+  const [received, setReceived] = useState<Received | null>(null);
   const [asking, setAsking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [copyRefused, setCopyRefused] = useState(false);
   const { copiedText, copy } = useCopyFeedback();
-  const secondsLeft = useSecondsLeft(issued?.expiresAt ?? null);
+  const issued = received?.issued ?? null;
+  const secondsLeft = useSecondsLeft(received);
   const live = issued !== null && secondsLeft !== null && secondsLeft > 0;
   const copied = issued !== null && copiedText === issued.code;
 
@@ -73,7 +90,7 @@ export default function ConnectAccountPage() {
     setCopyRefused(false);
     const result = await requestCode();
     if (typeof result === "string") setFailure(result);
-    else setIssued(result);
+    else setReceived(result);
     setAsking(false);
   }
 
