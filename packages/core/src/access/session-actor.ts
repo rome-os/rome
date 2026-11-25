@@ -1,10 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { IncomingMessage } from "node:http";
 import { getCookie } from "hono/cookie";
 import type { Context, MiddlewareHandler } from "hono";
 import { guardianAuth } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
-import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
+import { readCookie } from "../lib/ws-upgrade.js";
+import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
 import {
   guardianSessionMaterial,
   resolveGuardianSessionFromMaterial,
@@ -58,6 +60,16 @@ export function sessionActorMaterial(c: Context): SessionActorMaterial {
   };
 }
 
+/** What {@link sessionActorMaterial} reads, from a WebSocket upgrade. */
+export function upgradeActorMaterial(req: IncomingMessage): SessionActorMaterial {
+  return {
+    sessionToken: readCookie(req.headers.cookie, COOKIE_NAME),
+    hasForwardedFor: Boolean(req.headers["x-forwarded-for"]),
+    peerAddress: req.socket.remoteAddress ?? undefined,
+    visitorToken: readCookie(req.headers.cookie, VISITOR_COOKIE_NAME),
+  };
+}
+
 /**
  * Widen a resolved guardian session into a `SessionActor` using the single
  * guardian seat row: normalizes the JWT subject to the canonical seat userId
@@ -85,21 +97,31 @@ export async function enrichGuardianActor(
 }
 
 /**
- * Resolve the actor for a request. Mirrors the app-api caller precedence
+ * The person a request's session names. Mirrors the app-api caller precedence
  * (`RomeAppCaller`): guardian wins over a coexisting visitor session; a
- * sessionless request is `anonymous`.
+ * sessionless request is `anonymous`. A guardian's `userId` is the one their
+ * session carries. Reads the database only for a loopback peer.
  */
-export async function resolveSessionActorFromMaterial(
+export async function readSessionActor(
   material: SessionActorMaterial,
   db: DrizzleDb,
 ): Promise<SessionActor> {
   const guardian = await resolveGuardianSessionFromMaterial(material, db);
-  if (guardian) return enrichGuardianActor(db, guardian);
+  if (guardian) return { kind: "guardian", userId: guardian.userId, via: guardian.via };
 
   const visitor = material.visitorToken ? verifyVisitorSession(material.visitorToken) : null;
   if (visitor) return { kind: "visitor", accountId: visitor.accountId, email: visitor.email };
 
   return { kind: "anonymous" };
+}
+
+/** {@link readSessionActor}, with the guardian as their seat names them. */
+export async function resolveSessionActorFromMaterial(
+  material: SessionActorMaterial,
+  db: DrizzleDb,
+): Promise<SessionActor> {
+  const actor = await readSessionActor(material, db);
+  return actor.kind === "guardian" ? enrichGuardianActor(db, actor) : actor;
 }
 
 /** The guardian as the actor of work no person started, such as an app's routine. Undefined before a seat exists. */

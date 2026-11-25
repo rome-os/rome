@@ -19,13 +19,12 @@ import {
 } from "@rome/api-types/voice-conversation";
 import { LIVE_EVENTS_CLIENT_HEADER, PHONE_CLIENT } from "@rome/api-types/live-events";
 import {
-  enrichGuardianActor,
   runWithSessionActor,
   type SessionActor,
   sessionOwnerKey,
 } from "../access/session-actor.js";
 import { type DashboardAllowList, isOnTeam } from "../access/team.js";
-import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DrizzleDb } from "../db/index.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
@@ -102,17 +101,12 @@ export function attachVoiceConversationServer(
       return;
     }
     void gateUpgrade(req, socket, db, deps.dashboardAccess)
-      .then(async (caller) => {
-        if (!caller || socket.destroyed) return;
+      .then(async (actor) => {
+        if (!actor || socket.destroyed) return;
         // Only now, for a proven team member, ask Rome Cloud's list.
         const { available } = await deps.listening.info();
         if (socket.destroyed) return;
         if (!available) return rejectUpgrade(socket, 404, "Not Found");
-        // The person the upgrade proved, so each spoken turn is theirs, as a typed one is.
-        const actor: SessionActor =
-          caller.kind === "guardian"
-            ? await enrichGuardianActor(db, caller)
-            : actorOfUpgrade(caller);
         const onTeam = () => isOnTeam(actor, deps.dashboardAccess);
         // The phone app marks its sockets as it marks its live-events socket.
         const { follow, ...rest } = deps;
