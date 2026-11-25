@@ -182,35 +182,6 @@ describe("Webchat API", () => {
     expect(await list(visitor, "all")).toEqual(all);
   });
 
-  it("starts no chat, turn or fork for a person Rome cannot tell", async () => {
-    const app = createRuntime(deps).routes;
-    await deps.webchatRepo.createSession("open", "Open");
-    const post = (path: string, body: unknown) =>
-      app.request(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    const unknownPerson = async (request: () => Response | Promise<Response>) => [
-      (await request()).status,
-      (await runWithSessionActor({ kind: "anonymous" }, request)).status,
-      (
-        await runWithSessionActor(async () => {
-          throw new Error("no person read");
-        }, request)
-      ).status,
-    ];
-    expect(await unknownPerson(() => post("/chat/sessions", {}))).toEqual([403, 403, 403]);
-    expect(await unknownPerson(() => post("/chat/sessions/open/turns", { text: "hi" }))).toEqual([
-      403, 403, 403,
-    ]);
-    expect(
-      await unknownPerson(() => post("/chat/sessions/open/turns/t/forks", { prompt: "hi" })),
-    ).toEqual([403, 403, 403]);
-    expect(await deps.webchatRepo.getMessages("open")).toEqual([]);
-    expect((await deps.webchatRepo.listSessions("all")).map((chat) => chat.id)).toEqual(["open"]);
-  });
-
   it("keeps each person's Concierge and task chats from everyone else", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
@@ -2290,6 +2261,22 @@ describe("Webchat API", () => {
       // downstream consumers (the ClickStack dashboard) rely on actorKind
       // being present to distinguish "recorded, no email" from unattributed
       // history, and must never fill an email in for these rows.
+      const anonRes = await runWithSessionActor({ kind: "anonymous" }, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Anonymous actor test" }),
+        }),
+      );
+      expect(anonRes.status).toBe(200);
+      const anonRecord = exporter
+        .getFinishedLogRecords()
+        .filter((record) => record.body === "webchat_session_created")
+        .at(-1);
+      expect(anonRecord?.attributes).toMatchObject({ actorKind: "anonymous" });
+      expect(anonRecord?.attributes).not.toHaveProperty("actorUserId");
+      expect(anonRecord?.attributes).not.toHaveProperty("actorEmail");
+
       const localSeatRes = await runWithSessionActor(
         { kind: "guardian", userId: "seat-1", via: "cookie" },
         () =>
@@ -7072,40 +7059,6 @@ describe("Webchat API", () => {
       expect(showApp).not.toHaveBeenCalled();
     });
 
-    it("starts no feedback fork for a person Rome cannot tell, and stores no comment", async () => {
-      const text = (said: string) => JSON.stringify([{ type: "text", content: said }]);
-      await deps.webchatRepo.addMessage("fb-user", SESSION_ID, "user", text("hi"), TURN_ID);
-      const runForked = rs.fn();
-      deps.agentRunner = { run: deps.agentRunner.run.bind(deps.agentRunner), runForked };
-      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
-        release: () => {},
-        sessionId: "live-source-session",
-      } as AgentSession);
-      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
-        sessionId: "live-source-session",
-        turnId: TURN_ID,
-        provider: "openai",
-        modelThreadId: "source-model-thread",
-        checkpointId: "rated-provider-turn",
-      });
-      const app = createRuntime(deps).routes;
-      const rate = () =>
-        app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rating: "negative", comment: "this was wrong" }),
-        });
-
-      expect((await rate()).status).toBe(403);
-      expect((await runWithSessionActor({ kind: "anonymous" }, rate)).status).toBe(403);
-      const failedLookup = async () => {
-        throw new Error("no person read");
-      };
-      expect((await runWithSessionActor(failedLookup, rate)).status).toBe(403);
-      expect(runForked).not.toHaveBeenCalled();
-      expect(await deps.webchatRepo.getTurnFeedback(SESSION_ID, TURN_ID)).toBeNull();
-    });
-
     it("does not start feedback processing when no text was set", async () => {
       const runForked = rs.fn();
       deps.agentRunner = {
@@ -10097,6 +10050,7 @@ describe("Webchat API", () => {
       { kind: "guardian", userId: "seat", via: "loopback" },
       { kind: "guardian", userId: "seat", via: "cookie" },
       { kind: "visitor", accountId: "visitor", email: "visitor@example.com" },
+      { kind: "anonymous" },
     ] as const)("trusts automatedSource only for a guardian via loopback: %s", async (actor) => {
       const { send, sessionId } = await setup();
       const trusted = actor.kind === "guardian" && actor.via === "loopback";
@@ -10122,6 +10076,7 @@ describe("Webchat API", () => {
     it.each([
       { kind: "guardian", userId: "seat", via: "cookie" },
       { kind: "visitor", accountId: "visitor", email: "visitor@example.com" },
+      { kind: "anonymous" },
     ] as const)("ignores a forged on-behalf app source and flag from %s", async (actor) => {
       const { send, sessionId } = await setup();
       expect(
