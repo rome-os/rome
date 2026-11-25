@@ -212,8 +212,6 @@ type ForkSessionPlacement = {
  * anchor the analysis — the full turn is already in the fork's inherited
  * transcript — so a long reply must not bloat the prompt. */
 const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
-// A chat, a fork and a message each start from someone Rome can tell.
-const NO_PERSON = "Not signed in";
 /** Turns per message page when a request pages without naming `limit`. */
 const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
 const MESSAGE_PAGE_MAX_LIMIT = 100;
@@ -2040,8 +2038,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     prompt: string;
     label: string;
     initiator: string;
-    /** The person who asked for the fork, whom it acts for. */
-    actor: PersonActor;
     /**
      * Whether the guardian is meant to keep talking to this fork. A fork chat
      * is a conversation and asks for a resumable thread; the private learning
@@ -2171,6 +2167,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
+    const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
       .runForked({
         agentName,
@@ -2182,7 +2179,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
-        actor: input.actor,
+        // The fork acts for the person who asked for it.
+        ...(forkActor ? { actor: forkActor } : {}),
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
         ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
@@ -2215,7 +2213,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const forkSessionId = first.value.sessionId;
     const forkTurnId = first.value.turnId;
-    await deps.webchatRepo.attributePersonFork(forkSessionId, forkTurnId, input.actor);
+    await deps.webchatRepo.attributePersonFork(
+      forkSessionId,
+      forkTurnId,
+      await currentSessionActor(),
+    );
     if (input.continuable) {
       // Born an ordinary chat: createForkTraceRecorder wrote the row when
       // turn_start arrived, and the chat surface can already list and stream
@@ -2303,7 +2305,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     turnId: string;
     rating: "positive" | "negative";
     comment: string;
-    actor: PersonActor;
   }): Promise<
     { sessionId: string; placement: ForkSessionPlacement | null } | "no_turn_checkpoint" | null
   > => {
@@ -2338,7 +2339,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       prompt: buildTurnFeedbackProcessingPrompt(input.rating, input.comment, ratedExchange),
       label: "feedback",
       initiator: "system:turn-feedback",
-      actor: input.actor,
       continuable: false,
     });
   };
@@ -3084,7 +3084,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
 
   /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
-  const startChat = async (body: NewChatBody, ownerKey: string): Promise<RouteAnswer> => {
+  const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
     let deviceFolder: DeviceFolder | null = null;
     if (body.deviceFolder) {
       const { deviceId, path } = body.deviceFolder;
@@ -3182,9 +3182,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions", async (c) => {
     const body = await c.req.json<NewChatBody>().catch(() => ({}) as NewChatBody);
-    const owner = sessionOwnerKey(await currentSessionActor());
-    if (owner === null) return c.json({ error: NO_PERSON }, 403);
-    const started = await startChat(body, owner);
+    const started = await startChat(body, sessionOwnerKey(await currentSessionActor()));
     return c.json(started.body, started.status);
   });
 
@@ -3757,8 +3755,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // session; the returned Sessions placement lets the web client open that
   // fork chat immediately while its response continues in the background.
   app.post("/chat/sessions/:sessionId/turns/:turnId/forks", async (c) => {
-    const person = turnActor(await currentSessionActor(), undefined);
-    if (!person) return c.json({ error: NO_PERSON }, 403);
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -3797,7 +3793,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       prompt,
       label: "branch",
       initiator: "system:turn-branch",
-      actor: person,
       continuable: true,
     });
     if (started === "no_turn_checkpoint") {
@@ -3892,11 +3887,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       comment = trimmed.length === 0 ? null : trimmed;
     }
 
-    // Feedback is written once, so a comment whose fork cannot start is refused
-    // before it is stored.
-    const person = turnActor(await currentSessionActor(), undefined);
-    if (comment && !person) return c.json({ error: NO_PERSON }, 403);
-
     const stored = await deps.webchatRepo.insertTurnFeedback(
       sessionId,
       turnId,
@@ -3931,16 +3921,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // against the conversation it critiques and, only when useful, preserve a
     // durable learning in memory or a user skill. Rating-only feedback stays
     // a lightweight analytics signal.
-    const processing =
-      comment && person
-        ? await startTurnFeedbackProcessing({
-            session,
-            turnId,
-            rating: ratingInput,
-            comment,
-            actor: person,
-          })
-        : null;
+    const processing = comment
+      ? await startTurnFeedbackProcessing({
+          session,
+          turnId,
+          rating: ratingInput,
+          comment,
+        })
+      : null;
     // The learning fork is best-effort; a turn with no branch point (e.g. a
     // promoted fork chat's first answer) just skips it.
     const processingPlacement =
@@ -4268,10 +4256,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A Concierge turn's timing starts when the owner's send reaches Rome.
     const receivedAtMs = Date.now();
     const actor = said.taskActor ?? said.sender ?? (await currentSessionActor());
-    // A message is said as an agent account, or by a person Rome can tell.
-    if (!said.saidBy && sessionOwnerKey(actor) === null) {
-      return answer({ error: NO_PERSON }, 403);
-    }
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -6007,9 +5991,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   return { routes: app, runtime };
 }
 
-/** A person Rome can tell. */
-type PersonActor = Exclude<SessionActor, { kind: "anonymous" }>;
-
 /**
  * The person a sent message's turn acts for: the guardian or a visitor who
  * wrote it. A message said as an agent account, or with no person behind
@@ -6018,7 +5999,7 @@ type PersonActor = Exclude<SessionActor, { kind: "anonymous" }>;
 export function turnActor(
   actor: SessionActor | undefined,
   saidBy: Account | undefined,
-): PersonActor | undefined {
+): SessionActor | undefined {
   if (saidBy !== undefined) return undefined;
   return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
 }
