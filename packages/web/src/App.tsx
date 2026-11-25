@@ -37,6 +37,7 @@ const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
 const DeviceConnectPage = lazy(() => import("./pages/DeviceConnectPage"));
+const ConnectAccountPage = lazy(() => import("./pages/ConnectAccountPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsDialog = lazy(() => import("./pages/SettingsDialog"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
@@ -181,6 +182,9 @@ export default function App() {
             {/* Where a connect card's Connect leads for a device capability;
                 the device's own app opens its flow at this path. */}
             <Route path="/connections/device/:capability" element={<DeviceConnectPage />} />
+            {/* The link Rome sends a sender it does not know. Not /connect, which
+                is the instance-enroll page. */}
+            <Route path="/connect-account" element={<ConnectAccountPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
           </Route>

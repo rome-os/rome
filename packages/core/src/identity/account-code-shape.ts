@@ -1,7 +1,6 @@
 // The shape of an account code, as typed in a message. Identity issues and
-// redeems codes; a connection that reports a bare command after mentions
-// reads this shape too, as it reads a stop command's. Vocabulary:
-// docs/domains/identity.md#account-code.
+// redeems codes; Chats reads this shape to tell a code from a message.
+// Vocabulary: docs/domains/identity.md#account-code.
 
 // Digits and capitals without the look-alikes 0, 1, I, L, O and U. Twelve of
 // these carry 12 × log2(30) ≈ 58.9 bits.
