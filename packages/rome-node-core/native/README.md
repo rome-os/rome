@@ -18,7 +18,7 @@ swift "$script" verify --release
 
 The last command must fail for the compile-only bundle. That build accepts
 `--self-test` and runs test sockets with desktop access disabled, simulated
-consent, and an in-memory key store. The release gate requires a production
+consent, and an in-memory substitute for the Keychain calls. The release gate requires a production
 bundle with a valid Developer ID Application signature and a stapled
 notarization ticket.
 
@@ -67,11 +67,9 @@ path so macOS can retain permissions across upgrades.
    the kernel process record. A native host can apply the same kernel checks
    to the helper.
 5. Send `hello` with a fresh 32-byte random `nonce` and the host `proof`.
-   Encode both as standard Base64. The host can send `handshake` as an alias.
+   Encode both as standard Base64.
    Use the returned `helperPid` and `instance` to verify `helperProof` with a
-   constant-time MAC comparison. The reply also includes the original `pid`
-   and `proof` fields with the same values. Verify the proof before sending
-   any further requests.
+   constant-time MAC comparison before sending any further requests.
 
 The helper takes an exclusive `flock` on the pinned directory inode. It opens
 `bootstrap.json` without following symlinks and verifies its owner, type, mode,
@@ -187,38 +185,45 @@ If the requested tag has no match, the helper tries system preferred
 languages in order, then uses `en`. The caller supplies a source label.
 The helper writes all warnings and computes the fingerprint itself.
 
-The short fingerprint is the first six bytes of SHA-256 of the raw public
-key. It uses uppercase hexadecimal in three groups of four characters,
-such as `A7F3-91C2-4B8E`. The helper matches grants by the full public key.
-The short fingerprint helps the local user compare the key with the source.
+A `session_only` dialog shows the host's canonical executable path, PID, and
+any signing identifier and Team ID the helper found for the host.
+
+The fingerprint is the first 16 bytes of SHA-256 of the raw public key.
+It uses eight groups of four uppercase hexadecimal digits, such as
+`21FE-31DF-A154-A261-626B-F854-046F-D227`. The dialog shows four groups on each
+line. The menu, protocol, and commands use the full hyphenated form.
+The helper matches grants by the full public key.
 
 ### Manage trusted keys
 
-The helper stores up to 32 public keys and their grants in the macOS data
-protection Keychain. The item uses service
-`com.rome.computer-use.authorized-keys`, account `v1`, and an accessibility
-class that makes it available after the first unlock on that device.
-Neither the helper nor the Keychain item needs the controller's private key.
+The helper checks for a limit of 32 grants at enrollment. Each public key
+has its own item in the macOS data protection Keychain. The item uses
+service `com.rome.computer-use.authorized-keys` and the full Base64 public
+key as its account. The item stays on the device and becomes available
+after the first unlock. The controller keeps its private key.
 
 During a session, open the menu bar item to stop computer use, revoke the
 current persistent source and stop, or revoke all stored keys. Revoking all
 keys leaves a session-only grant active. A persistent session ends when its
-grant disappears or changes. The helper checks the grant while idle and
-before window operations.
+grant disappears or changes. The helper checks the grant once a second
+while idle and before window operations. If revocation fails, the menu
+action shows an error. Window controls for a persistent session stay stopped.
 
 Run these commands on the executable inside the signed app bundle.
 
 ```sh
 helper="/path/to/Rome Computer Use.app/Contents/MacOS/RomeComputerUse"
 "$helper" --list-keys
-"$helper" --revoke-key A7F3-91C2-4B8E
+"$helper" --revoke-key 21FE-31DF-A154-A261-626B-F854-046F-D227
 "$helper" --revoke-keys
 ```
 
 `--list-keys` prints JSON with `fingerprint`, `label`, `scope`, and
-`enrolledAt` in Unix seconds. `--revoke-key` takes the uppercase short
+`enrolledAt` in Unix seconds. `--revoke-key` takes the eight-group uppercase
 fingerprint and refuses an ambiguous match. `--revoke-keys` removes every
-grant. New persistent grants require approval in the consent dialog.
+grant in one Keychain operation. On failure, either revoke command writes
+an error code to standard error and exits with a nonzero status. New
+persistent grants require approval in the consent dialog.
 
 ## Threat model
 
@@ -273,7 +278,7 @@ requests. A framing or request error without a usable ID uses JSON `null`.
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `hello`, `handshake` | `nonce`, `proof`, optional `locale`, `consentMode`, `controller` | Helper proof and a session grant or controller challenge |
+| `hello` | `nonce`, `proof`, optional `locale`, `consentMode`, `controller` | `instance`, `helperPid`, `helperProof`, and a session grant or controller challenge |
 | `authorize` | `signature` | Session or persistent grant |
 | `status` | | `instance`, `stop` and optional `reason` |
 | `windows` | Optional `application` | `windows` array of eligible windows |

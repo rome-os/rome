@@ -289,7 +289,7 @@ func testNodeHandshake(_ app: URL, state: URL) throws {
           }
           assert(socket, 'Connect to helper.');
           const body = Buffer.from(JSON.stringify({
-            v: 1, id: 'node-host', method: 'handshake',
+            v: 1, id: 'node-host', method: 'hello',
             params: { nonce, proof: mac('host', process.pid, nonce).toString('base64') },
           }));
           const header = Buffer.alloc(8);
@@ -308,7 +308,7 @@ func testNodeHandshake(_ app: URL, state: URL) throws {
           assert.equal(v, 1);
           assert.equal(id, 'node-host');
           assert.equal(ok, true);
-          const { instance, pid, proof } = result;
+          const { instance, helperPid: pid, helperProof: proof } = result;
           assert(Number.isSafeInteger(pid) && pid > 0);
           assert.match(instance, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
           assert(timingSafeEqual(Buffer.from(proof, 'base64'), mac('helper', process.pid, pid, nonce, instance)));

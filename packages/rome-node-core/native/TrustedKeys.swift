@@ -1,5 +1,9 @@
 import CryptoKit
 import Foundation
+import Security
+#if !SELF_TEST_BUILD
+import LocalAuthentication
+#endif
 
 enum ControllerScope: String, Codable, Sendable {
     case remote, local
@@ -18,7 +22,7 @@ struct ControllerKey: Sendable {
         }
         signingKey = key
         self.base64 = base64
-        let hash = Array(SHA256.hash(data: bytes).prefix(6))
+        let hash = Array(SHA256.hash(data: bytes).prefix(16))
         fingerprint = stride(from: 0, to: hash.count, by: 2)
             .map { String(format: "%02X%02X", hash[$0], hash[$0 + 1]) }.joined(separator: "-")
     }
@@ -40,7 +44,7 @@ struct ControllerKey: Sendable {
 
     static func validFingerprint(_ fingerprint: String) -> Bool {
         let groups = fingerprint.split(separator: "-", omittingEmptySubsequences: false)
-        return groups.count == 3 && groups.allSatisfy { group in
+        return groups.count == 8 && groups.allSatisfy { group in
             group.utf8.count == 4 && group.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) }
         }
     }
@@ -78,157 +82,159 @@ enum TrustedKeySelector: Sendable {
 protocol TrustedKeyStore: Sendable {
     func list() throws -> [TrustedKeyRecord]
     func lookup(publicKey: String) throws -> TrustedKeyRecord?
-    func enroll(_ record: TrustedKeyRecord) throws -> (record: TrustedKeyRecord, enrolled: Bool)
+    func enroll(_ record: TrustedKeyRecord) throws
     func revoke(_ selector: TrustedKeySelector) throws
     func revokeAll() throws
 }
 
 extension TrustedKeyStore {
-    func lookup(publicKey: String) throws -> TrustedKeyRecord? {
-        try list().first { $0.publicKey == publicKey }
-    }
-
     func revoke(fingerprint: String) throws {
         guard ControllerKey.validFingerprint(fingerprint) else { throw Failure("invalid_request") }
         try revoke(.fingerprint(fingerprint))
     }
 }
 
-private struct TrustedKeyRecords {
-    static let limit = 32
-    var values: [TrustedKeyRecord]
-
-    mutating func enroll(_ record: TrustedKeyRecord) throws -> (record: TrustedKeyRecord, enrolled: Bool) {
-        guard record.valid else { throw Failure("invalid_request") }
-        if let index = values.firstIndex(where: { $0.publicKey == record.publicKey }) {
-            let previous = values[index]
-            if previous.scope == record.scope { return (previous, false) }
-            values[index] = record
-        } else {
-            guard values.count < Self.limit else { throw Failure("trusted_key_limit") }
-            values.append(record)
-        }
-        return (record, true)
-    }
-
-    mutating func revoke(_ selector: TrustedKeySelector) throws {
-        switch selector {
-        case .publicKey(let key):
-            values.removeAll { $0.publicKey == key }
-        case .fingerprint(let fingerprint):
-            let matches = values.indices.filter { values[$0].fingerprint == fingerprint }
-            guard matches.count <= 1 else { throw Failure("key_fingerprint_ambiguous") }
-            if let index = matches.first { values.remove(at: index) }
-        }
-    }
+protocol KeychainItems: Sendable {
+    func copy(_ query: [String: Any]) -> (OSStatus, Any?)
+    func add(_ item: [String: Any]) -> OSStatus
+    func update(_ query: [String: Any], values: [String: Any]) -> OSStatus
+    func delete(_ query: [String: Any]) -> OSStatus
 }
-
-#if SELF_TEST_BUILD
-final class MemoryTrustedKeyStore: TrustedKeyStore, @unchecked Sendable {
-    // The lock owns all access to records across test connections.
-    private let lock = NSLock()
-    private var records = TrustedKeyRecords(values: [])
-
-    func list() -> [TrustedKeyRecord] { lock.withLock { records.values } }
-
-    func enroll(_ record: TrustedKeyRecord) throws -> (record: TrustedKeyRecord, enrolled: Bool) {
-        try lock.withLock { try records.enroll(record) }
-    }
-
-    func revoke(_ selector: TrustedKeySelector) throws {
-        try lock.withLock { try records.revoke(selector) }
-    }
-
-    func revokeAll() { lock.withLock { records.values.removeAll() } }
-}
-#else
-import Darwin
-import LocalAuthentication
-import Security
 
 struct KeychainTrustedKeyStore: TrustedKeyStore {
-    private func query() throws -> [String: Any] {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let group = SecTaskCopyValueForEntitlement(task, "com.apple.application-identifier" as CFString, nil) as? String,
-              group.hasSuffix("." + bundleIdentifier) else { throw Failure("key_store_unavailable") }
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        return [
+    let accessGroup: String?
+    let items: any KeychainItems
+
+    private func query(account: String? = nil) throws -> [String: Any] {
+        guard let accessGroup else { throw Failure("key_store_unavailable") }
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.rome.computer-use.authorized-keys",
-            kSecAttrAccount as String: "v1",
-            kSecAttrAccessGroup as String: group,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecAttrSynchronizable as String: false,
             kSecUseDataProtectionKeychain as String: true,
-            kSecUseAuthenticationContext as String: context,
         ]
+        query[kSecAttrAccount as String] = account
+        #if !SELF_TEST_BUILD
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+        #endif
+        return query
     }
 
-    func list() throws -> [TrustedKeyRecord] { try read(query()) ?? [] }
-
-    private func read(_ query: [String: Any]) throws -> [TrustedKeyRecord]? {
-        var query = query
-        query[kSecReturnData as String] = true
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+    private func copy(_ query: [String: Any]) throws -> Any? {
+        let (status, result) = items.copy(query)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data, data.count <= 64 * 1024,
-              let records = try? JSONDecoder().decode([TrustedKeyRecord].self, from: data),
-              records.count <= TrustedKeyRecords.limit, records.allSatisfy(\.valid),
-              Set(records.map(\.publicKey)).count == records.count else { throw Failure("key_store_unavailable") }
-        return records
+        guard status == errSecSuccess, let result else { throw Failure("key_store_unavailable") }
+        return result
     }
 
-    private func withWriteLock<T>(_ operation: () throws -> T) throws -> T {
-        // Separate helper and CLI processes serialize read-modify-write on the per-user temp directory inode.
-        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-        let count = confstr(_CS_DARWIN_USER_TEMP_DIR, &path, path.count)
-        guard count > 2, count <= path.count else { throw Failure("key_store_unavailable") }
-        if path[count - 2] == 47 { path[count - 2] = 0 }
-        let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { throw Failure("key_store_unavailable") }
-        defer { close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_uid == geteuid(), info.st_mode & 0o077 == 0,
-              flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw Failure("key_store_unavailable") }
-        return try operation()
+    private func decode(_ value: Any?, account: String) -> TrustedKeyRecord? {
+        guard let data = value as? Data, data.count <= 64 * 1024,
+              let record = try? JSONDecoder().decode(TrustedKeyRecord.self, from: data),
+              record.publicKey == account, record.valid else { return nil }
+        return record
     }
 
-    private func change<T>(_ update: (inout TrustedKeyRecords) throws -> T) throws -> T {
-        try withWriteLock {
-            let query = try query()
-            let previous = try read(query)
-            var records = TrustedKeyRecords(values: previous ?? [])
-            let result = try update(&records)
-            guard records.values != (previous ?? []) else { return result }
-            guard let data = try? JSONEncoder().encode(records.values) else { throw Failure("key_store_unavailable") }
-            let status: OSStatus
-            if previous == nil {
-                var item = query
-                item[kSecValueData as String] = data
-                item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-                status = SecItemAdd(item as CFDictionary, nil)
-            } else {
-                status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-            }
-            guard status == errSecSuccess else { throw Failure("key_store_unavailable") }
-            return result
+    private func entries() throws -> [[String: Any]] {
+        var query = try query()
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        query[kSecReturnAttributes as String] = true
+        query[kSecReturnData as String] = true
+        guard let result = try copy(query) else { return [] }
+        guard let entries = result as? [[String: Any]] else { throw Failure("key_store_unavailable") }
+        return entries
+    }
+
+    func list() throws -> [TrustedKeyRecord] {
+        try entries().compactMap { item in
+            guard let account = item[kSecAttrAccount as String] as? String else { return nil }
+            return decode(item[kSecValueData as String], account: account)
         }
     }
 
-    func enroll(_ record: TrustedKeyRecord) throws -> (record: TrustedKeyRecord, enrolled: Bool) {
-        try change { try $0.enroll(record) }
+    func lookup(publicKey: String) throws -> TrustedKeyRecord? {
+        var query = try query(account: publicKey)
+        query[kSecReturnData as String] = true
+        guard let result = try copy(query) else { return nil }
+        guard let record = decode(result, account: publicKey) else { throw Failure("key_store_unavailable") }
+        return record
+    }
+
+    func enroll(_ record: TrustedKeyRecord) throws {
+        guard record.valid else { throw Failure("invalid_request") }
+        let entries = try entries()
+        // The count is an admission check. Concurrent enrollments of distinct accounts may both pass it.
+        guard entries.count < 32 || entries.contains(where: { $0[kSecAttrAccount as String] as? String == record.publicKey })
+        else { throw Failure("trusted_key_limit") }
+
+        let query = try query(account: record.publicKey)
+        let data = try JSONEncoder().encode(record)
+        let values = [kSecValueData as String: data]
+        var item = query
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = items.add(item)
+        if status == errSecDuplicateItem {
+            // A concurrent revoke can make this update fail. Retrying the add would restore a revoked grant.
+            guard items.update(query, values: values) == errSecSuccess else { throw Failure("key_store_unavailable") }
+        } else if status != errSecSuccess {
+            throw Failure("key_store_unavailable")
+        }
     }
 
     func revoke(_ selector: TrustedKeySelector) throws {
-        try change { try $0.revoke(selector) }
+        switch selector {
+        case .publicKey(let key):
+            try delete(account: key)
+        case .fingerprint(let fingerprint):
+            let matches = try list().filter { $0.fingerprint == fingerprint }
+            guard matches.count <= 1 else { throw Failure("key_fingerprint_ambiguous") }
+            if let match = matches.first { try delete(account: match.publicKey) }
+        }
     }
 
-    func revokeAll() throws {
-        try withWriteLock {
-            let status = SecItemDelete(try query() as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure("key_store_unavailable") }
-        }
+    func revokeAll() throws { try delete(account: nil) }
+
+    private func delete(account: String?) throws {
+        let status = items.delete(try query(account: account))
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure("key_store_unavailable") }
+    }
+}
+
+#if !SELF_TEST_BUILD
+extension KeychainTrustedKeyStore {
+    private static let applicationGroup: String? = {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let group = SecTaskCopyValueForEntitlement(task, "com.apple.application-identifier" as CFString, nil) as? String,
+              let separator = group.firstIndex(of: "."), separator != group.startIndex,
+              group[group.index(after: separator)...] == bundleIdentifier else { return nil }
+        return group
+    }()
+
+    init() {
+        self.init(accessGroup: Self.applicationGroup, items: SystemKeychainItems())
+    }
+}
+
+private struct SystemKeychainItems: KeychainItems {
+    func copy(_ query: [String: Any]) -> (OSStatus, Any?) {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result)
+    }
+
+    func add(_ item: [String: Any]) -> OSStatus {
+        SecItemAdd(item as CFDictionary, nil)
+    }
+
+    func update(_ query: [String: Any], values: [String: Any]) -> OSStatus {
+        SecItemUpdate(query as CFDictionary, values as CFDictionary)
+    }
+
+    func delete(_ query: [String: Any]) -> OSStatus {
+        SecItemDelete(query as CFDictionary)
     }
 }
 #endif

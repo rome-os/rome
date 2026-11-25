@@ -7,6 +7,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
         case title, access, persistentAccess, source, fingerprint, remoteRisk, localRisk
         case deny, allowSession, allowPersistent
         case menuTitle, noWindows, oneWindow, multipleWindows, stop, revokeCurrent, revokeAll, keyStoreError
+        case executable, signingIdentifier, teamID
     }
 
     subscript(_ text: Text) -> String { Self.strings[self]![text.rawValue] }
@@ -25,7 +26,8 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "The requester says the private key is on this Mac. If you always allow this source, any process running as you that can read the key can control this Mac unattended until you revoke it.",
             "Deny", "Allow This Session", "Always Allow This Source",
             "Rome Computer Use", "No window bound", "1 active window", "%d active windows", "Stop Computer Use",
-            "Revoke “%@” (%@) & Stop", "Revoke All Authorized Keys", "Could not access authorized keys",
+            "Revoke “%@” (%@) & Stop", "Revoke All Authorized Keys", "Could not revoke authorized keys",
+            "Executable:", "Signing identifier:", "Team ID:",
         ],
         .zhHans: [
             "允许电脑控制？",
@@ -36,7 +38,8 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "请求方声明私钥存放在本机。如果总是允许该来源，以你的用户身份运行且能读取私钥的任何进程，都可以在撤销授权前无人值守地控制这台 Mac。",
             "拒绝", "允许本次会话", "总是允许该来源",
             "Rome 电脑控制", "未绑定窗口", "1 个活动窗口", "%d 个活动窗口", "停止电脑控制",
-            "撤销「%@」（%@）并停止", "撤销全部已授权来源", "无法访问已授权公钥",
+            "撤销「%@」（%@）并停止", "撤销全部已授权来源", "无法撤销已授权公钥",
+            "可执行文件：", "签名标识：", "团队 ID：",
         ],
         .zhHant: [
             "允許電腦控制？",
@@ -47,7 +50,8 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "請求方聲明私密金鑰儲存在這台 Mac。如果一律允許此來源，以你的使用者身分執行且能讀取金鑰的任何程序，都能在撤銷授權前無人值守地控制這台 Mac。",
             "拒絕", "允許本次工作階段", "一律允許此來源",
             "Rome 電腦控制", "未綁定視窗", "1 個使用中的視窗", "%d 個使用中的視窗", "停止電腦控制",
-            "撤銷「%@」（%@）並停止", "撤銷所有已授權來源", "無法存取已授權的公開金鑰",
+            "撤銷「%@」（%@）並停止", "撤銷所有已授權來源", "無法撤銷已授權的公開金鑰",
+            "可執行檔：", "簽章識別碼：", "團隊 ID：",
         ],
         .ja: [
             "コンピュータの操作を許可しますか？",
@@ -59,7 +63,8 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "拒否", "今回のセッションを許可", "この接続元を常に許可",
             "Rome コンピュータ操作", "接続中のウインドウなし", "1 個のウインドウが接続中", "%d 個のウインドウが接続中",
             "コンピュータの操作を停止", "「%@」（%@）の許可を取り消して停止", "すべての接続元の許可を取り消す",
-            "許可済みの鍵にアクセスできません",
+            "許可済みの鍵を取り消せませんでした",
+            "実行ファイル:", "署名識別子:", "チーム ID:",
         ],
     ]
 }

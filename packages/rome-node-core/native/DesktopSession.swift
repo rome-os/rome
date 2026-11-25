@@ -102,6 +102,45 @@ struct ConsentUnlock {
     }
 }
 
+extension ConsentPrompt {
+    var informativeText: String {
+        var details = [locale[.access]]
+        if mode.choices.contains(.allowPersistent) { details.append(locale[.persistentAccess]) }
+        if let controller {
+            details.append(locale[controller.scope == .local ? .localRisk : .remoteRisk])
+            let groups = controller.key.fingerprint.split(separator: "-")
+            let lines = [groups.prefix(4), groups.dropFirst(4)].map { locale.keyFingerprint($0.joined(separator: "-")) }
+            details.append(([locale[.fingerprint]] + lines).joined(separator: "\n"))
+        }
+        details.append("\(locale[.source])\n\(locale.sourceLabel(label))")
+        if mode == .sessionOnly {
+            var identity = [
+                "\(locale[.executable]) \(locale.sourceLabel(String(reflecting: host.executable)))",
+                "PID: \(host.pid)",
+            ]
+            if let signingSummary {
+                identity.append("\(locale[.signingIdentifier]) \(locale.sourceLabel(String(reflecting: signingSummary.identifier)))")
+                if let teamID = signingSummary.teamID {
+                    identity.append("\(locale[.teamID]) \(locale.sourceLabel(String(reflecting: teamID)))")
+                }
+            }
+            details.append(identity.joined(separator: "\n"))
+        }
+        return details.joined(separator: "\n\n")
+    }
+}
+
+func revokeTrustedKeys(admission: Admission, persistent: Bool, remove: () throws -> Void, reportFailure: (String) -> Void) {
+    // Seal window admission before touching Keychain. The stop handler only enqueues cleanup.
+    if persistent { _ = admission.stop("key_revoked") }
+    do { try remove() }
+    catch {
+        reportFailure((error as? Failure)?.code ?? "key_store_unavailable")
+        return
+    }
+    if persistent { admission.terminate("key_revoked") }
+}
+
 @MainActor
 final class DesktopSession: NSObject, NSMenuDelegate {
     private enum ConsentVisibility { case untrusted, clear, raised }
@@ -114,7 +153,8 @@ final class DesktopSession: NSObject, NSMenuDelegate {
     private var windowItem: NSMenuItem?
     private var authorization: SessionAuthorization?
     private var revocationItems: [NSMenuItem] = []
-    private var revocationFailed = false
+    private var presentingRevocationError = false
+    private var pendingExitCode: Int32?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var lockObserver: NSObjectProtocol?
 
@@ -143,14 +183,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = locale[.title]
-        var details = [locale[.access]]
-        if prompt.mode.choices.contains(.allowPersistent) { details.append(locale[.persistentAccess]) }
-        if let controller = prompt.controller {
-            details.append(locale[controller.scope == .local ? .localRisk : .remoteRisk])
-            details.append("\(locale[.fingerprint])\n\(locale.keyFingerprint(controller.key.fingerprint))")
-        }
-        details.append("\(locale[.source])\n\(locale.sourceLabel(prompt.label))")
-        alert.informativeText = details.joined(separator: "\n\n")
+        alert.informativeText = prompt.informativeText
         let deny = alert.addButton(withTitle: locale[.deny])
         deny.tag = ConsentDecision.deny.rawValue
         let allows = prompt.mode.choices.dropFirst().map { choice in
@@ -339,11 +372,8 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             let title = String(format: locale[.revokeCurrent], locale.sourceLabel(record.label), locale.keyFingerprint(record.fingerprint))
             revocationItems.append(menu.addItem(withTitle: title, action: #selector(revokeCurrent), keyEquivalent: ""))
         }
-        if (try? store.list().isEmpty) == false {
+        if (try? store.list().isEmpty) != true {
             revocationItems.append(menu.addItem(withTitle: locale[.revokeAll], action: #selector(revokeAll), keyEquivalent: ""))
-        }
-        if revocationFailed {
-            revocationItems.append(menu.addItem(withTitle: locale[.keyStoreError], action: nil, keyEquivalent: ""))
         }
         revocationItems.forEach { $0.target = self }
     }
@@ -358,28 +388,34 @@ final class DesktopSession: NSObject, NSMenuDelegate {
     }
 
     private func revoke(_ remove: () throws -> Void) {
-        let persistent = authorization?.persistent != nil
-        // Seal window admission before touching Keychain. The stop handler only enqueues cleanup.
-        if persistent { _ = admission.stop("key_revoked") }
-        do {
-            try remove()
-            revocationFailed = false
-        } catch {
-            revocationFailed = true
-            FileHandle.standardError.write(Data("\((error as? Failure)?.code ?? "key_store_unavailable")\n".utf8))
+        guard let authorization, !presentingRevocationError else { return }
+        revokeTrustedKeys(admission: admission, persistent: authorization.persistent != nil, remove: remove) { reason in
+            FileHandle.standardError.write(Data("\(reason)\n".utf8))
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = authorization.prompt.locale[.keyStoreError]
+            alert.informativeText = reason
+            presentingRevocationError = true
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            _ = alert.runModal()
+            presentingRevocationError = false
+            if let pendingExitCode { finish(pendingExitCode) }
         }
-        if persistent { admission.terminate("key_revoked") }
     }
 
     @objc private func stopSession() {
         admission.terminate("local_stop")
     }
 
-    func close() {
+    func finish(_ code: Int32) {
+        // The host can disconnect while the revocation error is on screen.
+        if presentingRevocationError {
+            pendingExitCode = code
+            return
+        }
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) }
-        statusItem = nil
-        windowItem = nil
+        exit(code)
     }
 }

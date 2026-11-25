@@ -270,6 +270,8 @@ struct ConsentPrompt: Sendable {
     let mode: ConsentMode
     let label: String
     let controller: ControllerClaim?
+    let host: ProcessIdentity
+    let signingSummary: Peer.SigningSummary?
 }
 
 struct SessionAuthorization: Sendable {
@@ -314,9 +316,10 @@ private func authorize(_ prompt: ConsentPrompt, store: any TrustedKeyStore, cons
         throw Failure("consent_denied")
     }
     if decision == .allowPersistent, let controller = prompt.controller {
-        let enrollment = try store.enroll(TrustedKeyRecord(key: controller.key, label: controller.label, scope: controller.scope))
-        authorization.persistent = enrollment.record
-        authorization.enrolled = enrollment.enrolled
+        let record = TrustedKeyRecord(key: controller.key, label: controller.label, scope: controller.scope)
+        try store.enroll(record)
+        authorization.persistent = record
+        authorization.enrolled = true
     }
     return authorization
 }
@@ -329,10 +332,11 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     defer { connection.end() }
 
     let watchdogQueue = DispatchQueue(label: "rome.computer-use.watchdog", qos: .userInitiated)
-    func watch(on queue: DispatchQueue = watchdogQueue, _ check: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
+    func watch(on queue: DispatchQueue = watchdogQueue, every interval: DispatchTimeInterval = .milliseconds(100),
+               leeway: DispatchTimeInterval = .milliseconds(10), _ check: @escaping @Sendable () -> Void) -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.setEventHandler(handler: check)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(100), leeway: .milliseconds(10))
+        timer.schedule(deadline: .now(), repeating: interval, leeway: leeway)
         timer.resume()
         return timer
     }
@@ -356,7 +360,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         try connection.sendNow(Wire.failure(nil, "invalid_request"))
         return
     }
-    guard first.v == 1, ["handshake", "hello"].contains(first.method),
+    guard first.v == 1, first.method == "hello",
           let rawNonce = first.params?.nonce, let nonce = Data(base64Encoded: rawNonce),
           let rawProof = first.params?.proof, let proof = Data(base64Encoded: rawProof),
           handshake.verifyHost(proof, nonce: nonce) else {
@@ -373,7 +377,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     let helper = getpid()
     let helperProof = handshake.helperProof(helper: helper, nonce: nonce, instance: instance).base64EncodedString()
     let identification: [String: Any] = [
-        "instance": instance, "pid": helper, "proof": helperProof, "helperPid": helper, "helperProof": helperProof,
+        "instance": instance, "helperPid": helper, "helperProof": helperProof,
     ]
     let authorizedID: String
     if let controller = hello.controller {
@@ -427,7 +431,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     let executable = URL(fileURLWithPath: peer.identity.executable).lastPathComponent
     let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode,
                                label: hello.controller?.label ?? sanitizeLabel(executable) ?? hello.locale[.source],
-                               controller: hello.controller)
+                               controller: hello.controller, host: peer.identity, signingSummary: peer.signingSummary)
     let consentDeadline = DispatchTime.now() + .seconds(60)
     let canContinue: @Sendable () -> Bool = {
         do {
@@ -471,7 +475,8 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     }
     // Keychain I/O must not delay peer identity or socket checks.
     let trustWatchdog = authorization.persistent != nil
-        ? watch(on: DispatchQueue.global(qos: .userInitiated)) { try? checkTrust() } : nil
+        ? watch(on: DispatchQueue.global(qos: .userInitiated), every: .seconds(1), leeway: .milliseconds(100)) { try? checkTrust() }
+        : nil
     defer { trustWatchdog?.cancel() }
 
     let access = DesktopAccess()

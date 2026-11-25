@@ -1,4 +1,5 @@
 #if SELF_TEST_BUILD
+import AppKit
 import CoreGraphics
 import CoreMedia
 import CryptoKit
@@ -6,6 +7,7 @@ import Darwin
 import Darwin.libproc
 import Darwin.sys.proc_info
 import Foundation
+import Security
 
 final class SelfTest {
     private var assertions = 0
@@ -18,7 +20,9 @@ final class SelfTest {
         try test.bindings()
         try test.input()
         try test.consent()
+        try test.activationPolicy()
         try test.authorizationOptions()
+        try test.trustedKeyStorage()
         try test.frames()
         try test.admission()
         try test.transport()
@@ -518,6 +522,28 @@ final class SelfTest {
         }
     }
 
+    private func activationPolicy() throws {
+        var setCalled = false
+        try requireAccessoryPolicy(current: { .accessory }, set: { _ in
+            setCalled = true
+            return false
+        })
+        try expect(!setCalled, "already accessory passes without a setter call")
+        for setResult in [true, false] {
+            var current = NSApplication.ActivationPolicy.regular
+            var requested: NSApplication.ActivationPolicy?
+            try requireAccessoryPolicy(current: { current }, set: {
+                requested = $0
+                current = $0
+                return setResult
+            })
+            try expect(requested == .accessory && current == .accessory, "the resulting policy determines success")
+        }
+        try rejects("console_unavailable") {
+            try requireAccessoryPolicy(current: { .regular }, set: { _ in false })
+        }
+    }
+
     private func authorizationOptions() throws {
         for (tag, locale) in [
             ("zh-CN", HelperLocale.zhHans), ("zh-SG", .zhHans), ("zh-Hans-CN", .zhHans), ("zh", .zhHans),
@@ -550,10 +576,12 @@ final class SelfTest {
 
         let encoded = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
         let key = try ControllerKey(encoded)
-        try expect(key.fingerprint == "21FE-31DF-A154" && ControllerKey.validFingerprint(key.fingerprint),
-                   "short fingerprint matches the first six SHA-256 bytes")
+        try expect(key.fingerprint == "21FE-31DF-A154-A261-626B-F854-046F-D227" && ControllerKey.validFingerprint(key.fingerprint),
+                   "fingerprint matches the first 16 SHA-256 bytes")
         try expect(try ControllerKey(encoded).fingerprint == key.fingerprint, "fingerprinting is deterministic")
-        for malformed in ["630d-CD29-66C4", "630D-CD29-66C", "630DCD2966C4", "ZZZZ-AAAA-BBBB"] {
+        for malformed in ["21FE-31DF-A154", key.fingerprint.lowercased(), String(key.fingerprint.dropLast()),
+                          key.fingerprint.replacingOccurrences(of: "D227", with: "ZZZZ"),
+                          key.fingerprint.replacingOccurrences(of: "-", with: "")] {
             try expect(!ControllerKey.validFingerprint(malformed), "fingerprint syntax rejects \(malformed)")
         }
         for encoded in [
@@ -568,6 +596,27 @@ final class SelfTest {
         try expect(ConsentMode.sessionOrPersistent.choices == [.deny, .allowSession, .allowPersistent],
                    "both approval choices follow deny")
 
+        let host = ProcessIdentity(pid: 456, uid: 501, seconds: 1, microseconds: 0, executable: "/opt/Example/Rome",
+                                   generation: ProcessGeneration(uniqueID: 1, idVersion: 0))
+        let signing = Peer.SigningSummary(identifier: "com.example.rome", teamID: "ABCDEFG123")
+        for locale in HelperLocale.allCases {
+            let claim = ControllerClaim(key: key, label: "Controller", scope: .remote)
+            let prompt = ConsentPrompt(locale: locale, mode: .sessionOnly, label: claim.label, controller: claim,
+                                       host: host, signingSummary: signing)
+            let text = prompt.informativeText
+            try expect(text.contains(locale[.executable]) && text.contains(host.executable) && text.contains("PID: 456") &&
+                       text.contains(locale[.signingIdentifier]) && text.contains(signing.identifier) &&
+                       text.contains(locale[.teamID]) && text.contains("ABCDEFG123"),
+                       "session-only consent shows the verified host identity in \(locale.rawValue)")
+            let fingerprint = [locale[.fingerprint], locale.keyFingerprint("21FE-31DF-A154-A261"),
+                               locale.keyFingerprint("626B-F854-046F-D227")].joined(separator: "\n")
+            try expect(text.contains(fingerprint), "consent displays all 128 fingerprint bits across two lines")
+        }
+        let unsigned = ConsentPrompt(locale: .en, mode: .sessionOnly, label: "Rome", controller: nil,
+                                     host: host, signingSummary: nil).informativeText
+        try expect(unsigned.contains(host.executable) && unsigned.contains("PID: 456") &&
+                   !unsigned.contains(HelperLocale.en[.signingIdentifier]), "host details survive missing signing metadata")
+
         let privateKey = Curve25519.Signing.PrivateKey()
         let claim = ControllerClaim(key: try ControllerKey(privateKey.publicKey.rawRepresentation.base64EncodedString()),
                                     label: "Controller", scope: .remote)
@@ -579,6 +628,84 @@ final class SelfTest {
         let signature = try privateKey.signature(for: message).base64EncodedString()
         try expect(challenge.verifies(signature, now: start + .seconds(59)), "proof works before expiration")
         try expect(!challenge.verifies(signature, now: start + .seconds(60)), "proof expires at the deadline")
+    }
+
+    private func trustedKeyStorage() throws {
+        func key() throws -> ControllerKey {
+            try ControllerKey(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString())
+        }
+        let first = try key()
+        let other = try key()
+        let remote = TrustedKeyRecord(key: first, label: "Remote", scope: .remote)
+        let local = TrustedKeyRecord(key: first, label: "Local", scope: .local)
+        let unrelated = TrustedKeyRecord(key: other, label: "Other", scope: .remote)
+        let items = MemoryKeychainItems()
+        let store = items.store
+
+        try expect(try store.list().isEmpty && store.lookup(publicKey: first.base64) == nil, "empty service and missing account")
+        try store.enroll(remote)
+        try store.enroll(unrelated)
+        let beforeLookup = items.calls.count
+        try expect(try store.lookup(publicKey: first.base64) == remote, "lookup returns one account's JSON record")
+        try expect(Array(items.calls.dropFirst(beforeLookup)) == [.copy(first.base64)], "lookup issues one account-scoped read")
+        try store.enroll(local)
+        try expect(Array(items.calls.suffix(2)) == [.add(first.base64), .update(first.base64)],
+                   "duplicate enrollment updates the existing account")
+        try expect(try store.lookup(publicKey: first.base64) == local && store.lookup(publicKey: other.base64) == unrelated,
+                   "scope replacement leaves the other key intact")
+
+        items.seed(account: "v1", data: try JSONEncoder().encode([remote]))
+        items.seed(account: try key().base64, data: try JSONEncoder().encode(unrelated))
+        try expect(try store.list().count == 2, "the list skips legacy or mismatched records")
+        try store.revoke(fingerprint: local.fingerprint)
+        try expect(items.calls.last == .delete(first.base64), "fingerprint revocation deletes only its full-key account")
+        try store.revoke(fingerprint: local.fingerprint)
+        try store.revoke(.publicKey(first.base64))
+        try expect(try store.lookup(publicKey: first.base64) == nil && store.lookup(publicKey: other.base64) == unrelated,
+                   "revoking a missing grant is idempotent")
+
+        let beforeDelete = items.calls.count
+        try store.revokeAll()
+        try expect(Array(items.calls.dropFirst(beforeDelete)) == [.delete(nil)], "revoke-all uses one service-wide delete")
+        try expect(try store.list().isEmpty, "revoke-all clears every account")
+        try store.revokeAll()
+        try expect(items.calls.last == .delete(nil), "revoke-all on an empty service succeeds")
+
+        let missingEntitlement = KeychainTrustedKeyStore(accessGroup: nil, items: items)
+        let beforeMissingEntitlement = items.calls.count
+        try rejects("key_store_unavailable") { try missingEntitlement.revokeAll() }
+        try expect(items.calls.count == beforeMissingEntitlement, "a missing access group never uses a wildcard")
+        let readFailure = MemoryKeychainItems(copyError: errSecInteractionNotAllowed).store
+        try rejects("key_store_unavailable") { _ = try readFailure.lookup(publicKey: first.base64) }
+        try rejects("key_store_unavailable") { _ = try readFailure.list() }
+
+        let revokedDuringUpdate = MemoryKeychainItems(removeOnUpdate: true)
+        try revokedDuringUpdate.store.enroll(remote)
+        try rejects("key_store_unavailable") { try revokedDuringUpdate.store.enroll(local) }
+        try expect(try revokedDuringUpdate.store.lookup(publicKey: first.base64) == nil, "a revoked duplicate is never added again")
+
+        let deleteFailure = MemoryKeychainItems(deleteError: errSecNotAvailable).store
+        try deleteFailure.enroll(remote)
+        try rejects("key_store_unavailable") { _ = try manageKeys(["--revoke-key", remote.fingerprint], store: deleteFailure) }
+        try rejects("key_store_unavailable") { _ = try manageKeys(["--revoke-keys"], store: deleteFailure) }
+        let admission = Admission()
+        var feedback: String?
+        var admissionSealed = false
+        var terminatingAtFeedback = true
+        revokeTrustedKeys(admission: admission, persistent: true, remove: {
+            admissionSealed = admission.status()["stop"] as? String == "stop_confirmed"
+            try deleteFailure.revokeAll()
+        }, reportFailure: {
+            feedback = $0
+            terminatingAtFeedback = admission.terminating
+        })
+        try expect(admissionSealed && feedback == "key_store_unavailable" && !terminatingAtFeedback && !admission.terminating,
+                   "menu revocation seals admission and reports a failed delete without exiting")
+        try expect(try deleteFailure.lookup(publicKey: first.base64) == remote, "failed revocation leaves the grant in the store")
+        let successfulRevocation = Admission()
+        revokeTrustedKeys(admission: successfulRevocation, persistent: true, remove: { try store.revokeAll() },
+                          reportFailure: { feedback = $0 })
+        try expect(successfulRevocation.terminating, "a successful menu revocation ends the persistent session")
     }
 
     private func require<T>(_ value: T?, _ message: String) throws -> T {
@@ -715,7 +842,7 @@ final class SelfTest {
         }
     }
 
-    private func withControllerSocket(_ path: String, store: MemoryTrustedKeyStore, consent: @escaping ConsentProvider,
+    private func withControllerSocket(_ path: String, store: KeychainTrustedKeyStore, consent: @escaping ConsentProvider,
                                       _ test: (Int32, Admission, SymmetricKey) throws -> Void) throws {
         let listener = try Listener(state: StateDirectory(path))
         defer { listener.removeSocket() }
@@ -753,7 +880,7 @@ final class SelfTest {
     }
 
     private func controllerTransport(_ path: String) throws {
-        let store = MemoryTrustedKeyStore()
+        let store = MemoryKeychainItems().store
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
         let fingerprint = try ControllerKey(publicKey).fingerprint
@@ -787,20 +914,21 @@ final class SelfTest {
             try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0, "controller socket closes")
         }
 
-        func hello(_ fd: Int32, _ key: SymmetricKey, _ options: [String: Any]) throws -> [String: Any] {
+        func hello(_ fd: Int32, _ key: SymmetricKey, _ options: [String: Any], method: String = "hello") throws -> [String: Any] {
             let nonce = Curve25519.Signing.PrivateKey().rawRepresentation.base64EncodedString()
             let host = String(getpid())
             let hostMessage = Data(["rome-computer-use-v1", "host", host, nonce].joined(separator: "\n").utf8)
             let mac = Data(HMAC<SHA256>.authenticationCode(for: hostMessage, using: key)).base64EncodedString()
             let params = options.merging(["nonce": nonce, "proof": mac]) { _, proven in proven }
-            let reply = try rpc(fd, "hello", params)
+            let reply = try rpc(fd, method, params)
             if let result = reply["result"] as? [String: Any] {
                 let pid = try require(result["helperPid"] as? pid_t, "helper PID")
                 let instance = try require(result["instance"] as? String, "instance")
                 let proof = try require(result["helperProof"] as? String, "helper proof")
                 let message = Data(["rome-computer-use-v1", "helper", host, String(pid), nonce, instance].joined(separator: "\n").utf8)
                 let expected = Data(HMAC<SHA256>.authenticationCode(for: message, using: key)).base64EncodedString()
-                try expect(pid == getpid() && proof == expected && result["proof"] as? String == proof, "verify the helper HMAC")
+                try expect(pid == getpid() && proof == expected, "verify the helper HMAC")
+                try expect(result["pid"] == nil && result["proof"] == nil, "hello returns only the canonical helper fields")
             }
             return reply
         }
@@ -846,9 +974,14 @@ final class SelfTest {
                        grant["challenge"] == nil, "hello without a controller directly grants a session")
         }
         try expect(legacy.prompts.count == 1 && legacy.prompts.first?.controller == nil &&
-                   legacy.prompts.first?.mode == .sessionOnly, "legacy hello uses session-only consent")
+                   legacy.prompts.first?.mode == .sessionOnly, "hello without a controller uses session-only consent")
+        try expect(try legacy.prompts.first?.host == ProcessIdentity.read(getpid()), "session consent receives the authenticated host")
 
         let invalid = ConsentProbe()
+        try withControllerSocket(path, store: store, consent: invalid.provider(.allowSession)) { fd, _, key in
+            try failed(hello(fd, key, [:], method: "handshake"), "authentication_failed")
+            try closed(fd)
+        }
         for options: [String: Any] in [
             ["consentMode": "persistent_only"], ["consentMode": "session_or_persistent"],
             ["controller": controller, "consentMode": "always"], ["controller": NSNull()],
@@ -862,7 +995,7 @@ final class SelfTest {
                 try closed(fd)
             }
         }
-        try expect(invalid.prompts.isEmpty && store.list().isEmpty, "invalid hellos never prompt or enroll")
+        try expect(invalid.prompts.isEmpty && (try store.list()).isEmpty, "invalid hellos never prompt or enroll")
 
         let denied = ConsentProbe()
         for scenario in ["tampered", "wrong-key", "wrong-mode", "wrong-scope", "malformed"] {
@@ -896,7 +1029,7 @@ final class SelfTest {
             try expect(try result(rpc(fd, "stop"))["stop"] as? String == "stop_confirmed", "pending authorization accepts stop")
             try closed(fd)
         }
-        try expect(denied.prompts.isEmpty && store.list().isEmpty, "failed or stopped proofs never prompt or enroll")
+        try expect(denied.prompts.isEmpty && (try store.list()).isEmpty, "failed or stopped proofs never prompt or enroll")
 
         let ephemeral = ConsentProbe()
         for choice in [ConsentMode.sessionOnly, .sessionOrPersistent] {
@@ -910,7 +1043,7 @@ final class SelfTest {
                 try closed(fd)
             }
         }
-        try expect(ephemeral.prompts.map(\.mode) == [.sessionOnly, .sessionOrPersistent] && store.list().isEmpty,
+        try expect(ephemeral.prompts.map(\.mode) == [.sessionOnly, .sessionOrPersistent] && (try store.list()).isEmpty,
                    "session approval never enrolls and a new connection prompts again")
         try withControllerSocket(path, store: store, consent: denied.provider(.allowPersistent)) { fd, _, key in
             _ = try challenge(fd, key)
@@ -925,7 +1058,7 @@ final class SelfTest {
             try failed(answer(fd, sign(pending, mode: .persistentOnly)), "consent_denied")
             try closed(fd)
         }
-        try expect(incompatible.prompts.first?.mode == .persistentOnly && store.list().isEmpty,
+        try expect(incompatible.prompts.first?.mode == .persistentOnly && (try store.list()).isEmpty,
                    "a provider cannot return a choice missing from the dialog")
 
         let enrollment = ConsentProbe()
@@ -949,7 +1082,7 @@ final class SelfTest {
             let pending = try challenge(fd, key, .sessionOnly, claim: renamed)
             try granted(answer(fd, sign(pending, mode: .sessionOnly)), auth: "persistent", enrolled: false)
             try expect(silent.prompts.isEmpty, "matching key and scope bypass the consent provider")
-            try expect(store.list() == [enrolled], "using a matching key preserves its original label and timestamp")
+            try expect(try store.list() == [enrolled], "using a matching key preserves its original label and timestamp")
             _ = try manageKeys(["--revoke-key", fingerprint], store: store)
             try closed(fd)
             try expect(admission.status()["reason"] as? String == "key_revoked", "revoking the key stops an active persistent session")
@@ -959,15 +1092,15 @@ final class SelfTest {
             try failed(answer(fd, sign(challenge(fd, key))), "consent_denied")
             try closed(fd)
         }
-        try expect(afterRevocation.prompts.count == 1 && store.list().isEmpty, "the revoked key prompts again")
+        try expect(afterRevocation.prompts.count == 1 && (try store.list()).isEmpty, "the revoked key prompts again")
 
         let scopeChange = ConsentProbe()
         let local = controller.merging(["scope": "local"]) { _, new in new }
-        _ = try store.enroll(enrolled)
+        try store.enroll(enrolled)
         try withControllerSocket(path, store: store, consent: scopeChange.provider(.allowPersistent)) { fd, admission, key in
             let pending = try challenge(fd, key, mode, claim: local)
             try granted(answer(fd, sign(pending, scope: "local")), auth: "persistent", enrolled: true, scope: "local")
-            try expect(scopeChange.prompts.first?.controller?.scope == .local && store.list().first?.scope == .local,
+            try expect(scopeChange.prompts.first?.controller?.scope == .local && (try store.list()).first?.scope == .local,
                        "a scope change requires explicit approval and replaces the record")
             _ = try manageKeys(["--revoke-keys"], store: store)
             try closed(fd)
@@ -977,18 +1110,18 @@ final class SelfTest {
             try failed(answer(fd, sign(challenge(fd, key, mode, claim: local), scope: "local")), "consent_denied")
             try closed(fd)
         }
-        try expect(afterRevocation.prompts.count == 2 && store.list().isEmpty, "all revoked keys require consent")
+        try expect(afterRevocation.prompts.count == 2 && (try store.list()).isEmpty, "all revoked keys require consent")
 
         for _ in 0..<32 {
             let rawKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
             let other = try ControllerKey(rawKey.base64EncodedString())
-            _ = try store.enroll(TrustedKeyRecord(key: other, label: "Other", scope: .local))
+            try store.enroll(TrustedKeyRecord(key: other, label: "Other", scope: .local))
         }
         try withControllerSocket(path, store: store, consent: enrollment.provider(.allowPersistent)) { fd, _, key in
             try failed(answer(fd, sign(challenge(fd, key))), "trusted_key_limit")
             try closed(fd)
         }
-        try expect(store.list().count == 32, "a failed persistent write closes the session without changing the store")
+        try expect(try store.list().count == 32, "a failed persistent write closes the session without changing the store")
     }
 
     private func execConnection(_ path: String, executable: String) throws {
@@ -1224,7 +1357,7 @@ final class SelfTest {
         }
         let nonceText = nonce.base64EncodedString()
         let proof = mode == .wrongProof ? Data(count: 32) : mac(["host", String(host.pid), nonceText])
-        try sendBytes(fd, Wire.frame(["v": 1, "id": "handshake", "method": "handshake", "params": [
+        try sendBytes(fd, Wire.frame(["v": 1, "id": "hello", "method": "hello", "params": [
             "nonce": nonceText, "proof": proof.base64EncodedString(),
         ]]))
         if mode.provider == "wait" {
@@ -1240,7 +1373,7 @@ final class SelfTest {
                 try expect(kill(pid, mode == .consentStop ? SIGUSR1 : SIGTERM) == 0, "signal during consent")
             }
         }
-        let reply = try response("handshake")
+        let reply = try response("hello")
         if mode == .wrongProof {
             try expect((reply["error"] as? [String: String])?["code"] == "authentication_failed", "refuse invalid proof")
         } else if mode.provider != "allow" {
@@ -1253,9 +1386,9 @@ final class SelfTest {
             print("Consent denial and shutdown verified for \(mode).")
         } else {
             let result = reply["result"] as? [String: Any]
-            guard let instance = result?["instance"] as? String, let proofString = result?["proof"] as? String,
+            guard let instance = result?["instance"] as? String, let proofString = result?["helperProof"] as? String,
                   let proof = Data(base64Encoded: proofString) else { throw Failure("self-test: handshake result") }
-            try expect(result?["pid"] as? Int32 == pid, "handshake pid")
+            try expect(result?["helperPid"] as? Int32 == pid, "handshake pid")
             try expect(proof == mac(["helper", String(host.pid), String(pid), nonceText, instance]), "helper proof")
             try expect(proof != mac(["host", String(host.pid), nonceText]), "proofs are role separated")
             for method in ["windows", "bind", "unbind", "observe", "act"] {
@@ -1308,6 +1441,98 @@ final class SelfTest {
             try expect(unlink(socket) == 0, "clean replacement test socket")
         } else {
             try expect(!FileManager.default.fileExists(atPath: socket), "helper cleans its socket")
+        }
+    }
+}
+
+final class MemoryKeychainItems: KeychainItems, @unchecked Sendable {
+    enum Call: Equatable {
+        case copy(String?), add(String), update(String), delete(String?)
+    }
+
+    private static let group = "TESTTEAMID.com.rome.computer-use"
+    // The lock covers the item data and operation log shared by server and test threads.
+    private let lock = NSLock()
+    private var records: [String: Data] = [:]
+    private var log: [Call] = []
+    private let copyError: OSStatus?
+    private let deleteError: OSStatus?
+    private let removeOnUpdate: Bool
+
+    init(copyError: OSStatus? = nil, deleteError: OSStatus? = nil, removeOnUpdate: Bool = false) {
+        self.copyError = copyError
+        self.deleteError = deleteError
+        self.removeOnUpdate = removeOnUpdate
+    }
+
+    var store: KeychainTrustedKeyStore { KeychainTrustedKeyStore(accessGroup: Self.group, items: self) }
+    var calls: [Call] { lock.withLock { log } }
+
+    func seed(account: String, data: Data) { lock.withLock { records[account] = data } }
+
+    private func scoped(_ query: [String: Any]) -> Bool {
+        query[kSecClass as String] as? String == kSecClassGenericPassword as String &&
+            query[kSecAttrService as String] as? String == "com.rome.computer-use.authorized-keys" &&
+            query[kSecAttrAccessGroup as String] as? String == Self.group &&
+            query[kSecUseDataProtectionKeychain as String] as? Bool == true &&
+            query[kSecAttrSynchronizable as String] as? Bool == false
+    }
+
+    func copy(_ query: [String: Any]) -> (OSStatus, Any?) {
+        lock.withLock {
+            guard scoped(query), query[kSecReturnData as String] as? Bool == true else { return (errSecParam, nil) }
+            let account = query[kSecAttrAccount as String] as? String
+            log.append(.copy(account))
+            if let copyError { return (copyError, nil) }
+            if let account {
+                guard let data = records[account] else { return (errSecItemNotFound, nil) }
+                return (errSecSuccess, data)
+            }
+            guard query[kSecMatchLimit as String] as? String == kSecMatchLimitAll as String,
+                  query[kSecReturnAttributes as String] as? Bool == true else { return (errSecParam, nil) }
+            if records.isEmpty { return (errSecItemNotFound, nil) }
+            let entries: [[String: Any]] = records.map { account, data in
+                [kSecAttrAccount as String: account, kSecValueData as String: data]
+            }
+            return (errSecSuccess, entries)
+        }
+    }
+
+    func add(_ item: [String: Any]) -> OSStatus {
+        lock.withLock {
+            guard scoped(item), let account = item[kSecAttrAccount as String] as? String,
+                  let data = item[kSecValueData as String] as? Data,
+                  item[kSecAttrAccessible as String] as? String == kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
+            else { return errSecParam }
+            log.append(.add(account))
+            guard records[account] == nil else { return errSecDuplicateItem }
+            records[account] = data
+            return errSecSuccess
+        }
+    }
+
+    func update(_ query: [String: Any], values: [String: Any]) -> OSStatus {
+        lock.withLock {
+            guard scoped(query), let account = query[kSecAttrAccount as String] as? String,
+                  values.count == 1, let data = values[kSecValueData as String] as? Data else { return errSecParam }
+            log.append(.update(account))
+            if removeOnUpdate { records.removeValue(forKey: account) }
+            guard records[account] != nil else { return errSecItemNotFound }
+            records[account] = data
+            return errSecSuccess
+        }
+    }
+
+    func delete(_ query: [String: Any]) -> OSStatus {
+        lock.withLock {
+            guard scoped(query) else { return errSecParam }
+            let account = query[kSecAttrAccount as String] as? String
+            log.append(.delete(account))
+            if let deleteError { return deleteError }
+            if let account { return records.removeValue(forKey: account) == nil ? errSecItemNotFound : errSecSuccess }
+            guard !records.isEmpty else { return errSecItemNotFound }
+            records.removeAll()
+            return errSecSuccess
         }
     }
 }

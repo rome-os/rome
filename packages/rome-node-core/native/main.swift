@@ -21,6 +21,13 @@ func signedApp() -> Bool {
         code.map { SecStaticCodeCheckValidity($0, SecCSFlags(rawValue: kSecCSStrictValidate), requirement) == errSecSuccess } == true
 }
 
+func requireAccessoryPolicy(current: () -> NSApplication.ActivationPolicy,
+                            set: (NSApplication.ActivationPolicy) -> Bool) throws {
+    guard current() != .accessory else { return }
+    _ = set(.accessory)
+    guard current() == .accessory else { throw Failure("console_unavailable") }
+}
+
 @MainActor
 func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent: ConsentProvider? = nil) throws -> Never {
     let state = try StateDirectory(path)
@@ -46,7 +53,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
     let session: DesktopSession?
     let consent: ConsentProvider
     if let app {
-        guard app.setActivationPolicy(.accessory) else { throw Failure("console_unavailable") }
+        try requireAccessoryPolicy(current: app.activationPolicy, set: app.setActivationPolicy)
         let ui = DesktopSession(admission: admission, store: store)
         session = ui
         consent = { prompt, canContinue in
@@ -69,8 +76,8 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
             code = 1
         }
         signals.forEach { $0.cancel() }
-        if let session { DispatchQueue.main.sync { session.close() } }
-        exit(code)
+        if let session { DispatchQueue.main.async { session.finish(code) } }
+        else { exit(code) }
     }
 
     if let app { app.run() }
@@ -100,7 +107,7 @@ do {
     }
     if arguments.count == 3, arguments[0] == "--self-test-server" {
         try MainActor.assumeIsolated {
-            try launch(path: arguments[1], desktop: false, store: MemoryTrustedKeyStore(),
+            try launch(path: arguments[1], desktop: false, store: MemoryKeychainItems().store,
                        testConsent: SelfTest.consentProvider(arguments[2], path: arguments[1]))
         }
     }
