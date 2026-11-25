@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
+import { discordInboundText } from "../../connections/kinds/discord/discord.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
@@ -409,6 +410,51 @@ describe("account code admission", () => {
     await deliver(message(annCode, { messageId: "m2" }));
     await deliver(message(boCode, { messageId: "m3", senderId: "T1:U8" }));
     expect(await answers(2)).toEqual([ACCOUNT_CODE_ANSWERS.used, ACCOUNT_CODE_ANSWERS.used]);
+  });
+
+  describe("a message as the Discord kind hands it on", () => {
+    // The kind shows a mention of Rome as `@Rome` and knows nothing of codes,
+    // so a code after a mention is not the whole text Chats gets.
+    const ROME_ID = "123";
+    const discord = (content: string, overrides: Partial<ChannelMessage> = {}) =>
+      message(
+        discordInboundText(content, (id) => (id === ROME_ID ? "Rome" : undefined)),
+        { channel: "discord", raw: { content }, ...overrides },
+      );
+
+    it("redeems a code sent alone in a direct message", async () => {
+      const { ctx, identity, deliver, heard, answers } = setup();
+      const ann = await identity.createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(ctx, ann.id);
+
+      await deliver(discord(code));
+
+      expect((await identity.personOf(ANN_SLACK))?.id).toBe(ann.id);
+      expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.added]);
+      expect(heard).toEqual([]);
+    });
+
+    for (const [where, overrides] of [
+      ["a shared chat", { chatId: "G1" as ChatId, thread: { kind: "group" as const } }],
+      ["a direct message", {}],
+    ] as const) {
+      it(`voids a code after a mention of Rome in ${where}, and hears the message as an ordinary one`, async () => {
+        const { ctx, identity, deliver, heard, sent, answers } = setup();
+        const ann = await identity.createPerson({ accounts: [] });
+        const { code } = await accountCodeIssued(ctx, ann.id);
+
+        const mentioned = discord(`<@${ROME_ID}> ${code}`, overrides);
+        await deliver(mentioned);
+        expect(mentioned.text).toBe(`@Rome ${code}`);
+        expect(heard).toEqual([mentioned]);
+        expect(await identity.personOf(ANN_SLACK)).toBeNull();
+        expect(sent).toEqual([]);
+
+        await deliver(discord(code, { messageId: "m2" }));
+        expect(await identity.personOf(ANN_SLACK)).toBeNull();
+        expect(await answers(1)).toEqual([ACCOUNT_CODE_ANSWERS.used]);
+      });
+    }
   });
 
   it("admits a code in a direct message whose connection was removed before the answer", async () => {
