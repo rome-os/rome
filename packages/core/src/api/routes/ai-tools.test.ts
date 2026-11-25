@@ -11,6 +11,7 @@ import { settings } from "../../db/schema.js";
 import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { asGuardian } from "../../test/signed-in.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../../webchat/privacy.js";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 
@@ -756,20 +757,22 @@ describe("a card's switch and Continue, and the notices", () => {
       };
       const switchCard = rs.fn(async () => {});
       const continueCard = rs.fn(async () => {});
-      const app = new Hono().route(
-        "/",
-        aiToolsRoutes({
-          ...deps,
-          webchatRepo: { getSession: async (id: string) => rows[id] ?? null } as never,
-          providerFailures: {
-            cards: async () => [{ messageId: "m1", chatId: "task" }],
-            outages: async () => [
-              { id: "o1", noticeChatId: CONCIERGE_CHAT_ID, chats: [{ chatId: "task" }] },
-            ],
-            switchCard,
-            continueCard,
-          } as never,
-        }),
+      const app = asGuardian(
+        new Hono().route(
+          "/",
+          aiToolsRoutes({
+            ...deps,
+            webchatRepo: { getSession: async (id: string) => rows[id] ?? null } as never,
+            providerFailures: {
+              cards: async () => [{ messageId: "m1", chatId: "task" }],
+              outages: async () => [
+                { id: "o1", noticeChatId: CONCIERGE_CHAT_ID, chats: [{ chatId: "task" }] },
+              ],
+              switchCard,
+              continueCard,
+            } as never,
+          }),
+        ),
       );
       const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
       const post = (path: string, body: unknown) =>
