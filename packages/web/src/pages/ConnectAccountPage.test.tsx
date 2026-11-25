@@ -113,6 +113,25 @@ describe("ConnectAccountPage", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("says the code expired after the computer slept through its time", async () => {
+    // While the computer sleeps, the monotonic clock stands still and the wall
+    // clock moves on.
+    rs.spyOn(performance, "now").mockReturnValue(1_000);
+    rs.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ["setInterval", "clearInterval", "Date"],
+    });
+    renderPage(issued("ROME-ABCDEF-GHJKMN", 600));
+    getCode();
+    expect(await screen.findByText("ROME-ABCDEF-GHJKMN")).toBeTruthy();
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(15 * 60_000);
+    });
+    expect(screen.getByRole("status").textContent).toBe("This code has expired.");
+    expect(screen.queryByText("ROME-ABCDEF-GHJKMN")).toBeNull();
+  });
+
   it("says a failed request failed, and lets the person ask again", async () => {
     renderPage(json({ error: "boom" }, 500), issued("ROME-ABCDEF-GHJKMN", 600));
     getCode();

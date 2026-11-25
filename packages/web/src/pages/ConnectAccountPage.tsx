@@ -12,11 +12,20 @@ import { PageBody, PageHeader, PageShell } from "@/shell/PageShell";
 /** Why asking for a code failed. */
 type Failure = "no-person" | "failed";
 
-/** A code and the `performance.now()` its response arrived at. */
+/** A code and when its response arrived, on the monotonic clock and on the
+ *  wall clock. */
 interface Received {
   issued: AccountCodeIssued;
-  arrivedAt: number;
+  arrivedAt: Clocks;
 }
+
+/** One moment read on both clocks: `performance.now()` and `Date.now()`. */
+interface Clocks {
+  monotonic: number;
+  wall: number;
+}
+
+const readClocks = (): Clocks => ({ monotonic: performance.now(), wall: Date.now() });
 
 async function requestCode(): Promise<Received | Failure> {
   try {
@@ -31,34 +40,44 @@ async function requestCode(): Promise<Received | Failure> {
     }
     if (!response.ok) return "failed";
     const issued = (await response.json()) as AccountCodeIssued;
-    return { issued, arrivedAt: performance.now() };
+    return { issued, arrivedAt: readClocks() };
   } catch {
     return "failed";
   }
 }
 
 /**
+ * Milliseconds gone since `from`, the larger of the two clocks' answers, and
+ * never below zero. The monotonic clock stands still while the computer
+ * sleeps, and the difference of two wall clock readings does not depend on
+ * how wrong the browser's clock is, so neither shows an expired code as live.
+ */
+function elapsedMs(from: Clocks, to: Clocks): number {
+  return Math.max(0, to.monotonic - from.monotonic, to.wall - from.wall);
+}
+
+/**
  * Seconds the received code has left, ticking each second, never below zero.
- * Counts from when the response arrived on the monotonic clock, so a browser
- * clock that is wrong does not change it.
+ * Counts from when the response arrived, so a browser clock that is wrong
+ * does not change it.
  */
 function useSecondsLeft(received: Received | null): number | null {
-  const [now, setNow] = useState(() => performance.now());
+  const [now, setNow] = useState(readClocks);
   useEffect(() => {
     if (received === null) return;
-    const deadline = received.arrivedAt + received.issued.expiresInSeconds * 1000;
+    const lifetimeMs = received.issued.expiresInSeconds * 1000;
     const timer = window.setInterval(() => {
-      const current = performance.now();
+      const current = readClocks();
       setNow(current);
-      if (current >= deadline) window.clearInterval(timer);
+      if (elapsedMs(received.arrivedAt, current) >= lifetimeMs) window.clearInterval(timer);
     }, 1000);
     return () => window.clearInterval(timer);
   }, [received]);
   if (received === null) return null;
   // A `now` read before the response arrived counts as no time gone, so the
   // first paint of a new code shows its full time.
-  const elapsedMs = Math.max(0, now - received.arrivedAt);
-  return Math.max(0, Math.ceil(received.issued.expiresInSeconds - elapsedMs / 1000));
+  const gone = elapsedMs(received.arrivedAt, now);
+  return Math.max(0, Math.ceil(received.issued.expiresInSeconds - gone / 1000));
 }
 
 function minutesAndSeconds(seconds: number): string {
