@@ -132,6 +132,8 @@ export async function guardianActor(db: DrizzleDb): Promise<SessionActor | undef
 }
 
 /** NULL owners belong to the guardian for listing, but never match an anonymous viewer. */
+export function sessionOwnerKey(actor: Exclude<SessionActor, { kind: "anonymous" }>): string;
+export function sessionOwnerKey(actor: SessionActor | undefined): string | null;
 export function sessionOwnerKey(actor: SessionActor | undefined): string | null {
   if (actor?.kind === "guardian") return "guardian";
   if (actor?.kind === "visitor") return `visitor:${actor.accountId}`;
