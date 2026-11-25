@@ -209,7 +209,7 @@ describe("romeToolPorts defer for a task chat", () => {
 });
 
 describe("romeToolPorts sessionTools", () => {
-  it("serves no connect_account where the session's own tools show a connect card", async () => {
+  it("serves no connect_service where the session's own tools show a connect card", async () => {
     const connectCard = {
       name: "connect_card",
       description: "",
@@ -238,7 +238,7 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.filter((tool) => tool.name === "show_card")).toEqual([ownCard]);
   });
 
-  it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
+  it("serves connect_service for device kinds alone beside the session's own connect card", async () => {
     const connectCard = {
       name: "connect_card",
       description: "",
@@ -254,18 +254,18 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "connect_card",
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
-    const connect = tools.find((tool) => tool.name === "connect_account")!;
+    const connect = tools.find((tool) => tool.name === "connect_service")!;
     const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
     expect(schema.properties.kind.enum).toEqual(["apple_health"]);
     const refused = await connect.handler({ kind: "github" });
     expect(refused.isError).toBe(true);
   });
 
-  it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
+  it("serves the tools Rome adds, then propose_routine and connect_service, to a turn with a speaker", async () => {
     const extra = {
       name: "extra",
       description: "",
@@ -277,7 +277,7 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "extra",
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
@@ -290,23 +290,23 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine, connect_account, share_location and show_card to a turn with no speaker", async () => {
+  it("serves only propose_routine, connect_service, share_location and show_card to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
     expect(tools.map((tool) => tool.name)).toEqual([
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves only connect_account, share_location and show_card, each refusing, where cards draw as plain text", async () => {
+  it("serves only connect_service, share_location and show_card, each refusing, where cards draw as plain text", async () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
     expect(tools.map((tool) => tool.name)).toEqual([
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);

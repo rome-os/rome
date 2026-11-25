@@ -3,7 +3,7 @@
 // The page reads the same status (`GET /api/devices`) and renames and removes
 // through the same service (`PATCH` and `DELETE /api/devices/:deviceId`); a
 // run is `core:device_run`'s (actions.ts). Turning on what a device offers is
-// the connect card's (`connect_account`). Vocabulary:
+// the connect card's (`connect_service`). Vocabulary:
 // docs/domains/connections.md#device-connection. How a tool is declared:
 // docs/concepts/actions.md#core-agent-tools.
 
@@ -35,7 +35,7 @@ const deviceId = z.string().describe("The device's id, from system:read_devices.
 export const readDevices = agentTool({
   name: READ_DEVICES_TOOL,
   description:
-    "See the guardian's devices, such as their phone and computers, whether each is online, and what each lets Rome read or do, such as Apple Health or the phone's status, with the operations system:run_on_device runs. Use it when the guardian asks which devices they have, whether a device is online, or what Rome can reach on a device, and before reading or doing something on a device. Turn on something a device offers with connect_account",
+    "See the guardian's devices, such as their phone and computers, whether each is online, and what each lets Rome read or do, such as Apple Health or the phone's status, with the operations system:run_on_device runs. Use it when the guardian asks which devices they have, whether a device is online, or what Rome can reach on a device, and before reading or doing something on a device. Turn on something a device offers with connect_service",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps, turn }) => {

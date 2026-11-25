@@ -3,9 +3,9 @@ import { deviceKinds, deviceKindState } from "../connections/connect-card.js";
 import { createLiveRoutes } from "../connections/device/live-route.js";
 import { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import { createTestDb } from "../test/db.js";
-import { connectAccountTools } from "./connect-account-tool.js";
+import { connectServiceTools } from "./connect-service-tool.js";
 
-describe("connect_account", () => {
+describe("connect_service", () => {
   // Where Rome Cloud is set up, as on a provisioned instance.
   beforeEach(() => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
@@ -15,13 +15,15 @@ describe("connect_account", () => {
   });
 
   const call = async (widgets: "card" | "plain_text", args: unknown, hasSpeaker = true) => {
-    const [tool] = connectAccountTools({ widgets, hasSpeaker });
+    const [tool] = connectServiceTools({ widgets, hasSpeaker });
     return { tool, result: await tool!.handler(args as Record<string, unknown>) };
   };
 
   it("ends the turn on the connect card where cards show", async () => {
     const { tool, result } = await call("card", { kind: "github" });
     expect(tool?.endsTurn).toBe(true);
+    // A model thread started before the rename may still call it so.
+    expect(tool?.formerNames).toEqual(["connect_account"]);
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
       pendingInteraction: true,
       render: { componentId: "connect-card", props: { kind: "github" }, builtin: true },
@@ -40,7 +42,7 @@ describe("connect_account", () => {
   });
 
   it("offers the device kinds devices reported, and shows their card", async () => {
-    const [tool] = connectAccountTools({
+    const [tool] = connectServiceTools({
       widgets: "card",
       hasSpeaker: true,
       devices: [{ kind: "apple_health", label: "Apple Health" }],
@@ -57,7 +59,7 @@ describe("connect_account", () => {
 
   it("says what each device kind is, and that no card brings a device online", async () => {
     for (const devicesOnly of [false, true]) {
-      const [tool] = connectAccountTools({
+      const [tool] = connectServiceTools({
         widgets: "card",
         hasSpeaker: true,
         devicesOnly,
@@ -87,7 +89,7 @@ describe("connect_account", () => {
   });
 
   it("keeps the plain kind description where no device reported a kind", async () => {
-    const [tool] = connectAccountTools({ widgets: "card", hasSpeaker: true });
+    const [tool] = connectServiceTools({ widgets: "card", hasSpeaker: true });
     const kind = (tool!.inputSchema as { properties: { kind: { description: string } } }).properties
       .kind.description;
     expect(kind).toBe("The kind of connection to connect.");
@@ -96,7 +98,7 @@ describe("connect_account", () => {
 
   it("answers that a device kind already works, read when called, with no card", async () => {
     let state: "working" | "off" = "off";
-    const [tool] = connectAccountTools({
+    const [tool] = connectServiceTools({
       widgets: "card",
       hasSpeaker: true,
       devicesOnly: true,
@@ -142,7 +144,7 @@ describe("connect_account", () => {
       health("dev-other", true);
       const routes = createLiveRoutes(devices);
       const toolFor = (askingDeviceId?: string) =>
-        connectAccountTools({
+        connectServiceTools({
           widgets: "card",
           hasSpeaker: true,
           devicesOnly: true,

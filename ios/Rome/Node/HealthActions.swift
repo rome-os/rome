@@ -339,7 +339,7 @@ struct HealthActions: Sendable {
     }
 
     static func off(_ device: DeviceKind) -> NodeActionResult {
-        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Where you talk with the user directly, offer the connect card: connect_account with kind \"apple_health\". In a task chat, stop and report that Apple Health needs connecting, so the chat that started the task offers it. Do not ask whether it is connected. The user turns it on in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
+        .failed(code: "live_off", message: "Live access to Apple Health is off on this \(device.name). Where you talk with the user directly, offer the connect card: connect_service with kind \"apple_health\". In a task chat, stop and report that Apple Health needs connecting, so the chat that started the task offers it. Do not ask whether it is connected. The user turns it on in the Rome app on the \(device.name): Settings → Connections → Apple Health.")
     }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {

@@ -104,7 +104,7 @@ describe("device actions", () => {
                 title: "Apple Health",
                 personal: true,
                 state: "off",
-                next: expect.stringContaining('connect_account and kind "apple_health"'),
+                next: expect.stringContaining('connect_service and kind "apple_health"'),
                 operations: [{ name: "health.stats", access: "read", description: "Aggregates." }],
               },
               {
@@ -305,7 +305,7 @@ describe("device actions", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with connect_account and kind "device" when connect_account lists it, otherwise ask the guardian to turn on Live access in the Rome app on their device.',
+        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with connect_service and kind "device" when connect_service lists it, otherwise ask the guardian to turn on Live access in the Rome app on their device.',
     });
     expect(calls).toEqual([]);
   });
@@ -366,7 +366,7 @@ describe("device actions", () => {
     );
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^live_off: .*connect_account and kind "device"/),
+      error: expect.stringMatching(/^live_off: .*connect_service and kind "device"/),
     });
     expect(calls).toEqual([]);
   });

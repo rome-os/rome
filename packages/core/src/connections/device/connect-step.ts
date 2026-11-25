@@ -6,7 +6,7 @@ import type { DeviceConnectionState } from "./report.js";
 
 export type ConnectStepTarget =
   | {
-      /** The connection's capability, the kind `connect_account` takes for it. */
+      /** The connection's capability, the kind `connect_service` takes for it. */
       kind: string;
       title: string;
       device: { name: string | null };
@@ -24,8 +24,8 @@ export function connectStep(target: ConnectStepTarget, before?: string): string 
   if (target.state === "not_connected") {
     const there = target.device ? "the device they are asking from" : "their device";
     return target.kind
-      ? `${then("offer")} to connect it: show the card with connect_account and kind ` +
-          `"${target.kind}" when connect_account lists it, otherwise ask the guardian to connect ` +
+      ? `${then("offer")} to connect it: show the card with connect_service and kind ` +
+          `"${target.kind}" when connect_service lists it, otherwise ask the guardian to connect ` +
           `it in the Rome app on ${there}.`
       : `${then("ask")} the guardian to connect it in the Rome app on ${there}.`;
   }
@@ -33,7 +33,7 @@ export function connectStep(target: ConnectStepTarget, before?: string): string 
   if (target.state === "off") {
     return (
       `Live access to ${on} is off. ${then("offer")} to turn it on: show the card with ` +
-      `connect_account and kind "${target.kind}" when connect_account lists it, otherwise ` +
+      `connect_service and kind "${target.kind}" when connect_service lists it, otherwise ` +
       "ask the guardian to turn on Live access in the Rome app on their device."
     );
   }
