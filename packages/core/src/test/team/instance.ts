@@ -21,8 +21,8 @@ import { stringify as stringifyYaml } from "yaml";
 import { AgentLoader } from "../../app-host/agent-loader.js";
 import { buildAgentConfig, buildTestDeps, createTestDb, type TestDeps } from "../helpers.js";
 import { seedBaseline } from "../seeds.js";
-import { guardianAuth, settings, visitorProfiles } from "../../db/schema.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import { guardianAuth, visitorProfiles } from "../../db/schema.js";
+import { backfillMembers } from "../../access/application/backfill-members.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { phoneBook } from "../../people/phone-book/index.js";
 import { feishu } from "../../connections/kinds/feishu/index.js";
@@ -167,15 +167,15 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       createdAt: new Date(0),
     });
   }
-  // Written before the deps are built: they load the list at boot as the daemon does.
-  await db.insert(settings).values({
-    key: DASHBOARD_ACCESS_SETTING_KEY,
-    value: { cloudEmailAccess: options.dashboardEmails },
-    updatedAt: new Date(0),
-  });
+  // The daemon's startup step: the members learn the guardian's seat before
+  // the deps load the dashboard snapshot from them.
+  await backfillMembers(db);
   const baseline = await seedBaseline(db);
 
   const testDeps = await buildTestDeps(db);
+  // The invited emails are saved as the Settings page saves them, so the
+  // invited person is a member.
+  await saveDashboardList(testDeps, options.dashboardEmails);
   // The daemon loads `main` and the Concierge from the installed first-party
   // apps, which this instance has none of. Agents that may call every action
   // stand in, so the routes that read a chat's agent answer.
@@ -303,10 +303,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       return { port: handle.port, server, close };
     },
     async restoreDashboardList() {
-      await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-        cloudEmailAccess: options.dashboardEmails,
-      });
-      await deps.dashboardAccessState.load(db);
+      await saveDashboardList(deps, options.dashboardEmails);
     },
     async close() {
       for (const server of servers) await server.close().catch(() => {});
@@ -320,6 +317,17 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       releaseNetwork();
     },
   };
+}
+
+// What the PUT /api/dashboard-access handler does with a list, short of
+// pushing it to Rome Cloud: the members become the persons behind `emails`
+// and the auth-edge snapshot is reloaded from them.
+async function saveDashboardList(
+  deps: Pick<TestDeps, "db" | "dashboardAccessStore" | "dashboardAccessState">,
+  emails: string[],
+): Promise<void> {
+  await deps.dashboardAccessStore.save({ cloudEmailAccess: emails });
+  await deps.dashboardAccessState.load(deps.db);
 }
 
 /**
