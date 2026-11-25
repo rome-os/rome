@@ -19,9 +19,6 @@ export interface RoutineActivationGate {
    * the target action, so it never schedules anything the agent couldn't
    * already schedule by calling `system:create_routine` directly. */
   canCallAction(name: string): "permitted" | "denied" | "unknown";
-  /** For an "unknown" `name` that is an action's name without its app, that
-   * action's full ID when the agent may call it. */
-  suggestAction?(name: string): string | undefined;
   /** The target action's input-schema check on the routine's args — the same
    * one `POST /api/routines` runs for the card's "Turn it on". Null when the
    * args fit. */
@@ -70,9 +67,8 @@ async function activateRoutineDraft(
   if (!routineKey) return fallback("this tool call has no id to key the routine by");
   const target = gate.canCallAction(draft.actionName);
   if (target === "unknown") {
-    const suggestion = gate.suggestAction?.(draft.actionName);
     return text(
-      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action${suggestion ? `, such as "${suggestion}"` : ""}.`,
+      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
       true,
     );
   }
