@@ -82,7 +82,7 @@ describe("connector actions when not logged in to Composio", () => {
   it.each([
     "github",
     "shopify",
-  ])("connector_connect sends the agent to core's connect_account for %s, never a Composio connect", async (toolkit) => {
+  ])("connector_connect sends the agent to core's connect_service for %s, never a Composio connect", async (toolkit) => {
     // Rome connects these itself; a Composio connect here would create a
     // second, unmanaged connection. The refusal comes before the sign-in
     // check, so it never falls through to connector_login.
@@ -90,7 +90,7 @@ describe("connector actions when not logged in to Composio", () => {
     const result = await action.execute({ toolkit });
     expect(result).toMatchObject({ status: "error" });
     if (result.status !== "error") throw new Error(`got ${result.status}`);
-    expect(result.error).toContain(`connect_account tool with {"kind":"${toolkit}"}`);
+    expect(result.error).toContain(`connect_service tool with {"kind":"${toolkit}"}`);
     expect(result.error).toContain("Settings → Connections");
     expect(result.error).not.toMatch(/connector_login/);
   });

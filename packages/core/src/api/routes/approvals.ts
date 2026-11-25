@@ -2,6 +2,8 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../access/session-actor.js";
+import { isOnTeam, type TeamActor } from "../../access/team.js";
+import { teamOnly } from "../../access/team-only.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -19,6 +21,11 @@ export function approvalCall(approval: { payload: unknown } | null | undefined):
   args?: Record<string, unknown>;
 } {
   return (approval?.payload ?? {}) as { actionName?: unknown; args?: Record<string, unknown> };
+}
+
+/** Who resolved an approval, as `resolvedBy` records it: the guardian's seat id, or "visitor:<account>". */
+export function resolverOf(actor: TeamActor): string {
+  return actor.kind === "guardian" ? actor.userId : `visitor:${actor.accountId}`;
 }
 
 type ApprovalResolution = {
@@ -77,7 +84,8 @@ export async function resolveApproval(
 async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve" | "reject") {
   const approvalId = c.req.param("id") as string;
   const actor = await currentSessionActor();
-  if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
+  if (!isOnTeam(actor, deps.dashboardAccessState))
+    return c.json({ error: "Guardian authentication required" }, 403);
   if (action === "approve") {
     const approval = await deps.approvalsRepo.findById(approvalId);
     if (approvalCall(approval).actionName === VAULT_APPLY_ACTION) {
@@ -87,25 +95,21 @@ async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve"
       );
     }
   }
-  const { status, body } = await resolveApproval(deps, approvalId, action, actor.userId);
+  const { status, body } = await resolveApproval(deps, approvalId, action, resolverOf(actor));
   return c.json(body, status);
 }
 
 export function approvalsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  const team = teamOnly(deps.dashboardAccessState);
+  app.use("/approvals", team);
+  app.use("/approvals/*", team);
   app.use("/approvals/*", async (c, next) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
-      return c.json({ error: "Guardian authentication required" }, 403);
     if (
       !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
       !isSameOriginMutationRequest(c.req.raw)
     )
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
-    await next();
-  });
-  app.use("/approvals", async (c, next) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
-      return c.json({ error: "Guardian authentication required" }, 403);
     await next();
   });
   app.get("/approvals", async (c) => {

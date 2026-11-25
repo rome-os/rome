@@ -706,7 +706,7 @@ const BUILTIN_CARDS: ReadonlyArray<{
   { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
   {
     componentId: "connect-card",
-    emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+    emittedBy: (tool) => tool === "connect_service" || tool.endsWith("__connect_service"),
   },
   {
     componentId: ADD_DEVICE_CARD_ID,
@@ -1181,7 +1181,7 @@ export interface WebchatRuntime {
    * `signal` aborts, it lets go of what it gathered and rejects.
    */
   sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
-  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
+  /** Whether `sendSpoken` would take a turn for `chatId`: one the ambient session actor may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
@@ -6068,10 +6068,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+  // A socket reaches the chats its person's dashboard opens, as the routes' gate allows.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))) {
+    const owner = await currentChatOwner();
+    if (!owner || !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
       return "Session not found";
     }
     return isConciergeChat(await deps.webchatRepo.getSession(chatId))

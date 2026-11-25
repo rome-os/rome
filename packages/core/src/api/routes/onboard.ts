@@ -15,6 +15,7 @@ import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { isInstanceLinked } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
+import { isOnTeam } from "../../access/team.js";
 import type { ApiDeps } from "../deps.js";
 
 export function onboardRoutes(deps: ApiDeps): Hono {
@@ -104,13 +105,13 @@ export function onboardRoutes(deps: ApiDeps): Hono {
 
   app.post("/onboard/complete", async (c) => {
     const token = getCookie(c, COOKIE_NAME);
-    if (!token) {
-      return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    const session = verifySession(token);
-    if (!session) {
-      return c.json({ error: "Invalid session" }, 401);
+    const visitor = resolveVisitorSession(c);
+    const visitorActor = visitor && { kind: "visitor" as const, ...visitor };
+    const signedIn =
+      (token !== undefined && verifySession(token) !== null) ||
+      isOnTeam(visitorActor ?? undefined, deps.dashboardAccessState);
+    if (!signedIn) {
+      return c.json({ error: token ? "Invalid session" : "Not authenticated" }, 401);
     }
 
     await deps.db.update(guardianAuth).set({ onboardingComplete: true });

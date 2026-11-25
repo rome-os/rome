@@ -1,19 +1,22 @@
 import { Hono } from "hono";
 import type { VoiceConversationInfo } from "@rome/api-types/voice-conversation";
-import { isGuardianSession } from "../../access/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
+import { isOnTeam } from "../../access/team.js";
 import { NO_VOICE_INPUT } from "../../voice-input/index.js";
 import type { ApiDeps } from "../deps.js";
 
 /**
- * Whether the guardian's dashboard offers a voice conversation. It follows
- * the microphone exactly: Rome Cloud lets this account use voice input.
+ * Whether the dashboard offers a voice conversation to the caller. It follows
+ * the microphone exactly: Rome Cloud lets the guardian's account use voice input.
  */
-export function voiceConversationRoutes(deps: Pick<ApiDeps, "voiceInput" | "speaker">): Hono {
+export function voiceConversationRoutes(
+  deps: Pick<ApiDeps, "voiceInput" | "speaker" | "dashboardAccessState">,
+): Hono {
   const app = new Hono();
   app.get("/voice-conversation", async (c) => {
     const available =
       Boolean(deps.speaker) &&
-      (await isGuardianSession()) &&
+      isOnTeam(await currentSessionActor(), deps.dashboardAccessState) &&
       (await (deps.voiceInput ?? NO_VOICE_INPUT).info()).available;
     return c.json({ available } satisfies VoiceConversationInfo);
   });

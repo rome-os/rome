@@ -393,8 +393,8 @@ export function authRoutes(deps: ApiDeps): Hono {
   // session cookie.
   //
   // Direct (non-probe) calls to `/auth/verify` have no `X-Forwarded-Uri` and
-  // fall through to the cookie check — effectively "am I logged in" with a
-  // userId-in-header response.
+  // fall through to the cookie check — effectively "is a team member signed
+  // in", with their identity in the response headers.
   app.get("/auth/verify", async (c) => {
     const rawForwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
     const forwardedUri = rawForwardedUri ? resolveRoutedUri(rawForwardedUri) : "";
@@ -496,13 +496,8 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    const session = getGuardianSession();
-    if (!session) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    applyGuardianHeaders(c, session);
-    return c.body(null, 204);
+    if (allowFullDashboardSession()) return c.body(null, 204);
+    return c.json({ error: "Unauthorized" }, 401);
   });
 
   return app;

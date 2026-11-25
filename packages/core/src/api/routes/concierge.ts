@@ -8,6 +8,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { currentSessionActor, sessionOwnerKey } from "../../access/session-actor.js";
+import { type DashboardAllowList, isOnTeam } from "../../access/team.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -48,14 +49,10 @@ export function streamEvents(
  * visitor's own. Null for anyone else, app users included.
  */
 export async function conciergeCallerOwner(
-  dashboardAccessState: Pick<ApiDeps["dashboardAccessState"], "isCloudEmailAllowed">,
+  dashboardAccessState: DashboardAllowList,
 ): Promise<string | null> {
   const actor = await currentSessionActor();
-  if (actor?.kind === "guardian") return sessionOwnerKey(actor);
-  if (actor?.kind === "visitor" && dashboardAccessState.isCloudEmailAllowed(actor.email)) {
-    return sessionOwnerKey(actor);
-  }
-  return null;
+  return isOnTeam(actor, dashboardAccessState) ? sessionOwnerKey(actor) : null;
 }
 
 export function conciergeRoutes(

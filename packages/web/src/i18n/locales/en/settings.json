@@ -9,6 +9,7 @@
   },
   "tabs": {
     "Appearance": "Appearance",
+    "Team": "Team",
     "Connections": "Connections",
     "Favors": "Favors",
     "Trust": "Trust",
@@ -623,20 +624,23 @@
     "startingPackPurchase": "Starting favor pack purchase"
   },
   "publicAccess": {
-    "title": "Access and privacy",
-    "dashboardEmails": {
-      "title": "Admins",
-      "description": "These accounts get the full dashboard.",
-      "accountCount_one": "{{count}} account",
-      "accountCount_other": "{{count}} accounts",
-      "inputLabel": "Add email address",
+    "title": "Access and privacy"
+  },
+  "team": {
+    "members": {
+      "title": "People",
+      "description": "People here can use this Rome as you do.",
+      "peopleCount_one": "{{count}} person",
+      "peopleCount_other": "{{count}} people",
+      "inputLabel": "Email of their Rome account",
       "placeholder": "name@example.com",
       "add": "Add",
-      "empty": "No accounts yet. Shared dashboard access stays off until you add one.",
+      "empty": "Only you can use this Rome until you add someone.",
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
-      "savedFlash": "Admins saved",
-      "saveFailedFallback": "Failed to save admins.",
+      "savedFlash": "Team saved",
+      "saveFailedFallback": "Failed to save the team.",
+      "loadFailed": "Failed to load the team",
       "tooMany": "Up to {{limit}} emails allowed",
       "emailTooLong": "Email longer than {{limit}} characters"
     }

@@ -264,7 +264,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives a dashboard admin every topic but the app catalog", async () => {
+  it("gives a dashboard admin every topic, the app catalog included", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -295,14 +295,8 @@ describe("live events WebSocket", () => {
     });
     await client.subscribe("chat.status");
     await client.subscribe("chat.session:sess-a");
-    client.send({ type: "subscribe", topic: "apps.catalog" });
-    expect(await client.next((m) => m.type === "error")).toEqual({
-      type: "error",
-      topic: "apps.catalog",
-      message: "Forbidden",
-    });
-    expect(activeSubscriptions).toBe(2);
-    expect(catalogHandlers.size).toBe(0);
+    await client.subscribe("apps.catalog");
+    expect(catalogHandlers.size).toBe(1);
   });
 
   it("gives a visitor their own Concierge rows and hides the guardian's Concierge chat", async () => {

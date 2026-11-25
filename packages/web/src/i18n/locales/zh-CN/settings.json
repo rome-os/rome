@@ -9,6 +9,7 @@
   },
   "tabs": {
     "Appearance": "外观",
+    "Team": "团队",
     "Connections": "连接",
     "Favors": "Favors",
     "Trust": "信任",
@@ -623,20 +624,23 @@
     "startingPackPurchase": "正在购买 favor 套餐"
   },
   "publicAccess": {
-    "title": "访问与隐私",
-    "dashboardEmails": {
-      "title": "管理员",
-      "description": "这些账号可以使用完整仪表盘。",
-      "accountCount_one": "{{count}} 个账号",
-      "accountCount_other": "{{count}} 个账号",
-      "inputLabel": "添加邮箱地址",
+    "title": "访问与隐私"
+  },
+  "team": {
+    "members": {
+      "title": "成员",
+      "description": "这里的人可以像你一样使用这个 Rome。",
+      "peopleCount_one": "{{count}} 人",
+      "peopleCount_other": "{{count}} 人",
+      "inputLabel": "对方 Rome 账号的邮箱",
       "placeholder": "name@example.com",
       "add": "添加",
-      "empty": "还没有账号。添加账号之前，共享仪表盘访问保持关闭。",
+      "empty": "添加成员之前，只有你能使用这个 Rome。",
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
-      "savedFlash": "管理员已保存",
-      "saveFailedFallback": "保存管理员失败。",
+      "savedFlash": "团队已保存",
+      "saveFailedFallback": "保存团队失败。",
+      "loadFailed": "加载团队失败",
       "tooMany": "最多允许 {{limit}} 个邮箱",
       "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }

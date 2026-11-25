@@ -10355,10 +10355,10 @@ describe("Webchat API", () => {
       }
     });
 
-    // Core's connect card: only connect_account may mount it, and core builds
+    // Core's connect card: only connect_service may mount it, and core builds
     // its description from the connection kind, so no tool can supply one.
     it.each([
-      ["persists", "connect_account", true],
+      ["persists", "connect_service", true],
       ["rejects", "connector:connector_connect", false],
     ])("%s a connect card emitted by the %s tool", async (_label, tool, persisted) => {
       const sessionId = `sess-connect-${tool}`;

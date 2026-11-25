@@ -73,13 +73,17 @@ function setup(refuse?: string) {
   };
   const states: string[] = [];
   const ended: Array<ConversationStopReason | null> = [];
+  const unsent: string[] = [];
   const heard: string[] = [];
   const captions: string[] = [];
   const conversation = startVoiceConversation(
     "concierge",
     {
       onState: (s) => states.push(s),
-      onEnded: (r) => ended.push(r),
+      onEnded: (r, words) => {
+        ended.push(r);
+        unsent.push(words);
+      },
       onHeard: (text) => heard.push(text),
       onCaption: (text) => captions.push(text),
     },
@@ -90,6 +94,7 @@ function setup(refuse?: string) {
     conversation,
     states,
     ended,
+    unsent,
     heard,
     captions,
     setAhead: (seconds: number) => {
@@ -243,6 +248,66 @@ describe("a voice conversation in the browser", () => {
     expect(c.ended).toEqual([null]);
     expect(c.micClosed()).toBe(true);
     expect(c.closedPlayer()).toBe(true);
+  });
+
+  it("hands back the words Rome heard and never sent, but not what may be Rome's own voice", async () => {
+    const c = setup();
+    await settle();
+    c.socket.open();
+    c.socket.say({ type: "heard", settled: "Book a table", pending: "" });
+    c.socket.say({ type: "turn", text: "Book a table" });
+    c.socket.say({ type: "heard", settled: "for four ", pending: "at seven" });
+    c.conversation.end();
+    expect(c.unsent).toEqual(["for four at seven"]);
+
+    // Heard just after Rome spoke, it may still be its own voice.
+    const after = setup();
+    await settle();
+    after.socket.open();
+    after.socket.say({ type: "state", state: "speaking" });
+    after.socket.say({ type: "state", state: "listening" });
+    after.socket.say({ type: "heard", settled: "the place you liked", pending: "" });
+    after.conversation.end();
+    expect(after.unsent).toEqual([""]);
+
+    // Spoken over, Rome stops: what it hears is the guardian's.
+    const over = setup();
+    await settle();
+    over.socket.open();
+    over.socket.say({ type: "state", state: "speaking" });
+    over.socket.say({ type: "heard", settled: "No wait, ", pending: "make it eight" });
+    over.socket.say({ type: "clear" });
+    over.socket.say({ type: "state", state: "listening" });
+    over.conversation.end();
+    expect(over.unsent).toEqual(["No wait, make it eight"]);
+
+    // While Rome speaks, what is heard may be its own voice.
+    const speaking = setup();
+    await settle();
+    speaking.socket.open();
+    speaking.socket.say({ type: "state", state: "speaking" });
+    speaking.socket.say({ type: "heard", settled: "Sure, for", pending: "" });
+    speaking.conversation.end();
+    expect(speaking.unsent).toEqual([""]);
+
+    // Begun while Rome thinks, the turn is the guardian's, even once Rome speaks.
+    const thinking = setup();
+    await settle();
+    thinking.socket.open();
+    thinking.socket.say({ type: "state", state: "thinking" });
+    thinking.socket.say({ type: "heard", settled: "", pending: "Actually" });
+    thinking.socket.say({ type: "state", state: "speaking" });
+    thinking.conversation.end();
+    expect(thinking.unsent).toEqual(["Actually"]);
+
+    // A conversation that stops on its own hands them back too.
+    const lost = setup();
+    await settle();
+    lost.socket.open();
+    lost.socket.say({ type: "heard", settled: "", pending: "Remind me" });
+    lost.socket.onclose?.();
+    expect(lost.ended).toEqual(["connection-lost"]);
+    expect(lost.unsent).toEqual(["Remind me"]);
   });
 
   it("gives the socket 10 s to open, then 3 s of quiet from Rome", async () => {

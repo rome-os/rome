@@ -8,11 +8,11 @@ import {
   connectCardUiFromProps,
   type DeviceKind,
   deviceKinds,
-  parseConnectAccountInput,
+  parseConnectServiceInput,
 } from "./connect-card.js";
 import type { DeviceConnection } from "./device/repository.js";
 
-/** What `connect_account` hands back for `kind`, where a card shows or not. */
+/** What `connect_service` hands back for `kind`, where a card shows or not. */
 async function toolOutput(
   kind: string,
   widgetsShow: boolean,
@@ -31,7 +31,7 @@ function deviceOutput(device: DeviceKind, widgetsShow: boolean, language?: strin
   });
 }
 
-describe("connect_account", () => {
+describe("connect_service", () => {
   // Where Rome Cloud is set up, as on a provisioned instance.
   beforeEach(() => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
@@ -63,12 +63,12 @@ describe("connect_account", () => {
   });
 
   it("refuses a kind Rome does not connect itself", () => {
-    expect(parseConnectAccountInput({ kind: "notion" })).toMatchObject({ ok: false });
-    expect(parseConnectAccountInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });
+    expect(parseConnectServiceInput({ kind: "notion" })).toMatchObject({ ok: false });
+    expect(parseConnectServiceInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });
   });
 });
 
-describe("connect_account for a device kind", () => {
+describe("connect_service for a device kind", () => {
   const row = (
     deviceId: string,
     capability: string,
@@ -117,12 +117,12 @@ describe("connect_account for a device kind", () => {
 
   it("parses a reported device kind, and lists it among the kinds when refusing", () => {
     const devices = [{ kind: "apple_health", label: "Apple Health" }];
-    expect(parseConnectAccountInput({ kind: "apple_health" }, devices)).toEqual({
+    expect(parseConnectServiceInput({ kind: "apple_health" }, devices)).toEqual({
       ok: true,
       kind: "apple_health",
       device: devices[0],
     });
-    const refused = parseConnectAccountInput({ kind: "location" }, devices);
+    const refused = parseConnectServiceInput({ kind: "location" }, devices);
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error).toContain('"apple_health"');
   });

@@ -35,7 +35,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     schema: inputSchema,
     execute: async ({ toolkit }) => {
       // Rome-brokered toolkits (GitHub, Slack, Shopify) are connected by Rome
-      // itself, through core's own connect_account tool and card. Never start a
+      // itself, through core's own connect_service tool and card. Never start a
       // Composio OAuth here: that would create a second, unmanaged connection.
       if (isRomeManagedToolkit(toolkit)) {
         return { status: "error", error: romeManagedConnectHint(toolkit) };
