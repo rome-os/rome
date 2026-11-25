@@ -1,7 +1,7 @@
 import type { DashboardIdentity } from "@rome/api-types";
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
-import { deleteCookie, getCookie } from "hono/cookie";
+import { deleteCookie } from "hono/cookie";
 import { eq } from "drizzle-orm";
 import { guardianAuth } from "../../db/schema.js";
 import {
@@ -10,11 +10,15 @@ import {
   issueGuardianSession,
   shouldSecureCookie,
   verifyPassword,
-  verifySession,
 } from "../../access/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
+import { mayEnter } from "../../access/entry.js";
+import {
+  readSessionActor,
+  type SessionActor,
+  sessionActorMaterial,
+} from "../../access/session-actor.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
-import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
@@ -235,30 +239,20 @@ function listsEmails(appId: string, deps: ApiDeps): boolean {
 }
 
 /** Asks Access whether a visitor, or someone not signed in, may open the app. */
-function appVisitorVerdict(appId: string, viewer: RomeAppViewer | null, deps: ApiDeps): Verdict {
+function appVisitorVerdict(
+  appId: string,
+  viewer: Pick<RomeAppViewer, "email"> | null,
+  deps: ApiDeps,
+): Verdict {
   const principal: Principal = viewer
     ? { kind: "visitor", email: viewer.email }
     : { kind: "anonymous" };
   return decide(deps.permissions.get(appId), principal);
 }
 
-function dashboardAccessResult(
-  viewer: RomeAppViewer | null,
-  deps: ApiDeps,
-): "allowed" | "unauthenticated" | "forbidden" | "not_configured" {
-  if (!deps.dashboardAccessState.hasSignInEmails()) return "not_configured";
-  if (!viewer) return "unauthenticated";
-  return deps.dashboardAccessState.isCloudEmailAllowed(viewer.email) ? "allowed" : "forbidden";
-}
-
-function applyViewerHeaders(c: Context, viewer: RomeAppViewer): void {
+function applyViewerHeaders(c: Context, viewer: Pick<RomeAppViewer, "accountId" | "email">): void {
   c.header("X-Rome-Visitor-Account-Id", viewer.accountId);
   c.header("X-Rome-Visitor-Email", viewer.email);
-}
-
-function resolveGuardianCookieSession(c: Context): { userId: string } | null {
-  const token = getCookie(c, COOKIE_NAME);
-  return token ? verifySession(token) : null;
 }
 
 function applyGuardianHeaders(c: Context, session: { userId: string }): void {
@@ -352,8 +346,11 @@ export function authRoutes(deps: ApiDeps): Hono {
   // cookies are present, mirroring the app-api caller resolution. Public path
   // (under /api/auth/*): an unauthenticated caller gets `anonymous`, not 401.
   app.get("/auth/me", async (c) => {
-    const session = await resolveGuardianSession(c, deps.db);
-    if (session) {
+    const actor = await mayEnter(
+      await readSessionActor(sessionActorMaterial(c), deps.db),
+      deps.dashboardAccessState,
+    );
+    if (actor?.kind === "guardian") {
       const guardianName = await deps.settingsRepo.get("guardianName");
       const [guardian] = await deps.db
         .select({ avatarUrl: guardianAuth.avatarUrl })
@@ -361,20 +358,19 @@ export function authRoutes(deps: ApiDeps): Hono {
         .limit(1);
       const identity: DashboardIdentity = {
         kind: "guardian",
-        userId: session.userId,
+        userId: actor.userId,
         displayName: typeof guardianName === "string" && guardianName ? guardianName : null,
         avatarUrl: guardian?.avatarUrl ?? null,
       };
       return c.json(identity);
     }
 
-    const visitor = resolveVisitorSession(c);
-    if (visitor && deps.dashboardAccessState.isCloudEmailAllowed(visitor.email)) {
+    if (actor) {
       const identity: DashboardIdentity = {
         kind: "visitor",
-        accountId: visitor.accountId,
-        email: visitor.email,
-        avatarUrl: visitor.avatarUrl ?? null,
+        accountId: actor.accountId,
+        email: actor.email,
+        avatarUrl: resolveVisitorSession(c)?.avatarUrl ?? null,
       };
       return c.json(identity);
     }
@@ -403,42 +399,31 @@ export function authRoutes(deps: ApiDeps): Hono {
     if (forwardedUri === null) {
       return c.json({ error: "Bad Request" }, 400);
     }
-    let guardianSession: { userId: string } | null | undefined;
-    const getGuardianSession = () => {
-      if (guardianSession === undefined) {
-        guardianSession = resolveGuardianCookieSession(c);
-      }
-      return guardianSession;
+    // Whom the request's cookies name. The probe's peer is the edge, never the
+    // person, so it proves no one.
+    let reading: Promise<SessionActor> | undefined;
+    const person = () =>
+      (reading ??= readSessionActor(
+        { ...sessionActorMaterial(c), peerAddress: undefined },
+        deps.db,
+      ));
+    const visitor = async () => {
+      const actor = await person();
+      return actor.kind === "visitor" ? actor : null;
     };
-    let visitorSession: RomeAppViewer | null | undefined;
-    const getVisitorSession = () => {
-      if (visitorSession === undefined) {
-        visitorSession = resolveVisitorSession(c);
-      }
-      return visitorSession;
-    };
-    const allowGuardianSession = () => {
-      const session = getGuardianSession();
-      if (!session) return false;
-      applyGuardianHeaders(c, session);
+    const allowFullDashboardSession = async () => {
+      const actor = await mayEnter(await person(), deps.dashboardAccessState);
+      if (!actor) return false;
+      if (actor.kind === "guardian") applyGuardianHeaders(c, actor);
+      else applyViewerHeaders(c, actor);
       return true;
     };
-    const allowDashboardCloudEmailSession = () => {
-      const viewer = getVisitorSession();
-      if (dashboardAccessResult(viewer, deps) !== "allowed" || !viewer) {
-        return false;
-      }
-      applyViewerHeaders(c, viewer);
-      return true;
-    };
-    const allowFullDashboardSession = () =>
-      allowGuardianSession() || allowDashboardCloudEmailSession();
 
     if (forwardedUri) {
       const assetAppId = decodeAppAssetAppId(forwardedUri);
       if (assetAppId && !isLinkPublicApp(assetAppId, deps) && listsEmails(assetAppId, deps)) {
-        if (allowFullDashboardSession()) return c.body(null, 204);
-        const viewer = getVisitorSession();
+        if (await allowFullDashboardSession()) return c.body(null, 204);
+        const viewer = await visitor();
         const result = appVisitorVerdict(assetAppId, viewer, deps);
         if (result === "allowed" && viewer) {
           applyViewerHeaders(c, viewer);
@@ -471,8 +456,8 @@ export function authRoutes(deps: ApiDeps): Hono {
 
       const appId = dashboardAppId ?? decodePublicAppApiAppId(forwardedUri);
       if (appId && listsEmails(appId, deps)) {
-        if (allowFullDashboardSession()) return c.body(null, 204);
-        const viewer = getVisitorSession();
+        if (await allowFullDashboardSession()) return c.body(null, 204);
+        const viewer = await visitor();
         const result = appVisitorVerdict(appId, viewer, deps);
         if (result === "allowed" && viewer) {
           applyViewerHeaders(c, viewer);
@@ -488,17 +473,13 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     if (forwardedUri && deps.dashboardAccessState.hasSignInEmails()) {
-      if (allowFullDashboardSession()) return c.body(null, 204);
-      const result = dashboardAccessResult(getVisitorSession(), deps);
-      if (result === "forbidden") {
-        return c.json({ error: "Forbidden" }, 403);
-      }
-      if (result === "unauthenticated") {
-        return c.json({ error: "Visitor authentication required" }, 401);
-      }
+      if (await allowFullDashboardSession()) return c.body(null, 204);
+      return (await visitor())
+        ? c.json({ error: "Forbidden" }, 403)
+        : c.json({ error: "Visitor authentication required" }, 401);
     }
 
-    if (allowFullDashboardSession()) return c.body(null, 204);
+    if (await allowFullDashboardSession()) return c.body(null, 204);
     return c.json({ error: "Unauthorized" }, 401);
   });
 

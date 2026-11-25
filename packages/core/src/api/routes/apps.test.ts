@@ -23,6 +23,7 @@ import {
   createSession,
   createVisitorSession,
 } from "../../access/auth.js";
+import { runWithSessionActor, sessionActorMiddleware } from "../../access/session-actor.js";
 import { settings } from "../../db/schema.js";
 import { inviteMember, memberContext } from "../../access/application/members.js";
 import * as appPublishing from "../../apps/publish.js";
@@ -180,6 +181,7 @@ describe("host app route authorization", () => {
       const setEnabled = rs.spyOn(deps.appManager, "setEnabled");
       const lookup = rs.spyOn(deps.appCatalog, "get");
       const app = new Hono()
+        .use("*", sessionActorMiddleware(deps.db))
         .route("/api", appsRoutes(deps))
         .route("/api", appApiDashboardRoutes(deps));
       for (const [headers, status] of [
@@ -225,6 +227,24 @@ describe("host app route authorization", () => {
     }
   });
 
+  it("takes the person the request's session already names", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalogWith(buildResolvedApp("shared-app")),
+      };
+      const app = new Hono().route("/api", appsRoutes(deps));
+      const details = () => app.request("/api/apps/shared-app");
+      const guardian = { kind: "guardian", userId: "guardian-1", via: "cookie" } as const;
+      expect((await runWithSessionActor(guardian, details)).status).toBe(200);
+      expect((await runWithSessionActor({ kind: "anonymous" }, details)).status).toBe(401);
+      expect((await details()).status).toBe(401);
+    } finally {
+      testDb.close();
+    }
+  });
+
   for (const caller of ["guardian", "dashboard visitor"] as const) {
     it(`allows a ${caller} to read details, enable, uninstall and publish`, async () => {
       const testDb = createTestDb();
@@ -249,7 +269,9 @@ describe("host app route authorization", () => {
           .spyOn(deps.appManager, "uninstall")
           .mockResolvedValue({ alreadyAbsent: true, purged: false, diskCleanupError: null });
         const setEnabled = rs.spyOn(deps.appManager, "setEnabled").mockResolvedValue();
-        const app = new Hono().route("/api", appsRoutes(deps));
+        const app = new Hono()
+          .use("*", sessionActorMiddleware(deps.db))
+          .route("/api", appsRoutes(deps));
         const headers = {
           Cookie:
             caller === "guardian"

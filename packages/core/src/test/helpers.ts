@@ -64,6 +64,7 @@ import { EventCatalog } from "../event-catalog.js";
 import { Permissions } from "../access/permissions.js";
 import { loadAppPermissions } from "../apps/app-permissions.js";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
+import { sessionActorMiddleware } from "../access/session-actor.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
@@ -1233,6 +1234,7 @@ export async function createAppLifecycleHarness(
       ...(options.romeCloudListings ? { romeCloudListings: options.romeCloudListings } : {}),
     };
     const router = new Hono();
+    router.use("*", sessionActorMiddleware(db));
     router.route("/", appsRoutes(apiDeps));
 
     return {

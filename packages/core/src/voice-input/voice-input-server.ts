@@ -16,7 +16,7 @@ import {
 } from "@rome/api-types/voice-input";
 import type { DrizzleDb } from "../db/index.js";
 import { gateUpgrade } from "../access/ws-guardian-gate.js";
-import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import type { DashboardAllowList } from "../access/team.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
@@ -63,7 +63,7 @@ export function attachVoiceInputServer(
   db: DrizzleDb,
   source: VoiceInputSource,
   usage: TranscriptionUsageSink | null,
-  dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess: DashboardAllowList,
   voiceTerms: () => Promise<string[]> = readVoiceTerms,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
