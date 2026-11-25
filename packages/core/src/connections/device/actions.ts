@@ -6,7 +6,7 @@
 // one needs no prompt or core change. Which device answers is the live
 // route's choice (live-route.ts). Concept: docs/domains/connections.md#device-connection.
 
-import { actionExecutionContext } from "../../apps/actions/context.js";
+import { runningTurn } from "../../apps/actions/agent-tool.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
 import {
@@ -57,14 +57,6 @@ export function registerDeviceActions(
   deps: DeviceActionDeps & { whoMayAsk: WhoMayAsk },
 ): void {
   const now = deps.now ?? Date.now;
-  const runningTurn = (): ToolTurn => {
-    const store = actionExecutionContext.getStore();
-    return {
-      ...(store?.actor ? { actor: store.actor } : {}),
-      ...(store?.audience ? { audience: store.audience } : {}),
-      ...(store?.channelContext ? { channelContext: store.channelContext } : {}),
-    };
-  };
   const refusalFor = (name: string, turn: ToolTurn) =>
     deps.whoMayAsk({ name, sideEffects: "read-only" }, turn);
 

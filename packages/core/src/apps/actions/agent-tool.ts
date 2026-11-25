@@ -142,7 +142,7 @@ function resultOf(outcome: ToolOutcome): ActionResult {
 }
 
 /** The turn of the running action, as the engine put it in the action's store. */
-function runningTurn(): ToolTurn {
+export function runningTurn(): ToolTurn {
   const store = actionExecutionContext.getStore();
   return {
     ...(store?.actor ? { actor: store.actor } : {}),
