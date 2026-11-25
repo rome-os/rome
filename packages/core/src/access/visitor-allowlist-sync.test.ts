@@ -440,7 +440,7 @@ describe("DashboardAccessStore", () => {
   it("leaves the members equal to the list after every save, in save order", async () => {
     const ctx = memberContext(testDb.db);
     await guardianSeatCreated(ctx, {
-      accounts: [{ platform: "email", accountId: "owner@example.com" }],
+      accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
     });
     const store = new DashboardAccessStore(new SettingsRepository(testDb.db), (emails) =>
       invitedEmailsSaved(ctx, emails),
@@ -456,9 +456,9 @@ describe("DashboardAccessStore", () => {
     ]);
 
     expect(await listed()).toEqual(["lin@example.com"]);
-    expect(await roleOfAccount(ctx, { platform: "email", accountId: "owner@example.com" })).toBe(
-      "guardian",
-    );
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "owner@example.com" }),
+    ).toBe("guardian");
     await store.save({ cloudEmailAccess: [] });
     expect(await listed()).toEqual([]);
   });
