@@ -5,6 +5,7 @@ import { createTestDb, type TestDb } from "../../test/db.js";
 import { GuardianRemovalError } from "../access.js";
 import {
   guardianSeatCreated,
+  guardianSeatRebound,
   invitedEmailsSaved,
   inviteMember,
   listMembers,
@@ -114,6 +115,42 @@ describe("members", () => {
           accounts: [OWNER_EMAIL, OWNER_CLOUD],
         },
       ]);
+    });
+  });
+
+  describe("guardianSeatRebound", () => {
+    const NEW_CLOUD = { platform: ROME_CLOUD_PLATFORM, accountId: "acct-new" };
+    const NEW_EMAIL = { platform: "email", accountId: "new@example.com" };
+    const SLACK = { platform: "slack", accountId: "T1:U1" };
+
+    it("takes the seat's old accounts from the guardian and gives it the new ones, keeping the rest", async () => {
+      const { ctx } = setup();
+      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD, OWNER_EMAIL, SLACK, ADA_EMAIL] });
+
+      const rebind = { previous: [OWNER_CLOUD, OWNER_EMAIL], current: [NEW_CLOUD, NEW_EMAIL] };
+      await guardianSeatRebound(ctx, rebind);
+      await guardianSeatRebound(ctx, rebind);
+
+      expect(await roleOfAccount(ctx, OWNER_CLOUD)).toBeNull();
+      expect(await roleOfAccount(ctx, OWNER_EMAIL)).toBeNull();
+      expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
+        [ADA_EMAIL, NEW_EMAIL, NEW_CLOUD, SLACK],
+      ]);
+    });
+
+    it("keeps an old account the seat still names, and leaves an old account another person holds", async () => {
+      const { ctx } = setup();
+      await guardianSeatCreated(ctx, { accounts: [OWNER_CLOUD, OWNER_EMAIL] });
+      await ctx.identity.removeAccount(OWNER_EMAIL);
+      const ada = await inviteMember(ctx, OWNER_EMAIL.accountId);
+
+      await guardianSeatRebound(ctx, {
+        previous: [OWNER_CLOUD, OWNER_EMAIL],
+        current: [OWNER_CLOUD],
+      });
+
+      expect(await roleOfAccount(ctx, OWNER_CLOUD)).toBe("guardian");
+      expect((await ctx.identity.personOf(OWNER_EMAIL))?.id).toBe(ada.id);
     });
   });
 

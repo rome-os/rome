@@ -99,6 +99,30 @@ export async function guardianSeatCreated(
 }
 
 /**
+ * Moves the guardian's person from the accounts the seat named before a
+ * rebind to the ones it names now: takes from the guardian each `previous`
+ * account that is not `current`, then gives it `current` as
+ * {@link guardianSeatCreated} does. An account the guardian holds that is not
+ * in `previous`, such as one carried from People's links, stays, even when it
+ * is an email other than the seat's. Safe to call again with the same input.
+ */
+export async function guardianSeatRebound(
+  ctx: MemberContext,
+  seat: { previous: Account[]; current: Account[] },
+): Promise<void> {
+  const { identity, access } = ctx;
+  const guardianId = (await access.members()).find((m) => m.role === "guardian")?.personId;
+  const kept = new Set(seat.current.map(accountKey));
+  for (const account of seat.previous) {
+    if (kept.has(accountKey(account))) continue;
+    if (guardianId && (await identity.personOf(account))?.id === guardianId) {
+      await identity.removeAccount(account);
+    }
+  }
+  await guardianSeatCreated(ctx, { accounts: seat.current });
+}
+
+/**
  * Makes the person behind `email` a member, creating the person with the
  * email as their only account when nobody holds it. A person who already has
  * a role keeps it, so the guardian's own email answers the guardian. Throws
@@ -191,6 +215,12 @@ async function giveGuardian(identity: Identity, guardianId: string, account: Acc
     });
   }
   await identity.addAccount(guardianId, account);
+}
+
+function accountKey(account: Account): string {
+  const id =
+    account.platform === "email" ? account.accountId.trim().toLowerCase() : account.accountId;
+  return `${account.platform}:${id}`;
 }
 
 function emailAccount(email: string): Account {

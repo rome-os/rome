@@ -146,6 +146,32 @@ describe("backfillMembers", () => {
     );
   });
 
+  it("gives the guardian a rebound seat's accounts and takes away none it cannot tell came from the seat", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    db.insert(links)
+      .values({ id: "l5", personId: "p-owner", platform: "email", accountId: "olive@example.com" })
+      .run();
+    await backfillMembers(db);
+
+    // The seat moved while its step beside the write failed.
+    db.update(guardianAuth).set({ accountId: "acct-new", email: "new@example.com" }).run();
+    await backfillMembers(db);
+
+    const guardian = (await listMembers(memberContext(db)))[0];
+    expect(guardian?.role).toBe("guardian");
+    expect(guardian?.accounts.map((a) => `${a.platform}:${a.accountId}`)).toEqual([
+      "email:new@example.com",
+      "email:olive@example.com",
+      "email:owner@example.com",
+      "rome-cloud:acct-new",
+      "rome-cloud:acct-owner",
+      "slack:T1:U1",
+      "telegram:42",
+    ]);
+  });
+
   it("writes nothing on an instance with no seat and no list", async () => {
     testDb = createTestDb();
     await backfillMembers(testDb.db);

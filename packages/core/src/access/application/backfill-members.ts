@@ -28,7 +28,10 @@ const log = createLogger("members-backfill");
  * Brings the members in line with the guardian's seat and the dashboard
  * allow-list, in one transaction. The guardian gets the seat's Rome Cloud
  * account and email and every account People links to its guardian person,
- * as an agent's own account excepted. Each listed email becomes a member,
+ * as an agent's own account excepted. It takes no account from the guardian:
+ * Identity cannot tell an earlier seat's email from the same address carried
+ * from People, so only the step beside a seat's rebind, which knows the old
+ * values, takes them away. Each listed email becomes a member,
  * with each Rome Cloud account a visitor signed in with under that email. A
  * member off the list is removed. An account that would land on two persons
  * stays with or moves to the guardian, and the run logs it.
