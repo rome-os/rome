@@ -5,7 +5,7 @@ import * as pty from "node-pty";
 import type { DrizzleDb } from "./db/index.js";
 import { mayEnter, type HeldEntry, holdEntry } from "./access/entry.js";
 import type { DashboardAllowList, TeamActor } from "./access/team.js";
-import { actorOfUpgrade, gateUpgrade } from "./access/ws-guardian-gate.js";
+import { gateUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";
@@ -92,8 +92,8 @@ export function attachTerminalServer(
     socket.on("error", () => socket.destroy());
 
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((caller) => {
-        if (!caller || socket.destroyed) return;
+      .then((actor) => {
+        if (!actor || socket.destroyed) return;
         const preset = url.searchParams.get("preset");
         if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
           rejectUpgrade(socket, 400, "Bad Request");
@@ -101,7 +101,7 @@ export function attachTerminalServer(
         }
 
         wss.handleUpgrade(req, socket, head, (ws) => {
-          wss.emit("connection", ws, req, preset, actorOfUpgrade(caller));
+          wss.emit("connection", ws, req, preset, actor);
         });
       })
       .catch((err) => {

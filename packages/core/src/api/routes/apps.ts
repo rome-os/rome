@@ -38,7 +38,7 @@ import {
 import { GUARDIAN_ONLY, type Permission } from "../../access/permissions.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
-import { resolveVisitorSession, visitorActor } from "../../access/visitor-session.js";
+import { resolveVisitorSession } from "../../access/visitor-session.js";
 import { mayEnter } from "../../access/entry.js";
 import {
   currentSessionActor,
@@ -512,7 +512,11 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const viewer = resolveVisitorSession(c);
     const guardianAccessAllowed = guardianSession !== null;
     const dashboardAccessAllowed =
-      (await mayEnter(visitorActor(viewer), deps.dashboardAccessState)) !== null;
+      viewer !== null &&
+      (await mayEnter(
+        { kind: "visitor", accountId: viewer.accountId, email: viewer.email },
+        deps.dashboardAccessState,
+      )) !== null;
     const callerAccessAllowed =
       accessMode !== "cloud-email" ||
       guardianAccessAllowed ||

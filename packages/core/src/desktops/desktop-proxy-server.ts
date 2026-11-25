@@ -4,7 +4,7 @@ import net from "node:net";
 import type { DrizzleDb } from "../db/index.js";
 import { mayEnter, type HeldEntry, holdEntry } from "../access/entry.js";
 import type { DashboardAllowList } from "../access/team.js";
-import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 
@@ -76,8 +76,8 @@ export function attachDesktopProxy(
     socket.on("close", teardown);
 
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((caller) => {
-        if (!caller || socket.destroyed) return;
+      .then((actor) => {
+        if (!actor || socket.destroyed) return;
         const target = desktopUpstream(rawUrl);
         if (!target) {
           rejectUpgrade(socket, 404, "Not Found");
@@ -85,7 +85,6 @@ export function attachDesktopProxy(
         }
         const { port, path: targetPath } = target;
         const upstreamHost = `${host}:${port}`;
-        const actor = actorOfUpgrade(caller);
         const held = holdEntry(
           async () => (await mayEnter(actor, dashboardAccess)) !== null,
           teardown,

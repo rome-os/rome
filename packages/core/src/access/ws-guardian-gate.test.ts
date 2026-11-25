@@ -130,7 +130,7 @@ describe("gateUpgrade without a dashboard allow-list", () => {
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
-  it("admits a dashboard admin only when dashboard access is passed", async () => {
+  it("admits a member from the dashboard's own origin, and no one else's visitor session", async () => {
     const dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
     const visitor = (email: string, origin = "https://rome.example") =>
@@ -146,7 +146,7 @@ describe("gateUpgrade without a dashboard allow-list", () => {
     expect(
       await gateUpgrade(visitor("visitor@example.com"), allowed.socket, testDb.db, dashboardAccess),
     ).toEqual({
-      kind: "dashboard-admin",
+      kind: "visitor",
       accountId: "account-1",
       email: "visitor@example.com",
     });

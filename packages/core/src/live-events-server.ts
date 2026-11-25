@@ -35,11 +35,11 @@ import {
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
 import { mayEnter, holdEntry } from "./access/entry.js";
-import type { DashboardAllowList } from "./access/team.js";
+import type { DashboardAllowList, TeamActor } from "./access/team.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
 import type { DashboardActivity } from "./lib/dashboard-activity.js";
-import { actorOfUpgrade, gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
+import { gateUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 
@@ -128,9 +128,9 @@ export function attachLiveEventsServer(
     socket.on("error", () => socket.destroy());
 
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((caller) => {
-        if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, caller, isPhone(req)));
+      .then((actor) => {
+        if (!actor || socket.destroyed) return;
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, actor, isPhone(req)));
       })
       .catch((err) => {
         log.error("live events upgrade failed", { error: errorMessage(err) });
@@ -139,7 +139,7 @@ export function attachLiveEventsServer(
   };
   httpServer.on("upgrade", onUpgrade);
 
-  function serve(ws: WebSocket, caller: UpgradeCaller, phone: boolean): void {
+  function serve(ws: WebSocket, actor: TeamActor, phone: boolean): void {
     // An entry exists from the subscribe message on. `unsubscribe` stays null
     // while the topic check is pending, and the identity check after it drops
     // a result whose topic was unsubscribed (or resubscribed) meanwhile.
@@ -157,13 +157,12 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    const actor = actorOfUpgrade(caller);
     const entry = holdEntry(
       async () => (await mayEnter(actor, dashboardAccess)) !== null,
       () => ws.close(CLOSE_POLICY_VIOLATION, "Forbidden"),
     );
     // Whose Concierge todo list and private chats this socket may read.
-    const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
+    const owner = actor.kind === "guardian" ? "guardian" : `visitor:${actor.accountId}`;
     // A dashboard holds back only its own person's pushes; a phone's
     // activity frames count for nothing.
     const activity = phone ? undefined : dashboardActivity?.open(owner);

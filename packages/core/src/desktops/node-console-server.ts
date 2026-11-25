@@ -17,7 +17,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { DrizzleDb } from "../db/index.js";
 import { mayEnter, holdEntry } from "../access/entry.js";
 import type { DashboardAllowList, TeamActor } from "../access/team.js";
-import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 
@@ -44,9 +44,8 @@ export function attachNodeConsoleServer(
     if (url.pathname !== NODE_CONSOLE_PATH) return;
     socket.on("error", () => socket.destroy());
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((caller) => {
-        if (!caller || socket.destroyed) return;
-        const actor = actorOfUpgrade(caller);
+      .then((actor) => {
+        if (!actor || socket.destroyed) return;
         wss.handleUpgrade(req, socket, head, (ws) => serve(ws, actor));
       })
       .catch((err) => {

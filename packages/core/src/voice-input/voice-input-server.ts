@@ -17,7 +17,7 @@ import {
 import type { DrizzleDb } from "../db/index.js";
 import { mayEnter, holdEntry } from "../access/entry.js";
 import type { DashboardAllowList } from "../access/team.js";
-import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 import type { TranscriptionUsageSink } from "../usage/recorder.js";
@@ -80,9 +80,8 @@ export function attachVoiceInputServer(
       return;
     }
     void gateUpgrade(req, socket, db, dashboardAccess)
-      .then((caller) => {
-        if (!caller || socket.destroyed) return;
-        const actor = actorOfUpgrade(caller);
+      .then((actor) => {
+        if (!actor || socket.destroyed) return;
         const mayStillEnter = async () => (await mayEnter(actor, dashboardAccess)) !== null;
         wss.handleUpgrade(req, socket, head, (ws) =>
           serve(ws, { source, usage, voiceTerms, mayStillEnter }),
