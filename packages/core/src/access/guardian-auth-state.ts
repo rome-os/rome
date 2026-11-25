@@ -121,19 +121,13 @@ export async function setGuardianAccount(
   await guardianFollowsSeat(db, guardian);
 }
 
-// The members' guardian holds the seat's accounts, so a seat moved to another
-// Rome Cloud account or email takes the guardian's person with it at once: the
-// old account would otherwise still answer guardian. Only the seat's values
+// The members' guardian holds the seat's email, so a seat moved to another
+// email takes the guardian's person with it at once: the old email would
+// otherwise still answer guardian. Only the seat's values
 // from before the write are taken away, because Identity cannot tell a seat's
 // email from the same address carried from People.
-async function guardianFollowsSeat(
-  db: DrizzleDb,
-  before: { accountId: string | null; email: string | null },
-): Promise<void> {
-  const [after] = await db
-    .select({ accountId: guardianAuth.accountId, email: guardianAuth.email })
-    .from(guardianAuth)
-    .limit(1);
+async function guardianFollowsSeat(db: DrizzleDb, before: { email: string | null }): Promise<void> {
+  const [after] = await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1);
   const previous = seatAccounts(before);
   const current = seatAccounts(after ?? {});
   const unchanged =

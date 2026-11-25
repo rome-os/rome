@@ -92,7 +92,7 @@ describe("Dashboard-access API", () => {
   it("saves the members, then hands the snapshot and Rome Cloud the same emails, the guardian's left out", async () => {
     const ctx = memberContext(testDb.db);
     await guardianSeatCreated(ctx, {
-      accounts: [{ platform: "email", accountId: "owner@example.com" }],
+      accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
     });
     const pushed: Array<{ emails: readonly string[]; revision: number }> = [];
     deps.visitorAllowListSync.push = (list) => void pushed.push(list);

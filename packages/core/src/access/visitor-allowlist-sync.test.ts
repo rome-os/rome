@@ -441,7 +441,7 @@ describe("DashboardAccessStore", () => {
   it("leaves the members equal to the list after every save, in save order", async () => {
     const ctx = memberContext(testDb.db);
     await guardianSeatCreated(ctx, {
-      accounts: [{ platform: "email", accountId: "owner@example.com" }],
+      accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
     });
     const store = new DashboardAccessStore(new SettingsRepository(testDb.db), testDb.db);
     const listed = async () =>
@@ -455,9 +455,9 @@ describe("DashboardAccessStore", () => {
     ]);
 
     expect(await listed()).toEqual(["lin@example.com"]);
-    expect(await roleOfAccount(ctx, { platform: "email", accountId: "owner@example.com" })).toBe(
-      "guardian",
-    );
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "owner@example.com" }),
+    ).toBe("guardian");
     await store.save({ cloudEmailAccess: [] });
     expect(await listed()).toEqual([]);
   });
@@ -478,9 +478,9 @@ describe("DashboardAccessStore", () => {
 
     expect(await store.read()).toEqual(before);
     const ctx = memberContext(testDb.db);
-    expect(await ctx.identity.personOf({ platform: "email", accountId: "lin@example.com" })).toBe(
-      null,
-    );
+    expect(
+      await ctx.identity.personOf({ platform: "rome-cloud-email", accountId: "lin@example.com" }),
+    ).toBe(null);
   });
 });
 

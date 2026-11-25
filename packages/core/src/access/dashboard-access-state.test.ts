@@ -32,7 +32,7 @@ describe("DashboardAccessState", () => {
     try {
       const ctx = memberContext(testDb.db);
       await guardianSeatCreated(ctx, {
-        accounts: [{ platform: "email", accountId: "owner@example.com" }],
+        accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
       });
       await inviteMember(ctx, "Lin@Example.com");
       await inviteMember(ctx, "ada@example.com");

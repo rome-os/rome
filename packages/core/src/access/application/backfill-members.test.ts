@@ -108,20 +108,20 @@ describe("backfillMembers", () => {
         name: "Olive",
         avatarUrl: "https://example.com/owner.png",
         role: "guardian",
-        accounts: [
-          "email:owner@example.com",
-          "rome-cloud:acct-owner",
-          "slack:T1:U1",
-          "telegram:42",
-        ],
+        accounts: ["rome-cloud-email:owner@example.com", "slack:T1:U1", "telegram:42"],
       },
       {
         name: null,
         avatarUrl: null,
         role: "member",
-        accounts: ["email:ada@example.com", "rome-cloud:acct-ada"],
+        accounts: ["rome-cloud-email:ada@example.com"],
       },
-      { name: null, avatarUrl: null, role: "member", accounts: ["email:lin@example.com"] },
+      {
+        name: null,
+        avatarUrl: null,
+        role: "member",
+        accounts: ["rome-cloud-email:lin@example.com"],
+      },
     ]);
 
     const first = snapshot(db);
@@ -142,12 +142,9 @@ describe("backfillMembers", () => {
     await backfillMembers(db);
 
     const ctx = memberContext(db);
-    expect(await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" })).toBe(
-      "member",
-    );
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-ada" })).toBe(
-      "member",
-    );
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "ada@example.com" }),
+    ).toBe("member");
   });
 
   it("changes nothing on members an older build already brought in line with the list", async () => {
@@ -183,14 +180,20 @@ describe("backfillMembers", () => {
     let state = await restart();
     expect(state.isCloudEmailAllowed("kim@example.com")).toBe(true);
     expect(
-      await roleOfAccount(memberContext(db), { platform: "email", accountId: "kim@example.com" }),
+      await roleOfAccount(memberContext(db), {
+        platform: "rome-cloud-email",
+        accountId: "kim@example.com",
+      }),
     ).toBe("member");
 
     await store.save({ cloudEmailAccess: ["lin@example.com", "kim@example.com"] });
     state = await restart();
     expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
     expect(
-      await roleOfAccount(memberContext(db), { platform: "email", accountId: "ada@example.com" }),
+      await roleOfAccount(memberContext(db), {
+        platform: "rome-cloud-email",
+        accountId: "ada@example.com",
+      }),
     ).toBeNull();
     expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
 
@@ -204,7 +207,7 @@ describe("backfillMembers", () => {
     ).toEqual(["ada@example.com", "lin@example.com", "owner@example.com"]);
   });
 
-  it("gives the guardian no Rome Cloud account a visitor signed in with under the guardian's email", async () => {
+  it("gives the guardian's person the avatar a visitor signed in with under the guardian's listed email", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -219,37 +222,49 @@ describe("backfillMembers", () => {
 
     await backfillMembers(db);
 
-    const ctx = memberContext(db);
-    expect(
-      await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-visitor" }),
-    ).toBeNull();
-    expect((await listMembers(ctx))[0]?.person.avatarUrl).toBe("https://example.com/owner.png");
+    const listed = await listMembers(memberContext(db));
+    expect(listed[0]?.role).toBe("guardian");
+    expect(listed[0]?.person.avatarUrl).toBe("https://example.com/visitor.png");
+    expect(db.select().from(identities).all()).toHaveLength(3);
   });
 
-  it("takes from the guardian every Rome Cloud account but the seat's, and a second run changes nothing", async () => {
+  it("takes every stored Rome Cloud id from every person, and a second run changes nothing", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
     await backfillMembers(db);
     const ctx = memberContext(db);
-    const guardianId = (await listMembers(ctx))[0]?.person.id ?? "";
-    // Added by a sign-in under the guardian's email before sign-ins skipped the guardian.
-    await ctx.identity.addAccount(guardianId, { platform: "rome-cloud", accountId: "acct-stray" });
+    const [guardian, ada] = await listMembers(ctx);
+    // Stored by an earlier build as accounts.
+    await ctx.identity.addAccount(guardian?.person.id ?? "", {
+      platform: "rome-cloud",
+      accountId: "acct-owner",
+    });
+    await ctx.identity.addAccount(ada?.person.id ?? "", {
+      platform: "rome-cloud",
+      accountId: "acct-ada",
+    });
+    await ctx.identity.createPerson({
+      accounts: [{ platform: "rome-cloud", accountId: "acct-stray" }],
+    });
 
     await backfillMembers(db);
 
     expect(
-      await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-stray" }),
-    ).toBeNull();
-    expect(await roleOfAccount(ctx, { platform: "rome-cloud", accountId: "acct-owner" })).toBe(
-      "guardian",
-    );
+      db.select().from(identityAccounts).where(eq(identityAccounts.platform, "rome-cloud")).all(),
+    ).toEqual([]);
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "owner@example.com" }),
+    ).toBe("guardian");
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "ada@example.com" }),
+    ).toBe("member");
     const first = snapshot(db);
     await backfillMembers(db);
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("gives the guardian a rebound seat's accounts and takes away only the Rome Cloud account the seat no longer names", async () => {
+  it("gives the guardian a rebound seat's email and takes no email away", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -265,13 +280,80 @@ describe("backfillMembers", () => {
     const guardian = (await listMembers(memberContext(db)))[0];
     expect(guardian?.role).toBe("guardian");
     expect(guardian?.accounts.map((a) => `${a.platform}:${a.accountId}`)).toEqual([
-      "email:new@example.com",
       "email:olive@example.com",
-      "email:owner@example.com",
-      "rome-cloud:acct-new",
+      "rome-cloud-email:new@example.com",
+      "rome-cloud-email:owner@example.com",
       "slack:T1:U1",
       "telegram:42",
     ]);
+  });
+
+  it("moves each member's email account to the sign-in platform, and a second run changes nothing", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    // An earlier build invited members under `email`.
+    const ctx = memberContext(db);
+    const ada = await ctx.identity.createPerson({
+      avatarUrl: "https://example.com/ada.png",
+      accounts: [{ platform: "email", accountId: "ada@example.com" }],
+    });
+    await ctx.access.grant(ada.id, "member");
+
+    await backfillMembers(db);
+
+    expect(
+      await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" }),
+    ).toBeNull();
+    const member = (await listMembers(ctx)).find((m) => m.person.id === ada.id);
+    expect(member).toEqual({
+      person: { id: ada.id, name: null, avatarUrl: "https://example.com/ada.png" },
+      role: "member",
+      accounts: [{ platform: "rome-cloud-email", accountId: "ada@example.com" }],
+    });
+    const first = snapshot(db);
+    await backfillMembers(db);
+    expect(snapshot(db)).toEqual(first);
+  });
+
+  it("takes the seat's address as an email account from the guardian, unless People links it", async () => {
+    for (const linkedByPeople of [false, true]) {
+      testDb?.close();
+      testDb = createTestDb();
+      const { db } = testDb;
+      seed(db);
+      const ctx = memberContext(db);
+      // An earlier build gave the guardian the seat's email under `email`.
+      const owner = await ctx.identity.createPerson({
+        accounts: [{ platform: "email", accountId: "owner@example.com" }],
+      });
+      await ctx.access.grant(owner.id, "guardian");
+      if (linkedByPeople) {
+        db.insert(links)
+          .values({
+            id: "l5",
+            personId: "p-owner",
+            platform: "email",
+            accountId: "Owner@Example.com",
+          })
+          .run();
+      }
+
+      await backfillMembers(db);
+
+      const accounts = (await listMembers(ctx))[0]?.accounts.map(
+        (a) => `${a.platform}:${a.accountId}`,
+      );
+      expect(accounts).toEqual([
+        ...(linkedByPeople ? ["email:owner@example.com"] : []),
+        "rome-cloud-email:owner@example.com",
+        "slack:T1:U1",
+        "telegram:42",
+      ]);
+      const first = snapshot(db);
+      await backfillMembers(db);
+      expect(snapshot(db)).toEqual(first);
+    }
   });
 
   it("writes nothing on an instance with no seat and no list", async () => {

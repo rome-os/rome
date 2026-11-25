@@ -6,6 +6,7 @@ import {
   type MemberContext,
   memberContext,
   memberEmails,
+  ROME_CLOUD_EMAIL_PLATFORM,
   roleOfAccount,
 } from "./application/members.js";
 import {
@@ -113,7 +114,7 @@ export class DashboardAccessStore {
     const normalized = normalizeVisitorEmail(email);
     if (!normalized || !accountId) return Promise.resolve(false);
     return this.serialize(async () => {
-      const account = { platform: "email", accountId: normalized };
+      const account = { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: normalized };
       if ((await roleOfAccount(this.members, account)) !== "member") return false;
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
       const visitorAccounts = readVisitorAccounts(stored);
