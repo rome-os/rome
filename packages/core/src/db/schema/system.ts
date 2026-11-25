@@ -190,6 +190,25 @@ export const identityAccounts = sqliteTable(
 );
 
 /**
+ * Open codes for adding an account to a person (docs/domains/identity.md#account-code).
+ * Keyed by a hash of the code, never the code. One row per person: a new code
+ * replaces the earlier one, and deleting the person deletes their row.
+ */
+export const accountCodes = sqliteTable(
+  "account_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    personId: text("person_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("idx_account_codes_person").on(table.personId)],
+);
+
+/**
  * The members: each person with a role in this Rome (docs/domains/access.md#member).
  * Deleting the person deletes their row. The partial unique index holds the
  * Rome to one guardian.
