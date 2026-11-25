@@ -93,9 +93,6 @@ function paramValue(name: string, pattern: string, ids: SeededIds): string {
     if (under("sentinel-log")) return ids.sentinelId;
   }
   if (name === "personId") return ids.personId;
-  if (name === "token" && under("account-claims")) {
-    return pattern.endsWith("/confirm") ? ids.claimTokens.confirm : ids.claimTokens.read;
-  }
   return `verifier-${name}`;
 }
 

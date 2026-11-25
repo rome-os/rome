@@ -38,7 +38,6 @@ import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
 import { backfillMembers } from "../../access/application/backfill-members.js";
 import { invitedEmailsSaved, memberContext } from "../../access/application/members.js";
-import { accountClaimStarted, claimContext } from "../../identity/application/account-claims.js";
 import { allowVerifierServer, guardNetwork } from "./network.js";
 
 export const GUARDIAN = {
@@ -81,9 +80,6 @@ export interface SeededIds {
   personId: string;
   executionId: string;
   sentinelId: string;
-  /** Tokens of open claims on accounts nobody holds: one only read, one
-   *  confirmed. Confirming uses a claim up, so the read has its own. */
-  claimTokens: { read: string; confirm: string };
 }
 
 export interface Instance {
@@ -265,19 +261,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     args: {},
     chatId: null,
   });
-  // Each caller runs on an instance of its own, so each confirms its own claim.
-  const claims = claimContext(db);
-  const claimTokens = {
-    read: (
-      await accountClaimStarted(claims, { platform: "discord", accountId: "verifier-claim-read" })
-    ).token,
-    confirm: (
-      await accountClaimStarted(claims, {
-        platform: "discord",
-        accountId: "verifier-claim-confirm",
-      })
-    ).token,
-  };
   const ids: SeededIds = {
     chatId,
     conciergeChatIds,
@@ -286,7 +269,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     personId: baseline.persons.innerCircleId,
     executionId: baseline.actionExecutions.rootSuccessId,
     sentinelId: baseline.sentinelLog.unknownSenderId,
-    claimTokens,
   };
 
   const { app } = buildApp(deps, { port: 0, host: "127.0.0.1" });
