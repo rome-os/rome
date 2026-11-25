@@ -1466,7 +1466,6 @@ async function main() {
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
-      dashboardAccess: dashboardAccessState,
     }),
     webchatRepo,
     sessionRepository,

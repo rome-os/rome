@@ -1,11 +1,7 @@
-// Who each Concierge's owner is, and whether Rome still serves them. The
-// guardian always is. A visitor is while their email is on the dashboard
-// allow-list, and stops the moment they are dropped from it.
+// Who each Concierge's owner is.
 
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { VisitorProfilesRepository } from "../access/visitor-profiles.js";
-import { mayEnter } from "../access/entry.js";
-import type { DashboardAllowList } from "../access/team.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const VISITOR_PREFIX = "visitor:";
@@ -24,20 +20,16 @@ export interface OwnerProfile {
 
 export interface ConciergeOwners {
   profileOf(owner: ConciergeOwner): Promise<OwnerProfile>;
-  /** Whether Rome serves this owner's Concierge now. */
-  isServed(owner: ConciergeOwner): Promise<boolean>;
 }
 
-/** Every owner served, each named by role only. For tests and boot paths without people. */
-export const ALL_OWNERS_SERVED: ConciergeOwners = {
+/** Each owner named by role only. For tests and boot paths without people. */
+export const OWNERS_BY_ROLE: ConciergeOwners = {
   profileOf: async (owner) => ({ role: owner === GUARDIAN_OWNER ? "guardian" : "visitor" }),
-  isServed: async () => true,
 };
 
 export function createConciergeOwners(deps: {
   settingsRepo: Pick<SettingsRepository, "get">;
   visitorProfiles: Pick<VisitorProfilesRepository, "getMany">;
-  dashboardAccess: DashboardAllowList;
 }): ConciergeOwners {
   const emailOf = async (owner: ConciergeOwner): Promise<string | undefined> => {
     if (!owner.startsWith(VISITOR_PREFIX)) return undefined;
@@ -52,14 +44,6 @@ export function createConciergeOwners(deps: {
       }
       const email = await emailOf(owner);
       return { role: "visitor", ...(email ? { email } : {}) };
-    },
-    async isServed(owner) {
-      if (owner === GUARDIAN_OWNER) return true;
-      const accountId = recipientOf(owner);
-      const email = await emailOf(owner);
-      if (accountId === undefined || email === undefined) return false;
-      const person = { kind: "visitor", accountId, email } as const;
-      return (await mayEnter(person, deps.dashboardAccess)) !== null;
     },
   };
 }
