@@ -115,7 +115,7 @@ describe("Outlook actions", () => {
     expect(readOnly.invoke).not.toHaveBeenCalled();
   });
 
-  it("names a missing send grant apart from a missing connection", async () => {
+  it("names a missing send grant and a stale connectionId apart from a missing connection", async () => {
     const send = (scopes: string[], input = message) =>
       withForwardedApprovalId("test-approved", () =>
         harness(undefined, scopes).actions.get(OUTLOOK_SEND_ACTION)!.execute(input),
@@ -128,7 +128,7 @@ describe("Outlook actions", () => {
     }
     expect(await send(SCOPES, { ...message, connectionId: "no-such" })).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^outlook_not_connected: /),
+      error: expect.stringMatching(/^outlook_connection_changed: /),
     });
   });
 

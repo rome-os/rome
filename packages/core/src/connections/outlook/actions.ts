@@ -113,7 +113,7 @@ export function registerOutlookActions(
       name: OUTLOOK_SEND_ACTION,
       type: "system",
       description:
-        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections, and never send through another mailbox.",
+        "Send one new plain-text Outlook message through Rome-managed Microsoft, only after the guardian approves this exact From/To/Subject/Body on the approval card. First read /v1.0/me with core:outlook_read to get connectionId and the From address. To answer a message, send a new message to its sender with a matching subject; it is not threaded as an Outlook reply. No attachments, Cc, Bcc or drafts. Every invocation requires a fresh approval, including scheduled and nested calls. Only for a Rome-managed Microsoft connection: with none, send through the Composio Outlook connection's tools. outlook_send_not_granted means the connection lacks send permission: ask the guardian to reconnect Microsoft in Settings → Connections. outlook_connection_changed means the connectionId is stale: read /v1.0/me again. Never send either message through Composio or another mailbox.",
       complexity: "simple",
       speed: "moderate",
       reliability: "high",
@@ -155,7 +155,7 @@ export function registerOutlookActions(
         return {
           status: "error",
           error:
-            "outlook_not_connected: No Rome-managed Microsoft connection has this connectionId, so core:outlook_send cannot send it. Nothing was sent.",
+            "outlook_connection_changed: No Rome-managed Microsoft connection has this connectionId. Read /v1.0/me again for the current connectionId, and never switch to Composio for this message. Nothing was sent.",
         };
       if (!connection.act)
         return {

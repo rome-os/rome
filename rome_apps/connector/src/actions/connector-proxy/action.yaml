@@ -52,7 +52,8 @@ description: |
   connection, Gmail calls go to the Composio Gmail connection, and sending
   through it uses its Composio Gmail tools (connector:connector_tool_execute).
   A broken grant, or a gmail_send_not_granted send, never switches to Composio:
-  ask the guardian to reconnect Google. Other Google services stay on Composio.
+  ask the guardian to reconnect Google. A gmail_connection_changed send never
+  switches either: read the profile again for the current connectionId. Other Google services stay on Composio.
 
   With a Rome-managed Microsoft connection, Outlook mail is restricted to GETs for
   /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders,
@@ -65,7 +66,8 @@ description: |
   connection, and sending through it uses its Composio Outlook tools
   (connector:connector_tool_execute). A broken grant, or an
   outlook_send_not_granted send, never switches to Composio: ask the guardian to
-  reconnect Microsoft. Calendar, contacts and other Graph paths stay on Composio.
+  reconnect Microsoft. An outlook_connection_changed send never switches either:
+  read /v1.0/me again for the current connectionId. Calendar, contacts and other Graph paths stay on Composio.
 
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never
