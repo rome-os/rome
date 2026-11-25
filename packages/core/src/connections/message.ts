@@ -44,6 +44,9 @@ export interface MessageSender {
   /** The platform says a bot account said it, as with a Discord webhook.
    *  Absent where the platform does not tell. */
   readonly isBot?: boolean;
+  /** The platform says an app posted it, whichever account it posted as.
+   *  Absent where the platform does not tell. */
+  readonly viaApp?: boolean;
 }
 
 /** What a message says. */
