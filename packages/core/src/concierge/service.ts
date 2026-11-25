@@ -1207,8 +1207,8 @@ export class ConciergeService {
   }
 
   /**
-   * The events of a Concierge turn the guardian's message started in a chat on
-   * a connection, as the dashboard's route takes a Concierge chat's turn: it
+   * The events of a Concierge turn a message started in a chat on a
+   * connection, as the dashboard's route takes a Concierge chat's turn: it
    * takes the message, and its working tool calls show it working
    * (docs/domains/chats.md#status). Null for any other turn.
    */
@@ -1218,7 +1218,6 @@ export class ConciergeService {
     channel?: string;
     chatId?: string;
     messageKey?: string;
-    senderBondLevel?: string;
   }): {
     event(msg: { type: string; tool?: string; id?: string; toolUseId?: string }): void;
     end(): void;
@@ -1229,8 +1228,7 @@ export class ConciergeService {
       !turn.channel ||
       turn.channel === "webchat" ||
       !chatId ||
-      !messageKey ||
-      turn.senderBondLevel !== "guardian"
+      !messageKey
     ) {
       return null;
     }

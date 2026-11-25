@@ -280,7 +280,7 @@ export async function buildConciergeTools(
     const keys = await turnMessageKeys(chatId, turnId);
     const asked = optionalString(args, "message_id");
     const target = asked && keys.includes(asked) ? asked : keys.at(-1);
-    if (!target) throw new Error("No message of the guardian's in this turn to react to.");
+    if (!target) throw new Error("No message in this turn to react to.");
     if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
     // A message shows one emoji for its whole life, as on the dashboard: one
     // that showed working takes no reaction (docs/domains/chats.md#reaction).
@@ -973,7 +973,7 @@ export async function buildConciergeTools(
     {
       name: "react",
       description: onConnection
-        ? "React to the guardian's message of this turn with an emoji. It cannot be taken back here."
+        ? "React to the message of this turn with an emoji. It cannot be taken back here."
         : "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
       inputSchema: onConnection
         ? {
@@ -1704,15 +1704,15 @@ export async function buildConciergeTools(
     },
   ];
   if (!onConnection) return tools;
-  // On a connection, a reaction and the task tools act for the guardian. A
-  // message from anyone else may not use them; a turn Rome runs there, such as
-  // a task's report, may. Anyone's turn may say something.
+  // On a connection, the task tools act for the guardian. A message from
+  // anyone else may not use them; a turn Rome runs there, such as a task's
+  // report, may. Anyone's turn may say something and react.
   const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
   return tools
     .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     .map(
       (tool): RomeTool =>
-        tool.name === "say"
+        tool.name === "say" || tool.name === "react"
           ? tool
           : {
               ...tool,
@@ -1722,7 +1722,7 @@ export async function buildConciergeTools(
                       content: [
                         {
                           type: "text",
-                          text: "Only the guardian can react or start or change tasks here. Answer with say.",
+                          text: "Only the guardian can start or change tasks here. Answer with say.",
                         },
                       ],
                       isError: true,

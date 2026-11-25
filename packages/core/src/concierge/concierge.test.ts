@@ -847,7 +847,7 @@ describe("Concierge tools", () => {
       }
     });
 
-    it("reacts to the guardian's message of the turn through the chat's account", async () => {
+    it("reacts to the message of the turn through the chat's account", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
       const reacted: unknown[] = [];
@@ -865,14 +865,14 @@ describe("Concierge tools", () => {
       await run(there(s, chatId, "guardian"), s, "react", { emoji: "❤️", message_id: "900" });
       expect(reacted[1]).toEqual(["discord_app", "900", "800000000000000001", "❤️"]);
       reacted.splice(1);
-      // Anyone else's turn gets no reaction, and one cannot be taken back here.
-      expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
-        true,
-      );
+      // A member's message takes one too, and one cannot be taken back here.
+      expect(
+        (await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError,
+      ).toBeFalsy();
       expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
         true,
       );
-      expect(reacted).toHaveLength(1);
+      expect(reacted).toHaveLength(2);
     });
 
     it("says through the chat's account, never into a dashboard chat", async () => {
@@ -984,7 +984,7 @@ describe("Concierge tools", () => {
       expect(s.backendTurns).toHaveLength(1);
     });
 
-    it("shows the guardian's message working while the turn works, and settles it when the turn ends", async () => {
+    it("shows a message working while the turn works, and settles it when the turn ends", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
       s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
@@ -998,10 +998,8 @@ describe("Concierge tools", () => {
         channel: "discord_app",
         chatId,
         messageKey: "800000000000000001",
-        senderBondLevel: "guardian",
       };
-      // Anyone else's message, and a dashboard turn, are not watched here.
-      expect(s.service.observeConnectionTurn({ ...turn, senderBondLevel: "other" })).toBeNull();
+      // A dashboard turn is not watched here.
       expect(s.service.observeConnectionTurn({ ...turn, channel: "webchat" })).toBeNull();
       const watch = s.service.observeConnectionTurn(turn);
       expect(watch).not.toBeNull();
@@ -1046,7 +1044,6 @@ describe("Concierge tools", () => {
         channel: "discord_app",
         chatId,
         messageKey: "800000000000000002",
-        senderBondLevel: "guardian",
       });
       await new Promise((resolve) => setTimeout(resolve, 20));
       await s.finish({

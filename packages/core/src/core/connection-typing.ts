@@ -42,8 +42,6 @@ export interface ObservedTurn extends TypingTurn {
   chatId?: string;
   /** The message that started the turn, by the chat's key for it. */
   messageKey?: string;
-  /** The bond level of that message's sender, as the inbox passed it. */
-  senderBondLevel?: string;
 }
 
 /** Several watchers of one turn's events, as one. */
