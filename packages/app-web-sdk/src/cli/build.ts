@@ -6,7 +6,10 @@ export async function runBuild(): Promise<void> {
   const ctx = await createBuildContext({ cwd: process.cwd(), mode: "production" });
 
   cleanBackendOutput(ctx);
-  const rslib = await createRslib({ config: ctx.rslibConfig });
-  await rslib.build();
+  // An app with no web bundle and no backend sources ships only its assets.
+  if ((ctx.rslibConfig.lib ?? []).length > 0) {
+    const rslib = await createRslib({ config: ctx.rslibConfig });
+    await rslib.build();
+  }
   copyStaticAssets(ctx);
 }

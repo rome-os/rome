@@ -414,23 +414,6 @@
     "neverUsed": "从未使用",
     "grantedUntil": "授权至 {{time}}"
   },
-  "trust": {
-    "title": "关系层级规则",
-    "trustedLevels": {
-      "title": "受信消息",
-      "description": "来自这些关系层级的消息将跳过哨兵筛查。"
-    },
-    "replyToLevels": {
-      "title": "回复消息",
-      "description": "Rome 只回复来自这些关系层级的传入消息。"
-    },
-    "levels": {
-      "guardian": "守护者",
-      "inner-circle": "核心圈",
-      "acquaintance": "熟人",
-      "other": "其他"
-    }
-  },
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "搜索聊天",
@@ -796,13 +779,6 @@
       "pause": "聊天会暂停，直到你重新登录。",
       "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
-  },
-  "sentinelLog": {
-    "title": "哨兵日志",
-    "empty": "暂无哨兵日志条目。",
-    "responsePrefix": "回复：{{response}}",
-    "markReviewed": "标记为已审阅",
-    "reviewed": "已审阅"
   },
   "advanced": {
     "presentationMode": {
