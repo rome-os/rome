@@ -65,6 +65,23 @@ describe("fixed model identity migration", () => {
       db.close();
     }
   });
+  it.each(
+    Object.entries(LEGACY_MODEL_SELECTIONS),
+  )("freezes default preference %s at %s", (old, fixed) => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(
+        "CREATE TABLE rome_sessions (large_model_selection text); CREATE TABLE settings (key text, value text)",
+      );
+      db.prepare("INSERT INTO settings VALUES ('webchatLargeModel', ?)").run(JSON.stringify(old));
+      db.exec(migration);
+      expect(db.prepare("SELECT value FROM settings").get()).toEqual({
+        value: JSON.stringify(fixed),
+      });
+    } finally {
+      db.close();
+    }
+  });
   it.each([
     '"unknown"',
     '"auto"',
