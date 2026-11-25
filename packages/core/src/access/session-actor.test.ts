@@ -209,14 +209,14 @@ describe("session actor ambient context", () => {
     expect(source).toHaveBeenCalledTimes(1);
   });
 
-  it("fails open when the lazy source throws", async () => {
+  it("names no one when the lazy source throws", async () => {
     const seen = await runWithSessionActor(
       async () => {
         throw new Error("db down");
       },
       () => currentSessionActor(),
     );
-    expect(seen).toBeUndefined();
+    expect(seen).toEqual({ kind: "anonymous" });
   });
 
   it("does not leak across sibling scopes", async () => {
