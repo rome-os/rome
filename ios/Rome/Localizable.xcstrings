@@ -6373,16 +6373,6 @@
         }
       }
     },
-    "The voice conversation ended when Rome went to the background" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 进入后台，语音对话已结束"
-          }
-        }
-      }
-    },
     "The voice conversation reached its time limit" : {
       "localizations" : {
         "zh-Hans" : {
