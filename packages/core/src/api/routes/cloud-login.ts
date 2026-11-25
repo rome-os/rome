@@ -325,6 +325,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           return c.json({ error: "not_owner" }, 403);
         }
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
+        await reloadDashboardAccess();
       } else {
         await createGuardianSeat(identity);
       }
@@ -473,6 +474,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // owner); on an existing username/password instance this IS the implicit
       // link — the accountId lands on the guardian row, the local password stays.
       await setGuardianAccount(deps.db, accountId, accountEmail, accountAvatarUrl);
+      await reloadDashboardAccess();
       return await finishSignedIn(c, identity);
     } catch (err) {
       // A network throw at any leg is non-terminal: offer retry/local fallback.
@@ -577,6 +579,14 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     }
   }
 
+  // The dashboard snapshot holds the guardian's email, so a seat that gained
+  // or changed its email reloads it.
+  async function reloadDashboardAccess(): Promise<void> {
+    await deps.dashboardAccessState
+      .load(deps.db)
+      .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
+  }
+
   // On a fresh instance the cloud round trip is the sole account source, so
   // the guardian seat is created from the consenting cloud account, and setup
   // finishes right here: the names the guardian gave Rome Cloud's signup survey,
@@ -594,6 +604,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       name: guardianName,
       avatarUrl: identity.avatarUrl ?? undefined,
     }).catch(logStepFailure("guardian not made from the new seat"));
+    await reloadDashboardAccess();
     await applySetupDefaults(
       guardianName,
       {

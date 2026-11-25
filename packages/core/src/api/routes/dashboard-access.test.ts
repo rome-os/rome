@@ -113,8 +113,15 @@ describe("Dashboard-access API", () => {
       { role: "guardian", emails: ["owner@example.com"] },
       { role: "member", emails: ["lin@example.com"] },
     ]);
-    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    // A sign-in with the guardian's email is the guardian's person, so the
+    // snapshot lets it in, but the list stays the members'.
+    expect([...dashboardAccessState.cloudEmails()]).toEqual([
+      "lin@example.com",
+      "owner@example.com",
+    ]);
     expect(pushed).toEqual([{ emails: ["lin@example.com"], revision: 1 }]);
+    const getRes = await app.request("/dashboard-access");
+    expect(await getRes.json()).toEqual({ cloudEmailAccess: ["lin@example.com"] });
   });
 
   it("fails the save when the members cannot be written, and tells neither the snapshot nor Rome Cloud", async () => {

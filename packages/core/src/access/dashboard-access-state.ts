@@ -1,15 +1,17 @@
 import type { DrizzleDb } from "../db/index.js";
-import { memberContext, memberEmails } from "./application/members.js";
+import { memberContext, signInEmails } from "./application/members.js";
 import type { DashboardAccessConfig } from "./dashboard-access-config.js";
 import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /**
- * In-memory copy of the members' emails for the auth-edge probe.
+ * In-memory copy of the Rome Cloud sign-in emails of every person with a
+ * role, the guardian included, for the auth-edge probe.
  *
  * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request,
  * so the probe can't afford a DB round-trip. This state is loaded from the
- * members once at startup and refreshed by `/api/dashboard-access`. It holds
- * no guardian's email: the guardian's seat says who the guardian is.
+ * members at startup and reloaded after each save of the invited emails and
+ * each change of the guardian's seat. A sign-in with the guardian's email is
+ * the guardian's person, so it is let in too.
  */
 export class DashboardAccessState {
   private cloudEmailAccess: Set<string> = new Set();
@@ -38,8 +40,8 @@ export class DashboardAccessState {
     this.setCloudEmailAccess(config.cloudEmailAccess);
   }
 
-  /** Replaces the emails with those of every member in `db`. */
+  /** Replaces the emails with the sign-in emails of every person with a role in `db`. */
   async load(db: DrizzleDb): Promise<void> {
-    this.setCloudEmailAccess(await memberEmails(memberContext(db)));
+    this.setCloudEmailAccess(await signInEmails(memberContext(db)));
   }
 }

@@ -195,7 +195,11 @@ describe("backfillMembers", () => {
         accountId: "ada@example.com",
       }),
     ).toBeNull();
-    expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
+    expect([...state.cloudEmails()].sort()).toEqual([
+      "kim@example.com",
+      "lin@example.com",
+      "owner@example.com",
+    ]);
 
     // The list an older build wrote stays as it was.
     expect(

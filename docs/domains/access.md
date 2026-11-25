@@ -19,8 +19,8 @@ What a person is in this Rome: the guardian, or a member.
 A person with a role, the guardian included. A member is a [person](identity.md#person) in Identity, so a member is known by every account of theirs.
 
 - Every other part asks once, with an account, which role its person has. That step asks Identity who the person is and Access which role they have, so no other part asks Identity about roles.
-- The members are the one source of which emails may use the dashboard: the `rome-cloud-email` accounts of every person with role member. The dashboard and the auth edge hold an in-memory copy, loaded at startup and refreshed by each save of the invited emails. Rome Cloud receives the same emails.
-- The guardian's email is not among them. The guardian's seat says who the guardian is, so inviting the guardian's own email adds no member.
+- The members are the one source of which emails are invited: the `rome-cloud-email` accounts of every person with role member. The settings page and Rome Cloud receive these emails. The dashboard and the auth edge hold an in-memory copy of the sign-in emails of every person with a role, the guardian's included, since a Rome Cloud sign-in with the guardian's email is the guardian's person. It is loaded at startup and reloaded after each save of the invited emails and each change of the guardian's seat.
+- The guardian's email is not among the invited emails. The guardian's seat says who the guardian is, so inviting the guardian's own email adds no member.
 
 ## Steps Rome takes today
 

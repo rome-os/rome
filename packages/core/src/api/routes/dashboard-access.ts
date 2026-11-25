@@ -40,7 +40,7 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
     // A failed write to the members fails the request before the snapshot or
     // Rome Cloud hears of the list.
     const saved = await deps.dashboardAccessStore.save(config);
-    deps.dashboardAccessState.setConfig({ cloudEmailAccess: [...saved.emails] });
+    await deps.dashboardAccessState.load(deps.db);
     // The sync drops a revision older than one it already holds, so two saves
     // that finish out of order still send the newer list.
     deps.visitorAllowListSync.push(saved);

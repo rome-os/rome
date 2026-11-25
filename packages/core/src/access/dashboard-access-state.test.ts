@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/db.js";
-import { guardianSeatCreated, inviteMember, memberContext } from "./application/members.js";
+import {
+  guardianSeatCreated,
+  guardianSeatRebound,
+  inviteMember,
+  memberContext,
+  seatAccounts,
+} from "./application/members.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
 
 describe("DashboardAccessState", () => {
@@ -27,7 +33,7 @@ describe("DashboardAccessState", () => {
     expect([...snapshot]).toEqual(["ada@example.com"]);
   });
 
-  it("loads the emails of every member but the guardian", async () => {
+  it("loads the sign-in emails of every person with a role, the guardian's included", async () => {
     const testDb = createTestDb();
     try {
       const ctx = memberContext(testDb.db);
@@ -41,8 +47,34 @@ describe("DashboardAccessState", () => {
 
       await state.load(testDb.db);
 
-      expect([...state.cloudEmails()]).toEqual(["ada@example.com", "lin@example.com"]);
-      expect(state.isCloudEmailAllowed("owner@example.com")).toBe(false);
+      expect([...state.cloudEmails()]).toEqual([
+        "ada@example.com",
+        "lin@example.com",
+        "owner@example.com",
+      ]);
+      expect(state.isCloudEmailAllowed("Owner@Example.com")).toBe(true);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("lets in the rebound seat's email and no longer the old one", async () => {
+    const testDb = createTestDb();
+    try {
+      const ctx = memberContext(testDb.db);
+      await guardianSeatCreated(ctx, { accounts: seatAccounts({ email: "old@example.com" }) });
+      const state = new DashboardAccessState();
+      await state.load(testDb.db);
+      expect(state.isCloudEmailAllowed("old@example.com")).toBe(true);
+
+      await guardianSeatRebound(ctx, {
+        previous: seatAccounts({ email: "old@example.com" }),
+        current: seatAccounts({ email: "new@example.com" }),
+      });
+      await state.load(testDb.db);
+
+      expect(state.isCloudEmailAllowed("new@example.com")).toBe(true);
+      expect(state.isCloudEmailAllowed("old@example.com")).toBe(false);
     } finally {
       testDb.close();
     }
