@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Channel, ChannelMessage, ChatId, InboundEvent } from "@rome-os/app-runtime";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
-import { markEntered } from "../participation/entrance.js";
+import { markArrival } from "../participation/entrance.js";
 import { enteredChannels } from "./entered-channels.js";
 
 const ADA: SessionActor = {
@@ -45,7 +45,12 @@ describe("enteredChannels", () => {
         timestamp: new Date(),
       };
       const event: InboundEvent = { kind: "message", message, ref: { connectionId: "c", chatId } };
-      await deliver(markEntered(event, senderId === "ada" ? ADA : undefined));
+      await deliver(
+        markArrival(event, {
+          entry: senderId === "ada" ? { kind: "entered", person: ADA } : { kind: "unknown" },
+          automated: false,
+        }),
+      );
     }
     expect(heard).toEqual(["ada"]);
     expect(worksFor).toEqual([ADA]);
