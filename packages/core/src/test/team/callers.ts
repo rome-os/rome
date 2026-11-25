@@ -59,7 +59,7 @@ let requestsSent = 0;
  *  request from outside. Each request comes from its own address: the login
  *  rate limit counts per address for the whole process, so one shared address
  *  would answer a later run's login with 429 for what earlier runs sent. */
-function browserHeaders(cookie: string | null): Record<string, string> {
+export function browserHeaders(cookie: string | null): Record<string, string> {
   requestsSent += 1;
   return {
     ...(cookie ? { cookie } : {}),

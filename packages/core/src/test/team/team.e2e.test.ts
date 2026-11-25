@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
 import { runRule1b } from "./rule1.js";
 import { runRule2, type Rule2Result } from "./rule2.js";
+import { runRule3Dashboard } from "./rule3.js";
 import {
   STAND_IN_GUARDIAN_ONLY_ROUTE,
   STAND_IN_GUARDIAN_ONLY_WRITE,
@@ -117,4 +118,17 @@ describe("the check", () => {
     const result = await runRule1b({ standIn: "guardian-session-for-everyone" });
     expect(result.uninvited.at(-1)?.ok).toBe(false);
   }, 60_000);
+});
+
+describe("the removal check", () => {
+  it("fails a stand-in whose save keeps the teammate on the list", async () => {
+    const result = await runRule3Dashboard({ standIn: "teammate-kept" });
+    expect(result.pass).toBe(false);
+    const checked = result.sockets.filter((s) => s.verdict !== "unverified");
+    expect(checked.map((s) => s.route)).toEqual(
+      expect.arrayContaining(["WS /ws/events", "WS /ws/voice-conversation"]),
+    );
+    expect(checked.every((s) => s.verdict === "open")).toBe(true);
+    expect(result.nextCall.refused).toBe(false);
+  }, 120_000);
 });

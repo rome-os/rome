@@ -57,6 +57,12 @@ const rule2 = rule2Core
     }
   : { pass: false, error: "the core verifier wrote no result" };
 
+// Entry 3 belongs to phase 2, so it is reported and never decides the exit.
+const rule3Dashboard = core?.rule3Dashboard ?? {
+  pass: false,
+  error: "the core verifier wrote no result",
+};
+
 const report = {
   productCommit: git("rev-parse", "HEAD"),
   verifier: {
@@ -67,6 +73,7 @@ const report = {
   ranAt: new Date().toISOString(),
   elapsedMs: core?.elapsedMs ?? null,
   rules: { rule1, rule2 },
+  phase2: { rule3Dashboard },
 };
 writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 
@@ -133,6 +140,19 @@ else {
     "",
     "Out of scope:",
     ...rule2.outOfScope.map((o) => `- ${o.route} (${o.reach})`),
+  );
+}
+lines.push(
+  "",
+  `## Entry 3, dashboard half (phase 2, not scored here): ${verdict(rule3Dashboard.pass)}`,
+  "",
+  "The guardian removes a teammate; their open dashboard stops working.",
+);
+if (rule3Dashboard.error) lines.push(rule3Dashboard.error);
+else {
+  lines.push(
+    ...rule3Dashboard.sockets.map((s) => `- ${s.route}: ${s.verdict} (${s.detail})`),
+    `- the teammate's next GET /api/settings: ${rule3Dashboard.nextCall.status}`,
   );
 }
 writeFileSync(join(out, "summary.md"), `${lines.join("\n")}\n`);
