@@ -35,7 +35,7 @@ A participant's identity on a platform, as [Account](chats.md#account) in Chats 
 - The dashboard offers no way to link, move, unlink, dismiss or restore an account. Links and dismissals already made stay.
 - Dismissing makes no person.
 - An account linked to the guardian is one of theirs. The guardian's signed-in accounts, such as their own Telegram, WhatsApp, LinkedIn, WeChat or email, are theirs the moment they connect them, with no further step.
-- Where the platform does not say which account is the guardian's, a link code is the shortcut. A code Rome issues, sent in a direct message to any of Rome's accounts, links the sender to the guardian. It works the same on every platform. The dashboard shows no code.
+- Where the platform does not say which account is the guardian's, no account is linked to them.
 
 ## Link
 
@@ -43,7 +43,7 @@ The fact that an account belongs to a person. It is the only fact about who is w
 
 - One account has at most one link, so no account belongs to two persons.
 - A link names an account by its platform and the platform's own id, and needs nothing else to exist: no profile and no message. Rome checks only that the platform is one it knows and the id is not blank, since it cannot check an id against the platform.
-- A link is made only by a link code the guardian sends, from a statement the platform makes about which accounts are the guardian's, or was made earlier by the guardian. Never from what a sender says about itself, such as a display name.
+- A link is made only from a statement the platform makes about which accounts are the guardian's, or was made earlier by the guardian. Never from what a sender says about itself, such as a display name.
 - A link reaches back. Linking attributes everything the account ever said to the person, and unlinking takes it away again.
 - A link outlives Rome's access. Disconnecting the last of Rome's accounts on a platform removes nothing from People, and connecting again later finds everyone already known.
 

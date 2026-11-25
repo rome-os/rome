@@ -5,7 +5,6 @@ import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import type { PlaceAudience } from "../core/place-audience.js";
-import type { GuardianLinkCodes } from "../people/link-code/index.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
@@ -130,8 +129,6 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (people/link-code/application/guardian-link-code.ts). */
-  guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */
