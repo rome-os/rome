@@ -3345,7 +3345,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(sessionResponse(session, messageCount));
   });
 
-  // The checks pending in a chat, which its owner can cancel there.
+  // The checks pending in a chat, which any member can cancel there.
   app.get("/chat/sessions/:id/checks", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
