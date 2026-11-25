@@ -81,6 +81,7 @@ struct Peer {
     struct SigningSummary: Sendable {
         let identifier: String
         let teamID: String?
+        let isAdHoc: Bool
     }
 
     let identity: ProcessIdentity
@@ -117,10 +118,12 @@ struct Peer {
                   SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation),
                                                 &rawInfo) == errSecSuccess,
                   let info = rawInfo as? [String: Any],
-                  let identifier = info[kSecCodeInfoIdentifier as String] as? String else {
+                  let identifier = info[kSecCodeInfoIdentifier as String] as? String,
+                  let flags = info[kSecCodeInfoFlags as String] as? NSNumber else {
                 throw Failure("peer_rejected")
             }
-            signingSummary = SigningSummary(identifier: identifier, teamID: info[kSecCodeInfoTeamIdentifier as String] as? String)
+            signingSummary = SigningSummary(identifier: identifier, teamID: info[kSecCodeInfoTeamIdentifier as String] as? String,
+                                            isAdHoc: flags.uint32Value & SecCodeSignatureFlags.adhoc.rawValue != 0)
             try expected.verify()
         }
         return Self(identity: expected, audit: audit, signingSummary: signingSummary)

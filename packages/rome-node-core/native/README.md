@@ -122,26 +122,15 @@ contract using the helper PID from the response.
 
 ### Authorization modes
 
-`hello` accepts optional `locale`, `consentMode`, `controller`, and `source` fields.
+`hello` accepts optional `locale`, `consentMode`, and `controller` fields.
 With no controller, the helper asks for permission to start a single
 session. Its successful reply includes `auth: "session"` and the resolved
 `locale` alongside the helper proof.
 
-In any mode, `source` can name the requester.
-
-```json
-{"source":"Rome Node CLI"}
-```
-
-The caller declares its own name. For example, Rome App can send
-`"source": "Rome App"` or use `Rome App` as its controller `label`.
-The helper removes control and direction markers, collapses whitespace, and
-limits the name to 64 characters. A controller's `label` takes precedence.
-The dialog shows the supplied name under **About**, followed by the verified
-host process and the system explanation. When a caller supplies no name,
-the dialog omits **About**. The `source` field affects the displayed
-name only. Authorization, signed challenges, and stored keys use the usual
-controller fields.
+The helper ignores the legacy `hello.source` field. To supply a display
+label such as `Rome Node CLI` or `Rome App`, set `controller.label` and
+complete the controller's signed challenge. The label is a claim by the
+requester and carries no verified identity.
 
 A controller object has three fields.
 
@@ -210,18 +199,20 @@ regard to case. It maps `zh`, `zh-CN`, `zh-SG`, and `zh-Hans` tags to
 `zh-Hans`. It maps `zh-TW`, `zh-HK`, `zh-MO`, and `zh-Hant` tags to
 `zh-Hant`. It also accepts regional tags such as `en-US` and `ja-JP`.
 If the requested tag has no match, the helper tries system preferred
-languages in order, then uses `en`. The caller supplies a source label.
-The helper writes all warnings and computes the fingerprint itself.
+languages in order, then uses `en`. The helper writes the warnings and
+computes the fingerprint.
 
-The dialog displays the host process and PID. **Details** reveals the
-canonical executable path, available signing identifier and Team ID, and
-the controller's fingerprint when a controller is present.
+The alert shows the verified host process and PID, the full canonical
+executable path, and available code-signing information. If a controller
+proved possession of its key, the alert shows its fingerprint alongside
+those fields. **Claimed by requester** labels the controller's display
+name separately from the verified identity. All fields appear directly in
+the alert without scrolling or expanding a section.
 
 The fingerprint is the first 16 bytes of SHA-256 of the raw public key.
 It uses eight groups of four uppercase hexadecimal digits, such as
-`21FE-31DF-A154-A261-626B-F854-046F-D227`. The dialog shows four groups on each
-line in **Details**. The menu, protocol, and commands use the full hyphenated
-form.
+`21FE-31DF-A154-A261-626B-F854-046F-D227`. The alert shows four groups on
+each line. The menu, protocol, and commands use the full hyphenated form.
 The helper matches grants by the full public key.
 
 ### Manage trusted keys
@@ -273,22 +264,26 @@ control the Mac unattended until the grant is revoked.
 
 **Deny** is the default and shows the remaining seconds until the 60-second
 authorization deadline. The approval buttons unlock when the dialog stays
-focused and clear for 0.5 seconds. Approval requires a fresh gesture. A left mouse press or key press
-during that delay restarts it. Overlapping ordinary windows and system
-overlays such as screenshot selection pause confirmation. The system cursor
-and third-party high-layer overlays that pass the platform's mouse-down
-hit test leave the dialog available. The helper checks the dialog and button
-centers under those overlays. AppKit may route input to the dialog's verified
-backing window while rendering the alert in its child window.
-Once clear, the dialog waits for a full 0.5 seconds of focus again. The helper
-checks focus, visibility and eligibility again before approving. Periodic
-window visibility checks run in the background.
-The process row shows the authenticated host. Expand **Details** to see its
-key fingerprint, when present, executable path and available code-signing
-identifiers. All details appear directly in the alert. If the compact alert
-has limited room, expanding details replaces the explanatory section until
-the details are collapsed. Long paths are selectable and have a full-path
-tooltip.
+focused and clear for 0.5 seconds. Approval requires a fresh gesture. A
+left mouse press or key press during the wait restarts it. Overlapping
+windows and system overlays such as screenshot selection pause confirmation.
+System shields and unknown owners at shield level or higher block desktop
+access. The authenticated Window Server cursor is exempt.
+
+The remote-overlay allowlist currently contains UU Remote's server. The
+helper requires a verified Apple Developer ID signature with the exact
+Team ID and signing identifier, Hardened Runtime, a layer at or above the
+screen saver, and `kCGWindowSharingState == 0`. A matching overlay leaves
+the console available. Approval also requires AppKit to hit the alert at
+the dialog and button centers. For window input, AppKit must hit the bound
+window at the pointer location or at a point within the overlap for keyboard
+input. Untrusted intersecting overlays block these actions even if they
+accept no clicks. AppKit can route an alert hit to its verified backing
+window while rendering the alert in a child window.
+
+Once clear, the dialog waits for a full 0.5 seconds of focus again. The
+helper checks focus, visibility, and eligibility again before approving.
+Periodic window visibility checks run in the background.
 
 An authorized host can list eligible open windows and their titles.
 The authenticated host can hold bindings to several distinct windows at once.

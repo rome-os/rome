@@ -11,6 +11,9 @@ import Security
 
 final class SelfTest {
     private var assertions = 0
+    private static let verifiedRemoteSigning = TrustedRemoteOverlay.SigningIdentity(
+        teamID: "PU9BNSBJW7", identifier: "com.netease.uuremote.server", flags: SecCodeSignatureFlags.runtime.rawValue
+    )
 
     static func run() throws {
         let test = SelfTest()
@@ -140,9 +143,13 @@ final class SelfTest {
         try expect(pinnedWindow(first, rows: [WindowRow(id: first.id, pid: first.pid, bounds: first.bounds, visible: false)],
                                 rootBounds: first.bounds) == nil, "offscreen CG windows revoke the binding")
         let refs = ["subtree": 1]
-        try expect(try observedElement("subtree", in: refs, expires: 15, at: 14) == 1, "an observation can use a current subtree")
-        try rejects("element_unavailable") { _ = try observedElement("subtree", in: refs, expires: 15, at: 15) }
-        try rejects("element_unavailable") { _ = try observedElement("another binding", in: refs, expires: 15, at: 14) }
+        try expect(try observedElement("subtree", in: refs, expires: 15, at: 14, belongs: { $0 == 1 }) == 1, "an observation can use a current subtree")
+        try rejects("element_unavailable") { _ = try observedElement("subtree", in: refs, expires: 15, at: 15, belongs: { _ in true }) }
+        try rejects("element_unavailable") { _ = try observedElement("another binding", in: refs, expires: 15, at: 14, belongs: { _ in true }) }
+        let currentOwner = [1: "other-window"]
+        try rejects("element_unavailable") {
+            _ = try observedElement("subtree", in: refs, expires: 15, at: 14) { currentOwner[$0] == "bound-window" }
+        }
         let longText = String(repeating: "中文Rome\n\t🚀", count: 40)
         let preview = observedTextValue(longText, expanded: false)
         try expect(preview.truncated && preview.value.unicodeScalars.count == 160, "the observation marks a shortened text preview")
@@ -169,22 +176,45 @@ final class SelfTest {
             15: "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
             16: "/usr/libexec/PrivacySurface",
         ]
-        func available(_ rows: [[String: Any]]) -> Bool {
-            DesktopAccess.visibleLayersClear(rows, isWindowServer: { $0 == 12 }, executablePath: { paths[$0] })
+        func available(_ rows: [[String: Any]], trust: ([String: Any]) -> Bool = { _ in false }) -> Bool {
+            DesktopAccess.visibleLayersClear(rows, isWindowServer: { $0 == 12 }, executablePath: { paths[$0] }, trustedOverlay: trust)
         }
         try expect(available([[layer: 0], cursor]), "authenticated system cursor leaves the console available")
         var impostor = cursor
         impostor[pid] = 13
-        try expect(available([impostor]), "a verified third-party owner can use the cursor level without locking the console")
+        try expect(!available([impostor]), "a third-party window at the cursor level requires an authenticated overlay")
         try expect(available([[layer: saver + 100, pid: 13]]), "an ordinary high overlay leaves the console available")
         try expect(!available([[layer: saver, pid: 14]]), "the screen saver makes the console unavailable")
         try expect(!available([[layer: saver, pid: 15]]), "the system login window makes the console unavailable")
         try expect(!available([[layer: saver, pid: 16]]), "a protected system executable can own a private surface")
         try expect(!available([[layer: saver, pid: 17]]), "an unverifiable high-layer owner fails closed")
-        try expect(available([[layer: CGShieldingWindowLevel(), pid: 13]]), "a third-party shield level does not lock the console")
+        try expect(!available([[layer: CGShieldingWindowLevel(), pid: 13]]), "an untrusted shield level window blocks the console")
         let maximumLayer = CGWindowLevelForKey(.maximumWindow)
-        try expect(available([[layer: maximumLayer, pid: 13, kCGWindowSharingState as String: 0]]),
+        let sharing = kCGWindowSharingState as String
+        let privateOverlay = [layer: maximumLayer, pid: 13, sharing: 0]
+        let publicOverlay = [layer: maximumLayer, pid: 13, sharing: 1]
+        func allowOverlay(_ row: [String: Any]) -> Bool {
+            TrustedRemoteOverlay.matches(row) { $0 == 13 ? Self.verifiedRemoteSigning : nil }
+        }
+        try expect(available([privateOverlay], trust: allowOverlay),
                    "a verified private remote overlay at the maximum level leaves the console available")
+        try expect(!available([privateOverlay]), "an unverified private maximum-layer overlay blocks the console")
+        try expect(!available([publicOverlay], trust: allowOverlay) &&
+                   !available([[layer: maximumLayer, pid: 13]], trust: allowOverlay),
+                   "the allowlist requires explicit disabled window sharing")
+        try expect(!TrustedRemoteOverlay.matches([layer: saver - 1, pid: 13, sharing: 0]) { _ in Self.verifiedRemoteSigning },
+                   "the allowlist excludes ordinary UI from the verified process")
+        for signing in [
+            TrustedRemoteOverlay.SigningIdentity(teamID: "EXAMPLE123", identifier: Self.verifiedRemoteSigning.identifier,
+                                                flags: Self.verifiedRemoteSigning.flags),
+            TrustedRemoteOverlay.SigningIdentity(teamID: Self.verifiedRemoteSigning.teamID, identifier: "com.example.remote",
+                                                flags: Self.verifiedRemoteSigning.flags),
+            TrustedRemoteOverlay.SigningIdentity(teamID: Self.verifiedRemoteSigning.teamID,
+                                                identifier: Self.verifiedRemoteSigning.identifier, flags: 0),
+        ] {
+            try expect(!available([privateOverlay]) { row in TrustedRemoteOverlay.matches(row) { _ in signing } },
+                       "a mismatched team, signing ID or runtime flag cannot exempt a shield-level window")
+        }
         try expect(!available([[layer: maximumLayer, pid: 15]]) && !available([[layer: maximumLayer, pid: 17]]),
                    "system shields and unverifiable owners still lock the console at the maximum level")
         try expect(!DesktopAccess.visibleLayersClear(nil), "missing window list fails closed")
@@ -393,10 +423,10 @@ final class SelfTest {
         var remoteOverlay = row(16, 97, bounds.insetBy(dx: -200, dy: -200), layer: CGWindowLevelForKey(.maximumWindow))
         remoteOverlay[kCGWindowSharingState as String] = 0
         func verify(_ rows: [[String: Any]], at point: CGPoint? = nil, target: WindowRow = target,
-                    hit: (CGPoint) -> Bool = { _ in false }) throws {
+                    verified: Bool = true, hit: (CGPoint) -> Bool = { _ in false }) throws {
             try WindowInput.verifyStack(rows, target: target, point: point, isWindowServer: { $0 == 99 },
-                                        isThirdPartyOverlay: {
-                DesktopAccess.isThirdPartyOverlay($0, executablePath: { pid in pid == 97 ? "/Applications/Remote.app/Server" : nil })
+                                        trustedOverlay: { row in
+                TrustedRemoteOverlay.matches(row) { verified && $0 == 97 ? Self.verifiedRemoteSigning : nil }
             }, hitsTarget: hit)
         }
         try verify([cursor, adjacent, expected, helper], at: point)
@@ -413,6 +443,12 @@ final class SelfTest {
         try expect((try? verify([remoteOverlay, expected], hit: { $0 == CGPoint(x: bounds.midX, y: bounds.midY) })) != nil,
                    "keyboard input can use a verified pass-through point in the overlap")
         try rejects("window_occluded") { try verify([remoteOverlay, expected], at: point) }
+        try rejects("window_occluded") { try verify([remoteOverlay, expected], at: point, verified: false, hit: { _ in true }) }
+        try rejects("window_occluded") { try verify([remoteOverlay, expected], verified: false, hit: { _ in true }) }
+        var shareableOverlay = remoteOverlay
+        shareableOverlay[kCGWindowSharingState as String] = 1
+        try rejects("window_occluded") { try verify([shareableOverlay, expected], at: point, hit: { _ in true }) }
+        try rejects("window_occluded") { try verify([row(17, pid, bounds, layer: highLayer), expected], hit: { _ in true }) }
         try rejects("window_occluded") { try verify([remoteOverlay, helper, expected], at: point, hit: { _ in true }) }
         for blocker in [document, popup] {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
@@ -609,9 +645,7 @@ final class SelfTest {
         func clear(_ above: ArraySlice<[String: Any]>?, bounds: CGRect? = prompt, verifiedOverlay: Bool = false) -> Bool {
             ConsentOcclusion.clear(alertBounds: bounds, above: above, helperPID: helper, isWindowServer: { $0 == server },
                                    allowsOverlay: { row in
-                verifiedOverlay && DesktopAccess.isThirdPartyOverlay(row, executablePath: {
-                    $0 == other ? "/Applications/Remote.app/Server" : nil
-                })
+                TrustedRemoteOverlay.matches(row) { verifiedOverlay && $0 == other ? Self.verifiedRemoteSigning : nil }
             })
         }
         try expect(ConsentOcclusion.alertLevel > Int(CGWindowLevelForKey(.statusWindow)) &&
@@ -627,6 +661,15 @@ final class SelfTest {
                    "a private remote overlay at the maximum level requires a verified input path")
         try expect(!clear([remoteCover, row(other, prompt)], verifiedOverlay: true),
                    "a verified remote overlay never overrides an ordinary foreground cover")
+        var titleCover = row(other + 1, CGRect(x: prompt.minX, y: prompt.minY + 10, width: prompt.width, height: 20),
+                             layer: CGWindowLevelForKey(.maximumWindow))
+        titleCover[kCGWindowSharingState as String] = 0
+        try expect(!clear([titleCover], verifiedOverlay: true),
+                   "an untrusted strip over the title blocks consent even when dialog and button centers remain clear")
+        var shareableCover = remoteCover
+        shareableCover[kCGWindowSharingState as String] = 1
+        try expect(!clear([shareableCover], verifiedOverlay: true),
+                   "a signed remote process's shareable window still blocks consent")
         try expect(!clear([row(other, prompt, alpha: 0)]), "transparent click-through window blocks consent")
         try expect(clear([row(other, prompt.offsetBy(dx: 400, dy: 0))]), "nonoverlapping window leaves consent clear")
         try expect(clear([row(other, .zero), row(helper, prompt)]), "empty and helper-owned windows leave consent clear")
@@ -854,14 +897,12 @@ final class SelfTest {
 
         let host = ProcessIdentity(pid: 456, uid: 501, seconds: 1, microseconds: 0, executable: "/opt/Example/Rome",
                                    generation: ProcessGeneration(uniqueID: 1, idVersion: 0))
-        let signing = Peer.SigningSummary(identifier: "com.example.rome", teamID: "ABCDEFG123")
+        let signing = Peer.SigningSummary(identifier: "com.example.rome", teamID: "ABCDEFG123", isAdHoc: false)
         for locale in HelperLocale.allCases {
             let claim = ControllerClaim(key: key, label: "Controller", scope: .remote)
-            let prompt = ConsentPrompt(locale: locale, mode: .sessionOrPersistent, sourceLabel: claim.label,
+            let prompt = ConsentPrompt(locale: locale, mode: .sessionOrPersistent,
                                        controller: claim, host: host, signingSummary: signing, deadline: .now())
-            let captions: [HelperLocale.Text] = [.introduction, .process, .details, .fingerprint, .executable, .signingIdentifier, .teamID]
-            try expect(captions.map { locale[$0] }.allSatisfy { !$0.isEmpty && !$0.hasSuffix(":") && !$0.hasSuffix("：") },
-                       "consent uses standalone field captions in \(locale.rawValue)")
+            try expect(prompt.claimedSource == claim.label, "the consent identifies the proven controller's display claim")
             try expect(prompt.accessText == locale[.access] &&
                        prompt.persistentNotice?.contains(locale[.persistentAccess]) == true &&
                        prompt.persistentNotice?.contains(locale[.remoteRisk]) == true &&
@@ -870,75 +911,54 @@ final class SelfTest {
             let fingerprint = [locale.keyFingerprint("21FE-31DF-A154-A261"),
                                locale.keyFingerprint("626B-F854-046F-D227")].joined(separator: "\n")
             try expect(prompt.fingerprintLines == fingerprint, "consent displays all 128 fingerprint bits across two lines")
-            var disclosure = ConsentDisclosure(fields: prompt.detailFields)
-            try expect(disclosure.rows.isEmpty, "verified details start collapsed")
-            disclosure.toggle()
-            try expect(disclosure.visibleFields.map(\.label) == [.fingerprint, .executable, .signingIdentifier, .teamID] &&
-                       disclosure.visibleFields.map(\.value) == [fingerprint, host.executable, signing.identifier, "ABCDEFG123"],
-                       "the fingerprint leads the verified disclosure in \(locale.rawValue)")
-            try expect(disclosure.rows.map { $0.map(\.label) } == [[.fingerprint], [.executable], [.signingIdentifier, .teamID]],
-                       "signing identifiers share one row so all four fields can fit on screen")
-            disclosure.toggle()
-            try expect(disclosure.visibleFields.isEmpty, "collapsing hides the details again")
+            try expect(prompt.verifiedExecutable == host.executable && prompt.verifiedSigningIdentifier == signing.identifier &&
+                       prompt.verifiedTeam == "ABCDEFG123",
+                       "full verified identity and fingerprint are directly available in \(locale.rawValue)")
         }
-        let unsigned = ConsentPrompt(locale: .en, mode: .sessionOnly, sourceLabel: nil,
+        let unsigned = ConsentPrompt(locale: .en, mode: .sessionOnly,
                                      controller: nil, host: host, signingSummary: nil, deadline: .now())
         try expect(unsigned.accessText == HelperLocale.en[.access] && unsigned.fingerprintLines == nil &&
-                   unsigned.sourceLabel == nil, "legacy consent omits an empty introduction and fingerprint")
-        try expect(unsigned.detailFields.map(\.value) == [host.executable], "host details survive missing signing metadata")
-        try expect(auditDisplayValue("/tmp/Desk\n\u{202E}App") == "/tmp/Desk\\u{a}\\u{202e}App",
-                   "audit fields visibly escape line breaks and direction controls without adding quotes")
-        let local = ConsentPrompt(locale: .zhHans, mode: .persistentOnly, sourceLabel: "Controller",
-                                  controller: ControllerClaim(key: key, label: "Controller", scope: .local),
-                                  host: host, signingSummary: signing, deadline: .now())
-        try expect(local.persistentNotice?.contains(local.locale[.localRisk]) == true && local.detailFields.first?.label == .fingerprint,
-                   "persistent-only consent displays the local-key risk and fingerprint")
-        let translations: [(HelperLocale, String, String)] = [
-            (.en, "About", "Always Allow This Source"),
-            (.zhHans, "介绍", "总是允许该来源"),
-            (.zhHant, "介紹", "一律允許此來源"),
-            (.ja, "紹介", "この接続元を常に許可"),
-        ]
-        for (locale, introduction, approval) in translations {
-            try expect(locale[.introduction] == introduction &&
-                       locale[ConsentDecision.allowPersistent.buttonTitle] == approval,
-                       "the introduction and persistent approval use the requested text in \(locale.rawValue)")
-        }
-        try expect(ConsentDisclosure.contentWidth(alertWidth: 260) == 228 &&
-                   ConsentDisclosure.contentWidth(alertWidth: 310) == 228 &&
-                   ConsentDisclosure.contentWidth(alertWidth: 240) == 208, "accessory width follows the compact alert column")
-        let auditHeight: (Int) -> CGFloat = { lines in 130 + 14 * CGFloat(lines) }
-        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 176, fittingHeight: auditHeight) == 3,
-                   "a long executable path can use three lines when all details fit")
-        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 169, fittingHeight: auditHeight) == 2,
-                   "a compact alert limits the path to the lines left after the other audit fields")
-        try expect(ConsentDisclosure.pathLineLimit(heightLimit: 150, fittingHeight: auditHeight) == 1,
-                   "a tight layout reserves one path line so every audit field remains visible")
+                   unsigned.claimedSource == nil, "consent without a controller omits both the claim and the fingerprint")
+        try expect(unsigned.verifiedExecutable == host.executable &&
+                   unsigned.verifiedSigningIdentifier == unsigned.locale[.signingUnavailable] && unsigned.verifiedTeam == unsigned.locale[.noTeamID],
+                   "missing signing metadata is visible without inventing a signer")
+        try expect(auditDisplayValue("/tmp/Desk\n\u{202E}App") == "/tmp/Desk\\u{a}\\u{202e}App" &&
+                   auditDisplayValue("/tmp/Desk\\u{a}") == "/tmp/Desk\\\\u{a}",
+                   "audit fields visibly distinguish controls from literal escape sequences")
         let longPath = "/opt/" + String(repeating: "very-long-install-directory/", count: 8) + "bin/node"
-        let longPathDisclosure = ConsentDisclosure(fields: [(.executable, auditDisplayValue(longPath))])
-        try expect(longPathDisclosure.fields.first?.value == longPath,
-                   "limiting path height preserves the full selectable audit value")
-        var unsignedDetails = ConsentDisclosure(fields: unsigned.detailFields)
-        unsignedDetails.toggle()
-        try expect(unsignedDetails.rows.map { $0.map(\.label) } == [[.executable]],
-                   "an unsigned process keeps its path in a full-width row")
+        let longHost = ProcessIdentity(pid: host.pid, uid: host.uid, seconds: host.seconds, microseconds: host.microseconds,
+                                       executable: longPath, generation: host.generation)
+        let adHoc = Peer.SigningSummary(identifier: "node", teamID: nil, isAdHoc: true)
+        let local = ConsentPrompt(locale: .zhHans, mode: .persistentOnly,
+                                  controller: ControllerClaim(key: key, label: "Controller", scope: .local),
+                                  host: longHost, signingSummary: adHoc, deadline: .now())
+        try expect(local.persistentNotice == local.locale[.localRisk] && local.fingerprintLines != nil,
+                   "persistent-only consent displays the local-key risk and fingerprint")
+        try expect(local.verifiedExecutable == longPath && local.verifiedTeam == local.locale[.adHoc],
+                   "consent preserves the full long path and distinguishes ad hoc signing")
+        let translations: [(HelperLocale, String, String)] = [
+            (.en, "Claimed by requester", "Always Allow This Source"),
+            (.zhHans, "请求方声称", "总是允许该来源"),
+            (.zhHant, "請求方聲稱", "一律允許此來源"),
+            (.ja, "要求元の申告", "この接続元を常に許可"),
+        ]
+        for (locale, claimed, approval) in translations {
+            try expect(locale[.claimedSource] == claimed &&
+                       locale[ConsentDecision.allowPersistent.buttonTitle] == approval,
+                       "consent separates the display claim from approval in \(locale.rawValue)")
+        }
 
-        func declaredSource(_ options: [String: Any]) throws -> String? {
-            try Hello(JSONSerialization.data(withJSONObject: ["params": options]), preferred: []).sourceLabel
+        func claimedSource(_ options: [String: Any]) throws -> String? {
+            try Hello(JSONSerialization.data(withJSONObject: ["params": options]), preferred: []).controller?.label
         }
-        try expect(try declaredSource(["source": "  Rome\n\u{202E} Node CLI "]) == "Rome Node CLI",
-                   "the helper sanitizes and preserves the caller's self-introduction")
-        try expect(try declaredSource([:]) == nil, "an unnamed source has no introduction")
-        try expect(try declaredSource(["source": "\u{202E} \u{0000}\t"]) == nil, "an invisible source name is omitted")
-        try expect(try declaredSource(["source": String(repeating: "名", count: 70)])?.count == 64, "the source name is capped")
+        try expect(try claimedSource(["source": "Rome Desktop"]) == nil && claimedSource(["source": 42]) == nil,
+                   "legacy source fields never name an unauthenticated requester")
         for mode in [ConsentMode.sessionOnly, .persistentOnly, .sessionOrPersistent] {
-            let merged = try declaredSource(["consentMode": mode.rawValue,
-                                             "controller": ["label": "Rome App", "publicKey": encoded, "scope": "local"],
-                                             "source": "Rome Node CLI"])
-            try expect(merged == "Rome App",
-                       "a controller supplies the source label in \(mode.rawValue)")
+            let label = try claimedSource(["consentMode": mode.rawValue,
+                                           "controller": ["label": " Rome\n\u{202E} App ", "publicKey": encoded, "scope": "local"],
+                                           "source": "Rome Desktop"])
+            try expect(label == "Rome App", "only the sanitized controller label supplies a display claim in \(mode.rawValue)")
         }
-        try rejects("invalid_request") { _ = try declaredSource(["source": 42]) }
 
         let privateKey = Curve25519.Signing.PrivateKey()
         let claim = ControllerClaim(key: try ControllerKey(privateKey.publicKey.rawRepresentation.base64EncodedString()),
@@ -1303,9 +1323,11 @@ final class SelfTest {
         try withControllerSocket(path, store: store, consent: introduced.provider(.allowSession)) { fd, _, key in
             let grant = try result(hello(fd, key, ["source": "Desk\n Helper"]))
             try expect(grant["auth"] as? String == "session" && grant["label"] == nil,
-                       "a source introduction preserves the session-only reply")
+                       "an ignored legacy source preserves the session-only reply")
         }
-        try expect(introduced.prompts.first?.sourceLabel == "Desk Helper", "session consent receives the sanitized source name")
+        try expect(introduced.prompts.first?.claimedSource == nil &&
+                   introduced.prompts.first?.label == legacy.prompts.first?.label,
+                   "an unauthenticated source cannot replace the authenticated host's display identity")
 
         let invalid = ConsentProbe()
         try withControllerSocket(path, store: store, consent: invalid.provider(.allowSession)) { fd, _, key in

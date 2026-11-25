@@ -7,7 +7,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
         case title, access, persistentAccess, source, fingerprint, remoteRisk, localRisk
         case deny, allowSession, allowPersistent
         case menuTitle, noWindows, oneWindow, multipleWindows, stop, revokeCurrent, revokeAll, keyStoreError
-        case introduction, process, details, executable, signingIdentifier, teamID
+        case claimedSource, process, executable, signingIdentifier, teamID, signingUnavailable, noTeamID, adHoc
     }
 
     subscript(_ text: Text) -> String { Self.strings[self]![text.rawValue] }
@@ -19,15 +19,15 @@ enum HelperLocale: String, CaseIterable, Sendable {
     private static let strings: [Self: [String]] = [
         .en: [
             "Allow window control through Rome?",
-            "This source is requesting window control and may read private information. You can stop it in the menu bar or app settings.",
-            "Always allowing this source lets the key holder connect without asking.",
+            "Window control can read private information. Stop it from the menu bar or settings.",
+            "The key holder can connect without asking.",
             "Source", "Key fingerprint",
-            "The source says the key is remote. Compare the fingerprint on that host.",
-            "For long-term access, any process running as you that can read the private key on this Mac can connect without asking.",
+            "Verify the remote fingerprint.",
+            "Apps running as you can use the private key to connect without asking.",
             "Deny", "Allow This Session", "Always Allow This Source",
             "Rome Computer Use", "No window bound", "1 active window", "%d active windows", "Stop Computer Use",
             "Revoke “%@” (%@) & Stop", "Revoke All Authorized Keys", "Could not revoke authorized keys",
-            "About", "Process", "Details", "Executable", "Signing identifier", "Team ID",
+            "Claimed by requester", "Process", "Executable", "Signing ID", "Team ID", "Unverified", "None", "Ad hoc signed",
         ],
         .zhHans: [
             "允许通过 Rome 控制窗口？",
@@ -39,32 +39,32 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "拒绝", "允许本次会话", "总是允许该来源",
             "Rome 电脑控制", "未绑定窗口", "1 个活动窗口", "%d 个活动窗口", "停止电脑控制",
             "撤销「%@」（%@）并停止", "撤销全部已授权来源", "无法撤销已授权公钥",
-            "介绍", "进程", "详细信息", "可执行文件", "签名标识", "团队 ID",
+            "请求方声称", "进程", "可执行文件", "签名标识", "团队 ID", "未验证", "无", "临时签名",
         ],
         .zhHant: [
             "允許透過 Rome 控制視窗？",
             "此來源申請控制視窗，可能讀取隱私資訊。你可以在選單列或應用程式設定中停止。",
             "長期授權可憑私密金鑰直接連線。",
             "來源", "公開金鑰指紋",
-            "私密金鑰據稱在遠端，請核對指紋。",
-            "長期授權後，同一使用者下能讀取本機私密金鑰的程序可直接連線。",
+            "請核對遠端指紋。",
+            "同一使用者的程序可憑私密金鑰直接連線。",
             "拒絕", "允許本次工作階段", "一律允許此來源",
             "Rome 電腦控制", "未綁定視窗", "1 個使用中的視窗", "%d 個使用中的視窗", "停止電腦控制",
             "撤銷「%@」（%@）並停止", "撤銷所有已授權來源", "無法撤銷已授權的公開金鑰",
-            "介紹", "程序", "詳細資訊", "可執行檔", "簽章識別碼", "團隊 ID",
+            "請求方聲稱", "程序", "可執行檔", "簽章識別碼", "團隊 ID", "未驗證", "無", "臨時簽章",
         ],
         .ja: [
             "Rome 経由でウインドウの操作を許可しますか？",
-            "この接続元はウインドウの操作を要求しており、プライバシー情報を読み取る可能性があります。メニューバーまたはアプリ設定から停止できます。",
-            "常に許可すると、秘密鍵の所有者は確認なしで接続できます。",
+            "ウインドウの操作により個人情報が読み取られる場合があります。メニューバーまたは設定から停止できます。",
+            "秘密鍵があれば確認なしで再接続できます。",
             "接続元", "公開鍵のフィンガープリント",
-            "接続元によると秘密鍵はリモートにあります。リモート側のフィンガープリントと照合してください。",
-            "常に許可すると、同じユーザーでこの Mac の秘密鍵を読めるプロセスも確認なしで接続できます。",
+            "リモート側の指紋と照合してください。",
+            "同じユーザーのアプリが秘密鍵を読めると確認なしで再接続できます。",
             "拒否", "今回のセッションを許可", "この接続元を常に許可",
             "Rome コンピュータ操作", "接続中のウインドウなし", "1 個のウインドウが接続中", "%d 個のウインドウが接続中",
             "コンピュータの操作を停止", "「%@」（%@）の許可を取り消して停止", "すべての接続元の許可を取り消す",
             "許可済みの鍵を取り消せませんでした",
-            "紹介", "プロセス", "詳細", "実行ファイル", "署名識別子", "チーム ID",
+            "要求元の申告", "プロセス", "実行ファイル", "署名識別子", "チーム ID", "未検証", "なし", "アドホック署名",
         ],
     ]
 }

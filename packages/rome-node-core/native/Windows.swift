@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import ImageIO
 import ScreenCaptureKit
+import Security
 import UniformTypeIdentifiers
 
 struct WindowRow {
@@ -78,8 +79,9 @@ func pinnedWindow(_ previous: WindowRow, rows: [WindowRow], rootBounds: CGRect) 
     return window
 }
 
-func observedElement<Element>(_ ref: String, in refs: [String: Element], expires: TimeInterval, at uptime: TimeInterval) throws -> Element {
-    guard uptime < expires, let element = refs[ref] else { throw Failure("element_unavailable") }
+func observedElement<Element>(_ ref: String, in refs: [String: Element], expires: TimeInterval,
+                              at uptime: TimeInterval, belongs: (Element) -> Bool) throws -> Element {
+    guard uptime < expires, let element = refs[ref], belongs(element) else { throw Failure("element_unavailable") }
     return element
 }
 
@@ -94,6 +96,54 @@ func observedTextValue(_ source: String, expanded: Bool) -> (value: String, trun
           end != bytes.endIndex else { return (source, false) }
     while end.samePosition(in: scalars) == nil { bytes.formIndex(before: &end) }
     return (String(decoding: bytes[..<end], as: UTF8.self), true)
+}
+
+enum TrustedRemoteOverlay {
+    struct SigningIdentity {
+        let teamID: String
+        let identifier: String
+        let flags: UInt32
+    }
+
+    private static let teamID = "PU9BNSBJW7"
+    private static let identifier = "com.netease.uuremote.server"
+
+    static func matches(_ row: [String: Any]) -> Bool { matches(row, verify: verify) }
+
+    static func matches(_ row: [String: Any], verify: (pid_t) -> SigningIdentity?) -> Bool {
+        guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value,
+              layer >= CGWindowLevelForKey(.screenSaverWindow),
+              (row[kCGWindowSharingState as String] as? NSNumber)?.intValue == 0,
+              let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0,
+              let signing = verify(pid) else { return false }
+        return signing.teamID == teamID && signing.identifier == identifier &&
+            signing.flags & SecCodeSignatureFlags.runtime.rawValue != 0
+    }
+
+    private static func verify(_ pid: pid_t) -> SigningIdentity? {
+        guard let process = try? ProcessIdentity.read(pid) else { return nil }
+        let expression = """
+            anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and \
+            certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "\(teamID)" and \
+            identifier "\(identifier)"
+            """
+        var code: SecCode?
+        var requirement: SecRequirement?
+        var staticCode: SecStaticCode?
+        var rawInfo: CFDictionary?
+        let attributes = [kSecGuestAttributePid as String: pid] as CFDictionary
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess, let requirement,
+              SecCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate), requirement) == errSecSuccess,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &rawInfo) == errSecSuccess,
+              let info = rawInfo as? [String: Any],
+              let team = info[kSecCodeInfoTeamIdentifier as String] as? String,
+              let identifier = info[kSecCodeInfoIdentifier as String] as? String,
+              let flags = info[kSecCodeInfoFlags as String] as? NSNumber,
+              (try? process.verify()) != nil else { return nil }
+        return SigningIdentity(teamID: team, identifier: identifier, flags: flags.uint32Value)
+    }
 }
 
 final class DesktopAccess: @unchecked Sendable {
@@ -133,7 +183,8 @@ final class DesktopAccess: @unchecked Sendable {
 
     static func visibleLayersClear(_ rows: [[String: Any]]?,
                                    isWindowServer: (pid_t) -> Bool = ConsentOcclusion.isWindowServer,
-                                   executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
+                                   executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath,
+                                   trustedOverlay: ([String: Any]) -> Bool = TrustedRemoteOverlay.matches) -> Bool {
         guard let rows, !rows.isEmpty else { return false }
         let screenSaver = CGWindowLevelForKey(.screenSaverWindow)
         return rows.allSatisfy { row in
@@ -142,18 +193,12 @@ final class DesktopAccess: @unchecked Sendable {
             guard let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0 else { return false }
             if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server", isWindowServer(pid) { return true }
-            return isThirdPartyOverlay(row, executablePath: executablePath)
+            // Consent and input perform target-specific hit testing after this console check.
+            if layer >= CGShieldingWindowLevel() { return trustedOverlay(row) }
+            guard let path = executablePath(pid), path.hasPrefix("/") else { return false }
+            let systemPaths = ["/System/", "/usr/libexec/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/"]
+            return !systemPaths.contains { path.hasPrefix($0) }
         }
-    }
-
-    static func isThirdPartyOverlay(_ row: [String: Any],
-                                    executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
-        guard let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value,
-              layer >= CGWindowLevelForKey(.screenSaverWindow),
-              let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid > 0,
-              let path = executablePath(pid), path.hasPrefix("/") else { return false }
-        let systemPaths = ["/System/", "/usr/libexec/", "/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/"]
-        return !systemPaths.contains { path.hasPrefix($0) }
     }
 
     @MainActor
@@ -549,7 +594,9 @@ final class Windows: @unchecked Sendable {
         let now = ProcessInfo.processInfo.systemUptime
         let deadline = now + 0.6
         let previous = value.context.expires > now ? value.context.refs : [:]
-        let root = try element.map { try observedElement($0, in: previous, expires: value.context.expires, at: now) } ?? match.root
+        let root = try element.map { ref in
+            try observedElement(ref, in: previous, expires: value.context.expires, at: now) { belongs($0, to: match) }
+        } ?? match.root
         var refs: [String: AXUIElement] = [:]
         var truncated = false
         var expandedValue: (value: String, truncated: Bool)?
@@ -615,8 +662,9 @@ final class Windows: @unchecked Sendable {
     func act(_ id: String, element ref: String, action: String, input: Request.Value?) throws -> [String: Any] {
         let value = try bindings.current(id)
         let match = try revalidate(value)
-        let node = try observedElement(ref, in: value.context.refs, expires: value.context.expires, at: ProcessInfo.processInfo.systemUptime)
-        guard belongs(node, to: match), let role = text(node, kAXRoleAttribute) else { throw Failure("element_unavailable") }
+        let node = try observedElement(ref, in: value.context.refs, expires: value.context.expires,
+                                       at: ProcessInfo.processInfo.systemUptime) { belongs($0, to: match) }
+        guard let role = text(node, kAXRoleAttribute) else { throw Failure("element_unavailable") }
         guard actions(node, role: role).contains(action) else { throw Failure("action_unavailable") }
 
         let property: CFTypeRef?

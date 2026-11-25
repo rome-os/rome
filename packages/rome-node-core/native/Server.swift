@@ -268,14 +268,15 @@ final class Connection: @unchecked Sendable {
 struct ConsentPrompt: Sendable {
     let locale: HelperLocale
     let mode: ConsentMode
-    let sourceLabel: String?
     let controller: ControllerClaim?
     let host: ProcessIdentity
     let signingSummary: Peer.SigningSummary?
     let deadline: DispatchTime
 
+    var claimedSource: String? { controller?.label }
+
     var label: String {
-        sourceLabel ?? sanitizeLabel(URL(fileURLWithPath: host.executable).lastPathComponent) ?? locale[.source]
+        claimedSource ?? sanitizeLabel(URL(fileURLWithPath: host.executable).lastPathComponent) ?? locale[.source]
     }
 }
 
@@ -434,8 +435,8 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     }
 
     let consentDeadline = DispatchTime.now() + .seconds(60)
-    let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode, sourceLabel: hello.sourceLabel,
-                               controller: hello.controller, host: peer.identity, signingSummary: peer.signingSummary,
+    let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode, controller: hello.controller,
+                               host: peer.identity, signingSummary: peer.signingSummary,
                                deadline: consentDeadline)
     let canContinue: @Sendable () -> Bool = {
         do {

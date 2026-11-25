@@ -212,24 +212,24 @@ extension ConsentPrompt {
         }.joined(separator: "\n")
     }
 
-    var detailFields: [ConsentDisclosure.Field] {
-        func field(_ key: HelperLocale.Text, _ value: String) -> ConsentDisclosure.Field {
-            (key, auditDisplayValue(value))
-        }
-        var identity: [ConsentDisclosure.Field] = []
-        if let fingerprintLines { identity.append((.fingerprint, fingerprintLines)) }
-        identity.append(field(.executable, host.executable))
-        if let signingSummary {
-            identity.append(field(.signingIdentifier, signingSummary.identifier))
-            if let teamID = signingSummary.teamID { identity.append(field(.teamID, teamID)) }
-        }
-        return identity
+    var verifiedExecutable: String { auditDisplayValue(host.executable) }
+
+    var verifiedSigningIdentifier: String {
+        signingSummary.map { auditDisplayValue($0.identifier) } ?? locale[.signingUnavailable]
+    }
+
+    var verifiedTeam: String {
+        signingSummary?.teamID.map(auditDisplayValue) ?? locale[signingSummary?.isAdHoc == true ? .adHoc : .noTeamID]
     }
 }
 
 func auditDisplayValue(_ text: String) -> String {
     var visible = ""
     for scalar in text.unicodeScalars {
+        if scalar == "\\" {
+            visible += "\\\\"
+            continue
+        }
         switch scalar.properties.generalCategory {
         case .control, .format, .lineSeparator, .paragraphSeparator:
             visible += "\\u{\(String(scalar.value, radix: 16))}"
@@ -240,286 +240,106 @@ func auditDisplayValue(_ text: String) -> String {
     return visible
 }
 
-struct ConsentDisclosure {
-    typealias Field = (label: HelperLocale.Text, value: String)
-    let fields: [Field]
-    private(set) var expanded = false
-
-    var visibleFields: [Field] { expanded ? fields : [] }
-    var rows: [[Field]] {
-        let fields = visibleFields
-        guard fields.suffix(2).map(\.label) == [.signingIdentifier, .teamID] else { return fields.map { [$0] } }
-        return fields.dropLast(2).map { [$0] } + [Array(fields.suffix(2))]
-    }
-
-    mutating func toggle() { expanded.toggle() }
-
-    static func contentWidth(alertWidth: CGFloat) -> CGFloat {
-        min(228, max(1, alertWidth - 32))
-    }
-
-    static func pathLineLimit(heightLimit: CGFloat, fittingHeight: (Int) -> CGFloat) -> Int {
-        (2...3).reversed().first { ceil(fittingHeight($0)) <= heightLimit } ?? 1
-    }
-}
-
 @MainActor
-private final class ConsentAccessory: NSObject {
-    private final class DisclosureButton: NSButton {
-        override var alignmentRectInsets: NSEdgeInsets {
-            var insets = super.alignmentRectInsets
-            insets.left += 4
-            return insets
-        }
-    }
-
+private final class ConsentAccessory {
     let view = NSView()
     private let stack = NSStackView()
-    private let body = NSStackView()
-    private let toggle = DisclosureButton()
-    private let accessoryWidth: CGFloat
-    private var width: CGFloat { max(1, accessoryWidth - 12) }
-    private let heightLimit: CGFloat
-    private weak var alert: NSAlert?
-    private let locale: HelperLocale
-    private var disclosure: ConsentDisclosure
-    private var introduction: NSStackView?
-    private var detailsView: NSView?
-    private let beforeLayout: @MainActor () -> Void
-    private(set) var resizing = false
+    private let width: CGFloat = 248
 
-    init(prompt: ConsentPrompt, alert: NSAlert, beforeLayout: @escaping @MainActor () -> Void) {
-        self.alert = alert
-        self.beforeLayout = beforeLayout
-        locale = prompt.locale
-        let width = ConsentDisclosure.contentWidth(alertWidth: alert.window.contentLayoutRect.width)
-        accessoryWidth = width
-        heightLimit = Self.maxCompactHeight(of: alert, accessoryWidth: width)
-        disclosure = ConsentDisclosure(fields: prompt.detailFields)
-        super.init()
-        for column in [stack, body] {
-            column.orientation = .vertical
-            column.alignment = .leading
-            column.spacing = 10
-        }
-        stack.detachesHiddenViews = true
+    init(prompt: ConsentPrompt) {
+        let locale = prompt.locale
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             stack.topAnchor.constraint(equalTo: view.topAnchor),
-            stack.widthAnchor.constraint(equalToConstant: self.width),
-            body.widthAnchor.constraint(equalToConstant: self.width),
+            stack.widthAnchor.constraint(equalToConstant: width),
         ])
-        if let name = prompt.sourceLabel {
-            let value = label(locale.sourceLabel(name), font: .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold),
-                              color: .labelColor)
-            let header = group(locale[.introduction], value: value)
-            introduction = header
-            addBlock(header, to: stack)
-        }
+
+        let explanation = [prompt.accessText, prompt.persistentNotice].compactMap { $0 }.joined(separator: "\n")
+        append(label(explanation))
 
         let host = prompt.host
         let running = NSRunningApplication(processIdentifier: host.pid)
-        let name = running?.localizedName.flatMap { sanitizeLabel($0) } ??
-            sanitizeLabel(URL(fileURLWithPath: host.executable).lastPathComponent) ?? locale[.source]
         let icon = NSImageView(image: running?.icon ?? NSWorkspace.shared.icon(forFile: host.executable))
         icon.imageScaling = .scaleProportionallyDown
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 16),
                                      icon.heightAnchor.constraint(equalToConstant: 16)])
-        let nameLabel = label("\(locale.sourceLabel(name)) (\(host.pid))",
-                              font: .systemFont(ofSize: NSFont.systemFontSize), color: .labelColor)
-        nameLabel.maximumNumberOfLines = 1
-        nameLabel.lineBreakMode = .byTruncatingMiddle
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let process = NSStackView(views: [icon, nameLabel])
+        let name = auditDisplayValue(URL(fileURLWithPath: host.executable).lastPathComponent)
+        let processName = label("\(locale.sourceLabel(name)) (PID \(host.pid))", width: width - 22)
+        processName.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        let process = NSStackView(views: [icon, processName])
         process.orientation = .horizontal
         process.alignment = .centerY
         process.spacing = 6
-        addBlock(group(locale[.process], value: process), to: body)
+        process.setAccessibilityLabel(locale[.process])
+        append(process)
 
-        let explanation = label(prompt.accessText, font: .systemFont(ofSize: NSFont.systemFontSize), color: .labelColor)
-        addBlock(explanation, to: body)
-        stack.addArrangedSubview(body)
-        if let notice = prompt.persistentNotice {
-            addBlock(label(notice), to: body)
-            if alert.buttons.count == 3 {
-                body.setCustomSpacing(6, after: explanation)
-                stack.setCustomSpacing(6, after: body)
-            }
+        let pathCaption = locale[.executable] + "  "
+        let path = label(pathCaption + prompt.verifiedExecutable)
+        let pathText = NSMutableAttributedString(string: path.stringValue, attributes: [.font: path.font!])
+        pathText.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor,
+                              range: NSRange(location: 0, length: pathCaption.utf16.count))
+        path.attributedStringValue = pathText
+        path.lineBreakMode = .byCharWrapping
+        path.isSelectable = true
+        append(path)
+        let pairWidth = (width - 8) / 2
+        let pair = NSStackView(views: [
+            group(locale[.signingIdentifier], value: prompt.verifiedSigningIdentifier, width: pairWidth),
+            group(locale[.teamID], value: prompt.verifiedTeam, width: pairWidth),
+        ])
+        pair.orientation = .horizontal
+        pair.alignment = .top
+        pair.spacing = 8
+        append(pair)
+
+        if let fingerprint = prompt.fingerprintLines {
+            let value = label(fingerprint, width: 136)
+            value.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            value.isSelectable = true
+            let title = label(locale[.fingerprint], width: width - 144, color: .secondaryLabelColor)
+            let key = NSStackView(views: [title, value])
+            key.orientation = .horizontal
+            key.alignment = .top
+            key.spacing = 8
+            append(key)
+        }
+        if let name = prompt.claimedSource {
+            append(label("\(locale[.claimedSource]): \(locale.sourceLabel(name))", color: .secondaryLabelColor))
         }
 
-        toggle.controlSize = .mini
-        toggle.title = locale[.details]
-        toggle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        toggle.isBordered = false
-        toggle.imagePosition = .imageLeft
-        toggle.imageHugsTitle = true
-        toggle.contentTintColor = .secondaryLabelColor
-        toggle.target = self
-        toggle.action = #selector(toggleDetails)
-        toggle.setAccessibilityLabel(locale[.details])
-        updateDisclosure()
-        stack.addArrangedSubview(toggle)
-        fit()
+        stack.layoutSubtreeIfNeeded()
+        view.setFrameSize(CGSize(width: width, height: ceil(stack.fittingSize.height)))
+        view.layoutSubtreeIfNeeded()
     }
 
-    private static func maxCompactHeight(of alert: NSAlert, accessoryWidth: CGFloat) -> CGFloat {
-        let nativeWidth = alert.window.frame.width
-        var low = 1, high = 350
-        // AppKit changes layout when the complete alert gets too tall.
-        while low < high {
-            let height = (low + high + 1) / 2
-            alert.accessoryView = NSView(frame: CGRect(x: 0, y: 0, width: accessoryWidth, height: CGFloat(height)))
-            alert.layout()
-            if alert.window.frame.width <= nativeWidth { low = height }
-            else { high = height - 1 }
-        }
-        alert.accessoryView = nil
-        return CGFloat(low)
-    }
-
-    private func label(_ text: String, font: NSFont = .systemFont(ofSize: NSFont.smallSystemFontSize),
-                       color: NSColor = .secondaryLabelColor) -> NSTextField {
+    private func label(_ text: String, width: CGFloat? = nil, color: NSColor = .labelColor) -> NSTextField {
         let field = NSTextField(labelWithString: text)
-        field.font = font
+        field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         field.textColor = color
         field.maximumNumberOfLines = 0
-        field.lineBreakMode = .byCharWrapping
-        field.preferredMaxLayoutWidth = width
+        field.lineBreakMode = .byWordWrapping
+        field.preferredMaxLayoutWidth = width ?? self.width
+        field.widthAnchor.constraint(equalToConstant: field.preferredMaxLayoutWidth).isActive = true
         return field
     }
 
-    private func addBlock(_ block: NSView, to column: NSStackView) {
-        column.addArrangedSubview(block)
-        block.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+    private func append(_ block: NSView) {
+        stack.addArrangedSubview(block)
     }
 
-    private func group(_ caption: String, value: NSView, spacing: CGFloat = 3, columnWidth: CGFloat? = nil) -> NSStackView {
-        let title = label(caption)
-        title.preferredMaxLayoutWidth = columnWidth ?? width
-        let group = NSStackView(views: [title, value])
+    private func group(_ caption: String, value: String, width: CGFloat) -> NSStackView {
+        let field = label(value, width: width)
+        field.isSelectable = true
+        let group = NSStackView(views: [label(caption, width: width, color: .secondaryLabelColor), field])
         group.orientation = .vertical
         group.alignment = .leading
-        group.spacing = spacing
-        title.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
-        value.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        group.spacing = 1
         return group
-    }
-
-    private func fit() {
-        stack.layoutSubtreeIfNeeded()
-        view.setFrameSize(CGSize(width: accessoryWidth, height: ceil(stack.fittingSize.height)))
-        view.layoutSubtreeIfNeeded()
-    }
-
-    private func updateDisclosure() {
-        toggle.image = NSImage(systemSymbolName: disclosure.expanded ? "chevron.down" : "chevron.right",
-                               accessibilityDescription: nil)
-        toggle.setAccessibilityExpanded(disclosure.expanded)
-    }
-
-    @objc private func toggleDetails() {
-        relayout {
-            disclosure.toggle()
-            updateDisclosure()
-            if disclosure.expanded {
-                showDetails()
-            } else if let detailsView {
-                stack.removeArrangedSubview(detailsView)
-                detailsView.removeFromSuperview()
-                self.detailsView = nil
-                body.isHidden = false
-                if let introduction {
-                    introduction.spacing = 3
-                    stack.setCustomSpacing(10, after: introduction)
-                }
-            }
-        }
-    }
-
-    private func showDetails() {
-        let audit = NSStackView()
-        audit.orientation = .vertical
-        audit.alignment = .leading
-        audit.spacing = 5
-        var executable: NSTextField?
-        for row in disclosure.rows {
-            let columnWidth = row.count == 2 ? (width - 8) / 2 : width
-            let groups = row.map { field in
-                let value = auditValue(field, columnWidth: columnWidth)
-                if field.label == .executable { executable = value }
-                return group(locale[field.label], value: value, spacing: 2, columnWidth: columnWidth)
-            }
-            if groups.count == 2 {
-                let pair = NSStackView(views: groups)
-                pair.orientation = .horizontal
-                pair.alignment = .top
-                pair.distribution = .fillEqually
-                pair.spacing = 8
-                addBlock(pair, to: audit)
-            } else if let field = groups.first {
-                addBlock(field, to: audit)
-            }
-        }
-        detailsView = audit
-        stack.setCustomSpacing(2, after: toggle)
-        addBlock(audit, to: stack)
-        if ceil(stack.fittingSize.height) > heightLimit {
-            body.isHidden = true
-            if let introduction {
-                introduction.spacing = 2
-                stack.setCustomSpacing(2, after: introduction)
-            }
-        }
-        if let executable {
-            executable.maximumNumberOfLines = 0
-            let fullHeight = ceil(executable.fittingSize.height)
-            executable.maximumNumberOfLines = ConsentDisclosure.pathLineLimit(heightLimit: heightLimit) { lines in
-                executable.maximumNumberOfLines = lines
-                return stack.fittingSize.height
-            }
-            if ceil(executable.fittingSize.height) < fullHeight {
-                executable.lineBreakMode = .byTruncatingMiddle
-            }
-        }
-    }
-
-    private func auditValue(_ field: ConsentDisclosure.Field, columnWidth: CGFloat) -> NSTextField {
-        let value = label(field.value, color: .labelColor)
-        value.preferredMaxLayoutWidth = columnWidth
-        value.isSelectable = true
-        value.toolTip = field.value
-        if field.label == .fingerprint {
-            value.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
-            value.maximumNumberOfLines = 2
-        } else if field.label == .executable {
-            value.maximumNumberOfLines = 3
-        } else {
-            value.maximumNumberOfLines = 1
-            value.lineBreakMode = .byTruncatingMiddle
-        }
-        return value
-    }
-
-    private func relayout(_ change: () -> Void) {
-        guard let alert else { return }
-        let window = alert.window
-        let previous = window.frame
-        beforeLayout()
-        resizing = true
-        defer { resizing = false }
-        change()
-        fit()
-        alert.layout()
-        let size = window.frame.size
-        let frame = CGRect(x: previous.midX - size.width / 2, y: previous.maxY - size.height,
-                           width: size.width, height: size.height)
-        if window.isVisible, frame != previous {
-            window.setFrame(previous, display: false)
-            window.setFrame(frame, display: true, animate: true)
-        }
-        view.layoutSubtreeIfNeeded()
     }
 }
 
@@ -607,8 +427,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             self.unlock.reset()
             setEnabled(false)
         }
-        alert.layout()
-        let accessory = ConsentAccessory(prompt: prompt, alert: alert, beforeLayout: reset)
+        let accessory = ConsentAccessory(prompt: prompt)
         alert.accessoryView = accessory.view
         alert.layout()
         let window = alert.window
@@ -627,7 +446,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             return Self.visibility(ids, onScreen: onScreen)
         }
         let clear: @MainActor @Sendable (ConsentVisibility?) -> Bool = { visibility in
-            guard let visibility else { return false }
+            guard let visibility, let screen = window.screen, screen.visibleFrame.contains(window.frame) else { return false }
             guard visibility.needsHitTest else { return true }
             let dialogCenter = CGPoint(x: window.frame.midX, y: window.frame.midY)
             let buttonCenters = buttons.compactMap { button -> CGPoint? in
@@ -643,7 +462,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             }
         }
         let revalidate: @MainActor () -> Bool = {
-            let visible = !accessory.resizing && clear(sample(Self.surfaceIDs(window)))
+            let visible = clear(sample(Self.surfaceIDs(window)))
             return self.unlock.revalidate(clear: visible,
                                    focused: window.isKeyWindow && app.isActive, eligible: eligible(),
                                    at: ProcessInfo.processInfo.systemUptime)
@@ -720,7 +539,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         }
 
         let requestSample: @MainActor @Sendable () -> Void = {
-            guard !accessory.resizing, let token = self.consentPoll.begin() else { return }
+            guard let token = self.consentPoll.begin() else { return }
             let ids = Self.surfaceIDs(window)
             self.consentQueue.async {
                 let live = eligible()
@@ -843,7 +662,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                   ConsentOcclusion.bounds(reference) == bounds,
                   ConsentOcclusion.clear(alertBounds: bounds, above: ordered.dropLast(), helperPID: helperPID,
                                          isWindowServer: ConsentOcclusion.isWindowServer, allowsOverlay: { row in
-                guard DesktopAccess.isThirdPartyOverlay(row) else { return false }
+                guard TrustedRemoteOverlay.matches(row) else { return false }
                 needsHitTest = true
                 return true
             }) else { return nil }

@@ -96,7 +96,6 @@ struct Hello {
     let locale: HelperLocale
     let mode: ConsentMode
     let controller: ControllerClaim?
-    let sourceLabel: String?
 
     private struct Envelope: Decodable {
         let params: Options
@@ -112,10 +111,9 @@ struct Hello {
         let locale: String?
         let mode: ConsentMode
         let controller: Controller?
-        let source: String?
 
         private enum CodingKeys: String, CodingKey {
-            case locale, consentMode, controller, source
+            case locale, consentMode, controller
         }
 
         init(from decoder: Decoder) throws {
@@ -123,7 +121,6 @@ struct Hello {
             locale = try fields.decodeIfPresent(String.self, forKey: .locale)
             mode = try fields.contains(.consentMode) ? fields.decode(ConsentMode.self, forKey: .consentMode) : .sessionOnly
             controller = try fields.contains(.controller) ? fields.decode(Controller.self, forKey: .controller) : nil
-            source = try fields.decodeIfPresent(String.self, forKey: .source)
         }
     }
 
@@ -139,7 +136,6 @@ struct Hello {
             guard options.controller == nil, mode == .sessionOnly else { throw Failure("invalid_request") }
             controller = nil
         }
-        sourceLabel = controller?.label ?? options.source.flatMap(sanitizeLabel)
     }
 }
 

@@ -137,7 +137,7 @@ struct WindowInput {
 
     static func verifyStack(_ rows: [[String: Any]], target: WindowRow, point: CGPoint?,
                             isWindowServer: (pid_t) -> Bool,
-                            isThirdPartyOverlay: ([String: Any]) -> Bool = { DesktopAccess.isThirdPartyOverlay($0) },
+                            trustedOverlay: ([String: Any]) -> Bool = TrustedRemoteOverlay.matches,
                             hitsTarget: (CGPoint) -> Bool = { _ in false }) throws {
         guard target.pid > 0, target.pid != getpid(), target.id != 0, target.visible else {
             throw Failure("window_unavailable")
@@ -156,12 +156,12 @@ struct WindowInput {
             guard !bounds.isEmpty,
                   point.map({ bounds.contains($0) }) ?? target.bounds.intersects(bounds) else { continue }
             let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
-            if pid == target.pid, point == nil { continue }
             let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value
+            if pid == target.pid, point == nil, let layer, layer < CGWindowLevelForKey(.screenSaverWindow) { continue }
             if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server",
                let pid, isWindowServer(pid) { continue }
-            if isThirdPartyOverlay(row) {
+            if trustedOverlay(row) {
                 let overlap = target.bounds.intersection(bounds)
                 // Keyboard ownership is checked separately against the focused AX root.
                 if hitsTarget(point ?? CGPoint(x: overlap.midX, y: overlap.midY)) { continue }
