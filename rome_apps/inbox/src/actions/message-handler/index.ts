@@ -445,7 +445,7 @@ async function handleTrustedMessage(
     string,
     string
   >;
-  const bondLevel = (args.bondLevel as string) ?? "guardian";
+  const bondLevel = (args.bondLevel as string) ?? "other";
   const workingDir =
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
   const threadPath = getRuntimeThreadPath();

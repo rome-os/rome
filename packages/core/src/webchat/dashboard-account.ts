@@ -74,15 +74,15 @@ export async function readerOwner(
 /**
  * An action may write only into a chat its caller may open, as the dashboard's
  * own routes allow: another person's Concierge or task chat is not found. A
- * send no person's or chat's turn made is Rome's own work, and goes through.
+ * person Rome cannot tell opens no one's. A send with no actor and no chat is
+ * Rome's own work, and goes through.
  */
 export async function refuseAnotherOwnersChat(
   webchatRepo: WebChatRepository,
   chatId: string,
 ): Promise<void> {
   const caller = dashboardCaller();
-  const person = caller.actor && caller.actor.kind !== "anonymous";
-  if (!person && !caller.chatId) return;
+  if (!caller.actor && !caller.chatId) return;
   const owner = await readerOwner(webchatRepo, caller);
   if (!(await canOpenChat((id) => webchatRepo.getSession(id), chatId, owner))) {
     throw new Error(`No dashboard chat ${chatId}`);

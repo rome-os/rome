@@ -633,6 +633,12 @@ describe("Webchat API", () => {
       "No dashboard chat",
     );
     await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    // A person Rome cannot tell is no one's to write for.
+    await expect(
+      webchatCaller.run({ actor: { kind: "anonymous" }, chatId: null }, () =>
+        channel.send!.send("concierge" as never, { text: "hi" }),
+      ),
+    ).rejects.toThrow("No dashboard chat");
     await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 
