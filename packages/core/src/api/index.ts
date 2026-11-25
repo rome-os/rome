@@ -26,6 +26,7 @@ import { voiceConversationRoutes } from "./routes/voice-conversation.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
+import { endStreamsOnLostEntry } from "../access/entry-stream.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
@@ -178,6 +179,10 @@ export function buildApp(
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));
   api.route("/", appApiPublicRoutes(deps));
+
+  // After the app API, whose streams each app opens to whom it likes.
+  api.use("*", endStreamsOnLostEntry(deps.dashboardAccessState));
+
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
   api.route("/", appConnectionAccessRoutes(deps));

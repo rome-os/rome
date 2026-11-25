@@ -4,8 +4,8 @@
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: a
-// dashboard admin gets every topic the guardian gets, and loses the socket at
-// the next ping once off the team. `concierge.activity` carries the caller's own
+// dashboard admin gets every topic the guardian gets, and loses the socket
+// once they are no longer a member. `concierge.activity` carries the caller's own
 // Concierge chats, `chat.tasks:<id>` only the
 // caller's own Concierge chat, and another owner's Concierge or task chat is
 // not found.
@@ -34,8 +34,8 @@ import {
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
-import type { DashboardAccessState } from "./access/dashboard-access-state.js";
-import { isOnTeam } from "./access/team.js";
+import { mayEnter, holdEntry } from "./access/entry.js";
+import type { DashboardAllowList } from "./access/team.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
 import type { DashboardActivity } from "./lib/dashboard-activity.js";
@@ -114,7 +114,7 @@ function errorMessage(err: unknown): string {
 export function attachLiveEventsServer(
   httpServer: Server,
   db: DrizzleDb,
-  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess: DashboardAllowList,
   sources: LiveEventSources,
   phoneWatching?: PhoneWatching,
   dashboardActivity?: DashboardActivity,
@@ -157,11 +157,11 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    // A dashboard admin dropped from the allow-list loses new subscriptions at
-    // once and the socket at the next ping, as the edge probe would refuse a
-    // new stream.
     const actor = actorOfUpgrade(caller);
-    const onTeam = () => isOnTeam(actor, dashboardAccess);
+    const entry = holdEntry(
+      async () => (await mayEnter(actor, dashboardAccess)) !== null,
+      () => ws.close(CLOSE_POLICY_VIOLATION, "Forbidden"),
+    );
     // Whose Concierge todo list and private chats this socket may read.
     const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
     // A dashboard holds back only its own person's pushes; a phone's
@@ -213,28 +213,24 @@ export function attachLiveEventsServer(
         sendError("Unknown topic", name);
         return;
       }
-      if (!onTeam()) {
-        sendError("Forbidden", name);
-        return;
-      }
-      const entry: { unsubscribe: Unsubscribe | null } = { unsubscribe: null };
-      subscriptions.set(name, entry);
+      const subscription: { unsubscribe: Unsubscribe | null } = { unsubscribe: null };
+      subscriptions.set(name, subscription);
       exists(topic)
         .then((found) => {
-          if (closed || subscriptions.get(name) !== entry) return;
+          if (closed || subscriptions.get(name) !== subscription) return;
           if (!found) {
             subscriptions.delete(name);
             sendError("Not found", name);
             return;
           }
           send({ type: "subscribed", topic: name });
-          entry.unsubscribe = open(topic, (event, data) =>
+          subscription.unsubscribe = open(topic, (event, data) =>
             send({ type: "event", topic: name, event, data }),
           );
         })
         .catch((err) => {
           log.error("live events subscribe failed", { topic: name, error: errorMessage(err) });
-          if (closed || subscriptions.get(name) !== entry) return;
+          if (closed || subscriptions.get(name) !== subscription) return;
           subscriptions.delete(name);
           sendError("Subscribe failed", name);
         });
@@ -244,26 +240,23 @@ export function attachLiveEventsServer(
       [...subscriptions.keys()].filter((key) => !key.startsWith(CHAT_WATCH_TOPIC_PREFIX)).length;
 
     const unsubscribe = (name: string) => {
-      const entry = subscriptions.get(name);
-      if (!entry) return;
+      const subscription = subscriptions.get(name);
+      if (!subscription) return;
       subscriptions.delete(name);
-      entry.unsubscribe?.();
+      subscription.unsubscribe?.();
     };
 
     const teardown = () => {
       if (closed) return;
       closed = true;
       clearInterval(ping);
+      entry.release();
       activity?.close();
-      for (const entry of subscriptions.values()) entry.unsubscribe?.();
+      for (const subscription of subscriptions.values()) subscription.unsubscribe?.();
       subscriptions.clear();
     };
 
     const ping = setInterval(() => {
-      if (!onTeam()) {
-        ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
-        return;
-      }
       if (!alive) {
         ws.terminate();
         return;
@@ -275,7 +268,7 @@ export function attachLiveEventsServer(
       alive = true;
     });
 
-    ws.on("message", (raw: RawData, isBinary: boolean) => {
+    const take = (raw: RawData, isBinary: boolean) => {
       let parsed: unknown;
       try {
         parsed = isBinary ? undefined : JSON.parse(raw.toString());
@@ -291,7 +284,10 @@ export function attachLiveEventsServer(
       if (message.type === "subscribe") subscribe(message.topic);
       else if (message.type === "unsubscribe") unsubscribe(message.topic);
       else if (message.state === "away") activity?.away();
-      else if (onTeam()) activity?.active();
+      else activity?.active();
+    };
+    ws.on("message", (raw: RawData, isBinary: boolean) => {
+      entry.admit(() => take(raw, isBinary));
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

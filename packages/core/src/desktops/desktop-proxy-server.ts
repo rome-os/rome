@@ -1,9 +1,10 @@
 import type { Server, IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
+import { type Duplex, Transform } from "node:stream";
 import net from "node:net";
 import type { DrizzleDb } from "../db/index.js";
-import type { DashboardAccessState } from "../access/dashboard-access-state.js";
-import { gateUpgrade } from "../access/ws-guardian-gate.js";
+import { mayEnter, type HeldEntry, holdEntry } from "../access/entry.js";
+import type { DashboardAllowList } from "../access/team.js";
+import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 
@@ -52,7 +53,7 @@ function buildUpstreamUpgradeRequest(
 export function attachDesktopProxy(
   httpServer: Server,
   db: DrizzleDb,
-  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess: DashboardAllowList,
 ): { close(): void } {
   const host = "127.0.0.1";
   const upstreams = new Set<net.Socket>();
@@ -62,7 +63,9 @@ export function attachDesktopProxy(
     if (!rawUrl.startsWith(`${PREFIX}/`) && rawUrl !== PREFIX) return;
 
     let upstream: net.Socket | undefined;
+    let entry: HeldEntry | undefined;
     const teardown = () => {
+      entry?.release();
       if (upstream) {
         upstreams.delete(upstream);
         upstream.destroy();
@@ -82,14 +85,23 @@ export function attachDesktopProxy(
         }
         const { port, path: targetPath } = target;
         const upstreamHost = `${host}:${port}`;
+        const actor = actorOfUpgrade(caller);
+        const held = holdEntry(
+          async () => (await mayEnter(actor, dashboardAccess)) !== null,
+          teardown,
+        );
+        entry = held;
         const connected = net.connect(port, host);
         upstream = connected;
         upstreams.add(connected);
         connected.on("connect", () => {
           if (socket.destroyed) return teardown();
           connected.write(buildUpstreamUpgradeRequest(req, targetPath, upstreamHost));
-          if (head.length > 0) connected.write(head);
-          socket.pipe(connected);
+          const whileHeld = new Transform({
+            transform: (chunk, _encoding, done) => held.admit(() => done(null, chunk)),
+          });
+          if (head.length > 0) whileHeld.write(head);
+          socket.pipe(whileHeld).pipe(connected);
           connected.pipe(socket);
         });
 

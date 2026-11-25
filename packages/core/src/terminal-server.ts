@@ -3,8 +3,9 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import * as pty from "node-pty";
 import type { DrizzleDb } from "./db/index.js";
-import type { DashboardAccessState } from "./access/dashboard-access-state.js";
-import { gateUpgrade } from "./access/ws-guardian-gate.js";
+import { mayEnter, type HeldEntry, holdEntry } from "./access/entry.js";
+import type { DashboardAllowList, TeamActor } from "./access/team.js";
+import { actorOfUpgrade, gateUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";
@@ -29,10 +30,12 @@ export const TERMINAL_COMMAND_PRESETS: Record<string, TerminalCommandPreset> = {
 };
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
+const CLOSE_POLICY_VIOLATION = 1008;
 
 interface TerminalSession {
   ptyProcess: pty.IPty;
   ws: WebSocket;
+  entry: HeldEntry;
   timer: ReturnType<typeof setTimeout>;
   pingTimer: ReturnType<typeof setTimeout> | null;
   disposeLoginWatcher?: () => void;
@@ -42,6 +45,7 @@ const sessions = new Set<TerminalSession>();
 
 function cleanup(session: TerminalSession) {
   sessions.delete(session);
+  session.entry.release();
   clearTimeout(session.timer);
   if (session.pingTimer !== null) {
     clearTimeout(session.pingTimer);
@@ -72,7 +76,7 @@ export interface TerminalServerOptions {
 export function attachTerminalServer(
   httpServer: Server,
   db: DrizzleDb,
-  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess: DashboardAllowList,
   options: TerminalServerOptions = {},
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
@@ -97,7 +101,7 @@ export function attachTerminalServer(
         }
 
         wss.handleUpgrade(req, socket, head, (ws) => {
-          wss.emit("connection", ws, req, preset);
+          wss.emit("connection", ws, req, preset, actorOfUpgrade(caller));
         });
       })
       .catch((err) => {
@@ -108,7 +112,8 @@ export function attachTerminalServer(
       });
   });
 
-  wss.on("connection", (ws: WebSocket, _req: IncomingMessage, preset: string) => {
+  type Connection = [ws: WebSocket, req: IncomingMessage, preset: string, actor: TeamActor];
+  wss.on("connection", (...[ws, , preset, actor]: Connection) => {
     const command = TERMINAL_COMMAND_PRESETS[preset];
     log.info("terminal session started", { preset, cmd: command.cmd });
 
@@ -138,6 +143,13 @@ export function attachTerminalServer(
     const session: TerminalSession = {
       ptyProcess,
       ws,
+      entry: holdEntry(
+        async () => (await mayEnter(actor, dashboardAccess)) !== null,
+        () => {
+          ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
+          cleanup(session);
+        },
+      ),
       timer: setTimeout(() => {
         log.info("terminal session timed out", { preset });
         ws.send(JSON.stringify({ type: "error", message: "Session timed out (5 min limit)" }));
@@ -206,7 +218,7 @@ export function attachTerminalServer(
     });
 
     // WebSocket → PTY
-    ws.on("message", (raw: Buffer | string) => {
+    const take = (raw: Buffer | string) => {
       try {
         const msg = JSON.parse(typeof raw === "string" ? raw : raw.toString());
         if (msg.type === "input" && typeof msg.data === "string") {
@@ -240,7 +252,8 @@ export function attachTerminalServer(
       } catch {
         /* ignore malformed messages */
       }
-    });
+    };
+    ws.on("message", (raw: Buffer | string) => session.entry.admit(() => take(raw)));
 
     ws.on("close", () => {
       log.info("terminal WebSocket closed", { preset });

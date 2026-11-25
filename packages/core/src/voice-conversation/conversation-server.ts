@@ -4,8 +4,8 @@
 // reply. Messages are in `@rome/api-types/voice-conversation`. Only the
 // team may connect, and only while Rome Cloud lets the guardian's account use
 // voice input. A person dropped from the allow-list loses the conversation
-// before their next turn, or at the next membership check. Rome keeps no
-// audio: frames go straight to the provider.
+// before anything more they say is taken, or at the next recheck. Rome keeps
+// no audio: frames go straight to the provider.
 
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -18,13 +18,14 @@ import {
   voiceConversationClientMessageSchema,
 } from "@rome/api-types/voice-conversation";
 import { LIVE_EVENTS_CLIENT_HEADER, PHONE_CLIENT } from "@rome/api-types/live-events";
+import { mayEnter, holdEntry } from "../access/entry.js";
 import {
   enrichGuardianActor,
   runWithSessionActor,
   type SessionActor,
   sessionOwnerKey,
 } from "../access/session-actor.js";
-import { type DashboardAllowList, isOnTeam } from "../access/team.js";
+import type { DashboardAllowList } from "../access/team.js";
 import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DrizzleDb } from "../db/index.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
@@ -45,8 +46,6 @@ const MAX_CONVERSATION_MS = 30 * 60 * 1000;
 // A microphone delivers audio no faster than real time. The slack covers
 // frames that arrive in a burst after a network stall.
 const AUDIO_SLACK_MS = 5_000;
-// How often an open conversation rereads the allow-list, as `/ws/events` does on its ping.
-const TEAM_CHECK_INTERVAL_MS = 25_000;
 
 export interface VoiceConversationDeps {
   /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
@@ -70,10 +69,11 @@ export interface VoiceConversationDeps {
   follow?: (owner: string, chatId: string) => () => void;
   /**
    * Whether the person on the socket is still on the team. Asked before any
-   * session opens, before each turn, and every 25 s, and the conversation ends
-   * with `chat-refused` once it answers false. Default: always on the team.
+   * session opens, before anything the client sends is taken, before each
+   * turn, and every 25 s, and the conversation ends with `chat-refused` once it
+   * answers false. Default: always on the team.
    */
-  onTeam?: () => boolean;
+  onTeam?: () => Promise<boolean>;
 }
 
 /**
@@ -113,7 +113,7 @@ export function attachVoiceConversationServer(
           caller.kind === "guardian"
             ? await enrichGuardianActor(db, caller)
             : actorOfUpgrade(caller);
-        const onTeam = () => isOnTeam(actor, deps.dashboardAccess);
+        const onTeam = async () => (await mayEnter(actor, deps.dashboardAccess)) !== null;
         // The phone app marks its sockets as it marks its live-events socket.
         const { follow, ...rest } = deps;
         const phone = req.headers[LIVE_EVENTS_CLIENT_HEADER] === PHONE_CLIENT;
@@ -151,7 +151,6 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   // Each spoken turn's hold on the chat, until its reply is read.
   const following = new Set<() => void>();
   let chatId: string | null = null;
-  const onTeam = deps.onTeam ?? (() => true);
 
   const reply = (message: VoiceConversationServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -174,10 +173,10 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const conversation = createConversation({
-    send: (text, inputId, signal) => {
+    send: async (text, inputId, signal) => {
       const to = chatId;
-      if (!to) return Promise.reject(new Error("no chat"));
-      if (!onTeam()) return Promise.reject(new Error("off the team"));
+      if (!to) throw new Error("no chat");
+      if (!(await entry.holds())) throw new Error("may not enter");
       // They hear this turn's reply: the Concierge does not also push it.
       const release = follow(to);
       signal.addEventListener("abort", release, { once: true });
@@ -218,7 +217,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
 
   const settle = (outcome: string) => {
     for (const release of [...following]) release();
-    clearInterval(teamCheck);
+    entry.release();
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
     conversation.close();
@@ -235,9 +234,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     settle(last.type === "error" ? last.reason : last.type);
   }
   const fail = (reason: VoiceConversationStopReason) => close({ type: "error", reason });
-  const teamCheck = setInterval(() => {
-    if (!onTeam()) fail("chat-refused");
-  }, TEAM_CHECK_INTERVAL_MS);
+  const entry = holdEntry(deps.onTeam ?? (async () => true), () => fail("chat-refused"));
 
   // Counts one frame, or ends the conversation when the client sends audio
   // faster than a microphone records it.
@@ -256,7 +253,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     starting = true;
     // A chat that cannot take spoken turns is refused before any paid session opens.
     const to = chatId;
-    if (!to || !onTeam()) return fail("chat-refused");
+    if (!to) return fail("chat-refused");
     const canTalk = actor
       ? await runWithSessionActor(actor, () => deps.canTalkIn(to))
       : await deps.canTalkIn(to);
@@ -308,7 +305,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     reply({ type: "state", state: "listening" });
   }
 
-  ws.on("message", (data: RawData, isBinary) => {
+  const take = (data: RawData, isBinary: boolean) => {
     if (closed) return;
     if (isBinary) {
       if (!starting && !stream) return fail("bad-request");
@@ -337,7 +334,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       });
       fail("listening-failed");
     });
-  });
+  };
+  ws.on("message", (data: RawData, isBinary) => entry.admit(() => take(data, isBinary)));
 
   ws.on("close", () => {
     if (closed) return;

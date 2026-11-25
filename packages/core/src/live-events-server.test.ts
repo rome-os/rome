@@ -358,7 +358,7 @@ describe("live events WebSocket", () => {
     await client.subscribe("chat.status");
   });
 
-  it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {
+  it("stops serving a visitor dropped from the allow-list, with no new message", async () => {
     rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       await deps.webchatRepo.createSession("sess-a", "A");
@@ -372,13 +372,6 @@ describe("live events WebSocket", () => {
       await client.subscribe("chat.status");
 
       dashboardAccess.setCloudEmailAccess([]);
-      client.send({ type: "subscribe", topic: "chat.session:sess-a" });
-      expect(await client.next((m) => m.type === "error")).toEqual({
-        type: "error",
-        topic: "chat.session:sess-a",
-        message: "Forbidden",
-      });
-
       const closed = new Promise<number>((resolve) => client.ws.once("close", resolve));
       rs.advanceTimersByTime(25_000);
       expect(await closed).toBe(1008);
@@ -386,6 +379,17 @@ describe("live events WebSocket", () => {
     } finally {
       rs.useRealTimers();
     }
+  });
+
+  it("takes no message from a visitor dropped from the allow-list", async () => {
+    const client = await connect(visitorHeaders());
+    await client.subscribe("chat.status");
+    const closed = new Promise<number>((resolve) => client.ws.once("close", resolve));
+    dashboardAccess.setCloudEmailAccess([]);
+    client.send({ type: "subscribe", topic: "apps.catalog" });
+    expect(await closed).toBe(1008);
+    expect(client.messages.some((m) => m.topic === "apps.catalog")).toBe(false);
+    await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
   });
 
   it("acknowledges chat.status before replaying the running snapshot, then streams changes", async () => {
@@ -505,10 +509,9 @@ describe("live events WebSocket", () => {
   it("ignores an active signal from a visitor dropped from the allow-list", async () => {
     const visitor = await connect(visitorHeaders());
     dashboardAccess.setCloudEmailAccess([]);
+    const closed = new Promise<number>((resolve) => visitor.ws.once("close", resolve));
     visitor.send({ type: "activity", state: "active" });
-    // An error answers the refused subscribe, after the signal before it ran.
-    visitor.send({ type: "subscribe", topic: "chat.status" });
-    await visitor.next((m) => m.type === "error");
+    expect(await closed).toBe(1008);
     expect(dashboardActivity.isActive("visitor:account-1")).toBe(false);
   });
 

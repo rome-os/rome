@@ -1,7 +1,7 @@
 // Dashboard console of the local rome-node daemon at `/ws/node`. Each socket gets one bridge
 // from @rome-os/node-core/client, which forwards the observation methods to the daemon unchanged.
 // The team only: a person dropped from the allow-list loses the socket at the next message either
-// way, or at the next ping. Upgrades skip the edge probe like `/ws/terminal`:
+// way, or at the next recheck. Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -15,7 +15,8 @@ import {
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { DrizzleDb } from "../db/index.js";
-import { type DashboardAllowList, isOnTeam, type TeamActor } from "../access/team.js";
+import { mayEnter, holdEntry } from "../access/entry.js";
+import type { DashboardAllowList, TeamActor } from "../access/team.js";
 import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
@@ -59,27 +60,26 @@ export function attachNodeConsoleServer(
 
   function serve(ws: WebSocket, actor: TeamActor): void {
     let alive = true;
-    // Closes the socket once the person is off the team, as `/ws/events` does.
-    const stillOnTeam = () => {
-      if (isOnTeam(actor, dashboardAccess)) return true;
-      ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
-      return false;
-    };
+    const entry = holdEntry(
+      async () => (await mayEnter(actor, dashboardAccess)) !== null,
+      () => ws.close(CLOSE_POLICY_VIOLATION, "Forbidden"),
+    );
     const bridge = openBridge({
       send: (text) => {
-        if (ws.readyState !== WebSocket.OPEN || !stillOnTeam()) return;
-        if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
-          ws.close(CLOSE_TRY_AGAIN_LATER, "Client is not reading");
-          return;
-        }
-        ws.send(text);
+        entry.admit(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+            ws.close(CLOSE_TRY_AGAIN_LATER, "Client is not reading");
+            return;
+          }
+          ws.send(text);
+        });
       },
       close: () => {
         if (ws.readyState === WebSocket.OPEN) ws.close(CLOSE_TRY_AGAIN_LATER, "Daemon unavailable");
       },
     });
     const ping = setInterval(() => {
-      if (!stillOnTeam()) return;
       if (!alive) {
         ws.terminate();
         return;
@@ -91,15 +91,14 @@ export function attachNodeConsoleServer(
       alive = true;
     });
     ws.on("message", (raw: RawData, isBinary: boolean) => {
-      if (isBinary) {
-        ws.close(1003, "Text messages only");
-        return;
-      }
-      if (!stillOnTeam()) return;
-      bridge.receive(raw.toString());
+      entry.admit(() => {
+        if (isBinary) ws.close(1003, "Text messages only");
+        else bridge.receive(raw.toString());
+      });
     });
     const teardown = () => {
       clearInterval(ping);
+      entry.release();
       bridge.close();
     };
     ws.on("close", teardown);
