@@ -12,9 +12,9 @@ export const ACCOUNT_CODE_PREFIX = "ROME";
 const GROUP = `[${ACCOUNT_CODE_ALPHABET}]{${ACCOUNT_CODE_GROUP_LENGTH}}`;
 const CODE = `${ACCOUNT_CODE_PREFIX}-${GROUP}-${GROUP}`;
 const CODE_SHAPE = new RegExp(`^${CODE}$`);
-// The `i` flag matches as upper-casing the text would: the alphabet holds no
-// letter whose lower case folds onto another letter of it.
-const CODE_ANYWHERE = new RegExp(CODE, "gi");
+// Searched in the upper-cased text, as the whole-text check compares it, so
+// both fold case by the same rule.
+const CODE_ANYWHERE = new RegExp(CODE, "g");
 // What a person wraps around a code they paste alone: spaces, punctuation,
 // quotes and backticks, and Telegram's `/start ` when they follow a link.
 const START_COMMAND = /^\/start\s+/i;
@@ -37,5 +37,5 @@ export function looksLikeAccountCode(text: string): boolean {
 /** Every code-shaped token in `text`, wherever it sits, as a code is
  *  compared. Empty for a text that holds none. */
 export function accountCodesIn(text: string): string[] {
-  return (text.match(CODE_ANYWHERE) ?? []).map((code) => code.toUpperCase());
+  return text.toUpperCase().match(CODE_ANYWHERE) ?? [];
 }

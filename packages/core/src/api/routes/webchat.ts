@@ -3796,6 +3796,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (prompt.length > TURN_BRANCH_PROMPT_MAX_LENGTH) {
       return c.json({ error: `prompt too long (max ${TURN_BRANCH_PROMPT_MAX_LENGTH} chars)` }, 400);
     }
+    await deps.voidAccountCodesIn(prompt);
 
     const started = await startForkedSession({
       session,
@@ -3896,6 +3897,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       comment = trimmed.length === 0 ? null : trimmed;
     }
+    if (comment) await deps.voidAccountCodesIn(comment);
 
     const stored = await deps.webchatRepo.insertTurnFeedback(
       sessionId,
@@ -4251,6 +4253,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return row ? ((await tasks?.getWithChat(row.id))?.conciergeChat.id ?? null) : null;
   };
 
+  // A code a person types into a dashboard chat is dead before the message is
+  // recorded or reaches an agent (docs/domains/identity.md#account-code):
+  // the text, the quote it replies with, a card's answer and each file's name.
+  const voidAccountCodesInSend = (body: SendBody): Promise<void> =>
+    deps.voidAccountCodesIn(
+      [
+        body.text,
+        body.replyQuote,
+        Array.isArray(body.parts) ? JSON.stringify(body.parts) : undefined,
+        ...(Array.isArray(body.files) ? body.files.map((file) => file?.name) : []),
+      ]
+        .filter((text): text is string => typeof text === "string")
+        .join("\n"),
+    );
+
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
@@ -4337,6 +4354,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     ) {
       return answer({ error: "session id and text or files are required" }, 400);
     }
+
+    await voidAccountCodesInSend(body);
 
     const session = await findContinuableSession(sessionId);
     if (!session) return answer({ error: "Session not found" }, 404);

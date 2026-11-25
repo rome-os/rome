@@ -45,6 +45,7 @@ import type {
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import {
+  accountCodes,
   chatMessages,
   conciergeMessageTurns,
   guardianAuth,
@@ -61,6 +62,15 @@ import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
 import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
 import { showCardTools } from "../../core/show-card-tool.js";
+import { accountCodesVoidedIn } from "../../chats/connected-accounts/account-code-admission.js";
+import { AccountCodeRepository } from "../../identity/account-code-repository.js";
+import {
+  accountCodeContext,
+  accountCodeIssued,
+  accountCodeRedeemed,
+  AccountCodeUsedError,
+} from "../../identity/application/account-codes.js";
+import { createIdentity } from "../../identity/identity.js";
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -10547,6 +10557,81 @@ describe("Webchat API", () => {
         { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
         { type: "text", content: "typed" },
       ]);
+    });
+  });
+
+  describe("an account code typed into a dashboard chat", () => {
+    /** A chat whose agent notes, as each turn starts, its prompt and whether the code is used up. */
+    const setup = async () => {
+      const codes = accountCodeContext(testDb.db);
+      const ann = await createIdentity(testDb.db).createPerson({ accounts: [] });
+      const { code } = await accountCodeIssued(codes, ann.id);
+      const usedAt = () => testDb.db.select().from(accountCodes).get()?.usedAt ?? null;
+      const turns: Array<{ prompt: string; usedAt: Date | null }> = [];
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        startTurn(input: AgentTurnInput) {
+          turns.push({ prompt: input.prompt, usedAt: usedAt() });
+          return testTurnHandle({
+            turnId: `turn-${turns.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          });
+        },
+        onStatusChange: () => () => undefined,
+        stop: async () => undefined,
+        close: async () => undefined,
+      }));
+      await deps.webchatRepo.createSession("code-chat", "Code");
+      const send = (text: string) =>
+        createWebchatRuntime(deps).routes.request("/chat/sessions/code-chat/turns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      return { code, codes, turns, send };
+    };
+
+    it("is used up before the turn receives the message, which is still handed on", async () => {
+      const { code, codes, turns, send } = await setup();
+      const text = `what do I do with ${code.toLowerCase()}?`;
+
+      expect((await send(text)).status).toBe(200);
+
+      expect(turns).toEqual([{ prompt: text, usedAt: expect.any(Date) }]);
+      await expect(
+        accountCodeRedeemed(codes, code, { platform: "discord", accountId: "42" }),
+      ).rejects.toBeInstanceOf(AccountCodeUsedError);
+    });
+
+    it("costs an ordinary message no database read for codes", async () => {
+      const { code, turns, send } = await setup();
+      const repository = new AccountCodeRepository(testDb.db);
+      let reads = 0;
+      const counted = new Proxy(repository, {
+        get(target, name, receiver) {
+          const value = Reflect.get(target, name, receiver);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => {
+            reads += 1;
+            return value.apply(target, args);
+          };
+        },
+      });
+      deps.voidAccountCodesIn = accountCodesVoidedIn({
+        codes: { codes: counted, now: () => new Date() },
+      });
+
+      expect((await send("hello there")).status).toBe(200);
+
+      expect(turns).toHaveLength(1);
+      expect(reads).toBe(0);
+      await send(`my code is ${code}`);
+      expect(reads).toBeGreaterThan(0);
     });
   });
 });

@@ -117,6 +117,23 @@ export function accountCodeReadBack(deps: Pick<AccountCodeAdmissionDeps, "codes"
 }
 
 /**
+ * Voids every code in a text a person typed where no connection carries it,
+ * such as a dashboard chat, so the code is dead before the text is recorded or
+ * handed to an agent. Nothing is redeemed there and the text is never
+ * withheld. A text with no code-shaped token costs no database read.
+ */
+export function accountCodesVoidedIn(
+  deps: Pick<AccountCodeAdmissionDeps, "codes">,
+): (text: string) => Promise<void> {
+  return async (text) => {
+    const codes = new Set(accountCodesIn(text));
+    if (codes.size === 0) return;
+    for (const code of codes) await accountCodeVoided(deps.codes, code);
+    log.info("account code voided in a dashboard message", { codes: codes.size });
+  };
+}
+
+/**
  * Every code-shaped token in what Rome hands on with `message`: its text, the
  * text of the message it quotes, and the platform's raw payload, where a
  * reply can carry a quote no named field holds, such as Telegram's

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { accountCodes } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { accountCodesIn, normalizedAccountCode } from "../../lib/account-code-shape.js";
 import { AccountTakenError, createIdentity, UnknownPersonError } from "../identity.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
@@ -204,6 +205,13 @@ describe("account codes", () => {
 
     expect(looksLikeAccountCode(typed)).toBe(true);
     expect(await accountCodeRedeemed(ctx, typed, ANN_SLACK)).toEqual({ personId: ann.id });
+  });
+
+  it("finds in a text every code the whole-text check accepts, case folded the same way", () => {
+    for (const text of ["ROME-ſ23456-234567", "rome-abcdef-234567", "`rome-ﬀ2345-234567`"]) {
+      expect(looksLikeAccountCode(text)).toBe(true);
+      expect(accountCodesIn(text)).toEqual([normalizedAccountCode(text)]);
+    }
   });
 
   it("takes a code wrapped in punctuation, quotes, backticks or after /start for the code", async () => {

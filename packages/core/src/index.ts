@@ -19,6 +19,7 @@ import type { Admission } from "./chats/connected-accounts/admission.js";
 import {
   accountCodeAdmission,
   accountCodeReadBack,
+  accountCodesVoidedIn,
 } from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -2929,6 +2930,7 @@ async function main() {
       accountNames,
       assistants: listedAgents,
       webchatRepo,
+      voidAccountCodesIn: accountCodesVoidedIn({ codes: accountCodes }),
       recording: {
         adapters: chatsWired.adapters,
         chats: chatsWired.chats,
