@@ -39,7 +39,12 @@ export const readDevices = agentTool({
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps, turn }) => {
-    const status = await deps.devices.getStatus();
+    const status = await freshStatus(deps);
+    if (!status) {
+      return toolError(
+        "devices_unavailable: Rome could not read the devices in time. Tell the guardian, and try again in a minute.",
+      );
+    }
     const reach = describeDevices(
       deps.connections.list(),
       (deps.now ?? Date.now)(),
@@ -79,6 +84,8 @@ export const readDevices = agentTool({
     return {
       ...(service ? { deviceService: { state: status.connection, note: service } } : {}),
       ...("askingDevice" in reach ? { askingDevice: reach.askingDevice } : {}),
+      // How old each device's online status is.
+      checkedAt: status.checkedAt,
       devices,
     };
   },
@@ -155,6 +162,55 @@ export const removeDevice = agentTool({
   },
 });
 
+/** A status checked longer ago than this is the device service's last
+ *  snapshot, and reading it started a new check. */
+const FRESH_FOR_MS = 10_000;
+/** How long a read waits for that check: the service bounds one at 15 s. */
+const WAIT_FOR_CHECK_MS = 20_000;
+/** A check that fails leaves the snapshot stale, and the next read starts
+ *  another, so the wait between reads doubles from the first to the last. */
+const FIRST_POLL_MS = 500;
+const LAST_POLL_MS = 4_000;
+
+/** The devices' status checked in the last 10 s, as the Devices page has it
+ *  by polling. A read answers once, so it waits for the check its read
+ *  started; when none comes in time it answers the last one, whose
+ *  `checkedAt` says how old it is. Null when not even a first status comes
+ *  within the wait. */
+async function freshStatus(deps: DeviceToolDeps): Promise<DevicesStatus | null> {
+  const now = deps.now ?? Date.now;
+  const deadline = now() + WAIT_FOR_CHECK_MS;
+  // A service with no snapshot reads Rome Cloud's list before it checks any
+  // device, so even the first read can outlast the wait.
+  const first = await within(deps.devices.getStatus(), WAIT_FOR_CHECK_MS);
+  if (!first) return null;
+  let status = first;
+  let wait = FIRST_POLL_MS;
+  while (now() - Date.parse(status.checkedAt) >= FRESH_FOR_MS && now() < deadline) {
+    const pause = Math.min(wait, deadline - now());
+    await new Promise((resolve) => setTimeout(resolve, pause));
+    wait = Math.min(wait * 2, LAST_POLL_MS);
+    // A read the service holds past the deadline answers nothing newer.
+    const next = now() < deadline ? await within(deps.devices.getStatus(), deadline - now()) : null;
+    if (!next) break;
+    status = next;
+  }
+  return status;
+}
+
+/** The promise's value, or null when `ms` pass first. */
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The Devices page's agent tools. */
 export const deviceTools = [readDevices, runOnDeviceTool, renameDevice, removeDevice];
 
@@ -174,7 +230,8 @@ function manageError(result: Extract<DeviceManageResult, { ok: false }>, id: str
       return `No device found with id "${id}". Use system:read_devices to find the right id.`;
     case "invalid_device_name":
       return "invalid_device_name: A device name is 1 to 80 characters, with no control characters. Ask the guardian for a name that fits.";
+    // Also a request whose answer was lost after Cloud applied it.
     case "unavailable":
-      return "unavailable: Rome Cloud could not be reached, so nothing changed. Tell the guardian to try again later.";
+      return "outcome_unknown: Rome Cloud did not confirm the change, so it may or may not have happened. Call system:read_devices to see whether it did before you tell the guardian or try again.";
   }
 }

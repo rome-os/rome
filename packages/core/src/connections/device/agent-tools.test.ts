@@ -118,6 +118,7 @@ describe("the Devices page's tools", () => {
       expect(result).toEqual({
         status: "ok",
         data: {
+          checkedAt: ONLINE.checkedAt,
           devices: [
             {
               deviceId: "dev-phone",
@@ -174,6 +175,94 @@ describe("the Devices page's tools", () => {
       expect(data.devices).toEqual([
         expect.objectContaining({ deviceId: "dev-phone", status: "unknown" }),
       ]);
+    });
+  });
+
+  describe("reading the devices' status fresh", () => {
+    let reads: number;
+    let answers: Array<() => Promise<DevicesStatus>>;
+
+    beforeEach(() => {
+      rs.useFakeTimers();
+      rs.setSystemTime(NOW);
+      deps.now = undefined;
+      // The device service answers its last snapshot, then whatever the test
+      // queues, then `status`.
+      reads = 0;
+      answers = [];
+      deps.devices.getStatus = async () => {
+        reads += 1;
+        return await (answers.shift()?.() ?? status);
+      };
+    });
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    const stale = { ...ONLINE, checkedAt: new Date(NOW - 60_000).toISOString() };
+    /** Reads the devices while the clock runs for `ms`. */
+    const readFor = async (ms: number) => {
+      const read = callTool(readDevices, deps, {});
+      await rs.advanceTimersByTimeAsync(ms);
+      return (await read) as { data: { checkedAt: string; devices: unknown[] } };
+    };
+
+    it("waits for the check a stale snapshot starts, as the page's next poll would", async () => {
+      answers = [
+        async () => ({
+          ...stale,
+          devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "connected" }],
+        }),
+      ];
+      status = {
+        ...ONLINE,
+        checkedAt: new Date(NOW + 400).toISOString(),
+        devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "not_connected" }],
+      };
+
+      const { data } = await readFor(1_000);
+
+      expect(data.devices[0]).toMatchObject({ deviceId: "dev-phone", status: "not_connected" });
+      expect(data.checkedAt).toBe(status.checkedAt);
+    });
+
+    it("answers the last snapshot with its age when no check comes in time, reading it a few times", async () => {
+      status = stale;
+
+      const { data } = await readFor(20_000);
+
+      expect(data.checkedAt).toBe(stale.checkedAt);
+      expect(Date.now() - NOW).toBeLessThanOrEqual(20_000);
+      expect(reads).toBeLessThanOrEqual(10);
+    });
+
+    it("answers the last snapshot at the deadline when the service holds a read", async () => {
+      answers = [async () => stale, () => new Promise<DevicesStatus>(() => {})];
+
+      const { data } = await readFor(20_000);
+
+      expect(data.checkedAt).toBe(stale.checkedAt);
+      expect(reads).toBe(2);
+    });
+
+    it("says it could not read the devices in time when the first read outlasts the deadline", async () => {
+      // A cold service reads Rome Cloud's list before it checks any device.
+      answers = [
+        () => new Promise<DevicesStatus>((resolve) => setTimeout(() => resolve(status), 24_000)),
+      ];
+      let settled = false;
+      const read = callTool(readDevices, deps, {}).finally(() => {
+        settled = true;
+      });
+
+      await rs.advanceTimersByTimeAsync(20_000);
+
+      expect(settled).toBe(true);
+      expect(await read).toEqual({
+        status: "error",
+        error: expect.stringMatching(/^devices_unavailable:/),
+      });
+      expect(reads).toBe(1);
     });
   });
 
@@ -263,6 +352,20 @@ describe("the Devices page's tools", () => {
         error: expect.stringContaining("1 to 80 characters"),
       });
     });
+  });
+
+  it.each([
+    ["renaming", renameDevice, { deviceId: "dev-phone", name: "Work iPhone" }],
+    ["removing", removeDevice, { deviceId: "dev-phone" }],
+  ] as const)("says the outcome is unknown when Rome Cloud does not confirm %s", async (_, tool, args) => {
+    manage = { ok: false, code: "unavailable" };
+
+    const result = await callTool(tool, deps, args);
+
+    const error = (result as { error: string }).error;
+    expect(error).toMatch(/^outcome_unknown:/);
+    expect(error).toContain("may or may not have happened");
+    expect(error).not.toContain("nothing changed");
   });
 
   describe("removing a device", () => {
