@@ -219,8 +219,10 @@ export function createConversation(deps: ConversationDeps): Conversation {
     if (!head.sounded) {
       head.sounded = true;
       // Rome's words are kept while any of its audio may still be heard, however far
-      // the speech runs ahead of playback, and forgotten after.
-      spoken = spoken.filter((s) => now() < (s.until ?? echoUntil));
+      // the speech runs ahead of playback, and forgotten after: for a turn under
+      // way, after the time it began, as it still matches them.
+      const from = begun ? begunAt : now();
+      spoken = spoken.filter((s) => from < (s.until ?? echoUntil));
       spoken.push({ text: head.text, until: null });
     }
     if (begun && lateEcho && lateAfter.at(-1) !== head) lateAfter.push(head);

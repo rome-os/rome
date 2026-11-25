@@ -479,6 +479,37 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["deploy it", "wait stop", "the production server"]);
   });
 
+  it("keeps a stopped reply's words for a turn begun in their time, when the next sentence plays after it", async () => {
+    const t = setup();
+    t.conversation.heard("deploy it", "");
+    t.conversation.endpoint();
+    await settled();
+    t.turns[0]?.push({ type: "text_delta", content: "Deploying to the production server now.\n" });
+    await settled();
+    t.speak(0, 3000);
+    t.clock.advance(1000);
+    t.conversation.heard("wait stop", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["deploy it", "wait stop"]);
+
+    // The next reply plays, and the stopped reply's echo begins within its time.
+    t.clock.advance(500);
+    t.turns[1]?.push({ type: "text_delta", content: "Okay, stopped.\nAnything else?\n" });
+    await settled();
+    t.speak(1, 1000);
+    t.clock.advance(300);
+    t.conversation.heard("", "the production");
+    // The next sentence first plays after the stopped reply's words could come back.
+    t.clock.advance(1300);
+    t.speak(2, 1000);
+    t.conversation.heard("the production server", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["deploy it", "wait stop"]);
+    expect(t.signals[1]?.aborted).toBe(false);
+  });
+
   it("speaks the messages a private-text agent delivers, and points to the chat once for cards", async () => {
     const t = setup();
     t.conversation.heard("订机票", "");
