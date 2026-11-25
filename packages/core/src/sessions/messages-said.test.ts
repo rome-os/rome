@@ -100,7 +100,6 @@ const ALICE: SessionActor = {
   kind: "visitor",
   accountId: "cloud-alice",
   email: "alice@example.com",
-  via: "account",
 };
 
 describe("messagesSaid", () => {

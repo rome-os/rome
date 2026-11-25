@@ -8,7 +8,6 @@ const ADA: SessionActor = {
   kind: "visitor",
   accountId: "cloud-ada",
   email: "ada@example.com",
-  via: "account",
 };
 
 describe("enteredChannels", () => {

@@ -32,7 +32,6 @@ import type { KindMount } from "../../connections/kind-mount.js";
 import { ConnectionRegistry, DrizzleConnectionsRepository } from "../../connections/index.js";
 import { SetupManager } from "../../connections/setup/manager.js";
 import { placeAudience } from "../../core/place-audience.js";
-import { ownerOfChat } from "../../webchat/owner.js";
 import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
@@ -131,12 +130,7 @@ function connectionKinds(deps: TestDeps): KindMount[] {
 }
 
 function features(deps: ApiDeps): Feature[] {
-  return [
-    phoneBook({
-      ...deps,
-      ownerOfChat: (chatId) => ownerOfChat((id) => deps.webchatRepo.getSession(id), chatId),
-    } as Parameters<typeof phoneBook>[0]),
-  ];
+  return [phoneBook(deps as Parameters<typeof phoneBook>[0])];
 }
 
 export async function createInstance(options: InstanceOptions): Promise<Instance> {

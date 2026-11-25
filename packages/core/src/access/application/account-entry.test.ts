@@ -45,12 +45,7 @@ describe("accountEntry", () => {
     });
     expect(await enter(ADA)).toEqual({
       kind: "entered",
-      person: {
-        kind: "visitor",
-        accountId: "cloud-ada",
-        email: "ada@example.com",
-        via: "account",
-      },
+      person: { kind: "visitor", accountId: "cloud-ada", email: "ada@example.com" },
     });
   });
 
