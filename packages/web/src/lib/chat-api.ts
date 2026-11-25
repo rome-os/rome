@@ -33,8 +33,6 @@ import type {
 } from "@rome/api-types/sessions";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
-import { fetchJson } from "@/lib/fetch-json";
-import { z } from "zod";
 import { randomUUID } from "./random-uuid";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
@@ -100,49 +98,6 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 export type SessionStatusFilter = "active" | "archived" | "all";
 
 export type SessionScope = "mine" | "all";
-
-const computerUseTargetSchema = z
-  .object({
-    deviceId: z.string().uuid(),
-    name: z.string().trim().max(200),
-    authorized: z.literal(true).optional(),
-  })
-  .transform(({ name, ...target }) => ({
-    ...target,
-    name: name || target.deviceId,
-  }));
-
-export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;
-
-export async function getChatComputerUseTarget(sessionId: string, signal: AbortSignal) {
-  return computerUseTargetSchema
-    .and(
-      z.object({
-        targets: z.array(computerUseTargetSchema).optional(),
-        persistentAccess: z.literal(true).optional(),
-      }),
-    )
-    .parse(
-      await fetchJson<unknown>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
-        signal,
-        fallback: "Computer use is unavailable.",
-      }),
-    );
-}
-
-export async function setChatComputerUseAccess(
-  sessionId: string,
-  deviceId: string,
-  authorized: boolean,
-): Promise<void> {
-  await fetchJson<void>(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use/${encodeURIComponent(deviceId)}`,
-    {
-      method: authorized ? "PUT" : "DELETE",
-      fallback: "Couldn't update computer use access.",
-    },
-  );
-}
 
 export async function listSessions(
   status: SessionStatusFilter = "active",
@@ -587,15 +542,13 @@ export async function createProject(name: string): Promise<ProjectOption> {
   return jsonOrThrow<ProjectOption>(res);
 }
 
-type PostTurnErrorCode = ChatErrorCode | "computer_use_denied";
-
 export type PostTurnResult =
   | { ok: true; data: CreateTurnResponse }
   | {
       ok: false;
       status: number;
       message: string;
-      code?: PostTurnErrorCode;
+      code?: ChatErrorCode;
       provider?: ChatErrorProvider;
       reason?: ChatErrorReason;
     };
@@ -693,7 +646,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
     }
   }
   let message = "";
-  let code: PostTurnErrorCode | undefined;
+  let code: ChatErrorCode | undefined;
   let provider: ChatErrorProvider | undefined;
   let reason: ChatErrorReason | undefined;
   const trimmed = raw.trim();
@@ -702,7 +655,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
       const payload = JSON.parse(trimmed) as {
         error?: string;
         message?: string;
-        code?: PostTurnErrorCode;
+        code?: ChatErrorCode;
         provider?: ChatErrorProvider;
         reason?: ChatErrorReason;
       };
