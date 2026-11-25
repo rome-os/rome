@@ -10,6 +10,7 @@ import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
   type ConciergeService,
   isConciergeChat,
+  privateOwnerOf,
   isMainConciergeChat,
   TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
@@ -154,7 +155,7 @@ import type {
   BackendTurnOptions,
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
-import { withReplyContext } from "../../agent/index.js";
+import { currentMessageSection, withReplyContext } from "../../agent/index.js";
 import {
   answersFromQuestionCard,
   parseAskQuestionInput,
@@ -2926,8 +2927,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    // Chats the caller may not open are left out before the limit, so all 20
-    // are ones they may open.
+    // Other people's Concierge and task chats are left out before the limit,
+    // so all 20 are ones a list shows the caller.
     const matches = await deps.webchatRepo.searchSessionMessages(query, {
       sessionLimit: 20,
       visibleTo: await currentChatOwner(),
@@ -3210,7 +3211,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const session = await deps.webchatRepo.markSessionRead(sessionId);
+    // What a Concierge or task chat counts as unread is its owner's.
+    const owner = privateOwnerOf(lookup.session);
+    const session =
+      owner === null || owner === (await currentChatOwner())
+        ? await deps.webchatRepo.markSessionRead(sessionId)
+        : lookup.session;
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json({
       sessionId,
@@ -3618,7 +3624,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // A reply chain around a message, or before or after one of its messages
   // (docs/domains/chats.md#chat-thread). Under /chat/sessions/:id, so
-  // privateChatGate applies.
+  // chatGate applies.
   app.get("/chat/sessions/:id/messages/:messageId/thread", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -4344,7 +4350,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
-    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // A Concierge chat holds only people's messages and the Concierge's. A
     // routine, an app or another agent sending into it wakes the Concierge
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
@@ -4598,7 +4604,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
     // keeps it.
-    const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    // A message a person writes in a Concierge chat names them, the owner too,
+    // since every member writes there.
+    const writer =
+      isConciergeChat(session) && !saidBy && actor && deps.concierge
+        ? await deps.concierge.writerOf(actor)
+        : null;
+    const quotedPrompt = reply
+      ? withReplyContext(turnPrompt, reply.promptLine, writer)
+      : writer
+        ? currentMessageSection(turnPrompt, writer).join("\n")
+        : turnPrompt;
     const repliedPrompt =
       body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
@@ -4616,8 +4632,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
-    // A Concierge turn opens with the chat it runs in and the person it
-    // serves, on each turn, so a rename reaches a running session (rome-os/rome#1739).
+    // A Concierge turn opens with the chat it runs in and the person whose
+    // chat it is, on each turn, so a rename reaches a running session (rome-os/rome#1739).
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;

@@ -52,6 +52,7 @@ import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
+import type { SessionActor } from "../access/session-actor.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
@@ -143,7 +144,7 @@ export function conciergeChatLine(chat: ConciergeChatRef): string {
   return `<concierge_chat id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"/>`;
 }
 
-/** The line naming the person a Concierge chat serves. */
+/** The line naming the person whose a Concierge chat is. */
 export function conciergeOwnerLine(owner: OwnerProfile): string {
   const fields = [
     `role="${owner.role}"`,
@@ -555,7 +556,7 @@ export class ConciergeService {
 
   /**
    * What every turn in a Concierge chat opens with: the chat it runs in, and
-   * the person it serves, who may not be the guardian.
+   * the person whose chat it is, who may not be the guardian.
    */
   async turnHeader(chat: ConciergeChatRef): Promise<string> {
     // A chat whose owner cannot be found serves no one: never the guardian by default.
@@ -563,6 +564,18 @@ export class ConciergeService {
     if (ownerKey === null) throw new Error(`No Concierge chat ${chat.id}`);
     const owner = await this.owners.profileOf(ownerKey);
     return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
+  }
+
+  /**
+   * Who wrote a message in a Concierge chat, as the turn it starts names them:
+   * the guardian by the name {@link turnHeader} shows, anyone else by the email
+   * they signed in with. Null for a message no one is known to have written.
+   */
+  async writerOf(actor: SessionActor): Promise<{ name: string } | null> {
+    if (actor.kind === "visitor") return { name: actor.email };
+    if (actor.kind !== "guardian") return null;
+    const { name, role } = await this.owners.profileOf(GUARDIAN_OWNER);
+    return { name: name ?? role };
   }
 
   /**

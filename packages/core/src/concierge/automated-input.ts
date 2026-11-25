@@ -1,5 +1,5 @@
 // What a routine, an app or another agent sends into a Concierge chat. A
-// Concierge chat holds only its owner's messages and the Concierge's, so such a
+// Concierge chat holds only people's messages and the Concierge's, so such a
 // send is no message there: it runs as a quiet system turn whose input stays
 // in the turn's trace (docs/architecture/concierge.md).
 

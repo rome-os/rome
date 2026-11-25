@@ -1,6 +1,8 @@
 import { isWidgetAppPath } from "@rome-os/app-runtime";
 import { Hono } from "hono";
+import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
+import { privateOwnerOf } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { deviceConnectPath } from "../../connections/connect-card.js";
@@ -257,10 +259,15 @@ interface StoredWidget {
 }
 
 export interface WidgetEventDeps {
-  webchatRepo: Pick<WebChatRepository, "widgetMessage" | "getMessages" | "askingDeviceOf">;
+  webchatRepo: Pick<
+    WebChatRepository,
+    "widgetMessage" | "getSession" | "getMessages" | "askingDeviceOf"
+  >;
   /** Hands a request to Rome's own API, as if the caller had sent it there.
    *  `env` is the incoming request's, so the caller resolves the same way. */
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
+  /** Whose share-location cards the caller answers. */
+  callerOwner?: () => Promise<string | null>;
   /** Who can read a dashboard chat now. Absent, every chat reads as shared,
    *  so no location is accepted. */
   chatAudience?: (chatId: string) => Promise<"private" | "shared">;
@@ -272,13 +279,15 @@ export interface WidgetEventDeps {
 /**
  * Where a client (the web dashboard or the iOS app) sends every event a widget
  * fires. A widget is a message of its own, so its id is the message's id.
- * Core finds it, checks that the widget declares the event, then hands the event to the widget's owner: an app's
+ * Core finds it, checks that the widget declares the event, then hands the
+ * event to the widget's owner: an app's
  * widget calls the app at `/api/apps/<app id>/<event>`; a widget core owns,
  * such as the question card, is handled here, and its answer becomes a turn in
  * the chat. The client only sends the event; it never decides what it means.
  */
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
+  const callerOwner = deps.callerOwner ?? currentChatOwner;
   /** The cards whose answer is on its way to their chat. */
   const answering = new Set<string>();
 
@@ -296,6 +305,14 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
     if (!message) return c.json({ error: "No widget with this id" }, 404);
     const widget = readWidget(message.chatId, message.content);
     if (!widget) return c.json({ error: "No widget with this id" }, 404);
+    // A share-location card stays its chat's owner's: the position it takes is
+    // read as theirs, and a client may answer it without being asked.
+    if (widget.componentId === LOCATION_CARD_ID) {
+      const owner = privateOwnerOf(await deps.webchatRepo.getSession(message.chatId));
+      if (owner !== null && owner !== (await callerOwner())) {
+        return c.json({ error: "No widget with this id" }, 404);
+      }
+    }
     const unshown =
       widget.appId === "core" && CORE_UNSHOWN_EVENTS[widget.componentId ?? ""]?.includes(name);
     if (!eventNames(widget.components).has(name) && !unshown) {

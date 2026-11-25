@@ -23,7 +23,7 @@ import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
 import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
-import { runWithSessionActor } from "../../access/session-actor.js";
+import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import { askingDeviceOf } from "../../connections/device/live-route.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
@@ -261,19 +261,24 @@ describe("Webchat API", () => {
       path: string,
       init?: RequestInit,
     ) => (await runWithSessionActor(actor, () => app.request(path, init))).status;
-    const post = {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "hi" }),
-    };
 
     for (const actor of [guardian, visitor]) {
       for (const id of ["concierge", "visitor-main", "guardian-task", "task-branch", "shared"]) {
         expect(await status(actor, `/chat/sessions/${id}`)).toBe(200);
         expect(await status(actor, `/chat/sessions/${id}/messages`)).toBe(200);
-        expect(await status(actor, `/chat/sessions/${id}/turns`, post)).not.toBe(404);
       }
     }
+
+    // Reading another person's Concierge chat leaves what its owner has not read.
+    const marked = rs.spyOn(deps.webchatRepo, "markSessionRead");
+    for (const [actor, id] of [
+      [visitor, "concierge"],
+      [guardian, "concierge"],
+      [visitor, "shared"],
+    ] as const) {
+      expect(await status(actor, `/chat/sessions/${id}/read`, { method: "POST" })).toBe(200);
+    }
+    expect(marked.mock.calls.flat()).toEqual(["concierge", "shared"]);
 
     const listed = async (actor: typeof guardian | typeof visitor) =>
       (
@@ -851,6 +856,7 @@ describe("Webchat API", () => {
     const repo = new ConciergeTasksRepository(testDb.db);
     const tasks = new ConciergeTasks(repo);
     deps.concierge = {
+      writerOf: async () => null,
       deps: { tasks },
       conciergeChat: async () => null,
       followDefault: async () => {},
@@ -3106,7 +3112,7 @@ describe("Webchat API", () => {
     return id;
   };
 
-  it("hands a spoken input the turn that answers it, in the guardian's chats only", async () => {
+  it("hands a spoken input the turn that answers it, in a Concierge chat only", async () => {
     const SPOKEN_INPUT = "5f0c2a8e-3b1d-4c6e-9a7f-2d4b6c8e0a1f";
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     const { runtime } = createWebchatRuntime(deps);
@@ -3124,7 +3130,28 @@ describe("Webchat API", () => {
     expect(await runtime.canSendSpoken(task)).toBe(false);
     await expect(runtime.sendSpoken(task, "你好")).rejects.toThrow("only for a Concierge chat");
 
+    await deps.webchatRepo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await deps.webchatRepo.setSessionTrigger("visitor-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    expect(await runtime.canSendSpoken("visitor-task")).toBe(false);
+    await expect(runtime.sendSpoken("visitor-task", "你好")).rejects.toThrow(
+      "only for a Concierge chat",
+    );
     await expect(runtime.sendSpoken("no-such-chat", "你好")).rejects.toThrow("Session not found");
+    expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
   });
 
   it("lets go of the messages gathered for a spoken input the conversation no longer waits for", async () => {
@@ -3379,6 +3406,7 @@ describe("Webchat API", () => {
       buildAgent(name, { name: "concierge", policy: { finalText: "private", autoTitle: false } }),
     );
     deps.concierge = {
+      writerOf: async () => null,
       followDefault: async () => null,
       conciergeChat: async () => null,
       turnFailedBeforeStart: () => undefined,
@@ -4772,6 +4800,7 @@ describe("Webchat API", () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
+        writerOf: async () => null,
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
         followDefault: async () => null,
         conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
@@ -4816,6 +4845,7 @@ describe("Webchat API", () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
+        writerOf: async () => null,
         deps: { tasks: {} },
         followDefault: async () => null,
         conciergeChat: async (id: string) =>
@@ -4900,10 +4930,62 @@ describe("Webchat API", () => {
       expect(lineOf(sentTurns[4]?.prompt)).toMatchObject({ replyTo: null, root: null });
     });
 
+    it("names who wrote each message in a Concierge chat, whose chat it is or not", async () => {
+      const { sentTurns } = mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      deps.concierge = {
+        deps: { tasks: {} },
+        owners: { profileOf: async () => ({ role: "guardian", name: "Eric" }) },
+        writerOf: ConciergeService.prototype.writerOf,
+        followDefault: async () => null,
+        conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
+        turnHeader: async () => "<concierge_owner/>",
+        stoppedRequestLines: async () => "",
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const send = async (actor: SessionActor, body: Record<string, unknown>) =>
+        drainTurn(
+          app,
+          await runWithSessionActor(actor, () =>
+            app.request(`/chat/sessions/topic-1/turns`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }),
+          ),
+        );
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const ann = { kind: "visitor" as const, accountId: "ann", email: "ann@example.com" };
+      await send(guardian, { text: "from the owner" });
+      await send(ann, { text: "from another" });
+      const [first] = await deps.webchatRepo.getMessages("topic-1");
+      await send(ann, { text: "replying", replyToMessageId: first.id });
+      const prompts = sentTurns.map((turn) => turn.prompt as string);
+      expect(prompts[0]).toContain(
+        '<current_message from="Eric">\nfrom the owner\n</current_message>',
+      );
+      expect(prompts[1]).toContain(
+        '<current_message from="ann@example.com">\nfrom another\n</current_message>',
+      );
+      expect(prompts[2]).toMatch(
+        /<reply_context>[\s\S]+<\/reply_context>\n<current_message from="ann@example.com">\nreplying\n/,
+      );
+    });
+
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
+        writerOf: async () => null,
         followDefault: async (chatId: string) => {
           await deps.webchatRepo.updateSessionLargeModelSelection(
             chatId,
@@ -6364,6 +6446,7 @@ describe("Webchat API", () => {
       // The real card write, on the real store.
       const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
       deps.concierge = {
+        writerOf: async () => null,
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
         followDefault: async () => null,
         conciergeChat: async () => null,
@@ -10394,6 +10477,7 @@ describe("Webchat API", () => {
         props: { questions: [{ question: "Which tone?" }] },
       };
       deps.concierge = {
+        writerOf: async () => null,
         conciergeChat: async () => null,
         followDefault: async () => null,
         taskCardSources: () => ({
