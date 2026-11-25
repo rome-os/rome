@@ -162,7 +162,11 @@ describe("People API", () => {
     const nadia = await fetchPerson(nadiaId);
     // One account, two mappings: a client addresses the link it stored, and
     // both carry the mirror's name for the account rather than the raw jid.
-    expect(naming(nadia.accounts)).toEqual([
+    // The listing promises no order among a person's accounts.
+    const byAddress = naming(nadia.accounts).sort((a, b) =>
+      a.channelUserId.localeCompare(b.channelUserId),
+    );
+    expect(byAddress).toEqual([
       { channel: "whatsapp", channelUserId: NADIA_JID, displayName: "Nadia Cross" },
       { channel: "whatsapp", channelUserId: NADIA_LID, displayName: "Nadia Cross" },
     ]);
