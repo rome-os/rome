@@ -158,6 +158,38 @@ export const dismissedAccounts = sqliteTable(
 );
 
 /**
+ * The people Rome knows, one row each (docs/domains/identity.md#person).
+ * Separate from People's `persons`: nothing here grades a relationship or
+ * knows who is on the team.
+ */
+export const identities = sqliteTable("identities", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  avatarUrl: text("avatar_url"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+/**
+ * Which person each account belongs to (docs/domains/identity.md#account).
+ * Keyed by the account, so one account belongs to at most one person.
+ */
+export const identityAccounts = sqliteTable(
+  "identity_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    identityId: text("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId] }),
+    index("idx_identity_accounts_identity").on(table.identityId),
+  ],
+);
+
+/**
  * What a platform says about an account: its display name, handle and avatar
  * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
  * account itself, the platform and the platform's own id. It has no id of its

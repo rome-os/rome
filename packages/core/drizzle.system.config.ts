@@ -12,6 +12,8 @@ export default defineConfig({
     "sessions",
     "session_turn_checkpoints",
     "persons",
+    "identities",
+    "identity_accounts",
     "channel_mappings",
     "sentinel_log",
     "approvals",
