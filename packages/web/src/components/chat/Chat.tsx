@@ -127,7 +127,6 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { VoiceHeardBubble } from "@/components/chat/VoiceHeardBubble";
 import type { ConversationStopReason } from "@/lib/voice-conversation/conversation";
-import { ComputerUseAccess } from "@/components/chat/ComputerUseAccess";
 import {
   type LiveMessageStatuses,
   LiveMessageStatusesProvider,
@@ -200,7 +199,6 @@ import {
   ChatApiError,
   createSession,
   deleteSession,
-  getChatComputerUseTarget,
   interruptTurn,
   isUnreachableStatus,
   listChatAgents,
@@ -211,7 +209,6 @@ import {
   plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
-  type ChatComputerUseTarget,
   type PostTurnResult,
   pinSession,
   renameSession,
@@ -234,10 +231,6 @@ const TIMELINE_JUMP_OFFSET_PX = 24;
 const MAX_JUMP_PAGES = 20;
 /** How many older pages a click on a quote loads before it gives up. */
 const QUOTE_JUMP_PAGES = 10;
-
-function rememberedWindows(targets: ChatComputerUseTarget[]) {
-  return targets.filter((target) => target.authorized);
-}
 
 // Chat Component
 
@@ -699,90 +692,6 @@ export function Chat({
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
-  const computerUseSession = isArchived || shareMode ? null : mainSessionId;
-  const computerUseQueryClient = useQueryClient();
-  const computerUseEligibility = useQuery({
-    queryKey: ["chat-computer-use", computerUseSession],
-    queryFn: async ({ signal }) => {
-      if (!computerUseSession) return null;
-      let next: Awaited<ReturnType<typeof getChatComputerUseTarget>>;
-      try {
-        next = await getChatComputerUseTarget(computerUseSession, signal);
-      } catch (error) {
-        if (
-          error instanceof ChatApiError &&
-          (error.status === 401 || error.status === 403 || error.status === 404)
-        ) {
-          return null;
-        }
-        throw error;
-      }
-      if (next.discoveryDegraded) {
-        const previous = computerUseQueryClient.getQueryData<Awaited<
-          ReturnType<typeof getChatComputerUseTarget>
-        > | null>(["chat-computer-use", computerUseSession]);
-        if (previous) {
-          const prevList = previous.targets ?? [previous];
-          const nextList = next.targets ?? [next];
-          const seen = new Set(nextList.map(({ deviceId }) => deviceId));
-          const preserved = prevList.filter(({ deviceId }) => !seen.has(deviceId));
-          if (preserved.length > 0) {
-            return { ...next, targets: [...nextList, ...preserved] };
-          }
-        }
-      }
-      return next;
-    },
-    enabled: computerUseSession !== null,
-    staleTime: 0,
-    retry: false,
-  });
-  const computerUseTarget =
-    computerUseSession && computerUseEligibility.isFetchedAfterMount && computerUseEligibility.data
-      ? computerUseEligibility.data
-      : null;
-  const computerUseTargets =
-    computerUseTarget?.targets ?? (computerUseTarget ? [computerUseTarget] : []);
-  const rememberedTargets = rememberedWindows(computerUseTargets);
-  const [preferredComputer, setPreferredComputer] = useState<{
-    sessionId: string;
-    deviceId: string;
-  } | null>(null);
-  const selectedWindow =
-    preferredComputer?.sessionId === computerUseSession
-      ? rememberedTargets.find(({ deviceId }) => deviceId === preferredComputer.deviceId)
-      : undefined;
-  const computerUseDeviceIds = computerUseTargets
-    .map(({ deviceId, authorized }) => `${deviceId}:${authorized ?? ""}`)
-    .join(" ");
-  const [computerUseChoice, setComputerUseChoice] = useState<{
-    sessionId: string;
-    deviceId: string;
-    allowPreemption: true;
-  } | null>(null);
-  const computerUsePending = useRef(new WeakSet<NonNullable<typeof computerUseChoice>>());
-  const selectedComputerUse =
-    computerUseChoice?.sessionId === computerUseSession &&
-    computerUseChoice.deviceId === selectedWindow?.deviceId
-      ? computerUseChoice
-      : null;
-  useEffect(() => {
-    if (
-      computerUseEligibility.isFetchedAfterMount &&
-      preferredComputer?.sessionId === computerUseSession &&
-      !selectedWindow
-    ) {
-      setPreferredComputer(null);
-    }
-  }, [
-    computerUseEligibility.isFetchedAfterMount,
-    computerUseSession,
-    preferredComputer,
-    selectedWindow,
-  ]);
-  useEffect(() => {
-    setComputerUseChoice(null);
-  }, [computerUseSession, computerUseDeviceIds]);
   const setArchived = useArchiveSession();
   // The override is only a momentary optimistic flip for the navbar handlers.
   // Once the session read reflects the server's archived state (including an
@@ -2133,7 +2042,7 @@ export function Chat({
               : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
-          ...(result.code && result.code !== "computer_use_denied" ? { code: result.code } : {}),
+          ...(result.code ? { code: result.code } : {}),
           ...(result.provider ? { provider: result.provider } : {}),
           ...(result.reason ? { reason: result.reason } : {}),
         });
@@ -2343,25 +2252,6 @@ export function Chat({
         }
         adoptSession(sendingSessionId, snapshot.agentMention ?? null);
       }
-      const authorizedSend =
-        controls.userSubmitted && selectedComputerUse?.sessionId === sendingSessionId
-          ? selectedComputerUse
-          : null;
-      const computerUseDeviceId =
-        authorizedSend?.deviceId ??
-        (controls.userSubmitted && computerUseSession === sendingSessionId && snapshot.text.trim()
-          ? selectedWindow?.deviceId
-          : undefined);
-      if (
-        authorizedSend &&
-        (!snapshot.text.trim() || computerUsePending.current.has(authorizedSend))
-      ) {
-        const message = t(
-          snapshot.text.trim() ? "composer.computerUseSending" : "composer.computerUseNeedsText",
-        );
-        setStreamError(message);
-        throw new Error(message);
-      }
       const baseOptimisticText = buildOptimisticUserText(snapshot.text, snapshot.uploads);
       // Mirror the server's persisted form for a structured skill turn
       // (`/<name> task`) so the optimistic row matches what the reload shows.
@@ -2387,14 +2277,11 @@ export function Chat({
           : []),
         { type: "text", content: optimisticText },
       ]);
-      if (authorizedSend) computerUsePending.current.add(authorizedSend);
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
           const formData = new FormData();
           formData.set("text", snapshot.text);
-          if (computerUseDeviceId) formData.set("computerUseDeviceId", computerUseDeviceId);
-          if (authorizedSend?.allowPreemption) formData.set("computerUsePreemption", "true");
           if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
           if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
@@ -2417,36 +2304,16 @@ export function Chat({
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          const accepted = await postSessionTurn(sendingSessionId, formData, {
+          return postSessionTurn(sendingSessionId, formData, {
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
-          if (accepted.ok && authorizedSend) {
-            setComputerUseChoice((current) => (current === authorizedSend ? null : current));
-          } else if (
-            !accepted.ok &&
-            computerUseDeviceId &&
-            accepted.code === "computer_use_denied"
-          ) {
-            setPreferredComputer((current) =>
-              current?.sessionId === sendingSessionId && current.deviceId === computerUseDeviceId
-                ? null
-                : current,
-            );
-            setComputerUseChoice((current) =>
-              current?.sessionId === sendingSessionId ? null : current,
-            );
-            void queryClient.invalidateQueries({ queryKey: ["chat-computer-use"] });
-          }
-          return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
         // in the composer until the server accepts it, so its bubble waits too.
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
-      ).finally(() => {
-        if (authorizedSend) computerUsePending.current.delete(authorizedSend);
-      });
+      );
     },
     [
       runTurnLifecycle,
@@ -2457,10 +2324,6 @@ export function Chat({
       adoptSession,
       concierge,
       chain.focus,
-      queryClient,
-      computerUseSession,
-      selectedComputerUse,
-      selectedWindow?.deviceId,
     ],
   );
 
@@ -3380,48 +3243,6 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                    {computerUseTargets.length > 0 && computerUseSession ? (
-                      <div className="mb-2 flex min-w-0 flex-wrap gap-2">
-                        <ComputerUseAccess
-                          key={computerUseSession}
-                          sessionId={computerUseSession}
-                          targets={computerUseTargets}
-                          selected={selectedWindow}
-                          allowPreemption={selectedComputerUse?.allowPreemption === true}
-                          onSelect={(deviceId) => {
-                            setPreferredComputer((current) =>
-                              current?.sessionId === computerUseSession &&
-                              current.deviceId === deviceId
-                                ? null
-                                : { sessionId: computerUseSession, deviceId },
-                            );
-                            setComputerUseChoice(null);
-                          }}
-                          onRevoked={(deviceId) => {
-                            setPreferredComputer((current) =>
-                              current?.deviceId === deviceId ? null : current,
-                            );
-                            setComputerUseChoice((current) =>
-                              current?.deviceId === deviceId ? null : current,
-                            );
-                          }}
-                          onTogglePreemption={() => {
-                            if (!selectedWindow) return;
-                            setComputerUseChoice((current) => {
-                              if (current && computerUsePending.current.has(current))
-                                return current;
-                              return current?.allowPreemption
-                                ? null
-                                : {
-                                    sessionId: computerUseSession,
-                                    deviceId: selectedWindow.deviceId,
-                                    allowPreemption: true,
-                                  };
-                            });
-                          }}
-                        />
-                      </div>
-                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
