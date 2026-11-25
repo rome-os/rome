@@ -82,17 +82,15 @@ export async function memberEmails({ identity, access }: MemberContext): Promise
   return emails.sort();
 }
 
-/** The email of every Rome Cloud sign-in account of every person with a
- *  role, the guardian's included, sorted: the emails a Rome Cloud sign-in may
- *  use the dashboard with. */
-export async function signInEmails({ identity, access }: MemberContext): Promise<string[]> {
-  const emails: string[] = [];
-  for (const { personId } of await access.members()) {
-    for (const account of await identity.accountsOf(personId)) {
-      if (account.platform === ROME_CLOUD_EMAIL_PLATFORM) emails.push(account.accountId);
-    }
-  }
-  return emails.sort();
+/** The email of every Rome Cloud sign-in account of the guardian, sorted. A
+ *  sign-in with one of them is the guardian's person. */
+export async function guardianEmails({ identity, access }: MemberContext): Promise<string[]> {
+  const guardian = (await access.members()).find((m) => m.role === "guardian");
+  if (!guardian) return [];
+  return (await identity.accountsOf(guardian.personId))
+    .filter((account) => account.platform === ROME_CLOUD_EMAIL_PLATFORM)
+    .map((account) => account.accountId)
+    .sort();
 }
 
 /**
@@ -227,20 +225,21 @@ export function logStepFailure(message: string): (err: unknown) => void {
 }
 
 /**
- * Runs `work`, made of Access and Identity calls on `db`, in one transaction
- * that it commits, or rolls back when `work` rejects. Rejects when `db` is
- * already in a transaction.
+ * Runs `work`, made of Access, Identity and other drizzle calls on `db`, in
+ * one transaction that it commits, or rolls back when `work` rejects, and
+ * answers what `work` answers. Rejects when `db` is already in a transaction.
  */
 // better-sqlite3 runs a transaction function synchronously, and the Access and
 // Identity calls are async, so the transaction is opened by hand. Every call
 // inside settles without waiting on I/O, so no timer or I/O callback runs
 // before COMMIT or ROLLBACK, and Identity's own transactions nest as savepoints.
-export async function inOneTransaction(db: DrizzleDb, work: () => Promise<void>): Promise<void> {
+export async function inOneTransaction<T>(db: DrizzleDb, work: () => Promise<T>): Promise<T> {
   if (inTransaction(db)) throw new Error("A members transaction cannot open inside another");
   db.run(sql`BEGIN IMMEDIATE`);
   try {
-    await work();
+    const result = await work();
     db.run(sql`COMMIT`);
+    return result;
   } catch (err) {
     db.run(sql`ROLLBACK`);
     throw err;

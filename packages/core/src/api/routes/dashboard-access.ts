@@ -37,8 +37,8 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
     }
     const config: DashboardAccessConfig = normalizeDashboardAccessConfig(body);
 
-    // A failed write to the members fails the request before the snapshot or
-    // Rome Cloud hears of the list.
+    // A save that cannot be written changes nothing and fails the request
+    // before the snapshot or Rome Cloud hears of the list.
     const saved = await deps.dashboardAccessStore.save(config);
     await deps.dashboardAccessState.load(deps.db);
     // The sync drops a revision older than one it already holds, so two saves

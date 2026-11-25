@@ -1,4 +1,5 @@
 import type { DrizzleDb } from "../db/index.js";
+import { settings } from "../db/schema.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
   inOneTransaction,
@@ -11,6 +12,7 @@ import {
 } from "./application/members.js";
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
+  INVITED_EMAILS_DONE_KEY,
   readDashboardAccessRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
@@ -39,6 +41,7 @@ export class DashboardAccessStore {
   private chain: Promise<unknown> = Promise.resolve();
   private readonly members: MemberContext;
 
+  /** `settingsRepo` must write to `db`, so a save's settings writes share its transaction. */
   constructor(
     private readonly settingsRepo: Pick<SettingsRepository, "get" | "set">,
     private readonly db: DrizzleDb,
@@ -55,32 +58,39 @@ export class DashboardAccessStore {
   }
 
   /**
-   * Makes the members the persons behind the config's emails, then stores the
-   * next revision, and answers the members' emails under it. Rejects,
-   * changing no member and storing no revision, when the members cannot be
-   * written.
+   * Makes the members the persons behind the config's emails, stores the next
+   * revision and records that the members are the source of the list, all in
+   * one transaction, and answers the members' emails under that revision.
+   * Rejects, changing nothing, when any of it cannot be written.
    */
   save(config: DashboardAccessConfig): Promise<VisitorAllowList> {
-    return this.serialize(async () => {
-      await inOneTransaction(this.db, () =>
-        invitedEmailsSaved(this.members, config.cloudEmailAccess),
-      );
-      const emails = await memberEmails(this.members);
-      const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-      const revision = readDashboardAccessRevision(stored) + 1;
-      // An email taken off the list forgets its account, so adding it back
-      // counts its next sign-in as a new account.
-      const listed = new Set(emails);
-      const visitorAccounts = Object.fromEntries(
-        Object.entries(readVisitorAccounts(stored)).filter(([email]) => listed.has(email)),
-      );
-      await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-        ...asRecord(stored),
-        revision,
-        visitorAccounts,
-      });
-      return { emails, revision };
-    });
+    return this.serialize(() =>
+      inOneTransaction(this.db, async () => {
+        const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
+        const revision = readDashboardAccessRevision(stored) + 1;
+        await invitedEmailsSaved(this.members, config.cloudEmailAccess);
+        const emails = await memberEmails(this.members);
+        // An email taken off the list forgets its account, so adding it back
+        // counts its next sign-in as a new account.
+        const listed = new Set(emails);
+        const visitorAccounts = Object.fromEntries(
+          Object.entries(readVisitorAccounts(stored)).filter(([email]) => listed.has(email)),
+        );
+        // The list in the record is now stale, so the members backfill must
+        // never read it.
+        this.db
+          .insert(settings)
+          .values({ key: INVITED_EMAILS_DONE_KEY, value: true, updatedAt: new Date() })
+          .onConflictDoNothing()
+          .run();
+        await this.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+          ...asRecord(stored),
+          revision,
+          visitorAccounts,
+        });
+        return { emails, revision };
+      }),
+    );
   }
 
   /**

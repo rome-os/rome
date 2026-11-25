@@ -7,6 +7,7 @@ import {
   memberContext,
   seatAccounts,
 } from "./application/members.js";
+import { placeAudience } from "../core/place-audience.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
 
 describe("DashboardAccessState", () => {
@@ -33,7 +34,7 @@ describe("DashboardAccessState", () => {
     expect([...snapshot]).toEqual(["ada@example.com"]);
   });
 
-  it("loads the sign-in emails of every person with a role, the guardian's included", async () => {
+  it("loads the members' emails as the list and lets in the guardian's too", async () => {
     const testDb = createTestDb();
     try {
       const ctx = memberContext(testDb.db);
@@ -47,12 +48,40 @@ describe("DashboardAccessState", () => {
 
       await state.load(testDb.db);
 
-      expect([...state.cloudEmails()]).toEqual([
-        "ada@example.com",
-        "lin@example.com",
-        "owner@example.com",
-      ]);
+      expect([...state.cloudEmails()]).toEqual(["ada@example.com", "lin@example.com"]);
       expect(state.isCloudEmailAllowed("Owner@Example.com")).toBe(true);
+      expect(state.isCloudEmailAllowed("lin@example.com")).toBe(true);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("reads a Rome with a Rome Cloud guardian and no members as having no one invited, so the guardian's chats stay private", async () => {
+    const testDb = createTestDb();
+    try {
+      await guardianSeatCreated(memberContext(testDb.db), {
+        accounts: seatAccounts({ email: "owner@example.com" }),
+      });
+      const state = new DashboardAccessState();
+      await state.load(testDb.db);
+      // Wired as index.ts wires it.
+      const audience = placeAudience({
+        dashboardChat: async (id) => ({ id, agentName: "main", ownerKey: null }),
+        visitorsAllowed: () => state.hasCloudEmailAccess(),
+      });
+
+      expect(state.hasCloudEmailAccess()).toBe(false);
+      expect(state.cloudEmails().size).toBe(0);
+      expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
+      expect(
+        await audience({
+          channel: "telegram",
+          threadId: "1",
+          threadType: "private",
+          senderBondLevel: "guardian",
+        }),
+      ).toBe("private");
+      expect(await audience({ channel: "webchat", threadId: "chat-1" })).toBe("private");
     } finally {
       testDb.close();
     }

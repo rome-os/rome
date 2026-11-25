@@ -115,10 +115,8 @@ describe("Dashboard-access API", () => {
     ]);
     // A sign-in with the guardian's email is the guardian's person, so the
     // snapshot lets it in, but the list stays the members'.
-    expect([...dashboardAccessState.cloudEmails()]).toEqual([
-      "lin@example.com",
-      "owner@example.com",
-    ]);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("owner@example.com")).toBe(true);
     expect(pushed).toEqual([{ emails: ["lin@example.com"], revision: 1 }]);
     const getRes = await app.request("/dashboard-access");
     expect(await getRes.json()).toEqual({ cloudEmailAccess: ["lin@example.com"] });
@@ -141,6 +139,36 @@ describe("Dashboard-access API", () => {
 
     expect(res.status).toBe(500);
     expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);
+    expect(pushed).toEqual([]);
+    expect(await deps.dashboardAccessStore.read()).toEqual({
+      emails: ["ada@example.com"],
+      revision: 1,
+    });
+  });
+
+  it("fails the save when the settings record cannot be written, and changes no member, no snapshot and nothing Rome Cloud hears", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    await dashboardAccessState.load(testDb.db);
+    const pushed: unknown[] = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+    testDb.db.run(
+      sql`CREATE TRIGGER settings_down BEFORE UPDATE ON settings WHEN NEW.key = 'dashboardAccess' BEGIN SELECT RAISE(ABORT, 'settings down'); END`,
+    );
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com"] }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(
+      (await listMembers(memberContext(testDb.db))).flatMap((m) =>
+        m.accounts.map((a) => a.accountId),
+      ),
+    ).toEqual(["ada@example.com"]);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("ada@example.com")).toBe(true);
     expect(pushed).toEqual([]);
     expect(await deps.dashboardAccessStore.read()).toEqual({
       emails: ["ada@example.com"],

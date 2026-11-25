@@ -6,6 +6,13 @@ export interface DashboardAccessConfig {
 
 export const DASHBOARD_ACCESS_SETTING_KEY = "dashboardAccess";
 
+/**
+ * Set in `settings` once the members are the source of the invited emails:
+ * by the members backfill's first run, or by a save, whichever comes first.
+ * From then on the list in the `dashboardAccess` setting is never read.
+ */
+export const INVITED_EMAILS_DONE_KEY = "backfill.membersFromInvitedEmails";
+
 function normalizeEmailList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return Array.from(

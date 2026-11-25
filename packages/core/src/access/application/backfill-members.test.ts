@@ -195,11 +195,8 @@ describe("backfillMembers", () => {
         accountId: "ada@example.com",
       }),
     ).toBeNull();
-    expect([...state.cloudEmails()].sort()).toEqual([
-      "kim@example.com",
-      "lin@example.com",
-      "owner@example.com",
-    ]);
+    expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
+    expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
 
     // The list an older build wrote stays as it was.
     expect(
@@ -209,6 +206,24 @@ describe("backfillMembers", () => {
         )
       )?.cloudEmailAccess,
     ).toEqual(["ada@example.com", "lin@example.com", "owner@example.com"]);
+  });
+
+  it("keeps a member removed by a save made before its first run", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    await store.save({ cloudEmailAccess: ["lin@example.com"] });
+    await backfillMembers(db);
+
+    const ctx = memberContext(db);
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "ada@example.com" }),
+    ).toBeNull();
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "lin@example.com" }),
+    ).toBe("member");
   });
 
   it("gives the guardian's person the avatar a visitor signed in with under the guardian's listed email", async () => {

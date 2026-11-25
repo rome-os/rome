@@ -3,8 +3,9 @@
 // in the `dashboardAccess` setting say (docs/domains/access.md). It runs at
 // every startup, after migrations, and a run on members that already match
 // changes nothing, so it also repairs a step that failed beside a seat write
-// or a sign-in. The invited emails are read only on the first run: from then
-// on the members are their source, and a `settings` key records that run.
+// or a sign-in. The invited emails are read only on the first run, and not at
+// all after a save of the invited emails: from then on the members are their
+// source, and a `settings` key records that.
 
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
@@ -19,6 +20,7 @@ import {
 import { createLogger } from "../../logger.js";
 import {
   DASHBOARD_ACCESS_SETTING_KEY,
+  INVITED_EMAILS_DONE_KEY,
   normalizeDashboardAccessConfig,
 } from "../dashboard-access-config.js";
 import {
@@ -34,9 +36,6 @@ import {
 } from "./members.js";
 
 const log = createLogger("members-backfill");
-
-/** Set in `settings` once the invited emails have become members. */
-const INVITED_EMAILS_DONE_KEY = "backfill.membersFromInvitedEmails";
 
 // The platform an earlier build stored Rome Cloud ids under. A Rome Cloud
 // sign-in is now known by its email, so no account is kept on it.
@@ -55,7 +54,8 @@ const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
  * email connection's address. It takes no other email away: Identity cannot
  * tell an earlier seat's email from the same address carried from People, so
  * only the step beside a seat's rebind, which knows the old values, takes
- * them away. On the first run, each invited email becomes a member and a
+ * them away. On the first run, unless a save of the invited emails came
+ * first, each invited email becomes a member and a
  * member off the list is removed; later runs leave who is a member alone.
  * Each member and the guardian get the avatar a visitor last signed in with
  * under their email. An account that would land on two persons stays with or moves to the
