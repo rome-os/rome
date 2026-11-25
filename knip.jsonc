@@ -83,7 +83,10 @@
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
         "src/api/routes/__fixtures__/**",
-        "drizzle.*.config.ts"
+        "drizzle.*.config.ts",
+        // The team verifier's runs, which its run.sh names to rstest and node.
+        "src/test/team/*.verify.ts",
+        "src/test/team/merge-report.mjs"
       ]
     },
     "packages/web": {
@@ -95,6 +98,8 @@
       "rstest": false,
       "entry": [
         "src/**/*.test.{ts,tsx}",
+        // Verifier runs that packages/core/src/test/team/run.sh names to rstest.
+        "src/**/*.verify.tsx",
         ".storybook/*.test.{ts,tsx}",
         "src/test/setup.ts",
         "rstest.config.mts",
