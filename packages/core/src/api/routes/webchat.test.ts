@@ -7078,6 +7078,40 @@ describe("Webchat API", () => {
       expect(showApp).not.toHaveBeenCalled();
     });
 
+    it("starts no feedback fork for a person Rome cannot tell, and stores no comment", async () => {
+      const text = (said: string) => JSON.stringify([{ type: "text", content: said }]);
+      await deps.webchatRepo.addMessage("fb-user", SESSION_ID, "user", text("hi"), TURN_ID);
+      const runForked = rs.fn();
+      deps.agentRunner = { run: deps.agentRunner.run.bind(deps.agentRunner), runForked };
+      rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
+        sessionId: "live-source-session",
+      } as AgentSession);
+      rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
+        sessionId: "live-source-session",
+        turnId: TURN_ID,
+        provider: "openai",
+        modelThreadId: "source-model-thread",
+        checkpointId: "rated-provider-turn",
+      });
+      const app = createRuntime(deps).routes;
+      const rate = () =>
+        app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rating: "negative", comment: "this was wrong" }),
+        });
+
+      expect((await rate()).status).toBe(403);
+      expect((await runWithSessionActor({ kind: "anonymous" }, rate)).status).toBe(403);
+      const failedLookup = async () => {
+        throw new Error("no person read");
+      };
+      expect((await runWithSessionActor(failedLookup, rate)).status).toBe(403);
+      expect(runForked).not.toHaveBeenCalled();
+      expect(await deps.webchatRepo.getTurnFeedback(SESSION_ID, TURN_ID)).toBeNull();
+    });
+
     it("does not start feedback processing when no text was set", async () => {
       const runForked = rs.fn();
       deps.agentRunner = {

@@ -373,14 +373,19 @@ describe("webchat task actor admission without a database or provider", () => {
     );
   });
 
-  it("refuses a forged actor in an external HTTP body", async () => {
-    const s = harness();
-    const response = await s.routes.request("/chat/sessions/target/turns", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...body, actor: guardian, taskActor: guardian }),
-    });
-    expect(response.status).toBe(404);
-    expect(s.submit).not.toHaveBeenCalled();
+  it("ignores a forged actor in an external HTTP body", async () => {
+    const s = harness("visitor:v");
+    const response = await runWithSessionActor(visitor, () =>
+      s.routes.request("/chat/sessions/target/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, actor: guardian, taskActor: guardian, sender: guardian }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(s.submit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ actor: visitor }),
+    );
   });
 });
