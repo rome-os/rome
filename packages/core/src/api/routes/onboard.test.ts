@@ -12,7 +12,8 @@ rs.mock("../../profile-memory.js", () => ({
 import { onboardRoutes } from "./onboard.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
-import { guardianAuth, persons, settings } from "../../db/schema.js";
+import { guardianAuth, identities, persons, settings } from "../../db/schema.js";
+import { listMembers, memberContext } from "../../access/application/members.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -22,6 +23,7 @@ beforeEach(() => {
   testDb.db.delete(guardianAuth).run();
   testDb.db.delete(settings).run();
   testDb.db.delete(persons).run();
+  testDb.db.delete(identities).run();
 });
 
 // Local-first setup is the account step alone: creating the seat also names the
@@ -69,5 +71,13 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
     expect(preset).toBeDefined();
     expect(stored.agentPurpose).toBe(preset?.purpose);
     expect(stored.guardianName).toBe("alex");
+  });
+
+  it("makes the guardian with no accounts, since a local seat names none", async () => {
+    await createAccount(await buildLocalApp());
+
+    expect(await listMembers(memberContext(testDb.db))).toEqual([
+      { person: expect.objectContaining({ name: "alex" }), role: "guardian", accounts: [] },
+    ]);
   });
 });

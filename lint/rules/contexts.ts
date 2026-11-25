@@ -8,7 +8,7 @@
 import type { ImportRule, ListedCrossing } from "../import-rules.js";
 
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  access: ["instance"],
+  access: ["identity", "instance"],
   agent: ["instance"],
   "app-host": [
     "access",
@@ -92,7 +92,7 @@ const REASONS: Record<string, string> = {
   "desktops-never-imports-participation":
     "Desktops never knows what woke an agent or where it speaks, so no file in desktops/ imports participation/.",
   "identity-never-imports-access":
-    "Identity says which person an account belongs to. Access decides who is on the team by asking Identity, so no file in identity/ imports access/.",
+    "Identity says which person an account belongs to. Access's steps on members ask Identity who a person is, so no file in identity/ imports access/.",
   "identity-never-imports-people":
     "Identity says who a person is, whoever they are to the guardian. People grades that relationship, so no file in identity/ imports people/.",
   "instance-never-imports-agent":
