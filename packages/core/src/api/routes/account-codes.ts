@@ -2,17 +2,21 @@
 // message from the account they want added. Vocabulary:
 // docs/domains/identity.md#account-code.
 
-import type { AccountCodeIssued } from "@rome/api-types";
+import type { AccountCodeIssued, AccountCodeNoPerson } from "@rome/api-types";
 import { Hono } from "hono";
 import { createAccess } from "../../access/access.js";
 import { currentSessionActor, type SessionActor } from "../../access/session-actor.js";
-import { accountCodeContext, accountCodeIssued } from "../../identity/application/account-codes.js";
+import {
+  ACCOUNT_CODE_LIFETIME_MS,
+  accountCodeContext,
+  accountCodeIssued,
+} from "../../identity/application/account-codes.js";
 import { createIdentity, ROME_CLOUD_EMAIL_PLATFORM } from "../../identity/identity.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 
 /** `POST /account-codes`, for the guardian and members alike. Answers
- *  `{ code, expiresAt }`. `now` is the clock codes expire by. */
+ *  `{ code, expiresAt, expiresInSeconds }`. `now` is the clock codes expire by. */
 export function accountCodesRoutes(
   deps: Pick<ApiDeps, "db">,
   now: () => Date = () => new Date(),
@@ -49,9 +53,21 @@ export function accountCodesRoutes(
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
     }
     const personId = await personOf(actor);
-    if (!personId) return c.json({ error: "This sign-in belongs to no person" }, 403);
+    if (!personId) {
+      return c.json(
+        {
+          error: "This sign-in belongs to no person",
+          code: "no_person",
+        } satisfies AccountCodeNoPerson,
+        403,
+      );
+    }
     const { code, expiresAt } = await accountCodeIssued(codes, personId);
-    return c.json({ code, expiresAt: expiresAt.toISOString() } satisfies AccountCodeIssued);
+    return c.json({
+      code,
+      expiresAt: expiresAt.toISOString(),
+      expiresInSeconds: ACCOUNT_CODE_LIFETIME_MS / 1000,
+    } satisfies AccountCodeIssued);
   });
 
   return app;

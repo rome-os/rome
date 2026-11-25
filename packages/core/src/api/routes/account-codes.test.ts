@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type { AccountCodeIssued, AccountCodeNoPerson } from "@rome/api-types";
 import { Hono } from "hono";
 import {
   guardianSeatCreated,
@@ -57,10 +58,11 @@ describe("account codes API", () => {
     const res = await ask({ kind: "visitor", accountId: "acct-ann", email: "Ann@Example.com" });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { code: string; expiresAt: string };
-    expect(Object.keys(body).sort()).toEqual(["code", "expiresAt"]);
+    const body = (await res.json()) as AccountCodeIssued;
+    expect(Object.keys(body).sort()).toEqual(["code", "expiresAt", "expiresInSeconds"]);
     expect(looksLikeAccountCode(body.code)).toBe(true);
     expect(body.expiresAt).toBe("2026-11-25T10:10:00.000Z");
+    expect(body.expiresInSeconds).toBe(600);
     expect(await redeemedBy(body.code)).toBe(ann.id);
   });
 
@@ -93,6 +95,7 @@ describe("account codes API", () => {
     const res = await ask({ kind: "visitor", accountId: "acct-x", email: "stranger@example.com" });
 
     expect(res.status).toBe(403);
+    expect(((await res.json()) as AccountCodeNoPerson).code).toBe("no_person");
     expect(stored()).toEqual([]);
   });
 
@@ -113,6 +116,7 @@ describe("account codes API", () => {
     );
 
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBeUndefined();
     expect(stored()).toEqual([]);
   });
 
@@ -127,6 +131,7 @@ describe("account codes API", () => {
     });
 
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBeUndefined();
     expect(stored()).toEqual([]);
   });
 });
