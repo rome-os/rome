@@ -45,6 +45,7 @@ How an account nobody holds becomes a person's. A signed-in guardian or member g
 - A code adds an account on a platform a connection hears, never a sign-in address. Sending it from an email or Rome Cloud email account is refused.
 - The code is sent in a direct message. A code shown in a shared chat is voided. Whoever hears the message applies that rule, not Identity.
 - Deleting a person deletes their open code.
+- A code proves that whoever sent it had the code. A person who gives their code to someone else gives that account their role, so the page that shows a code tells the person to send it only from their own account and to share it with nobody (accepted cost, Ouou, 2026-11-25).
 
 ## Decided against
 
