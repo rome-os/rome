@@ -3,7 +3,7 @@ import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { MessageReactionEvent } from "@rome/api-types/concierge";
-import { privateChildren, shownSql } from "./privacy.js";
+import { PRIVATE_CHILD_TRIGGER_KIND, privateChildren, shownSql } from "./privacy.js";
 import {
   ChatOutputsRepository,
   OutputCalls,
@@ -1343,12 +1343,20 @@ export class WebChatRepository {
     return row?.ownerKey ?? null;
   }
 
-  /** Attributes a person-created fork and its opening input without changing agent context. */
+  /**
+   * Attributes a person-created fork and its opening input without changing
+   * agent context. A fork of a Concierge or task chat keeps that chat's owner.
+   */
   async attributePersonFork(sessionId: string, turnId: string, actor: SessionActor | undefined) {
     await this.db.transaction((tx) => {
       tx.update(romeSessions)
         .set({ ownerKey: sessionOwnerKey(actor) })
-        .where(eq(romeSessions.id, sessionId))
+        .where(
+          and(
+            eq(romeSessions.id, sessionId),
+            sql`coalesce(${romeSessions.triggerKind}, '') <> ${PRIVATE_CHILD_TRIGGER_KIND}`,
+          ),
+        )
         .run();
       tx.update(romeAgentMessages)
         .set({ actor: actor ?? null })
@@ -3219,16 +3227,6 @@ export class WebChatRepository {
       .where(eq(romeAgentMessages.id, id))
       .limit(1);
     return row ? { chatId: row.sessionId, content: row.content } : null;
-  }
-
-  /** The chat a stored message belongs to, or null. */
-  async sessionIdOfMessage(messageId: string): Promise<string | null> {
-    const [row] = await this.db
-      .select({ sessionId: romeAgentMessages.sessionId })
-      .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.id, messageId))
-      .limit(1);
-    return row?.sessionId ?? null;
   }
 
   async hasTurnInSession(sessionId: string, turnId: string): Promise<boolean> {

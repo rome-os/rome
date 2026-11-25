@@ -503,29 +503,6 @@ describe("an event on a widget, over the dashboard's own storage", () => {
       testDb.close();
     }
   });
-
-  it("leaves a trace found by its own id when a dashboard line takes that id as its key", async () => {
-    const { createTestDb } = await import("../../test/helpers.js");
-    const { TurnLinks } = await import("../../sessions/turn-links.js");
-    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
-    const testDb = createTestDb();
-    try {
-      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
-      await repo.createSession("private", "Private");
-      await repo.createSession("mine", "Mine");
-      await repo.addMessage("trace-1", "private", "trace", "[]");
-      // A client picks a user line's key, so it can pick a trace's id.
-      await repo.addMessage(
-        "trace-1",
-        "mine",
-        "user",
-        JSON.stringify([{ type: "text", content: "hi" }]),
-      );
-      expect(await repo.sessionIdOfMessage("trace-1")).toBe("private");
-    } finally {
-      testDb.close();
-    }
-  });
 });
 
 describe("an event on the connect card core owns", () => {
