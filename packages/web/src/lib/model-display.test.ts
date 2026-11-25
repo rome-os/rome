@@ -7,6 +7,20 @@ describe("modelDisplayName", () => {
     expect(modelDisplayName("gpt-6.1-sol")).toBe("GPT-6.1 Sol");
   });
 
+  it.each([
+    ["claude-opus-4-8[1m]", "Opus 4.8"],
+    ["claude-opus-5[1m]", "Opus 5"],
+    ["claude-opus-5-5[1m]", "Opus 5.5"],
+  ])("keeps wire version %s distinct", (id, name) => {
+    expect(modelDisplayName(id)).toBe(name);
+  });
+
+  it("does not interpret a selection id or floating alias as a wire model", () => {
+    expect(modelDisplayName("claude-opus")).toBe("claude-opus");
+    expect(modelDisplayName("opus")).toBe("opus");
+    expect(modelDisplayName("claude-opus-99")).toBe("claude-opus-99");
+  });
+
   it("shows an unknown id as-is", () => {
     expect(modelDisplayName("MiniMax-M2.7")).toBe("MiniMax-M2.7");
   });

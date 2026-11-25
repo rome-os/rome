@@ -353,7 +353,7 @@ describe("resolveModel on the default provider", () => {
 
   it("runs a chat on Rome credits on Codex, at the strength of the model it keeps", () => {
     expect(
-      modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" }, true),
+      modelResolutionRequest("anthropic/claude-opus-5-5[1m]", undefined, { tier: "large" }, true),
     ).toMatchObject({ kind: "exact", providerId: "openai", credits: true });
     expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, true)).toEqual({
       kind: "tier",
@@ -361,7 +361,9 @@ describe("resolveModel on the default provider", () => {
       override: "openai",
       credits: true,
     });
-    expect(modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" })).toMatchObject({
+    expect(
+      modelResolutionRequest("anthropic/claude-opus-5-5[1m]", undefined, { tier: "large" }),
+    ).toMatchObject({
       kind: "exact",
       providerId: "anthropic",
     });
@@ -433,7 +435,7 @@ describe("an unchecked move keeps every existing chat: a held session", () => {
   it("never spends Rome credits: a held ChatGPT chat shows its own account's card", () => {
     expect(
       resolveModel(
-        heldOn("openai", "gpt-6-1-sol"),
+        heldOn("openai", "openai/gpt-6.1-sol"),
         facts({
           reports: reports(unauthorized, unauthorized),
           logins: { openai: credits() },
@@ -461,7 +463,7 @@ describe("an unchecked move keeps every existing chat: a held session", () => {
 
   it("keeps a held chat with a provider-restricted agent on its own account under a credits default", () => {
     const ask = modelResolutionRequest(
-      "gpt-6-1-sol",
+      "openai/gpt-6.1-sol",
       undefined,
       { tier: "large", providerId: "openai" },
       true,

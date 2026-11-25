@@ -3,7 +3,7 @@ import { createTestDb } from "../test/db.js";
 import { reportOf } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import { MODEL_SELECTIONS } from "../agent/index.js";
-import { createChatProviders, pinnedModelOf } from "./chat-providers.js";
+import { createChatProviders, pinnedModelOf, selectionOfModel } from "./chat-providers.js";
 
 async function setup(
   options: {
@@ -35,10 +35,16 @@ async function setup(
   await said("plain");
   // Follows the default at the fast strength Rome chose.
   await webchatRepo.createSession("fast", "Fast");
-  await webchatRepo.updateSessionLargeModelSelection("fast", "claude-sonnet", "auto");
+  await webchatRepo.updateSessionLargeModelSelection("fast", "anthropic/claude-sonnet-5-5", "auto");
   await said("fast");
   // Its owner picked the model.
-  await webchatRepo.createSession("picked", "Picked", undefined, undefined, "claude-opus-5-5");
+  await webchatRepo.createSession(
+    "picked",
+    "Picked",
+    undefined,
+    undefined,
+    "anthropic/claude-opus-5-5[1m]",
+  );
   await said("picked");
   // Never said anything.
   await webchatRepo.createSession("empty", "Empty");
@@ -112,13 +118,16 @@ describe("which provider a chat that follows the default runs on", () => {
       by: "guardian",
       moveExisting: false,
     });
-    expect(await row("plain")).toEqual({ selection: "claude-opus-5-5", by: "kept" });
-    expect(await row("fast")).toEqual({ selection: "claude-sonnet", by: "kept" });
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
+    expect(await row("plain")).toEqual({ selection: "anthropic/claude-opus-5-5[1m]", by: "kept" });
+    expect(await row("fast")).toEqual({ selection: "anthropic/claude-sonnet-5-5", by: "kept" });
+    expect(await row("picked")).toEqual({
+      selection: "anthropic/claude-opus-5-5[1m]",
+      by: "owner",
+    });
     expect(await row("empty")).toEqual({ selection: null, by: null });
     expect(selected).toEqual([
-      ["plain", "claude-opus-5-5"],
-      ["fast", "claude-sonnet"],
+      ["plain", "anthropic/claude-opus-5-5[1m]"],
+      ["fast", "anthropic/claude-sonnet-5-5"],
     ]);
     // Kept now: a later change that moves existing chats would move them again.
     expect(await providers.followingCount()).toBe(2);
@@ -138,17 +147,20 @@ describe("which provider a chat that follows the default runs on", () => {
       by: "guardian",
       moveExisting: true,
     });
-    expect(await row("plain")).toEqual({ selection: "claude-opus-5-5", by: "auto" });
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
+    expect(await row("plain")).toEqual({ selection: "anthropic/claude-opus-5-5[1m]", by: "auto" });
+    expect(await row("picked")).toEqual({
+      selection: "anthropic/claude-opus-5-5[1m]",
+      by: "owner",
+    });
   });
 
   it("keeps one chat on another provider, never one its owner picked a model for", async () => {
     const { providers, row } = await setup();
-    expect(await providers.keep("fast", "openai")).toBe("gpt-6-luna");
-    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "kept" });
+    expect(await providers.keep("fast", "openai")).toBe("openai/gpt-6-luna");
+    expect(await row("fast")).toEqual({ selection: "openai/gpt-6-luna", by: "kept" });
     expect(await providers.keep("picked", "openai")).toBeNull();
     await providers.follow("fast");
-    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
+    expect(await row("fast")).toEqual({ selection: "openai/gpt-6-luna", by: "auto" });
   });
 });
 
@@ -164,14 +176,14 @@ describe("the model a kept chat stays on", () => {
       moveExisting: false,
     });
     // It ran the fast model, so it stays fast: never "strong" because it was kept.
-    expect(await row("plain")).toEqual({ selection: "claude-sonnet", by: "kept" });
+    expect(await row("plain")).toEqual({ selection: "anthropic/claude-sonnet-5-5", by: "kept" });
   });
 
   it("is its agent's tier when the session never ran a model", async () => {
     const fast = await setup({ lastModel: {}, tier: "medium" });
-    expect(await fast.providers.keep("plain", "anthropic")).toBe("claude-sonnet");
+    expect(await fast.providers.keep("plain", "anthropic")).toBe("anthropic/claude-sonnet-5-5");
     const strong = await setup({ lastModel: {}, tier: "large" });
-    expect(await strong.providers.keep("plain", "anthropic")).toBe("claude-opus-5-5");
+    expect(await strong.providers.keep("plain", "anthropic")).toBe("anthropic/claude-opus-5-5[1m]");
   });
 });
 
@@ -293,9 +305,13 @@ describe("an unchecked move keeps every existing chat", () => {
       parentTurnId: "t1",
     });
     // An older overload swap left Rome's choice on the fork.
-    await webchatRepo.updateSessionLargeModelSelection(forkId, "claude-sonnet", "auto");
+    await webchatRepo.updateSessionLargeModelSelection(
+      forkId,
+      "anthropic/claude-sonnet-5-5",
+      "auto",
+    );
     await providers.beforeDefaultChange(unchecked);
-    expect(await row(forkId)).toEqual({ selection: "claude-sonnet", by: "kept" });
+    expect(await row(forkId)).toEqual({ selection: "anthropic/claude-sonnet-5-5", by: "kept" });
     expect(providers.heldProvider(`webchat:${forkId}`)).toBe("anthropic");
   });
 
@@ -305,7 +321,7 @@ describe("an unchecked move keeps every existing chat", () => {
     });
     await webchatRepo.createSession("old-kept", "Old kept");
     // Kept on ChatGPT under the old rule, with no held entry.
-    await webchatRepo.updateSessionLargeModelSelection("old-kept", "gpt-6-1-sol", "kept");
+    await webchatRepo.updateSessionLargeModelSelection("old-kept", "openai/gpt-6.1-sol", "kept");
     await providers.beforeDefaultChange(unchecked);
     // Its subagents stay with it on ChatGPT, not on the old default.
     expect(providers.heldProvider("webchat:old-kept:subagent:abc")).toBe("openai");
@@ -317,25 +333,28 @@ describe("an unchecked move keeps every existing chat", () => {
     const { providers, row, selected } = await setup();
     await providers.beforeDefaultChange(unchecked);
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("anthropic");
-    await providers.pick("fast", "gpt-6-1-sol");
-    expect(await row("fast")).toEqual({ selection: "gpt-6-1-sol", by: "owner" });
-    expect(selected.at(-1)).toEqual(["fast", "gpt-6-1-sol"]);
+    await providers.pick("fast", "openai/gpt-6.1-sol");
+    expect(await row("fast")).toEqual({ selection: "openai/gpt-6.1-sol", by: "owner" });
+    expect(selected.at(-1)).toEqual(["fast", "openai/gpt-6.1-sol"]);
     expect(providers.heldProvider("webchat:fast")).toBe("openai");
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("openai");
     // Auto lets the conversation go.
     await providers.pick("fast", null);
     expect(providers.heldProvider("webchat:fast")).toBeUndefined();
     // A chat that is not held stays unheld.
-    await providers.pick("empty", "gpt-6-1-sol");
+    await providers.pick("empty", "openai/gpt-6.1-sol");
     expect(providers.heldProvider("webchat:empty")).toBeUndefined();
   });
 
   it("an owner's pick and a card's switch at once leave the chat and its hold agreeing", async () => {
     const { providers, row } = await setup({ slowWrites: true });
     await providers.beforeDefaultChange(unchecked);
-    await Promise.all([providers.keep("fast", "anthropic"), providers.pick("fast", "gpt-6-1-sol")]);
+    await Promise.all([
+      providers.keep("fast", "anthropic"),
+      providers.pick("fast", "openai/gpt-6.1-sol"),
+    ]);
     const after = await row("fast");
-    const on = MODEL_SELECTIONS[after.selection as "gpt-6-1-sol"].providerId;
+    const on = MODEL_SELECTIONS[after.selection as "openai/gpt-6.1-sol"].providerId;
     // Whichever ran last, the parent's model and its subagents' hold name one provider.
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe(on);
   });
@@ -360,9 +379,9 @@ describe("an unchecked move keeps every existing chat", () => {
     await providers.beforeDefaultChange({ ...unchecked, from: "anthropic", to: "openai" });
     expect(providers.heldProvider(`webchat:${forkId}`)).toBe("anthropic");
     // A Sonnet fork on a large-tier agent comes back as the fast model, not Sol.
-    expect(await providers.follow(forkId)).toBe("gpt-6-luna");
-    expect(await row(forkId)).toEqual({ selection: "gpt-6-luna", by: "auto" });
-    expect(selected.at(-1)).toEqual([forkId, "gpt-6-luna"]);
+    expect(await providers.follow(forkId)).toBe("openai/gpt-6-luna");
+    expect(await row(forkId)).toEqual({ selection: "openai/gpt-6-luna", by: "auto" });
+    expect(selected.at(-1)).toEqual([forkId, "openai/gpt-6-luna"]);
     expect(providers.heldProvider(`webchat:${forkId}`)).toBeUndefined();
   });
 
@@ -468,16 +487,26 @@ describe("an unchecked move keeps every existing chat", () => {
 describe("a pinned chat always reports it is pinned", () => {
   it("reports an owner's pick, a kept chat and a held fork, and nothing for Rome's choice", () => {
     expect(
-      pinnedModelOf({ largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" }),
-    ).toMatchObject({ by: "owner", providerId: "anthropic", selection: "claude-haiku" });
+      pinnedModelOf({
+        largeModelSelection: "anthropic/claude-haiku-5-5",
+        largeModelSelectionBy: "owner",
+      }),
+    ).toMatchObject({
+      by: "owner",
+      providerId: "anthropic",
+      selection: "anthropic/claude-haiku-5-5",
+    });
     // A model stored before Rome recorded who chose it is its owner's.
     expect(
-      pinnedModelOf({ largeModelSelection: "claude-haiku", largeModelSelectionBy: null }),
+      pinnedModelOf({
+        largeModelSelection: "anthropic/claude-haiku-5-5",
+        largeModelSelectionBy: null,
+      }),
     ).toMatchObject({
       by: "owner",
     });
     expect(
-      pinnedModelOf({ largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "kept" }),
+      pinnedModelOf({ largeModelSelection: "openai/gpt-6.1-sol", largeModelSelectionBy: "kept" }),
     ).toMatchObject({ by: "kept", providerId: "openai" });
     expect(pinnedModelOf({ largeModelSelection: null }, "anthropic")).toEqual({
       by: "kept",
@@ -486,19 +515,26 @@ describe("a pinned chat always reports it is pinned", () => {
       model: null,
     });
     expect(
-      pinnedModelOf({ largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" }),
+      pinnedModelOf({
+        largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+        largeModelSelectionBy: "auto",
+      }),
     ).toBeNull();
     expect(pinnedModelOf({ largeModelSelection: null })).toBeNull();
     // A model Rome chose, while its conversation is held: pinned there.
     expect(
       pinnedModelOf(
-        { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        { largeModelSelection: "anthropic/claude-opus-5-5[1m]", largeModelSelectionBy: "auto" },
         "anthropic",
       ),
-    ).toMatchObject({ by: "kept", providerId: "anthropic", selection: "claude-opus-5-5" });
+    ).toMatchObject({
+      by: "kept",
+      providerId: "anthropic",
+      selection: "anthropic/claude-opus-5-5[1m]",
+    });
     expect(
       pinnedModelOf(
-        { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "auto" },
+        { largeModelSelection: "openai/gpt-6.1-sol", largeModelSelectionBy: "auto" },
         "anthropic",
       ),
     ).toEqual({ by: "kept", providerId: "anthropic", selection: null, model: null });
@@ -508,24 +544,76 @@ describe("a pinned chat always reports it is pinned", () => {
     const { providers, row, selected } = await setup({ currentDefault: "openai" });
     await providers.keep("fast", "anthropic");
     expect(providers.heldProvider("webchat:fast")).toBe("anthropic");
-    expect(await providers.follow("fast")).toBe("gpt-6-luna");
-    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
+    expect(await providers.follow("fast")).toBe("openai/gpt-6-luna");
+    expect(await row("fast")).toEqual({ selection: "openai/gpt-6-luna", by: "auto" });
     expect(providers.heldProvider("webchat:fast")).toBeUndefined();
-    expect(selected.at(-1)).toEqual(["fast", "gpt-6-luna"]);
+    expect(selected.at(-1)).toEqual(["fast", "openai/gpt-6-luna"]);
   });
 
   it("Back to default clears an owner's pick too", async () => {
     const { providers, row } = await setup({ currentDefault: "anthropic" });
-    expect(await providers.follow("picked")).toBe("claude-opus-5-5");
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "auto" });
+    expect(await providers.follow("picked")).toBe("anthropic/claude-opus-5-5[1m]");
+    expect(await row("picked")).toEqual({ selection: "anthropic/claude-opus-5-5[1m]", by: "auto" });
     expect(
-      pinnedModelOf({ largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" }),
+      pinnedModelOf({
+        largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+        largeModelSelectionBy: "auto",
+      }),
     ).toBeNull();
   });
 
   it("Back to default does nothing for a chat that follows the default", async () => {
     const { providers, row } = await setup();
     expect(await providers.follow("fast")).toBeNull();
-    expect(await row("fast")).toEqual({ selection: "claude-sonnet", by: "auto" });
+    expect(await row("fast")).toEqual({ selection: "anthropic/claude-sonnet-5-5", by: "auto" });
   });
+});
+
+it("does not match another provider or strip a context suffix when reversing an identity", () => {
+  expect(selectionOfModel("claude-opus-4-8[1m]", "anthropic")).toBe(
+    "anthropic/claude-opus-4-8[1m]",
+  );
+  expect(selectionOfModel("claude-opus-4-8[1m]", "openai")).toBeNull();
+  expect(selectionOfModel("claude-opus-4-8", "anthropic")).toBeNull();
+});
+
+it.each([
+  "claude-opus-5-5",
+  "claude-sonnet-4-5-20250929",
+])("holds off-catalog %s without changing its exact session pin or blocking other chats", async (model) => {
+  const { providers, row, selected } = await setup({
+    lastModel: { plain: { providerId: "anthropic", model } },
+  });
+  await providers.beforeDefaultChange({
+    from: "anthropic",
+    to: "openai",
+    by: "guardian",
+    moveExisting: false,
+  });
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(selected.some(([id]) => id === "plain")).toBe(false);
+  expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
+  expect((await row("fast")).by).toBe("kept");
+  await providers.beforeDefaultChange({
+    from: "openai",
+    to: "anthropic",
+    by: "guardian",
+    moveExisting: false,
+  });
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
+  expect(selected.some(([id]) => id === "plain")).toBe(false);
+  await expect(providers.follow("plain")).resolves.not.toThrow();
+  expect(providers.heldProvider("webchat:plain")).toBeUndefined();
+});
+
+it("clears an unknown choice on explicit Back to default, without guessing its old target", async () => {
+  const { providers, row, webchatRepo } = await setup({
+    currentDefault: "anthropic",
+    lastModel: { plain: { providerId: "anthropic", model: "claude-sonnet-4-5-20250929" } },
+  });
+  await webchatRepo.updateSessionLargeModelSelection("plain", "unknown-old-choice", "owner");
+  await providers.follow("plain");
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(providers.heldProvider("webchat:plain")).toBeUndefined();
 });

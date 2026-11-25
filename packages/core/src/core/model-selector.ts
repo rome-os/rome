@@ -1,16 +1,15 @@
 import type { ModelReasoningEffort } from "./agent-runner.js";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import {
-  isModelSelectionId,
+  canonicalModelSelection,
   MODEL_SELECTIONS,
   type ModelSelection,
   type ModelSelectionId,
 } from "../agent/index.js";
 
 // The webchat settings that pick a model, and how a stored value reads as a
-// selection. The selections themselves are the agent context's
-// (`ModelSelection`); "auto" is the setting's word for leaving the choice to
-// the resolver.
+// selection. The shared directory supplies exact identities; the agent context
+// resolves them. "auto" leaves the choice to the resolver.
 
 export const ENABLE_MODEL_SELECTOR_SETTING_KEY = "enableModelSelector";
 export const WEBCHAT_LARGE_MODEL_SETTING_KEY = "webchatLargeModel";
@@ -25,9 +24,10 @@ export const DEFAULT_WEBCHAT_REASONING_EFFORT =
 export function normalizeWebchatLargeModelSelectionId(
   value: unknown,
 ): WebchatLargeModelSelectionId {
-  return value === "auto" || isModelSelectionId(value)
-    ? value
-    : DEFAULT_WEBCHAT_LARGE_MODEL_SELECTION;
+  if (value === "auto" || value === null || value === undefined) return "auto";
+  const id = canonicalModelSelection(value);
+  if (!id) throw new Error(`Unknown stored model selection: ${String(value)}`);
+  return id;
 }
 
 export function resolveWebchatLargeModelSelection(value: unknown): ModelSelection | null {

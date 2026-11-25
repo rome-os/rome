@@ -97,13 +97,21 @@ describe("a pinned chat always reports it is pinned, in the chat API", () => {
   it("adds followsDefault and pinnedModel beside the fields the iOS app reads", () => {
     expect(
       toWebchatSessionResponse(
-        { ...chat, largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
+        {
+          ...chat,
+          largeModelSelection: "anthropic/claude-haiku-5-5",
+          largeModelSelectionBy: "owner",
+        },
         0,
       ),
     ).toMatchObject({
-      largeModelSelection: "claude-haiku",
+      largeModelSelection: "anthropic/claude-haiku-5-5",
       followsDefault: false,
-      pinnedModel: { by: "owner", providerId: "anthropic", selection: "claude-haiku" },
+      pinnedModel: {
+        by: "owner",
+        providerId: "anthropic",
+        selection: "anthropic/claude-haiku-5-5",
+      },
     });
   });
 
@@ -126,20 +134,32 @@ describe("a pinned chat always reports it is pinned, in the chat API", () => {
   it("reports a model Rome chose as pinned while its conversation is held", () => {
     expect(
       toWebchatSessionResponse(
-        { ...chat, largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        {
+          ...chat,
+          largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+          largeModelSelectionBy: "auto",
+        },
         0,
         "anthropic",
       ),
     ).toMatchObject({
       followsDefault: false,
-      pinnedModel: { by: "kept", providerId: "anthropic", selection: "claude-opus-5-5" },
+      pinnedModel: {
+        by: "kept",
+        providerId: "anthropic",
+        selection: "anthropic/claude-opus-5-5[1m]",
+      },
     });
   });
 
   it("reports nothing pinned for a model Rome chose", () => {
     expect(
       toWebchatSessionResponse(
-        { ...chat, largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        {
+          ...chat,
+          largeModelSelection: "anthropic/claude-opus-5-5[1m]",
+          largeModelSelectionBy: "auto",
+        },
         0,
       ),
     ).toMatchObject({ followsDefault: true, pinnedModel: null });
