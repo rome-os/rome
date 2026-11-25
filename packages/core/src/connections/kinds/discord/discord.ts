@@ -1094,15 +1094,16 @@ export class DiscordAdapter {
   /** Sends `text` to user `accountId` in their direct message with the bot.
    *  A bot can show one member a message in a shared chat only to answer a
    *  command, so the direct message is the private place. A user whose
-   *  direct messages are closed to the bot, or who shares no server with
-   *  it, reads as {@link PrivateMessageRefused}. */
+   *  direct messages are closed to the bot, who shares no server with it, or
+   *  who is another bot or unknown to Discord, reads as
+   *  {@link PrivateMessageRefused}, whether Discord refuses to open the
+   *  direct message or to send to it. */
   async sendOnlyTo(accountId: string, text: string): Promise<void> {
-    const dm = await this.directMessageWith(accountId);
     try {
+      const dm = await this.directMessageWith(accountId);
       for (const chunk of splitMessage(text.trim())) await dm.send({ content: chunk });
     } catch (err) {
-      const refused =
-        err instanceof discordJs().DiscordAPIError && DM_REFUSED.get(Number(err.code));
+      const refused = err instanceof discordJs().DiscordAPIError && dmRefusal(Number(err.code));
       if (refused) throw new PrivateMessageRefused(accountId, refused, { cause: err });
       throw err;
     }
@@ -1313,13 +1314,24 @@ const ALL_MENTIONS = {
   parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
 };
 
-/** Discord's refusals of a direct message that are about the user, by error
- *  code: 50007, the user takes no direct messages from the bot, and 50278,
- *  the user shares no server with the bot. */
-const DM_REFUSED = new Map([
-  [50007, "their direct messages are closed"],
-  [50278, "they share no server with the bot"],
-]);
+/** Why Discord refused to open or send to a direct message with the user,
+ *  when error `code` is about the user; otherwise undefined. Opening one
+ *  with another bot answers 50007. */
+function dmRefusal(code: number): string | undefined {
+  const codes = discordJs().RESTJSONErrorCodes;
+  switch (code) {
+    case codes.CannotSendMessagesToThisUser:
+      return "they take no direct messages from the bot";
+    case codes.CannotSendMessagesToThisUserDueToHavingNoMutualGuilds:
+      return "they share no server with the bot";
+    case codes.UnknownUser:
+      return "Discord knows no such user";
+    case codes.InvalidRecipients:
+      return "Discord takes no direct message with them";
+    default:
+      return undefined;
+  }
+}
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;
