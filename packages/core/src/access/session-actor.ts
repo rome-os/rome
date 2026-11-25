@@ -44,14 +44,7 @@ export type SessionActor =
        * platform that said or pressed something there. */
       via: "cookie" | "loopback" | "account";
     }
-  | {
-      kind: "visitor";
-      accountId: string;
-      email: string;
-      /** A member let in by their account on a platform. A signed-in session's
-       * visitor, such as one an app answers, carries none. */
-      via?: "account";
-    }
+  | { kind: "visitor"; accountId: string; email: string }
   /** An entry on a session-capable surface (/api routes, the app WS server)
    * whose session names no one, or could not be read. Distinct from an absent
    * actor, which means no accountable session could exist anywhere in the
