@@ -73,7 +73,7 @@ export interface SeededIds {
   chatId: string;
   /** Each caller's own Concierge chat, private to them. */
   conciergeChatIds: { guardian: string; teammate: string };
-  /** The Mac computer use is set up on. */
+  /** A seeded device id for device routes. */
   deviceId: string;
   routineId: string;
   approvalId: string;
@@ -139,9 +139,8 @@ function features(deps: ApiDeps): Feature[] {
   ];
 }
 
-// A Mac's id as the node registry issues it. The computer-use routes refuse
-// any other shape before they reach the guard.
-const COMPUTER_USE_DEVICE = "7e57c0de-0000-4000-8000-00000000ac01";
+// A device id in the shape the node registry issues.
+const SEEDED_DEVICE_ID = "7e57c0de-0000-4000-8000-00000000ac01";
 
 export async function createInstance(options: InstanceOptions): Promise<Instance> {
   const releaseNetwork = guardNetwork();
@@ -184,7 +183,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
   const testDeps = await buildTestDeps(db);
   // The daemon loads `main` and the Concierge from the installed first-party
   // apps, which this instance has none of. Agents that may call every action
-  // stand in, so the routes that read a chat's agent (computer use) answer.
+  // stand in, so the routes that read a chat's agent answer.
   const agentsDir = join(root, "agents");
   mkdirSync(agentsDir);
   for (const name of ["main", "concierge"]) {
@@ -218,8 +217,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     }),
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
-    // A Mac this Rome can use, as when computer use is set up on the host.
-    computerUseLocal: { deviceId: COMPUTER_USE_DEVICE, name: "Verifier Mac" },
   };
   deps.features = [...features(deps), ...(options.extraFeatures ?? [])];
 
@@ -267,7 +264,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
   const ids: SeededIds = {
     chatId,
     conciergeChatIds,
-    deviceId: COMPUTER_USE_DEVICE,
+    deviceId: SEEDED_DEVICE_ID,
     routineId,
     approvalId: baseline.approvals.pendingId,
     personId: baseline.persons.innerCircleId,

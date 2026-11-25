@@ -112,7 +112,7 @@ export function fillPattern(pattern: string, ids: SeededIds): string {
     .join("/");
 }
 
-// A chat's routes, which some capabilities (computer use) answer only in a
+// A chat's routes, which some capabilities answer only in a
 // chat private to the caller.
 const CHAT_ROUTE = /^\/api\/chat\/sessions\/:(id|sessionId)(\/|$)/;
 
