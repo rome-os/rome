@@ -217,12 +217,11 @@ describe("ActionEngine", () => {
             servedAs.push((await currentSessionActor()) ?? null);
           }),
       } as unknown as WorkerRpcServer);
-      engine.startWorkerWarmPool();
-
       const request = { type: "rpc_request", reqId: "1", method: "test.whose", params: {} };
-      runWithSessionActor({ kind: "guardian", userId: "g", via: "cookie" }, () =>
-        children[0].emit("message", request),
-      );
+      runWithSessionActor({ kind: "guardian", userId: "g", via: "cookie" }, () => {
+        engine.startWorkerWarmPool();
+        children[0].emit("message", request);
+      });
       await rs.waitFor(() => expect(servedAs).toEqual([null]));
       await engine.stopWorkerWarmPool();
     });
