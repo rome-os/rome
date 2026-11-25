@@ -533,19 +533,19 @@ describe("Webchat API", () => {
     expect(await readAs(visitor, "guardian-plain")).toEqual([...plain, "visitor-main"].sort());
     expect(await readAs(guardian, "visitor-plain")).toEqual(["concierge", ...plain].sort());
     expect(await readAs(undefined, "guardian-plain")).toEqual(plain);
-    // A send goes only where its caller may write: a visitor's action cannot
-    // put a line into the guardian's Concierge chat, nor the guardian's into
-    // the visitor's, and Rome's own sends go through.
-    const send = (actor: typeof guardian | typeof visitor | undefined, from: string, to: string) =>
-      webchatCaller.run({ actor, chatId: from }, () =>
-        channel.send!.send(to as never, { text: "hi" }),
-      );
-    await expect(send(visitor, "guardian-plain", "concierge")).rejects.toThrow("No dashboard chat");
-    await expect(send(guardian, "visitor-plain", "visitor-main")).rejects.toThrow(
-      "No dashboard chat",
-    );
-    await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
-    await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
+    // A read of one chat, and a send into it, reach it whoever owns it.
+    const asMember = <T>(fn: () => Promise<T>) =>
+      webchatCaller.run({ actor: visitor, chatId: "guardian-plain" }, fn);
+    expect(
+      (
+        await asMember(() =>
+          channel.messages!.query({ chatId: "concierge" as never, since: new Date(0) }),
+        )
+      ).map((m) => m.text),
+    ).toEqual(["said in concierge"]);
+    await expect(
+      asMember(() => channel.send!.send("concierge" as never, { text: "hi" })),
+    ).resolves.toBeTruthy();
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {
@@ -9787,7 +9787,7 @@ describe("Webchat API", () => {
       expect(runSystemTurn).not.toHaveBeenCalled();
     });
 
-    it("refuses a visitor's action, which may not open the guardian's Concierge chat", async () => {
+    it("takes a member's action into the guardian's Concierge chat", async () => {
       const { runSystemTurn, runtime } = await setup();
       const loopback = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
       const res = await runWithSessionActor(loopback, () =>
@@ -9802,8 +9802,8 @@ describe("Webchat API", () => {
         }),
       );
 
-      expect(res.status).toBe(404);
-      expect(runSystemTurn).not.toHaveBeenCalled();
+      expect(res.status).toBe(202);
+      expect(runSystemTurn).toHaveBeenCalled();
       expect(await deps.webchatRepo.getMessages("concierge")).toEqual([]);
     });
 

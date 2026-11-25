@@ -15,7 +15,7 @@ import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
-import { canOpenChat } from "../webchat/privacy.js";
+import { privateOwnerOf } from "../webchat/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
@@ -790,8 +790,8 @@ describe("AgentRunner", () => {
           label: "feedback",
         }),
       );
-      // Never promoted, it is private from the start, so deleting the task
-      // chat does not open it.
+      // Never promoted, it has the task chat's owner from the start, so it
+      // keeps it once the task chat is deleted.
       expect(await repo.getSession("fork-session")).toMatchObject({
         type: "fork",
         ownerKey: "visitor:a",
@@ -799,10 +799,7 @@ describe("AgentRunner", () => {
         triggerName: "feedback",
       });
       await repo.deleteSession("task-chat");
-      const canOpen = (owner: string) =>
-        canOpenChat((id) => repo.getSession(id), "fork-session", owner);
-      expect(await canOpen("visitor:a")).toBe(true);
-      expect(await canOpen("guardian")).toBe(false);
+      expect(privateOwnerOf(await repo.getSession("fork-session"))).toBe("visitor:a");
     } finally {
       testDb.close();
     }

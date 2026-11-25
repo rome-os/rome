@@ -3,7 +3,7 @@ import type { DeviceFolder } from "@rome/api-types/devices";
 import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { MessageReactionEvent } from "@rome/api-types/concierge";
-import { canOpenSql, privateChildren } from "./privacy.js";
+import { privateChildren, shownSql } from "./privacy.js";
 import {
   ChatOutputsRepository,
   OutputCalls,
@@ -440,9 +440,9 @@ const sessionSelectFields = {
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
 
-/** The chats `owner` may open; no condition when the caller does not filter. */
+/** The chats a list shows `owner`; no condition when the caller does not filter. */
 const visibleTo = (owner: string | null | undefined) =>
-  owner === undefined ? undefined : canOpenSql(romeSessions, owner);
+  owner === undefined ? undefined : shownSql(romeSessions, owner);
 
 // Whether the session's latest turn ended in an error, read from the
 // `turn_end` block of its newest trace. A turn still running has no
@@ -1495,7 +1495,7 @@ export class WebChatRepository {
   }
 
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
-  /** `visibleTo` keeps only the chats that owner may open. */
+  /** `visibleTo` keeps only the chats a list shows that owner. */
   async listSessions(
     status: "active" | "archived" | "all" = "active",
     ownerKey?: string | null,
@@ -1542,7 +1542,7 @@ export class WebChatRepository {
    * text. Returns at most one match per session — its most recent matching
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
-  /** `visibleTo` keeps only the chats that owner may open, before the limit. */
+  /** `visibleTo` keeps only the chats a list shows that owner, before the limit. */
   async searchSessionMessages(
     query: string,
     options: { sessionLimit?: number; visibleTo?: string | null } = {},

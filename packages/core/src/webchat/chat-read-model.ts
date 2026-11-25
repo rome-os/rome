@@ -20,7 +20,7 @@
 // Nothing reads through it yet: the dashboard still reads its legacy tables
 // until the Chats switch moves it here.
 
-import { canOpenSql } from "./privacy.js";
+import { shownSql } from "./privacy.js";
 import { sql } from "drizzle-orm";
 import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
@@ -356,7 +356,7 @@ export class ChatReadModel {
    * `query`, case-insensitive, each with its most recent matching line and a
    * snippet around the first hit, most recent first, at most `limit` chats.
    */
-  /** `visibleTo` keeps only the chats that owner may open, before the limit. */
+  /** `visibleTo` keeps only the chats a search shows that owner, before the limit. */
   async search(query: string, limit: number, visibleTo?: string | null): Promise<ChatSearchHit[]> {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
@@ -387,7 +387,7 @@ export class ChatReadModel {
       ${
         visibleTo === undefined
           ? sql``
-          : sql`AND ${canOpenSql(
+          : sql`AND ${shownSql(
               {
                 id: sql`s.id`,
                 agentName: sql`s.agent_name`,

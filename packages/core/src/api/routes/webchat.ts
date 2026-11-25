@@ -8,7 +8,6 @@ import {
 import { ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
-  canOpenChat,
   type ConciergeService,
   isConciergeChat,
   isMainConciergeChat,
@@ -4350,18 +4349,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
     if (automated && isConciergeChat(session)) {
-      // An action's loopback send stands for the person its turn ran for,
-      // known here only by kind. That person must be able to open the chat,
-      // as on any send into a dashboard chat: a visitor's, of no known
-      // account, opens no one's. A send no person made is Rome's own work.
-      const actorKind = sourceId ? body.automatedActorKind : undefined;
-      if (
-        actorKind === "visitor" ||
-        (actorKind === "guardian" &&
-          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
-      ) {
-        return answer({ error: "Session not found" }, 404);
-      }
       const concierge = deps.concierge;
       const text = body.text?.trim() ?? "";
       // A turn takes only the text: files are refused, not dropped.

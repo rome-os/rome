@@ -1,4 +1,4 @@
-// Which dashboard chats are a Concierge's, and who may open them. A leaf
+// Which dashboard chats are a Concierge's, and whose. A leaf
 // module, so the chat, action and storage layers can ask without loading the
 // Concierge.
 
@@ -71,33 +71,8 @@ export interface ChatPrivacyRow {
   triggerKind?: string | null;
 }
 
-/**
- * The one privacy policy for dashboard chats, read off the chat's own row:
- * a private chat opens only for its owner, and any other chat for everyone.
- * A child session inherits its parent's privacy when it is made, so no path
- * needs to look past the row.
- */
-export function canOpen(chat: ChatPrivacyRow | null | undefined, owner: string | null): boolean {
-  const privateTo = privateOwnerOf(chat);
-  return privateTo === null || privateTo === owner;
-}
-
-/**
- * Whether `owner` may open chat `chatId`. It fails closed: only a chat that
- * exists and passes {@link canOpen} is open, and one that cannot be found is
- * not found to anyone.
- */
-export async function canOpenChat(
-  getSession: (id: string) => Promise<ChatPrivacyRow | null>,
-  chatId: string,
-  owner: string | null,
-): Promise<boolean> {
-  const chat = await getSession(chatId);
-  return chat !== null && canOpen(chat, owner);
-}
-
-/** The columns of a chat row the policy reads, for a query to filter by. */
-export interface ChatPrivacyColumns {
+/** The columns of a chat row {@link shownSql} reads. */
+export interface ShownColumns {
   id: SQL | unknown;
   agentName: SQL | unknown;
   ownerKey: SQL | unknown;
@@ -105,14 +80,15 @@ export interface ChatPrivacyColumns {
 }
 
 /**
- * {@link canOpen} as a query condition: the chats `owner` may open. A list or
- * a search filters with it before it counts, limits or reads a message.
+ * The chats a list or a search shows `owner`, as a query condition: every
+ * common chat, and their own Concierge and task chats. Anyone opens any chat
+ * by its id.
  */
-export function canOpenSql(chat: ChatPrivacyColumns, owner: string | null): SQL {
-  const isPrivate = sql`(${chat.id} = ${CONCIERGE_CHAT_ID}
+export function shownSql(chat: ShownColumns, owner: string | null): SQL {
+  const isConcierges = sql`(${chat.id} = ${CONCIERGE_CHAT_ID}
     OR coalesce(${chat.agentName}, '') IN (${CONCIERGE_AGENT_ID}, 'concierge')
     OR coalesce(${chat.triggerKind}, '') IN (${TASK_CHAT_TRIGGER_KIND}, ${PRIVATE_CHILD_TRIGGER_KIND}))`;
   return owner === null
-    ? sql`NOT ${isPrivate}`
-    : sql`(NOT ${isPrivate} OR coalesce(${chat.ownerKey}, 'guardian') = ${owner})`;
+    ? sql`NOT ${isConcierges}`
+    : sql`(NOT ${isConcierges} OR coalesce(${chat.ownerKey}, 'guardian') = ${owner})`;
 }
