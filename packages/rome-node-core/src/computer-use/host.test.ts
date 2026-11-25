@@ -238,7 +238,8 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
   const otherHelper = fakeHelper();
   mock.launch.mockResolvedValueOnce(helper).mockResolvedValueOnce(otherHelper);
   const f = executor(audit);
-  expect(await f.json("system.info")).toMatchObject({
+  const info = await f.json("system.info");
+  expect(info).toMatchObject({
     result: {
       actions: expect.arrayContaining([
         "computer.windows",
@@ -253,10 +254,7 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
         "computer.bind": expect.stringContaining("{window}"),
         "computer.unbind": expect.stringContaining("{binding}"),
         "computer.observe": expect.stringMatching(
-          /\{binding, element\?, screenshot\?\}.*screenshot: true requires a binary request frame/,
-        ),
-        "computer.act": expect.stringMatching(
-          /\{binding, actionId, action, \.\.\.\}.*press, set_value, increment, and decrement.*click, move, drag, scroll, key_press, and type_text/,
+          /\{binding, element\?, screenshot\?\}.*screenshot: true requires a binary request frame and returns raw PNG bytes in the response body/,
         ),
         "computer.cancel": expect.stringContaining("No arguments"),
       },
@@ -272,6 +270,22 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
       ],
     },
   });
+  for (const fields of [
+    "{binding, actionId, action, ...}. Use a new UUID actionId per intended action.",
+    "{element, action: press|increment|decrement}",
+    "{element, action: set_value, value}",
+    "click {x, y, button?, clickCount?}",
+    "move {x, y}",
+    "drag {x, y, toX, toY, button?, steps?}",
+    "scroll {x, y, deltaX, deltaY}",
+    "key_press {key}",
+    "type_text {text}",
+    "except type_text accepts an optional modifiers array",
+  ]) {
+    expect(info).toMatchObject({
+      result: { usage: { "computer.act": expect.stringContaining(fields) } },
+    });
+  }
   expect(mock.launch).not.toHaveBeenCalled();
   expect(await f.json("computer.windows", { application: shellToken })).toMatchObject({
     result: { windows: [{ title }] },

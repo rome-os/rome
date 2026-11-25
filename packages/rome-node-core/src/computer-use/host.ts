@@ -154,7 +154,8 @@ export class ComputerUseHost {
     },
     "computer.observe": {
       usage:
-        "{binding, element?, screenshot?}. Read the AX tree. screenshot: true requires a binary request frame and returns PNG bytes.",
+        "{binding, element?, screenshot?}. Read the AX tree, optionally rooted at an element ref. " +
+        "screenshot: true requires a binary request frame and returns raw PNG bytes in the response body.",
       run: async (session, input, binary) => {
         const { binding: id, element, screenshot } = requestParams("observe", input);
         if (screenshot && !binary)
@@ -175,9 +176,15 @@ export class ComputerUseHost {
     },
     "computer.act": {
       usage:
-        "{binding, actionId, action, ...}. Use a UUID for actionId. " +
-        "AX actions are press, set_value, increment, and decrement. " +
-        "Input actions are click, move, drag, scroll, key_press, and type_text.",
+        "{binding, actionId, action, ...}. Use a new UUID actionId per intended action. " +
+        "For AX, use {element, action: press|increment|decrement} or {element, action: set_value, value}. " +
+        "Use an element ref from observe. value is a string, number, or boolean. " +
+        "Input fields by action are click {x, y, button?, clickCount?}, move {x, y}, " +
+        "drag {x, y, toX, toY, button?, steps?}, scroll {x, y, deltaX, deltaY}, key_press {key}, " +
+        "and type_text {text}. Pointer coordinates use points from the window's top-left corner. " +
+        "button is left, right, or middle. clickCount is 1 to 3 and steps is 1 to 60. " +
+        "key is a named key such as Enter or a single grapheme. Each input action except type_text " +
+        "accepts an optional modifiers array of distinct names (command, control, option, shift).",
       run: async (session, input) => {
         if (!isRecord(input)) throw new ComputerUseError("invalid_request");
         const { actionId, ...args } = input;
