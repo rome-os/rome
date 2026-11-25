@@ -4,7 +4,8 @@
 
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { VisitorProfilesRepository } from "../access/visitor-profiles.js";
-import { type DashboardAllowList, isOnTeam } from "../access/team.js";
+import { mayEnter } from "../access/entry.js";
+import type { DashboardAllowList } from "../access/team.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const VISITOR_PREFIX = "visitor:";
@@ -57,7 +58,8 @@ export function createConciergeOwners(deps: {
       const accountId = recipientOf(owner);
       const email = await emailOf(owner);
       if (accountId === undefined || email === undefined) return false;
-      return isOnTeam({ kind: "visitor", accountId, email }, deps.dashboardAccess);
+      const person = { kind: "visitor", accountId, email } as const;
+      return (await mayEnter(person, deps.dashboardAccess)) !== null;
     },
   };
 }
