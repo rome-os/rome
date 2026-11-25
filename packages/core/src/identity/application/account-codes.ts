@@ -4,6 +4,13 @@
 
 import { createHash, randomInt } from "node:crypto";
 import type { DrizzleDb } from "../../db/index.js";
+import {
+  ACCOUNT_CODE_ALPHABET as ALPHABET,
+  ACCOUNT_CODE_GROUP_LENGTH as GROUP_LENGTH,
+  ACCOUNT_CODE_PREFIX as PREFIX,
+  looksLikeAccountCode,
+  normalizedAccountCode as normalizedCode,
+} from "../../lib/account-code-shape.js";
 import { AccountCodeRepository } from "../account-code-repository.js";
 import {
   type Account,
@@ -13,17 +20,10 @@ import {
   UnknownPersonError,
 } from "../identity.js";
 
+export { looksLikeAccountCode };
+
 /** How long a code can be redeemed after it is issued. */
 export const ACCOUNT_CODE_LIFETIME_MS = 10 * 60 * 1000;
-
-// Digits and capitals without the look-alikes 0, 1, I, L, O and U. Twelve of
-// these carry 12 × log2(30) ≈ 58.9 bits.
-const ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
-const GROUP_LENGTH = 6;
-const PREFIX = "ROME";
-const CODE_SHAPE = new RegExp(
-  `^${PREFIX}-[${ALPHABET}]{${GROUP_LENGTH}}-[${ALPHABET}]{${GROUP_LENGTH}}$`,
-);
 
 // Sign-in addresses become a person's through their seat or an invitation,
 // never through a code.
@@ -112,7 +112,7 @@ export async function accountCodeRedeemed(
 ): Promise<{ personId: string }> {
   if (SIGN_IN_PLATFORMS.has(account.platform)) throw new SignInAccountCodeError(account);
   const normal = normalizedCode(code);
-  if (!CODE_SHAPE.test(normal)) throw new UnknownAccountCodeError();
+  if (!looksLikeAccountCode(normal)) throw new UnknownAccountCodeError();
   const result = codes.redeem(hashOf(normal), normalizedAccount(account), now());
   if (!("refused" in result)) return result;
   switch (result.refused) {
@@ -138,18 +138,7 @@ export async function accountCodeVoided(
   code: string,
 ): Promise<void> {
   const normal = normalizedCode(code);
-  if (CODE_SHAPE.test(normal)) codes.void(hashOf(normal), now());
-}
-
-/** Whether a text is shaped like a code, so a caller can tell a code from an
- *  ordinary message without a database read. The whole text must be the code,
- *  ignoring case and surrounding spaces. */
-export function looksLikeAccountCode(text: string): boolean {
-  return CODE_SHAPE.test(normalizedCode(text));
-}
-
-function normalizedCode(text: string): string {
-  return text.trim().toUpperCase();
+  if (looksLikeAccountCode(normal)) codes.void(hashOf(normal), now());
 }
 
 function randomGroup(): string {

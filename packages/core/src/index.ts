@@ -16,6 +16,8 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
+import { accountCodeAdmission } from "./chats/connected-accounts/account-code-admission.js";
+import { accountCodeContext } from "./identity/application/account-codes.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -80,7 +82,13 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
+import type {
+  Channel,
+  ChannelMessage,
+  ChannelsService,
+  ChatId,
+  ChatStopHandler,
+} from "@rome-os/app-runtime";
 import { isSendRefused } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
@@ -759,22 +767,31 @@ async function main() {
     platform: AGENTS_KIND,
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
+  // The platform a message's sender is on. A grant that recorded no account
+  // still names its platform by its channel.
+  const senderPlatformOf = (connectionId: string, message: ChannelMessage): string =>
+    accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
+  const heardAccountCode = accountCodeAdmission({
+    codes: accountCodeContext(db),
+    registry: connectionRegistry,
+    platformOf: senderPlatformOf,
+  });
   // Read at each message, once the chat settings below exist.
   const heardInChat = heardUnlessSwitchedOff({
     settings: { get: (ref) => chatSettings.get(ref) },
     rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
   });
   // Every sender is admitted: Rome never asks a sender to pair
-  // (docs/domains/people.md#stranger). Only a message said in a chat switched
-  // off is taken out, unless it is a stop said to Rome.
+  // (docs/domains/people.md#stranger). Only an account code is taken out of
+  // the chat, and every message said in a chat switched off but a stop said to
+  // Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
     if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
-    // A grant that recorded no account still names its platform by its channel.
-    const platform =
-      accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
-    await readBotsOfPeople(platform, message);
+    await readBotsOfPeople(senderPlatformOf(connectionId, message), message);
+    // A code said in a chat switched off is still voided.
+    if (!(await heardAccountCode(connectionId, connectionKind, message))) return false;
     return heardInChat(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
