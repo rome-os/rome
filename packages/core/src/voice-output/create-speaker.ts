@@ -9,7 +9,6 @@ export function speakerFor(
     url?: string;
     model?: string;
     voice?: string;
-    language?: string;
     speed?: number;
   },
 ): Speaker | null {

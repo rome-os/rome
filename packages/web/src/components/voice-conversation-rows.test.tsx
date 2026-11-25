@@ -50,10 +50,16 @@ afterEach(() => {
 /** Stands in for the voice conversation routes, and records what the rows asked of them. */
 function serve(
   available = true,
-  answer: { preview?: () => Promise<Response>; save?: () => Promise<void> } = {},
+  answer: {
+    preview?: () => Promise<Response>;
+    save?: () => Promise<void>;
+    /** Holds a read after the first, answering what was saved when it was asked. */
+    read?: () => Promise<void>;
+  } = {},
 ) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let settings = { voice: "Iris", speed: 1 };
+  let reads = 0;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -67,8 +73,12 @@ function serve(
       if (method === "PUT") {
         await answer.save?.();
         settings = body;
+        return Response.json(settings);
       }
-      return Response.json(settings);
+      const asked = settings;
+      reads += 1;
+      if (reads > 1) await answer.read?.();
+      return Response.json(asked);
     }
     if (path === "/api/voice-conversation/preview") {
       if (answer.preview) return answer.preview();
@@ -82,7 +92,7 @@ function serve(
       <VoiceConversationRows />
     </QueryClientProvider>,
   );
-  return { calls, view };
+  return { calls, view, client };
 }
 
 describe("the voice conversation rows in Settings", () => {
@@ -201,6 +211,28 @@ describe("a sample in Settings", () => {
     expect(speed().hasAttribute("disabled")).toBe(true);
     saved();
     await waitFor(() => expect(voice().hasAttribute("disabled")).toBe(false));
+    expect(voice().textContent).toBe("Grace");
+  });
+});
+
+describe("a save in Settings", () => {
+  it("is not undone by a read that was already on its way", async () => {
+    let answerRead: () => void = () => {};
+    const { client } = serve(true, {
+      read: () => new Promise<void>((resolve) => (answerRead = resolve)),
+    });
+    const user = userEvent.setup();
+    const voice = () => screen.getByRole("combobox", { name: "Conversation voice" });
+    await waitFor(() => expect(voice().textContent).toBe("Iris"));
+    // A read begins, as when the window regains focus, and is slow to answer.
+    void client.refetchQueries({ queryKey: ["voice-conversation", "settings"] });
+    await user.click(voice());
+    await user.click(screen.getByRole("option", { name: /Grace/ }));
+    await waitFor(() => expect(voice().hasAttribute("disabled")).toBe(false));
+    expect(voice().textContent).toBe("Grace");
+    // The old read answers Iris now; the saved choice stays.
+    answerRead();
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(voice().textContent).toBe("Grace");
   });
 });

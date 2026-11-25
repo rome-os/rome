@@ -56,6 +56,8 @@ export function VoiceConversationRows() {
       voiceConversationSettingsSchema.parse(
         await fetchJson<unknown>(SETTINGS_URL, { method: "PUT", json: next, fallback }),
       ),
+    // A read still on its way began before the save, so it would bring the old choice back.
+    onMutate: () => client.cancelQueries({ queryKey: settingsKey }),
     onSuccess: (settings) => client.setQueryData(settingsKey, settings),
   });
   const sample = useSample(i18n.language.startsWith("zh") ? "zh" : "en");

@@ -37,8 +37,6 @@ type SpeakerOpenOutcome =
 export interface SpeakingChoice {
   voice?: string;
   speed?: number;
-  /** The main language of the text, which sets the prosody. */
-  language?: string;
 }
 
 export interface SpeakerSource {
@@ -91,7 +89,6 @@ async function openOnCredential(
           url: granted.url,
           model: granted.model,
           voice: choice.voice ?? granted.voice,
-          language: choice.language,
           speed: choice.speed,
         });
         if (!speaker) {
