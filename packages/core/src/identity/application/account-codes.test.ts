@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { accountCodes } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { accountCodesIn, normalizedAccountCode } from "../../lib/account-code-shape.js";
+import { accountCodesIn, normalizedAccountCode } from "../account-code-shape.js";
 import { AccountTakenError, createIdentity, UnknownPersonError } from "../identity.js";
 import {
   ACCOUNT_CODE_LIFETIME_MS,
