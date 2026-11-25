@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { SetupStartOutcome } from "../../connections/setup/start.js";
 import { type SetupStartRequest, widgetEventRoutes } from "./widget-events.js";
 import { connectCardUi } from "../../connections/connect-card.js";
+import { addDeviceCardUi } from "@rome/api-types/add-device-card";
 
 const button = (id: string, name: string, context?: unknown) => ({
   id,
@@ -60,6 +61,8 @@ function setup(
       state: { status: "awaiting-redirect", url: "https://cloud.example/authorize?state=s1" },
     },
   },
+  /** The devices `GET /api/devices` lists, or null when it fails. */
+  devices: Array<{ id: string; name: string }> | null = [],
 ) {
   const setups: SetupStartRequest[] = [];
   const forwarded: {
@@ -102,6 +105,11 @@ function setup(
       }
       if (request.method === "GET" && new URL(request.url).pathname === "/api/device-connections") {
         return Response.json({ connections: deviceConnections });
+      }
+      if (request.method === "GET" && new URL(request.url).pathname === "/api/devices") {
+        return devices
+          ? Response.json({ connection: "online", devices })
+          : Response.json({ error: "Rome Cloud is unavailable" }, { status: 503 });
       }
       forwarded.push({
         url: new URL(request.url).pathname,
@@ -1050,5 +1058,84 @@ describe("an event on the share-location card core owns", () => {
     expect(second.status).toBe(400);
     expect(await second.json()).toEqual({ error: "This card was already answered" });
     expect(turns).toHaveLength(1);
+  });
+});
+
+describe("an event on the add-device card", () => {
+  const addDeviceCard = (props: Record<string, unknown>) => ({
+    type: "pending_interaction",
+    toolUseId: "d1",
+    appId: "core",
+    render: {
+      kind: "inline",
+      componentId: "add-device-card",
+      props,
+      builtin: true,
+      ui: addDeviceCardUi(),
+    },
+  });
+  const MAC = { id: "mac", name: "MacBook Pro" };
+  const LAPTOP = { id: "new", name: "New laptop" };
+  const card = (
+    devices: Array<{ id: string; name: string }> | null,
+    props: Record<string, unknown> = { deviceIds: ["mac"] },
+  ) =>
+    setup(
+      { m: { chatId: "c1", content: [addDeviceCard(props)] } },
+      "guardian",
+      undefined,
+      [],
+      [],
+      "private",
+      null,
+      undefined,
+      devices,
+    );
+  const answers = (forwarded: Array<{ url: string; body: unknown }>) =>
+    forwarded.map((f) => (f.body as { parts: Array<{ output: unknown }> }).parts[0]?.output);
+
+  it("answers on Check once a device the card did not list is linked", async () => {
+    const { fire, forwarded } = card([MAC, LAPTOP]);
+    const res = await fire("m", { name: "check" });
+    expect(res.status).toBe(200);
+    expect(answers(forwarded)).toEqual([{ added: true, deviceId: "new", name: "New laptop" }]);
+  });
+
+  it("refuses Check while no new device is linked, or the devices cannot be read", async () => {
+    for (const devices of [[MAC], null]) {
+      const { fire, forwarded } = card(devices);
+      const res = await fire("m", { name: "check" });
+      expect(res.status).toBe(409);
+      expect(forwarded).toEqual([]);
+    }
+  });
+
+  it("never answers by itself for a card sent without the devices", async () => {
+    const { fire, forwarded } = card([LAPTOP], {});
+    expect((await fire("m", { name: "check" })).status).toBe(409);
+    expect(await (await fire("m", { name: "open-devices" })).json()).toEqual({
+      open: "http://localhost/settings/devices",
+    });
+    expect(forwarded).toEqual([]);
+  });
+
+  it("opens the Devices page on Open Devices, or answers when the device is already linked", async () => {
+    const waiting = card([MAC]);
+    expect(await (await waiting.fire("m", { name: "open-devices" })).json()).toEqual({
+      open: "http://localhost/settings/devices",
+    });
+    expect(waiting.forwarded).toEqual([]);
+
+    const linked = card([MAC, LAPTOP]);
+    await linked.fire("m", { name: "open-devices" });
+    expect(answers(linked.forwarded)).toEqual([
+      { added: true, deviceId: "new", name: "New laptop" },
+    ]);
+  });
+
+  it("declines on Not now", async () => {
+    const { fire, forwarded } = card([MAC]);
+    await fire("m", { name: "dismiss" });
+    expect(answers(forwarded)).toEqual([{ dismissed: true }]);
   });
 });

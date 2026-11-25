@@ -15,6 +15,13 @@ import {
   LOCATION_CARD_ID,
   SHARE_LOCATION_EVENT,
 } from "@rome/api-types/location-card";
+import {
+  ADD_DEVICE_CARD_ID,
+  type AddDeviceAnswer,
+  CHECK_DEVICES_EVENT,
+  DISMISS_ADD_DEVICE_EVENT,
+  OPEN_DEVICES_EVENT,
+} from "@rome/api-types/add-device-card";
 
 /** What core's own widget makes of one of its events: an answer for the agent
  *  waiting on it, a link for the client to open, or neither, which leaves the
@@ -27,6 +34,9 @@ interface CoreIo {
   connections(): Promise<ConnectionStatus[]>;
   /** The device connections, as `GET /api/device-connections` lists them to the caller. */
   deviceConnections(): Promise<DeviceConnection[]>;
+  /** The linked devices, as `GET /api/devices` lists them to the caller, or
+   *  null when they cannot be read. */
+  devices(): Promise<Array<{ id: string; name: string }> | null>;
   /** The origin the caller reached Rome at, for turning a path into a link. */
   origin: string;
   /** The props core stored with the widget, which a client cannot change. */
@@ -100,6 +110,21 @@ function setupTarget(ofKind: readonly ConnectionStatus[]): SetupStartRequest | n
     force: chosen.state === "broken",
   };
 }
+
+/** The first device listed now that the add-device card's props did not
+ *  list, or null when there is none or the card listed none. */
+async function addedDevice(io: CoreIo) {
+  const known = io.props.deviceIds;
+  if (!Array.isArray(known)) return null;
+  return (await io.devices())?.find((device) => !known.includes(device.id)) ?? null;
+}
+
+const addedAnswer = (device: { id: string; name: string }): { answer: AddDeviceAnswer } => ({
+  answer: { added: true, deviceId: device.id, name: device.name },
+});
+
+/** Where Open Devices takes the guardian: the Devices page, with Link device. */
+const DEVICES_PATH = "/settings/devices";
 
 /**
  * The widgets core owns, by kind, and how each handles its events. The question
@@ -209,6 +234,25 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
+  // Open Devices answers once a device the card did not list is linked, else
+  // opens the Devices page; Check answers only then; Not now declines.
+  [ADD_DEVICE_CARD_ID]: {
+    [OPEN_DEVICES_EVENT]: async (_context, io) => {
+      const device = await addedDevice(io);
+      return device ? addedAnswer(device) : { open: DEVICES_PATH };
+    },
+    [CHECK_DEVICES_EVENT]: async (_context, io) => {
+      const device = await addedDevice(io);
+      if (device) return addedAnswer(device);
+      return Response.json(
+        { error: "No new device is linked yet. Link it in Settings › Devices, then try again." },
+        { status: 409 },
+      );
+    },
+    [DISMISS_ADD_DEVICE_EVENT]: async (): Promise<{ answer: AddDeviceAnswer }> => ({
+      answer: { dismissed: true },
+    }),
+  },
 };
 
 /** Set on the env of a turn the widget route starts, which a client cannot
@@ -234,10 +278,12 @@ function vetLink(link: unknown, origin: string): string | undefined {
 /** The names a question card stored before its events were its own. */
 /**
  * Events a core card takes with no button for them: a device's connect card
- * gets `check` from the device's app once its flow ends.
+ * gets `check` from the device's app once its flow ends, and the add-device
+ * card gets it from a client that sees a new device listed.
  */
 const CORE_UNSHOWN_EVENTS: Record<string, readonly string[]> = {
   "connect-card": ["check"],
+  [ADD_DEVICE_CARD_ID]: [CHECK_DEVICES_EVENT],
 };
 
 const STORED_EVENT_NAMES: Record<string, string> = {
@@ -385,6 +431,16 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
             connections?: DeviceConnection[];
           } | null;
           return res.ok ? (listed?.connections ?? []) : [];
+        },
+        devices: async () => {
+          const res = await deps.forward(
+            new Request(new URL("/api/devices", c.req.url), { headers }),
+            c.env,
+          );
+          const listed = (await res.json().catch(() => null)) as {
+            devices?: Array<{ id: string; name: string }>;
+          } | null;
+          return res.ok && Array.isArray(listed?.devices) ? listed.devices : null;
         },
       });
       if (reply instanceof Response) return reply;

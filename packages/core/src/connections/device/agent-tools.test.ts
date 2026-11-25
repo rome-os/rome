@@ -255,6 +255,7 @@ describe("the Devices page's tools", () => {
             componentId: "add-device-card",
             props: { deviceIds: ["dev-phone", "dev-mac"] },
             builtin: true,
+            cardToken: expect.any(String),
           },
         },
       });

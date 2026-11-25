@@ -2,6 +2,7 @@
 // which core registers in the main process under its full name. How to add
 // one: docs/concepts/actions.md#core-agent-tools.
 
+import { randomUUID } from "node:crypto";
 import {
   defineAction,
   type Action,
@@ -87,21 +88,61 @@ export function toolError(message: string): ToolError {
 }
 
 /** A card of core's own, shown in the chat the tool runs in. The chat draws
- * it only for the one tool its entry in `BUILTIN_CARDS` names
- * (api/routes/webchat.ts). `ask` is what the agent says in its place where
- * the chat draws no card. */
+ * it only when its entry in `BUILTIN_CARDS` (api/routes/webchat.ts) says so,
+ * and only as kept here: the render carries a token this process issued, which
+ * the chat claims (`claimToolCard`). `ask` is what the agent says in its place
+ * where the chat draws no card. Call it from `run`, once per card shown. */
 export function card(spec: {
   componentId: string;
   props: Record<string, unknown>;
   ask: string;
 }): ToolCard {
+  const kept = { componentId: spec.componentId, props: spec.props };
   const render = {
     kind: "inline",
-    componentId: spec.componentId,
-    props: spec.props,
+    ...kept,
     builtin: true,
+    cardToken: issueToolCard(kept),
   } as PendingInteraction["render"];
   return { [OUTCOME]: "card", interaction: { appId: "core", promptText: spec.ask, render } };
+}
+
+/** A card `card()` kept, as the chat stores it. */
+export interface IssuedToolCard {
+  componentId: string;
+  props: Record<string, unknown>;
+}
+
+// Cards core's own tools returned through `card()`, by a token only this
+// process issued, with when each lapses. Any tool, such as one on an agent's
+// external MCP server named `execute_action`, can print the same output, so
+// neither the tool's name nor the action it names proves the card is core's;
+// the token does. A token outlives no restart, which only drops a card shown
+// across one.
+const issuedToolCards = new Map<string, { card: IssuedToolCard; lapses: number }>();
+const ISSUED_TOOL_CARD_MS = 30 * 60 * 1000;
+
+function issueToolCard(card: IssuedToolCard, now = Date.now()): string {
+  for (const [token, kept] of issuedToolCards) {
+    if (kept.lapses <= now) issuedToolCards.delete(token);
+  }
+  const token = randomUUID();
+  issuedToolCards.set(token, { card, lapses: now + ISSUED_TOOL_CARD_MS });
+  return token;
+}
+
+/** The card a token claims, or null when this process issued no such token,
+ *  it lapsed, or it kept a card of another kind. A token claims its card once. */
+export function claimToolCard(
+  token: unknown,
+  componentId: string,
+  now = Date.now(),
+): IssuedToolCard | null {
+  if (typeof token !== "string") return null;
+  const kept = issuedToolCards.get(token);
+  issuedToolCards.delete(token);
+  if (!kept || kept.lapses <= now || kept.card.componentId !== componentId) return null;
+  return kept.card;
 }
 
 /** The declaration function for a page's tools, all taking deps `D`:
