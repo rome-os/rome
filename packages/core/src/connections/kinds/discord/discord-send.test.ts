@@ -241,16 +241,35 @@ describe("DiscordAdapter.sendOnlyTo", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("refuses a member whose direct messages are closed as a refused private message", async () => {
-    const closed = new DiscordAPIError(
-      { code: 50007, message: "Cannot send messages to this user" },
-      50007,
+  /** Discord's refusal with error `code`, as its API answers a direct message. */
+  function refusal(code: number, message: string) {
+    return new DiscordAPIError(
+      { code, message },
+      code,
       403,
       "POST",
       "/channels/dm-alice/messages",
       {},
     );
+  }
+
+  it("refuses a member whose direct messages are closed as a refused private message", async () => {
+    const closed = refusal(50007, "Cannot send messages to this user");
     const { adapter, shared } = privately(rs.fn().mockRejectedValue(closed));
+
+    await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
+      name: "PrivateMessageRefused",
+      accountId: "alice",
+    });
+    expect(shared.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member who shares no server with the bot as a refused private message", async () => {
+    const noServer = refusal(
+      50278,
+      "Cannot send messages to this user due to having no mutual guilds",
+    );
+    const { adapter, shared } = privately(rs.fn().mockRejectedValue(noServer));
 
     await expect(adapter.sendOnlyTo("alice", "Sign in here")).rejects.toMatchObject({
       name: "PrivateMessageRefused",

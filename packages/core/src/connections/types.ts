@@ -85,11 +85,25 @@ export interface TalkPrivateMessaging {
    * Delivers `text` to account `accountId` so that no other account can read
    * it. `chatId` is the chat the text answers, and `accountId` is the sender
    * id the kind reports on a delivered `Message`. The kind chooses where the
-   * platform shows it. Resolves once the platform took the message, and
-   * rejects with {@link PrivateMessageRefused} when the platform cannot show
-   * that account a private message.
+   * platform shows it. `options.replyToMessageId` names the message the text
+   * answers, as `OutgoingMessage.replyToMessageId` does, so a kind that shows
+   * the text in the chat shows it beside that message, in its thread when it
+   * is in one. Resolves once the platform took the message, and rejects with
+   * {@link PrivateMessageRefused} when the platform cannot show that account
+   * a private message.
    */
-  sendOnlyTo(chatId: ChatId, accountId: string, text: string): Promise<void>;
+  sendOnlyTo(
+    chatId: ChatId,
+    accountId: string,
+    text: string,
+    options?: PrivateMessageOptions,
+  ): Promise<void>;
+}
+
+/** Where a private message sits among the chat's messages. */
+export interface PrivateMessageOptions {
+  /** The message the private message answers, one of the kind's message ids. */
+  replyToMessageId?: string;
 }
 
 /** The platform cannot show the account a private message, as when it takes

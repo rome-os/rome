@@ -104,9 +104,9 @@ What someone ran on a platform's own command menu, such as a Discord slash comma
 
 ## Private message
 
-What a connection delivers to one account of its platform, in answer to a chat, so that no other account can read it. Rome's Slack app shows it in that chat as Slack's "Only visible to you" message. A Discord bot can do that only to answer a command, so it sends a direct message to the account instead.
+What a connection delivers to one account of its platform, in answer to a chat or to one message in it, so that no other account can read it. Rome's Slack app shows it in that chat as Slack's "Only visible to you" message, in the thread of the message it answers when that message is in one. A Discord bot can do that only to answer a command, so it sends a direct message to the account instead.
 
-- The connection delivers the text it is given to the account it is named, and refuses when the platform cannot show that account a private message, as when the account takes no direct messages. Who gets one and what it says are decided above the connection.
+- The connection delivers the text it is given to the account it is named, and refuses when the platform cannot show that account a private message, as when the account takes no direct messages. It refuses a blank text. Who gets one and what it says are decided above the connection.
 - A private message is not recorded in the chat, and no receipt names it.
 
 ## Decided against

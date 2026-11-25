@@ -41,7 +41,8 @@ export interface ChannelSend extends AppChannelSend {
   /**
    * Messages to one account in a chat that no other account reads, which
    * Chats does not record. Null or absent where the channel cannot send them.
-   * It rejects as `direct` does when no Connection or live talker backs it.
+   * It rejects as `direct` does when no Connection or live talker backs it,
+   * and refuses blank text as `SendRefused` with reason `empty`.
    */
   readonly privately?: TalkPrivateMessaging | null;
 }

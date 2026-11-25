@@ -19,6 +19,7 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import type {
   Connection,
   TalkFeatureName,
@@ -305,10 +306,16 @@ function connectionSend(backing: Backing): ChannelSend {
       const offered = connection.withTalker((talker) => talker.privateMessaging !== undefined);
       if (offered === false) return null;
       const privately: TalkPrivateMessaging = {
-        sendOnlyTo: (chatId, accountId, text) =>
-          callTalker(connection, (talker) =>
-            talker.privateMessaging?.sendOnlyTo(chatId, accountId, text),
-          ),
+        async sendOnlyTo(chatId, accountId, text, options) {
+          // Every kind would send a blank text as an empty message, which its
+          // platform refuses in its own words.
+          if (!text.trim()) {
+            throw new SendRefused("empty", `A private message to ${accountId} needs text`);
+          }
+          return callTalker(connection, (talker) =>
+            talker.privateMessaging?.sendOnlyTo(chatId, accountId, text, options),
+          );
+        },
       };
       return privately;
     },

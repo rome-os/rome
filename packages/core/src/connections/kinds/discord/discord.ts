@@ -1094,18 +1094,16 @@ export class DiscordAdapter {
   /** Sends `text` to user `accountId` in their direct message with the bot.
    *  A bot can show one member a message in a shared chat only to answer a
    *  command, so the direct message is the private place. A user whose
-   *  direct messages are closed to the bot reads as
-   *  {@link PrivateMessageRefused}. */
+   *  direct messages are closed to the bot, or who shares no server with
+   *  it, reads as {@link PrivateMessageRefused}. */
   async sendOnlyTo(accountId: string, text: string): Promise<void> {
     const dm = await this.directMessageWith(accountId);
     try {
       for (const chunk of splitMessage(text.trim())) await dm.send({ content: chunk });
     } catch (err) {
-      if (err instanceof discordJs().DiscordAPIError && Number(err.code) === DM_CLOSED) {
-        throw new PrivateMessageRefused(accountId, "their direct messages are closed", {
-          cause: err,
-        });
-      }
+      const refused =
+        err instanceof discordJs().DiscordAPIError && DM_REFUSED.get(Number(err.code));
+      if (refused) throw new PrivateMessageRefused(accountId, refused, { cause: err });
       throw err;
     }
   }
@@ -1315,9 +1313,13 @@ const ALL_MENTIONS = {
   parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
 };
 
-/** Discord's "Cannot send messages to this user": the user takes no direct
- *  messages from the bot. */
-const DM_CLOSED = 50007;
+/** Discord's refusals of a direct message that are about the user, by error
+ *  code: 50007, the user takes no direct messages from the bot, and 50278,
+ *  the user shares no server with the bot. */
+const DM_REFUSED = new Map([
+  [50007, "their direct messages are closed"],
+  [50278, "they share no server with the bot"],
+]);
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;

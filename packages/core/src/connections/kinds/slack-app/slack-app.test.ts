@@ -794,12 +794,14 @@ describe("Slack app messages only one member sees", () => {
     ]);
   });
 
-  it("posts it in the thread the chat is, to the member the sender id names, and nothing in the chat", async () => {
+  it("posts it in the thread of the message it answers, to the member the sender id names, and nothing in the chat", async () => {
     const api = fakeApi();
     const { adapter: a } = adapter(fakeMailbox(), api);
     await a.start();
 
-    await a.sendOnlyTo("C1:1700000000.000001" as never, `${TEAM}/U_ALICE`, "Sign in here");
+    await a.sendOnlyTo("C1" as never, `${TEAM}/U_ALICE`, "Sign in here", {
+      replyToMessageId: "1700000000.000001:1700000000.000002",
+    });
 
     expect(api.postEphemeral).toHaveBeenCalledWith(
       TEAM,
@@ -812,6 +814,22 @@ describe("Slack app messages only one member sees", () => {
       expect.anything(),
     );
     expect(api.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("posts an answer to a message at the top of the chat in the chat, starting no thread", async () => {
+    const api = fakeApi();
+    const { adapter: a } = adapter(fakeMailbox(), api);
+    await a.start();
+
+    await a.sendOnlyTo("C1" as never, `${TEAM}/U_ALICE`, "Sign in here", {
+      replyToMessageId: "1700000000.000001",
+    });
+
+    expect(api.postEphemeral).toHaveBeenCalledWith(
+      TEAM,
+      { channel: "C1", user: "U_ALICE", markdown: "Sign in here", threadTs: undefined },
+      expect.anything(),
+    );
   });
 
   it("refuses a member who is not in the chat as a refused private message", async () => {
