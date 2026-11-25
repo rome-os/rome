@@ -39,7 +39,8 @@ import {
 import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
-import { markEntered } from "../../participation/entrance.js";
+import { markArrival } from "../../participation/entrance.js";
+import type { Entry } from "../../participation/entry.js";
 import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
@@ -55,9 +56,9 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
-  /** Whom each admitted message is let in as, asked once before any subscriber
+  /** Whether each admitted message is let in, asked once before any subscriber
    *  hears it. The event is marked with the answer (participation/entrance.ts).
-   *  Absent, no message is let in. */
+   *  Absent, no event is marked. */
   entry?: MessageEntry;
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
@@ -366,7 +367,11 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // stopping it.
   const dispatchFrom =
     (connectionId: string) =>
-    async (message: ChannelMessage, person: unknown): Promise<void> => {
+    async (
+      message: ChannelMessage,
+      entry: Entry | undefined,
+      automated: boolean,
+    ): Promise<void> => {
       // A talker delivers the channel's own record, inbound, named after its
       // connection kind. The event names the channel and the account it
       // arrived on.
@@ -380,7 +385,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
         message: named,
         ref: { connectionId, chatId: message.chatId },
       };
-      const event = markEntered(heard, person);
+      const event = entry ? markArrival(heard, { entry, automated }) : heard;
       // Waited on from before any subscriber can hear it, so its recording
       // cannot come first.
       const accepted = deps.accepted?.(channel, {
@@ -414,7 +419,9 @@ function connectionInbound(backing: Backing): ChannelInbound {
     if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
-      admission.deliver(connection, channelMessageOf(message, channel), dispatch),
+      admission.deliver(connection, channelMessageOf(message, channel), (heard, entry) =>
+        dispatch(heard, entry, message.sender.isBot === true || message.sender.viaApp === true),
+      ),
     );
     if (detach) attached.set(connection.id, detach);
   };
