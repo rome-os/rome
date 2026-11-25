@@ -380,7 +380,7 @@ describe("webchat task actor admission without a database or provider", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, actor: guardian, taskActor: guardian }),
     });
-    expect(response.status).toBe(200);
-    expect(s.submit.mock.calls[0]![1]).not.toHaveProperty("actor");
+    expect(response.status).toBe(404);
+    expect(s.submit).not.toHaveBeenCalled();
   });
 });

@@ -17,7 +17,8 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { widgetEventRoutes } from "./widget-events.js";
-import { createWebchatRuntime, openToolOf } from "./webchat.js";
+import { createWebchatRuntime as createRuntime, openToolOf } from "./webchat.js";
+import { asGuardian, GUARDIAN } from "../../test/signed-in.js";
 import { Session, withoutRepeatedHeaders } from "../../agent/index.js";
 import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -61,6 +62,17 @@ import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
 import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
 import { showCardTools } from "../../core/show-card-tool.js";
+
+// The guardian's dashboard, unless a test runs a request as someone else.
+function createWebchatRuntime(...args: Parameters<typeof createRuntime>) {
+  const built = createRuntime(...args);
+  asGuardian(built.routes);
+  const { runtime } = built;
+  const { canSendSpoken, sendSpoken } = runtime;
+  runtime.canSendSpoken = (...sent) => runWithSessionActor(GUARDIAN, () => canSendSpoken(...sent));
+  runtime.sendSpoken = (...sent) => runWithSessionActor(GUARDIAN, () => sendSpoken(...sent));
+  return built;
+}
 
 /** Reads an SSE body until its text holds `needle`, and returns the text read. */
 async function readSseUntil(
@@ -165,10 +177,38 @@ describe("Webchat API", () => {
     expect(await list({ ...visitor, email: "changed@example.com" }, "mine")).toEqual([visitorId]);
     expect(await list(otherVisitor, "mine")).toEqual([otherId]);
     expect(await list({ kind: "anonymous" }, "mine")).toEqual([]);
-    expect(await (await app.request("/chat/sessions?scope=mine")).json()).toEqual([]);
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
+  });
+
+  it("starts no chat, turn or fork for a person Rome cannot tell", async () => {
+    const app = createRuntime(deps).routes;
+    await deps.webchatRepo.createSession("open", "Open");
+    const post = (path: string, body: unknown) =>
+      app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const unknownPerson = async (request: () => Response | Promise<Response>) => [
+      (await request()).status,
+      (await runWithSessionActor({ kind: "anonymous" }, request)).status,
+      (
+        await runWithSessionActor(async () => {
+          throw new Error("no person read");
+        }, request)
+      ).status,
+    ];
+    expect(await unknownPerson(() => post("/chat/sessions", {}))).toEqual([403, 403, 403]);
+    expect(await unknownPerson(() => post("/chat/sessions/open/turns", { text: "hi" }))).toEqual([
+      403, 403, 403,
+    ]);
+    expect(
+      await unknownPerson(() => post("/chat/sessions/open/turns/t/forks", { prompt: "hi" })),
+    ).toEqual([403, 403, 403]);
+    expect(await deps.webchatRepo.getMessages("open")).toEqual([]);
+    expect((await deps.webchatRepo.listSessions("all")).map((chat) => chat.id)).toEqual(["open"]);
   });
 
   it("keeps each person's Concierge and task chats from everyone else", async () => {
@@ -1213,6 +1253,12 @@ describe("Webchat API", () => {
       ).toHaveLength(2);
 
       // The guardian's own message, as their composer sends it: said by no agent.
+      await expect(runtime.sendAsGuardian(id, "Before a guardian.")).rejects.toThrow(
+        "No guardian to send as",
+      );
+      await testDb.db
+        .insert(guardianAuth)
+        .values({ id: "seat", userId: "seat", passwordHash: "unused", createdAt: new Date() });
       await runtime.sendAsGuardian(id, "Help me follow Gmail.");
       const inputs3 = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
       expect(inputs3).toHaveLength(3);
@@ -2175,9 +2221,6 @@ describe("Webchat API", () => {
         },
       });
       expect(creationRecords[0].attributes).not.toHaveProperty("name");
-      // No ambient session actor in this harness — the attributes must be
-      // absent, not empty, mirroring the action_executions contract.
-      expect(creationRecords[0].attributes).not.toHaveProperty("actorKind");
       expect(JSON.stringify(creationRecords[0])).not.toContain("Private title");
     } finally {
       stdoutSpy.mockRestore();
@@ -2247,22 +2290,6 @@ describe("Webchat API", () => {
       // downstream consumers (the ClickStack dashboard) rely on actorKind
       // being present to distinguish "recorded, no email" from unattributed
       // history, and must never fill an email in for these rows.
-      const anonRes = await runWithSessionActor({ kind: "anonymous" }, () =>
-        app.request("/chat/sessions", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: "Anonymous actor test" }),
-        }),
-      );
-      expect(anonRes.status).toBe(200);
-      const anonRecord = exporter
-        .getFinishedLogRecords()
-        .filter((record) => record.body === "webchat_session_created")
-        .at(-1);
-      expect(anonRecord?.attributes).toMatchObject({ actorKind: "anonymous" });
-      expect(anonRecord?.attributes).not.toHaveProperty("actorUserId");
-      expect(anonRecord?.attributes).not.toHaveProperty("actorEmail");
-
       const localSeatRes = await runWithSessionActor(
         { kind: "guardian", userId: "seat-1", via: "cookie" },
         () =>
@@ -2351,7 +2378,6 @@ describe("Webchat API", () => {
         },
       });
       expect(deletionRecords[0].attributes).not.toHaveProperty("sessionName");
-      expect(deletionRecords[0].attributes).not.toHaveProperty("actorKind");
       expect(JSON.stringify(deletionRecords[0])).not.toContain("Private title");
       expect(JSON.stringify(deletionRecords[0])).not.toContain("Private message");
     } finally {
@@ -2869,23 +2895,23 @@ describe("Webchat API", () => {
         }),
       )
     ).json()) as { id: string };
-    const send = (headers: Record<string, string>, actor?: typeof guardian) => {
-      const request = () =>
+    const member = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    const send = (headers: Record<string, string>, actor: typeof guardian | typeof member) =>
+      runWithSessionActor(actor, () =>
         app.request(`/chat/sessions/${session.id}/turns`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify({ text: "battery?" }),
-        });
-      return actor ? runWithSessionActor(actor, request) : request();
-    };
+        }),
+      );
     expect((await send({ "x-rome-device": "dev-1" }, guardian)).status).toBe(200);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBe("dev-1");
-    // No header, a malformed one, or no guardian session: no asking device.
+    // No header, a malformed one, or another person's session: no asking device.
     await send({}, guardian);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
     await send({ "x-rome-device": "dev 1" }, guardian);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
-    await send({ "x-rome-device": "dev-1" });
+    await send({ "x-rome-device": "dev-1" }, member);
     expect(askingDeviceOf(sent.at(-1)?.threadContext)).toBeUndefined();
     expect(sent).toHaveLength(4);
   });
@@ -10037,7 +10063,6 @@ describe("Webchat API", () => {
       { kind: "guardian", userId: "seat", via: "loopback" },
       { kind: "guardian", userId: "seat", via: "cookie" },
       { kind: "visitor", accountId: "visitor", email: "visitor@example.com" },
-      { kind: "anonymous" },
     ] as const)("trusts automatedSource only for a guardian via loopback: %s", async (actor) => {
       const { send, sessionId } = await setup();
       const trusted = actor.kind === "guardian" && actor.via === "loopback";
@@ -10063,7 +10088,6 @@ describe("Webchat API", () => {
     it.each([
       { kind: "guardian", userId: "seat", via: "cookie" },
       { kind: "visitor", accountId: "visitor", email: "visitor@example.com" },
-      { kind: "anonymous" },
     ] as const)("ignores a forged on-behalf app source and flag from %s", async (actor) => {
       const { send, sessionId } = await setup();
       expect(

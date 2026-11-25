@@ -115,6 +115,7 @@ import {
 import {
   currentChatOwner,
   currentSessionActor,
+  guardianActor,
   sessionOwnerKey,
   type SessionActor,
 } from "../../access/session-actor.js";
@@ -211,6 +212,8 @@ type ForkSessionPlacement = {
  * anchor the analysis — the full turn is already in the fork's inherited
  * transcript — so a long reply must not bloat the prompt. */
 const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
+// A chat, a fork and a message each start from someone Rome can tell.
+const NO_PERSON = "Not signed in";
 /** Turns per message page when a request pages without naming `limit`. */
 const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
 const MESSAGE_PAGE_MAX_LIMIT = 100;
@@ -3083,7 +3086,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
 
   /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
-  const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
+  const startChat = async (body: NewChatBody, ownerKey: string): Promise<RouteAnswer> => {
     let deviceFolder: DeviceFolder | null = null;
     if (body.deviceFolder) {
       const { deviceId, path } = body.deviceFolder;
@@ -3181,7 +3184,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions", async (c) => {
     const body = await c.req.json<NewChatBody>().catch(() => ({}) as NewChatBody);
-    const started = await startChat(body, sessionOwnerKey(await currentSessionActor()));
+    const owner = sessionOwnerKey(await currentSessionActor());
+    if (owner === null) return c.json({ error: NO_PERSON }, 403);
+    const started = await startChat(body, owner);
     return c.json(started.body, started.status);
   });
 
@@ -3754,6 +3759,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // session; the returned Sessions placement lets the web client open that
   // fork chat immediately while its response continues in the background.
   app.post("/chat/sessions/:sessionId/turns/:turnId/forks", async (c) => {
+    if (sessionOwnerKey(await currentSessionActor()) === null) {
+      return c.json({ error: NO_PERSON }, 403);
+    }
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -4244,6 +4252,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       saidBy?: Account;
       fromWidgetEvent?: boolean;
       askingDeviceId?: string;
+      /** The person the message is from, when no request of theirs sends it. */
+      sender?: SessionActor;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
       /** Gets the turn this input starts or joins, once the input is submitted. */
@@ -4252,7 +4262,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
     const receivedAtMs = Date.now();
-    const actor = said.taskActor ?? (await currentSessionActor());
+    const actor = said.taskActor ?? said.sender ?? (await currentSessionActor());
+    // A message is said as an agent account, or by a person Rome can tell.
+    if (!said.saidBy && sessionOwnerKey(actor) === null) {
+      return answer({ error: NO_PERSON }, 403);
+    }
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -4661,8 +4675,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: sessionProjectName,
         projectPath: sessionProjectPath,
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-        // The web dashboard is guardian-only, so a webchat turn is always from
-        // the guardian.
+        // Only the guardian and members write on the dashboard, and the
+        // dashboard answers each of them as the guardian.
         senderBondLevel: "guardian",
       },
       // The guardian's own message names its device; a task chat's message
@@ -5949,8 +5963,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     async sendAsGuardian(chatId, text) {
+      const sender = await guardianActor(deps.db);
+      if (!sender) throw new Error("No guardian to send as");
       const inputId = randomUUID();
-      const sent = await handleChatSend(chatId, { inputId, text });
+      const sent = await handleChatSend(chatId, { inputId, text }, { sender });
       if (sent.status < 400) return;
       // Once the input is recorded it is said, even when the agent could not be woken on it.
       if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
