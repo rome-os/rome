@@ -50,7 +50,6 @@ import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
 import { partsText } from "../chats/storage/message.js";
-import type { BondLevel } from "@rome-os/app-runtime";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -678,29 +677,7 @@ export async function buildConciergeTools(
     return service.runsSystemTurnIn(chatId) ? "guardian" : "other";
   };
 
-  // The turn's message on a connection, which a message said there answers:
-  // its sender as People knows them, and what they said.
-  const connectionRecipient = async (chatId: string, turnId: string) => {
-    const thread = context.getThreadContext();
-    const asked = (await webchatRepo.getTurnChatMessages(chatId, turnId))
-      .filter((row) => row.role === "user")
-      .at(-1);
-    let said = asked?.content ?? "";
-    try {
-      const parts: unknown = JSON.parse(said);
-      if (Array.isArray(parts)) said = partsText(parts);
-    } catch {
-      // Plain text already.
-    }
-    return {
-      bondLevel: bondHere(chatId) as BondLevel,
-      shownName: thread?.channelUserId ?? "someone",
-      said,
-    };
-  };
-
-  // Says `text` in this chat on a connection, through the account's send
-  // gate to the platform. Answers the platform's key, or why it was not sent.
+  // Says `text` in this chat on a connection. Answers the platform's key.
   // The turn's first message quotes the message it answers, as the inbox
   // quoted every reply.
   const sayOnConnection = async (text: string, replyTo: string | undefined) => {
@@ -714,8 +691,6 @@ export async function buildConciergeTools(
       text,
       ...(quoting ? { replyTo: quoting } : {}),
       turnId,
-      place: context.getThreadContext()?.threadType === "private" ? "direct" : "group",
-      recipient: await connectionRecipient(chatId, turnId),
     });
   };
 
@@ -724,7 +699,7 @@ export async function buildConciergeTools(
     format: "bubble" | "long",
     isPrivate: boolean,
     replyTo?: string,
-  ): Promise<{ id: string } | { notSent: string }> => {
+  ): Promise<{ id: string }> => {
     const { chatId, turnId } = currentTurn();
     // Others may read a chat on a connection, and no lock screen hides a
     // message there: nothing said there is private.
@@ -752,9 +727,7 @@ export async function buildConciergeTools(
     // platform the chat on a connection is on.
     let id: string;
     if (onConnection) {
-      const result = await sayOnConnection(text, target?.id);
-      if ("notSent" in result) return result;
-      id = result.sent;
+      id = await sayOnConnection(text, target?.id);
     } else {
       id = await addMessage(parts, target);
     }
@@ -989,7 +962,6 @@ export async function buildConciergeTools(
             args.private === true,
             optionalString(args, "replyTo"),
           );
-          if ("notSent" in said) return { sent: false, note: said.notSent };
           return {
             sent: onConnection
               ? "Sent to this chat. Call say again only for a new message."

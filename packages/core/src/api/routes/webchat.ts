@@ -5366,30 +5366,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               );
             }
 
-            // Mirror the auto-approved outgoing-message audit record message_handler creates.
-            if (resultContent && deps.approvalsRepo) {
-              await deps.approvalsRepo
-                .create({
-                  type: "outgoing_message",
-                  requestedBy: "main",
-                  description: "WebChat guardian send (envoy skipped)",
-                  payload: {
-                    response: resultContent,
-                    channel: "webchat",
-                    threadId: sessionId,
-                    channelUserId,
-                  },
-                  status: "auto_approved",
-                })
-                .catch((err) => {
-                  log.warn("failed to record auto-approved outgoing message", {
-                    sessionId,
-                    turnId,
-                    error: err instanceof Error ? err.message : String(err),
-                  });
-                });
-            }
-
             const stopped = stream.segmentBuilder.snapshot().summary.stoppedByUser === true;
             return {
               success: !resultError,

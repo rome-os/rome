@@ -277,7 +277,6 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
-import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -1413,66 +1412,31 @@ async function main() {
       if (!added) throw new Error("This chat's account takes no reaction.");
       await added;
     },
-    // What the Concierge says in a chat on a connection goes out as the inbox
-    // sends an agent's reply: past the send gate, and Envoy where it asks, to
-    // the platform through the chat's speaker, which records it.
-    sayInChat: (chat, message) =>
-      sayOnConnection(
-        {
-          gate: guardedSend,
-          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
-          envoy: async (input) => {
-            let verdict: unknown;
-            for await (const event of agentRunner.run({
-              agentName: "envoy",
-              prompt: envoyPrompt(input),
-              initiatedBy: "system",
-            })) {
-              if (event.type === "result") verdict = event.structuredOutput;
-            }
-            return readEnvoyVerdict(verdict);
-          },
-          send: async (target, text, replyTo, turnId) => {
-            const channel = channels.find((candidate) => candidate.name === target.channel);
-            if (!channel) throw new Error(`Channel "${target.channel}" cannot send`);
-            const say = (quoting: string | undefined) =>
-              chatsWired.replies.send(
-                target.id,
-                channel,
-                { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
-                { turnId, agent: CONCIERGE_AGENT_ID },
-              );
-            let said: Awaited<ReturnType<typeof say>>;
-            try {
-              said = await say(replyTo);
-            } catch (error) {
-              // A platform that cannot quote that message takes it unquoted.
-              if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
-                throw error;
-              }
-              said = await say(undefined);
-            }
-            if (!said) throw new Error("This chat stands nowhere a message can be said.");
-            return said.sent;
-          },
-          record: async ({ status, description, chat: target, text }) => {
-            await approvalsRepo
-              .create({
-                type: "outgoing_message",
-                requestedBy: CONCIERGE_AGENT_ID,
-                description,
-                payload: { response: text, channel: target.channel, threadId: target.threadId },
-                status,
-              })
-              .catch((error: unknown) =>
-                log.warn("outgoing message not put on record", {
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-          },
-        },
-        { chat, ...message },
-      ),
+    // What the Concierge says in a chat on a connection goes to the platform
+    // through the chat's speaker, which records it.
+    sayInChat: async (chat, { text, replyTo, turnId }) => {
+      const channel = channels.find((candidate) => candidate.name === chat.channel);
+      if (!channel) throw new Error(`Channel "${chat.channel}" cannot send`);
+      const say = (quoting: string | undefined) =>
+        chatsWired.replies.send(
+          chat.id,
+          channel,
+          { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
+          { turnId, agent: CONCIERGE_AGENT_ID },
+        );
+      let said: Awaited<ReturnType<typeof say>>;
+      try {
+        said = await say(replyTo);
+      } catch (error) {
+        // A platform that cannot quote that message takes it unquoted.
+        if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
+          throw error;
+        }
+        said = await say(undefined);
+      }
+      if (!said) throw new Error("This chat stands nowhere a message can be said.");
+      return said.sent;
+    },
     // Who answers a chat on a connection, as the inbox routes it: the
     // account's agent (a task started there reports there when it is the
     // Concierge).
