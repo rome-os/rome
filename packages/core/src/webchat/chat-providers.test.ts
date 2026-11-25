@@ -606,3 +606,14 @@ it.each([
   await expect(providers.follow("plain")).resolves.not.toThrow();
   expect(providers.heldProvider("webchat:plain")).toBeUndefined();
 });
+
+it("clears an unknown choice on explicit Back to default, without guessing its old target", async () => {
+  const { providers, row, webchatRepo } = await setup({
+    currentDefault: "anthropic",
+    lastModel: { plain: { providerId: "anthropic", model: "claude-sonnet-4-5-20250929" } },
+  });
+  await webchatRepo.updateSessionLargeModelSelection("plain", "unknown-old-choice", "owner");
+  await providers.follow("plain");
+  expect(await row("plain")).toEqual({ selection: null, by: null });
+  expect(providers.heldProvider("webchat:plain")).toBeUndefined();
+});

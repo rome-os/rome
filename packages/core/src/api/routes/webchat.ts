@@ -91,7 +91,6 @@ import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
   WEBCHAT_LARGE_MODEL_SETTING_KEY,
-  normalizeWebchatLargeModelSelectionId,
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";

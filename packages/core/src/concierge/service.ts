@@ -475,7 +475,7 @@ export class ConciergeService {
     const id = mainChatIdOf(owner);
     const existing = await this.deps.webchatRepo.getSession(id);
     if (existing) {
-      if (!existing.largeModelSelection) {
+      if (!existing.largeModelSelection && !this.deps.held?.(id)) {
         const picked = this.pickModel();
         if (picked) {
           await this.deps.webchatRepo.updateSessionLargeModelSelection(id, picked, "auto");

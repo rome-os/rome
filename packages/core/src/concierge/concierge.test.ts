@@ -4543,6 +4543,16 @@ describe("Concierge chat", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("does not seed a held Concierge chat from the new default", async () => {
+    const { service, update } = serviceWith(codexOnly, true, null);
+    service.deps.held = (id) => id === "concierge";
+    await service.ensureChatId();
+    expect(update).not.toHaveBeenCalled();
+    service.deps.held = () => false;
+    await service.ensureChatId();
+    expect(update).toHaveBeenCalledWith("concierge", "openai/gpt-6.1-sol", "auto");
+  });
+
   it("gives a chat created before any default its model once a default is set", async () => {
     const { service, update } = serviceWith(codexOnly, true, null);
     await service.ensureChatId();

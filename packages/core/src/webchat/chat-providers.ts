@@ -376,7 +376,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
           const next = current
             ? await on(chatId, chat.agentName ?? null, null, providerOfDefault(current))
             : null;
-          if (next) await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
+          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
           deps.selectModel(chatId, chat.agentName ?? null, next);
           return next;
         }
