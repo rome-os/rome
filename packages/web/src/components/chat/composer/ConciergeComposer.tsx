@@ -100,6 +100,8 @@ export interface ConciergeComposerProps {
   placeholder?: string;
   /** The chat whose draft the field keeps. */
   chatId?: string | null;
+  /** Creates the chat a draft's voice conversation talks in, and answers its id. */
+  startChat?: () => Promise<string>;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -124,6 +126,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       chatName,
       placeholder,
       chatId,
+      startChat,
       modelSelection,
       onSend,
     },
@@ -197,6 +200,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     // above the box, and its mute and end take the place of send.
     const conversation = useVoiceConversation({
       chatId,
+      startChat,
       // Words the conversation ended before sending wait in the field, for the
       // guardian to send or not. They are saved as the draft at once, as the
       // field may be going away with the chat.
