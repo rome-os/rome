@@ -700,45 +700,18 @@ export function Chat({
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
   const computerUseSession = isArchived || shareMode ? null : mainSessionId;
-  const computerUseQueryClient = useQueryClient();
   const computerUseEligibility = useQuery({
     queryKey: ["chat-computer-use", computerUseSession],
-    queryFn: async ({ signal }) => {
-      if (!computerUseSession) return null;
-      let next: Awaited<ReturnType<typeof getChatComputerUseTarget>>;
-      try {
-        next = await getChatComputerUseTarget(computerUseSession, signal);
-      } catch (error) {
-        if (
-          error instanceof ChatApiError &&
-          (error.status === 401 || error.status === 403 || error.status === 404)
-        ) {
-          return null;
-        }
-        throw error;
-      }
-      if (next.discoveryDegraded) {
-        const previous = computerUseQueryClient.getQueryData<Awaited<
-          ReturnType<typeof getChatComputerUseTarget>
-        > | null>(["chat-computer-use", computerUseSession]);
-        if (previous) {
-          const prevList = previous.targets ?? [previous];
-          const nextList = next.targets ?? [next];
-          const seen = new Set(nextList.map(({ deviceId }) => deviceId));
-          const preserved = prevList.filter(({ deviceId }) => !seen.has(deviceId));
-          if (preserved.length > 0) {
-            return { ...next, targets: [...nextList, ...preserved] };
-          }
-        }
-      }
-      return next;
-    },
+    queryFn: ({ signal }) =>
+      computerUseSession ? getChatComputerUseTarget(computerUseSession, signal) : null,
     enabled: computerUseSession !== null,
     staleTime: 0,
     retry: false,
   });
   const computerUseTarget =
-    computerUseSession && computerUseEligibility.isFetchedAfterMount && computerUseEligibility.data
+    computerUseSession &&
+    computerUseEligibility.isSuccess &&
+    computerUseEligibility.isFetchedAfterMount
       ? computerUseEligibility.data
       : null;
   const computerUseTargets =
@@ -766,20 +739,6 @@ export function Chat({
     computerUseChoice.deviceId === selectedWindow?.deviceId
       ? computerUseChoice
       : null;
-  useEffect(() => {
-    if (
-      computerUseEligibility.isFetchedAfterMount &&
-      preferredComputer?.sessionId === computerUseSession &&
-      !selectedWindow
-    ) {
-      setPreferredComputer(null);
-    }
-  }, [
-    computerUseEligibility.isFetchedAfterMount,
-    computerUseSession,
-    preferredComputer,
-    selectedWindow,
-  ]);
   useEffect(() => {
     setComputerUseChoice(null);
   }, [computerUseSession, computerUseDeviceIds]);
@@ -3396,14 +3355,6 @@ export function Chat({
                                 : { sessionId: computerUseSession, deviceId },
                             );
                             setComputerUseChoice(null);
-                          }}
-                          onRevoked={(deviceId) => {
-                            setPreferredComputer((current) =>
-                              current?.deviceId === deviceId ? null : current,
-                            );
-                            setComputerUseChoice((current) =>
-                              current?.deviceId === deviceId ? null : current,
-                            );
                           }}
                           onTogglePreemption={() => {
                             if (!selectedWindow) return;

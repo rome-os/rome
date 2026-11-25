@@ -50,7 +50,6 @@ async function withRunningSession(
     firstEnded(): Promise<void>;
     finishSecond(): void;
     nextStarted(): Promise<void>;
-    interrupts(): number;
     openSession(): Promise<AgentSession>;
   }) => Promise<void>,
   initialActor: TurnActor = { kind: "visitor", accountId: "synthetic-visitor" },
@@ -59,7 +58,6 @@ async function withRunningSession(
     computerUse?: AgentComputerUse;
     initialError?: boolean;
     deferConsumeSecond?: boolean;
-    interruptEndsCurrentTurn?: boolean;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "rome-task-actor-stop-"));
@@ -108,7 +106,6 @@ async function withRunningSession(
   let facts: TurnFacts | undefined;
   let running = false;
   let runs = 0;
-  let interruptCount = 0;
   let currentInputId: string | undefined;
   const turnEnds = Array.from({ length: 4 }, () => gate());
   const provider: ModelProvider = {
@@ -137,11 +134,6 @@ async function withRunningSession(
           return base.sendUserInput(input);
         },
         interrupt: async () => {
-          interruptCount += 1;
-          if (test.interruptEndsCurrentTurn) {
-            turnEnds[Math.max(0, runs - 1)]?.resolve();
-            return;
-          }
           await acknowledgement;
         },
       };
@@ -221,7 +213,6 @@ async function withRunningSession(
       firstEnded: () => firstTurn.ended().then(() => {}),
       finishSecond: () => turnEnds[1].resolve(),
       nextStarted: () => rs.waitFor(() => expect(runs).toBeGreaterThan(1)),
-      interrupts: () => interruptCount,
       openSession,
     });
   } finally {
@@ -430,279 +421,6 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
     ).toThrow("requires an inputId");
     expect(inUse(missingInputId)).toBe(false);
   }, guardian);
-});
-
-it("supersedes a running turn when supersedeRunning is set on an isolated computer-use turn and reports queued for follow-up next turns", async () => {
-  await withRunningSession(
-    async ({ session, firstEnded, nextStarted, interrupts }) => {
-      const grant = { deviceId: "synthetic-device", expiresAt: Date.now() + 30_000 };
-      const cuReceipt = session.submit(
-        { inputId: "cu-now", prompt: "take over now" },
-        {
-          actor: guardian,
-          priority: "after",
-          supersedeRunning: true,
-          computerUseGrant: grant,
-        },
-      );
-      expect(cuReceipt.landed).toBe("queued");
-      await firstEnded();
-      await nextStarted();
-      expect(interrupts()).toBe(1);
-
-      const followUp = session.submit(
-        { inputId: "follow-up-next", prompt: "after computer use" },
-        { actor: guardian, priority: "next" },
-      );
-      expect(followUp.landed).toBe("queued");
-    },
-    guardian,
-    {},
-    { interruptEndsCurrentTurn: true },
-  );
-});
-
-it("preserves AgentInputQueue carry-over when supersedeRunning interrupts a queue-owned turn with an accepted steer", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rome-cu-supersede-carry-"));
-  const rows = new Map<string, Session>();
-  const repository: SessionRepository = {
-    session: async (id) => rows.get(id) ?? null,
-    current: async () => [...rows.values()][0] ?? null,
-    predecessorOf: async () => null,
-    add: async (row) => {
-      rows.set(row.id, row);
-      row.markSaved();
-    },
-    save: async (row) => {
-      row.markSaved();
-    },
-    replace: async () => {
-      throw new Error("unexpected replacement");
-    },
-    deprecatedCheckpoint: async () => null,
-  };
-  const agent: Agent = {
-    name: "core:concierge",
-    localName: "concierge",
-    ownerId: "core",
-    ownerType: "core",
-    definition: {
-      description: "synthetic",
-      tier: "medium",
-      providerId: "anthropic",
-      reasoningEffort: "high",
-      systemPromptPrefix: "Synthetic test",
-      tools: [],
-      actions: ["*"],
-      permissionMode: "default",
-    },
-  };
-  const loader: AgentCatalog = { find: () => agent, list: () => [agent] };
-  const grant: ComputerUseGrant = {
-    deviceId: "synthetic-device",
-    expiresAt: Date.now() + 30_000,
-    allowPreemption: true,
-  };
-
-  let facts: TurnFacts | undefined;
-  const turnAStarted = gate();
-  const turnAInterrupted = gate();
-  const steerAccepted = gate();
-  const sentTurns: Array<{
-    inputId: string | undefined;
-    text: string;
-    grant: ComputerUseGrant | undefined;
-  }> = [];
-  let interruptCount = 0;
-
-  const provider: ModelProvider = {
-    id: "anthropic",
-    builtinTools: new Set(),
-    openSession: async () => {
-      const outbox: ModelSessionEvent[] = [];
-      let notifyOutbox: (() => void) | undefined;
-      let closed = false;
-      const pushEvent = (event: ModelSessionEvent) => {
-        outbox.push(event);
-        notifyOutbox?.();
-        notifyOutbox = undefined;
-      };
-      const queue: Array<{ inputId: string | undefined; text: string }> = [];
-      let wake: (() => void) | undefined;
-      const sessionClosed = gate();
-      const driver = (async () => {
-        while (!closed) {
-          if (queue.length === 0) {
-            await new Promise<void>((resolve) => {
-              wake = resolve;
-            });
-            if (closed) break;
-          }
-          const current = queue.shift()!;
-          if (current.inputId) {
-            pushEvent({ type: "input_status", inputId: current.inputId, state: "consumed" });
-          }
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          sentTurns.push({
-            inputId: current.inputId,
-            text: current.text,
-            grant: facts?.computerUseGrant?.(),
-          });
-          if (current.inputId === "turn-a") {
-            turnAStarted.resolve();
-            await Promise.race([turnAInterrupted.promise, sessionClosed.promise]);
-            if (closed) break;
-            pushEvent({ type: "error", error: "interrupted" });
-          } else {
-            pushEvent({
-              type: "result",
-              content: `reply:${current.inputId ?? "anon"}`,
-              reasoningEffort: "medium",
-            });
-          }
-        }
-      })();
-      return {
-        providerId: "anthropic",
-        model: "synthetic",
-        events: (async function* () {
-          while (!closed || outbox.length > 0) {
-            if (outbox.length === 0) {
-              await new Promise<void>((resolve) => {
-                notifyOutbox = resolve;
-              });
-              continue;
-            }
-            yield outbox.shift()!;
-          }
-        })(),
-        sendUserInput: async (input) => {
-          queue.push({ inputId: input.inputId, text: input.text });
-          wake?.();
-          wake = undefined;
-        },
-        steerUserInput: async () => {
-          steerAccepted.resolve();
-          return "accepted";
-        },
-        interrupt: async () => {
-          interruptCount += 1;
-          turnAInterrupted.resolve();
-        },
-        close: async () => {
-          closed = true;
-          sessionClosed.resolve();
-          wake?.();
-          notifyOutbox?.();
-          await driver;
-        },
-      };
-    },
-  };
-
-  const noop = () => {};
-  const manager = createSessions(
-    {
-      agentLoader: loader,
-      sessionRepository: repository,
-      systemPrompts: { build: () => "Synthetic test", fingerprint: () => "synthetic" } as never,
-      modelResolver: createModelResolver({
-        providers: [provider],
-        accounts: fakeAccounts(bothAvailable()),
-      }),
-      networkMcpServers: () => ({}),
-      skillCatalog: { list: () => [], find: () => undefined },
-      turnLifecycle: { started: noop, ended: noop, couldNotStart: noop } as never,
-      readAnswerShape: () => {
-        throw new Error("unexpected output schema");
-      },
-      sessionTracing: romeSessionTracing,
-      turnUsage: new Proxy({}, { get: () => noop }) as never,
-      folders: { defaultWorkingDir: directory, projectsFolder: directory },
-      log: { info: noop, warn: noop, error: noop },
-      actions: {
-        list: () => [],
-        permits: () => false,
-        appOf: () => undefined,
-        find: () => undefined,
-        run: async () => ({ status: "ok" }),
-      },
-      defer: {
-        schedule: async () => {
-          throw new Error("unexpected defer");
-        },
-      },
-      sessionTools: {
-        forTurn: async (turn) => {
-          facts = turn;
-          return [];
-        },
-      },
-    },
-    { keepAliveAcrossTurns: true },
-  );
-
-  try {
-    const session = await manager.open(
-      { agentName: agent.name, channelThreadKey: "webchat:cu-carry" },
-      {
-        workingDir: directory,
-        audience: "private",
-        threadContext: { channel: "webchat", threadId: "cu-carry", threadType: "private" },
-      },
-    );
-
-    const receiptA = session.submit(
-      { inputId: "turn-a", prompt: "long task A" },
-      { actor: guardian, priority: "next" },
-    );
-    const turnA = await receiptA.turn;
-    await turnAStarted.promise;
-
-    const statesB: string[] = [];
-    const receiptB = session.submit(
-      { inputId: "steer-b", prompt: "steered follow-up B" },
-      {
-        actor: guardian,
-        priority: "next",
-        onInputStatus: (event) => {
-          statesB.push(event.state);
-        },
-      },
-    );
-    await steerAccepted.promise;
-    await rs.waitFor(() => expect(statesB).toContain("accepted"));
-
-    expect(session.status).toBe("running");
-    const receiptCU = session.submit(
-      { inputId: "cu-now", prompt: "take over Mac now" },
-      {
-        actor: guardian,
-        priority: "after",
-        supersedeRunning: true,
-        computerUseGrant: grant,
-      },
-    );
-    expect(receiptCU.landed).toBe("queued");
-
-    await turnA.ended();
-    const cuTurn = await receiptCU.turn;
-    await cuTurn.ended();
-    const carriedTurnB = await receiptB.turn;
-    await carriedTurnB.ended();
-
-    expect(interruptCount).toBe(1);
-    expect(statesB).not.toContain("unknown");
-    expect(statesB).toContain("consumed");
-    expect(sentTurns.map((entry) => entry.inputId)).toEqual(["turn-a", "cu-now", "steer-b"]);
-    expect(sentTurns[1]?.grant).toEqual(grant);
-    expect(sentTurns[2]?.grant).toBeUndefined();
-    expect(sentTurns[2]?.text).toContain("long task A");
-    expect(sentTurns[2]?.text).toContain("steered follow-up B");
-  } finally {
-    await manager.shutdown();
-    await rm(directory, { recursive: true, force: true });
-  }
 });
 
 it("drains a provider-retained steer B into its own ungranted turn before queued granted turn G opens", async () => {

@@ -1,4 +1,4 @@
-import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Monitor } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,47 +6,11 @@ import { toast } from "sonner";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  type ChatComputerUseEligibility,
-  type ChatComputerUseTarget,
-  setChatComputerUseAccess,
-} from "@/lib/chat-api";
+import { type ChatComputerUseTarget, setChatComputerUseAccess } from "@/lib/chat-api";
 
 interface AccessDecision {
   target: ChatComputerUseTarget;
   authorized: boolean;
-}
-
-function applyTargetAuthorization<T extends ChatComputerUseTarget>(
-  entry: T,
-  deviceId: string,
-  authorized: boolean,
-): T {
-  if (entry.deviceId !== deviceId) return entry;
-  if (authorized) return { ...entry, authorized: true };
-  const { authorized: _removed, ...rest } = entry;
-  return rest as T;
-}
-
-function updateCachedComputerUseAccess(
-  queryClient: QueryClient,
-  deviceId: string,
-  authorized: boolean,
-): void {
-  queryClient.setQueriesData<ChatComputerUseEligibility | null>(
-    { queryKey: ["chat-computer-use"] },
-    (previous) => {
-      if (!previous) return previous;
-      const updatedTop = applyTargetAuthorization(previous, deviceId, authorized);
-      if (!previous.targets) return updatedTop;
-      return {
-        ...updatedTop,
-        targets: previous.targets.map((entry) =>
-          applyTargetAuthorization(entry, deviceId, authorized),
-        ),
-      };
-    },
-  );
 }
 
 export function ComputerUseAccess({
@@ -55,7 +19,6 @@ export function ComputerUseAccess({
   selected,
   allowPreemption,
   onSelect,
-  onRevoked,
   onTogglePreemption,
 }: {
   sessionId: string;
@@ -63,7 +26,6 @@ export function ComputerUseAccess({
   selected: ChatComputerUseTarget | undefined;
   allowPreemption: boolean;
   onSelect: (deviceId: string) => void;
-  onRevoked?: (deviceId: string) => void;
   onTogglePreemption: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -73,10 +35,7 @@ export function ComputerUseAccess({
   const access = useMutation({
     mutationFn: ({ target, authorized }: AccessDecision) =>
       setChatComputerUseAccess(sessionId, target.deviceId, authorized),
-    onSuccess: async (_data, { target, authorized }) => {
-      await queryClient.cancelQueries({ queryKey: ["chat-computer-use"] });
-      updateCachedComputerUseAccess(queryClient, target.deviceId, authorized);
-      if (!authorized) onRevoked?.(target.deviceId);
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["chat-computer-use"] });
       setDecision(null);
     },
