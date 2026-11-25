@@ -18,8 +18,13 @@ import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
-import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
-import { appApiAppId, dashboardAppId as dashboardAppIdOf, isPublicPath } from "../ways-in.js";
+import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
+import {
+  appApiAppId,
+  appApiPath,
+  dashboardAppId as dashboardAppIdOf,
+  isPublicPath,
+} from "../ways-in.js";
 import type { ApiDeps } from "../deps.js";
 
 // Any absolute origin works: only the path is read back.
@@ -77,20 +82,9 @@ function isResolvedApiApp(
  * or for malformed paths (which fall through to the normal cookie check).
  */
 function isAppApiPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
-  const path = forwardedUri.split("?")[0];
-  const match = path.match(/^\/api\/app-api\/([^/]+)(?:\/(.*))?$/);
-  if (!match) return false;
-
-  let appId: string;
-  let subPath: string;
-  try {
-    appId = decodeAppIdPathSegment(match[1]);
-    const parts = decodeAppApiPath(match[2]);
-    subPath = parts.length === 0 ? "/" : `/${parts.join("/")}`;
-  } catch (err) {
-    if (err instanceof InvalidAppApiPathError) return false;
-    throw err;
-  }
+  const path = appApiPath(forwardedUri);
+  if (path === null || path.subPath === null) return false;
+  const { appId, subPath } = path;
 
   if (isLinkPublicApp(appId, deps)) return true;
 

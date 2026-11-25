@@ -1,7 +1,7 @@
 // Which paths are public, and which are an app's, whose own access decides
 // them. Contract: docs/architecture/access-control.md.
 
-import { decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
+import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
 
 // `/api/*` endpoints the Caddy `forward_auth` probe waves through without
 // a cookie check — login flow, health/uptime probes, OAuth/MCP callbacks
@@ -83,16 +83,31 @@ export function dashboardAppId(forwardedUri: string): string | null {
   }
 }
 
-/** The app whose API a path is on, or null for any other path. */
-export function appApiAppId(forwardedUri: string): string | null {
+/**
+ * The app whose API a path is on, with the path inside it, or null for any other
+ * path. `subPath` is null for one the app router would refuse.
+ */
+export function appApiPath(forwardedUri: string): { appId: string; subPath: string | null } | null {
   const path = forwardedUri.split("?")[0];
-  const match = path.match(/^\/api\/app-api\/([^/]+)(?:\/.*)?$/);
+  const match = path.match(/^\/api\/app-api\/([^/]+)(?:\/(.*))?$/);
   if (!match) return null;
 
+  let appId: string;
   try {
-    return decodeAppIdPathSegment(match[1]);
+    appId = decodeAppIdPathSegment(match[1]);
   } catch (err) {
     if (err instanceof InvalidAppApiPathError) return null;
     throw err;
   }
+  try {
+    return { appId, subPath: `/${decodeAppApiPath(match[2]).join("/")}` };
+  } catch (err) {
+    if (err instanceof InvalidAppApiPathError) return { appId, subPath: null };
+    throw err;
+  }
+}
+
+/** The app whose API a path is on, or null for any other path. */
+export function appApiAppId(forwardedUri: string): string | null {
+  return appApiPath(forwardedUri)?.appId ?? null;
 }
