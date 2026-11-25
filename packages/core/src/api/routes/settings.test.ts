@@ -5,7 +5,12 @@ import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../instance/timezone.js";
-import { COOKIE_NAME, createSession } from "../../access/auth.js";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../../access/auth.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
@@ -334,6 +339,20 @@ describe("Settings API", () => {
       const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await postDetected("Asia/Tokyo", null);
+
+      expect(res.status).toBe(403);
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();
+      expect(reactivate).not.toHaveBeenCalled();
+    });
+
+    it("refuses a dashboard admin, whose zone is not the guardian's", async () => {
+      deps.dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected(
+        "Asia/Tokyo",
+        `${VISITOR_COOKIE_NAME}=${createVisitorSession("ada", "ada@example.com")}`,
+      );
 
       expect(res.status).toBe(403);
       expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();

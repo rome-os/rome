@@ -287,9 +287,9 @@ describe("FeishuAdapter", () => {
     expect(captured[0].addressing).toBe("mention");
   });
 
-  it("passes a link code said in a group to admission without a mention, so it is voided", async () => {
-    await channel.emit({ chatType: "group", mentionedBot: false, content: "ROME-7KQ2M9XA" });
-    expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
+  it("passes a group message without a mention to admission", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: false, content: "lunch at noon?" });
+    expect(captured.map((m) => m.text)).toStrictEqual(["lunch at noon?"]);
   });
 
   it("lists an observed group under its Feishu name, fetched once per chat", async () => {
@@ -538,7 +538,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0]).not.toHaveProperty("routing");
   });
 
-  it("ignores normal group messages when group policy is disabled", async () => {
+  it("hands over a group message when group policy is disabled, since keeping it is Rome's call", async () => {
     const chatSettings = makeChatSettings({
       enabled: false,
       activation: { mode: "all" },
@@ -562,7 +562,7 @@ describe("FeishuAdapter", () => {
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "@_user_1 hello" });
 
-    expect(captured).toHaveLength(0);
+    expect(captured).toHaveLength(1);
   });
 
   it("delivers an addressed /stop when group policy is disabled", async () => {

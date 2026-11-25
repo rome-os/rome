@@ -20,11 +20,6 @@ import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { CreateRoutineResult, RoutineCreationService } from "../routines/create.js";
 import type {
-  RoutineControlOp,
-  RoutineControlResult,
-  RoutineControlService,
-} from "../routines/control.js";
-import type {
   AgentFeedback,
   FeedbackOutcome,
   FeedbackService,
@@ -186,14 +181,6 @@ export class RoutineCreationProxy implements RoutineCreationService {
   }
 }
 
-/** Worker-side stand-in for core's routine operations: the main process runs
- * them, for the turn of this worker's action. */
-export class RoutineControlProxy implements RoutineControlService {
-  call(op: RoutineControlOp, input: unknown): Promise<RoutineControlResult> {
-    return callMain<RoutineControlResult>("routines.control", { op, input });
-  }
-}
-
 /**
  * Worker-side action existence and args checker backed by the main process's
  * eager ActionRegistry. The worker registry may contain lazy stubs whose modules
@@ -211,9 +198,11 @@ export class ActionRegistryProxy {
     return result.explicit;
   }
 
-  async suggest(actionName: string): Promise<string | undefined> {
-    const result = await callMain<{ suggestion: string | null }>("actions.suggest", { actionName });
-    return result.suggestion ?? undefined;
+  async getCanonicalName(actionName: string): Promise<string | undefined> {
+    const result = await callMain<{ canonicalName: string | null }>("actions.canonicalName", {
+      actionName,
+    });
+    return result.canonicalName ?? undefined;
   }
 
   /** Returns an error message when args fail the action's input schema, else null. */

@@ -36,8 +36,20 @@ export interface RomeToolsOptions {
   repliesTo?: boolean;
 }
 
-function toDefinition({ name, description, inputSchema, endsTurn }: RomeTool): RomeToolDefinition {
-  return { name, description, inputSchema, ...(endsTurn !== undefined ? { endsTurn } : {}) };
+function toDefinition({
+  name,
+  description,
+  inputSchema,
+  endsTurn,
+  formerNames,
+}: RomeTool): RomeToolDefinition {
+  return {
+    name,
+    description,
+    inputSchema,
+    ...(endsTurn !== undefined ? { endsTurn } : {}),
+    ...(formerNames ? { formerNames } : {}),
+  };
 }
 
 export function createRomeTools(options: RomeToolsOptions): RomeTools {

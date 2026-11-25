@@ -22,9 +22,10 @@ const ACTIONS = [action("system:send_message"), action("system:create_routine"),
 
 const registry: ActionRegistry = {
   register: () => {},
-  get: (name) => ACTIONS.find((a) => a.config.name === name),
+  get: (name) =>
+    ACTIONS.find((a) => a.config.name === (name === "send" ? "system:send_message" : name)),
   has: (name) => ACTIONS.some((a) => a.config.name === name),
-  suggest: (name) => (name === "send_message" ? "system:send_message" : undefined),
+  getCanonicalName: (name) => (name === "send" ? "system:send_message" : name),
   list: () => ACTIONS.map((a) => a.config.name),
   getForAgent: (names) =>
     names.includes("*") ? ACTIONS : ACTIONS.filter((a) => names.includes(a.config.name)),
@@ -72,36 +73,20 @@ function ports(
 }
 
 describe("romeToolPorts actions", () => {
-  it("lists and permits only what the turn's agent may call, by full ID", () => {
+  it("lists and permits only what the turn's agent may call, under any of its names", () => {
     const { actions } = ports();
     expect(actions.list(turn()).map((a) => a.name)).toEqual([
       "system:send_message",
       "system:create_routine",
     ]);
-    expect(actions.permits(turn(), "system:send_message")).toBe(true);
-    expect(actions.permits(turn(), "send_message")).toBe(false);
+    expect(actions.permits(turn(), "send")).toBe(true);
     expect(actions.permits(turn(), "secret")).toBe(false);
   });
 
-  it("names the full ID when an action is called without its app", async () => {
+  it("finds an action the turn's agent may call under any of its names, and no other", () => {
     const { actions } = ports();
-    await expect(actions.run(turn(), "send_message", { text: "hi" })).rejects.toThrow(
-      'Unknown action: send_message. Did you mean "system:send_message"?',
-    );
-  });
-
-  it("names no full ID the turn's agent may not call", async () => {
-    const { actions } = ports();
-    const denied = turn({ actions: ["system:create_routine"] });
-    await expect(actions.run(denied, "send_message", { text: "hi" })).rejects.toThrow(
-      /^Unknown action: send_message$/,
-    );
-  });
-
-  it("finds an action the turn's agent may call by its full ID, and no other", () => {
-    const { actions } = ports();
+    expect(actions.find(turn(), "send")?.name).toBe("system:send_message");
     expect(actions.find(turn(), "system:send_message")?.name).toBe("system:send_message");
-    expect(actions.find(turn(), "send_message")).toBeUndefined();
     expect(actions.find(turn(), "secret")).toBeUndefined();
     expect(actions.find(turn(), "missing")).toBeUndefined();
   });
@@ -224,7 +209,7 @@ describe("romeToolPorts defer for a task chat", () => {
 });
 
 describe("romeToolPorts sessionTools", () => {
-  it("serves no connect_account where the session's own tools show a connect card", async () => {
+  it("serves no connect_service where the session's own tools show a connect card", async () => {
     const connectCard = {
       name: "connect_card",
       description: "",
@@ -253,7 +238,7 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.filter((tool) => tool.name === "show_card")).toEqual([ownCard]);
   });
 
-  it("serves connect_account for device kinds alone beside the session's own connect card", async () => {
+  it("serves connect_service for device kinds alone beside the session's own connect card", async () => {
     const connectCard = {
       name: "connect_card",
       description: "",
@@ -269,18 +254,18 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "connect_card",
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
-    const connect = tools.find((tool) => tool.name === "connect_account")!;
+    const connect = tools.find((tool) => tool.name === "connect_service")!;
     const schema = connect.inputSchema as { properties: { kind: { enum: string[] } } };
     expect(schema.properties.kind.enum).toEqual(["apple_health"]);
     const refused = await connect.handler({ kind: "github" });
     expect(refused.isError).toBe(true);
   });
 
-  it("serves the tools Rome adds, then propose_routine and connect_account, to a turn with a speaker", async () => {
+  it("serves the tools Rome adds, then propose_routine and connect_service, to a turn with a speaker", async () => {
     const extra = {
       name: "extra",
       description: "",
@@ -292,7 +277,7 @@ describe("romeToolPorts sessionTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "extra",
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
@@ -305,23 +290,23 @@ describe("romeToolPorts sessionTools", () => {
     );
   });
 
-  it("serves only propose_routine, connect_account, share_location and show_card to a turn with no speaker", async () => {
+  it("serves only propose_routine, connect_service, share_location and show_card to a turn with no speaker", async () => {
     const { sessionTools, provided } = ports();
     const tools = await sessionTools.forTurn(turn(), false);
     expect(tools.map((tool) => tool.name)).toEqual([
       "propose_routine",
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);
     expect(provided).not.toHaveBeenCalled();
   });
 
-  it("serves only connect_account, share_location and show_card, each refusing, where cards draw as plain text", async () => {
+  it("serves only connect_service, share_location and show_card, each refusing, where cards draw as plain text", async () => {
     const { sessionTools } = ports();
     const tools = await sessionTools.forTurn(turn({ widgets: "plain_text" }), true);
     expect(tools.map((tool) => tool.name)).toEqual([
-      "connect_account",
+      "connect_service",
       "share_location",
       "show_card",
     ]);

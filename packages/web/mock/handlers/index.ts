@@ -1496,44 +1496,6 @@ const settings: SettingsMap = {
   showAiToolUsage: true,
 };
 
-// Triage activity for the Inbox page. Offsets rather than fixed dates, so the
-// entries stay recent whenever the mock is opened.
-const sentinelLog = [
-  {
-    id: "sl_01",
-    channel: "telegram",
-    channelUserId: "tg:4471",
-    displayName: "Priya Natarajan",
-    text: "Hi! Is this the number for the plumber quote?",
-    action: "replied",
-    response: "This line belongs to Rome, Mia's assistant. I've passed your note along.",
-    reviewed: false,
-    createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-  },
-  {
-    id: "sl_02",
-    channel: "whatsapp",
-    channelUserId: "wa:15550001",
-    displayName: null,
-    text: "URGENT: your account will be suspended, click here",
-    action: "escalated",
-    response: null,
-    reviewed: false,
-    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-  },
-  {
-    id: "sl_03",
-    channel: "discord",
-    channelUserId: "dc:8812",
-    displayName: "sam_k",
-    text: "gg, rematch tomorrow?",
-    action: "ignored",
-    response: null,
-    reviewed: true,
-    createdAt: new Date(Date.now() - 2 * 86_400_000 - 3_600_000).toISOString(),
-  },
-];
-
 // Projects file-browser fixture. `./file-browser.ts` serves it — the same
 // factory the memory dir goes through, since both are the same routes over a
 // different root.
@@ -2068,12 +2030,6 @@ export const handlers = [
   }),
   http.get("/api/actions", () => HttpResponse.json({ actions: actionCatalog })),
   http.get("/api/settings", () => HttpResponse.json(settings)),
-  http.get("/api/sentinel-log", () => HttpResponse.json(sentinelLog)),
-  http.post("/api/sentinel-log/:id/review", ({ params }) => {
-    const entry = sentinelLog.find((candidate) => candidate.id === params.id);
-    if (entry) entry.reviewed = true;
-    return HttpResponse.json({ ok: true });
-  }),
   // Several surfaces write a setting back on mount (last-used project, composer
   // preferences), so a read-only /api/settings makes the dashboard log a failed
   // write on every load.
@@ -2282,7 +2238,7 @@ export const handlers = [
   ...liveEventsHandlers,
   ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
-  // dir and the memory dir a person's dossier links into.
+  // dir and the memory dir.
   ...projectFileHandlers,
   ...memoryFileHandlers,
 ];

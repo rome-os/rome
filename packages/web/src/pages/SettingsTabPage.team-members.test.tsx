@@ -1,0 +1,237 @@
+// @rstest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import i18n from "@/i18n";
+import { toast } from "sonner";
+import SettingsPage from "./SettingsTabPage";
+
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
+
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+});
+
+function ok(json: unknown): Response {
+  return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
+}
+
+function mockSettingsBackend(options?: {
+  cloudEmailAccess?: string[];
+  failPut?: boolean;
+  putError?: { error: string; limit: number };
+  /** How many loads of the list fail before one succeeds. */
+  failedLoads?: number;
+}) {
+  const putBodies: unknown[] = [];
+  let failedLoads = options?.failedLoads ?? 0;
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    const url = String(input);
+    if (url === "/api/settings") return ok({});
+    if (url === "/api/public-access") {
+      return ok({ allowedApps: [], cloudEmailAccess: {} });
+    }
+    if (url === "/api/dashboard-access") {
+      if (init?.method === "PUT") {
+        putBodies.push(JSON.parse(String(init.body)));
+        if (options?.putError) {
+          const body = options.putError;
+          return { ok: false, status: 400, json: async () => body } as Response;
+        }
+        if (options?.failPut) {
+          return { ok: false, status: 500, json: async () => ({ error: "boom" }) } as Response;
+        }
+        return ok({});
+      }
+      if (failedLoads > 0) {
+        failedLoads--;
+        return { ok: false, status: 502, json: async () => ({ error: "bad gateway" }) } as Response;
+      }
+      return ok({ cloudEmailAccess: options?.cloudEmailAccess ?? ["ada@example.com"] });
+    }
+    if (url === "/api/uptime") return ok({ uptime: 120 });
+    if (url === "/api/build-info") return ok({ sha: null, builtAt: null });
+    if (url === "/api/diagnosis") {
+      return ok({
+        status: "ok",
+        checkedAt: "2026-06-16T00:00:00.000Z",
+        uptimeSeconds: 120,
+        build: { version: null, sha: null, builtAt: null },
+        upgradedSinceLastBoot: false,
+        previousVersion: null,
+        instance: { auth: "no_token", accountId: null, instanceId: null },
+        database: { ok: true },
+        relay: { configured: false, depositUrlConfigured: false },
+        channels: [],
+        apps: { total: 0, failed: [], broken: [] },
+      });
+    }
+    return ok({});
+  }) as typeof fetch);
+  return { putBodies };
+}
+
+function renderSettings(path: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/settings/:tab" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("SettingsPage Team tab", () => {
+  it("shows the people who can use this Rome, and Advanced no longer lists them", async () => {
+    mockSettingsBackend();
+    renderSettings("/settings/team");
+
+    expect(
+      await screen.findByText("People", { selector: "[data-slot=form-row-label]" }),
+    ).toBeTruthy();
+    expect(screen.getByText("People here can use this Rome as you do.")).toBeTruthy();
+    expect(await screen.findByText("ada@example.com")).toBeTruthy();
+    cleanup();
+
+    renderSettings("/settings/advanced");
+    await screen.findByRole("heading", { level: 2, name: "Access and privacy" });
+    expect(screen.queryByText("ada@example.com")).toBeNull();
+  });
+
+  it("lists the saved people with a count and no save button", async () => {
+    mockSettingsBackend({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
+    renderSettings("/settings/team");
+
+    expect(await screen.findByText("ada@example.com")).toBeTruthy();
+    expect(screen.getByText("lin@example.com")).toBeTruthy();
+    expect(screen.getByText("2 people")).toBeTruthy();
+    // Changes save automatically — there is no explicit save button.
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+  });
+
+  it("adds an email on Enter and auto-saves the full list", async () => {
+    const { putBodies } = mockSettingsBackend();
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Email of their Rome account");
+    await user.type(input, "lin@example.com{Enter}");
+
+    expect(screen.getByText("lin@example.com")).toBeTruthy();
+    expect((input as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("2 people")).toBeTruthy();
+    await waitFor(() =>
+      expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
+    );
+  });
+
+  it("splits a pasted list into individual emails and auto-saves once", async () => {
+    const { putBodies } = mockSettingsBackend({ cloudEmailAccess: [] });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Email of their Rome account");
+    await user.click(input);
+    await user.paste("ada@example.com, lin@example.com grace@example.com");
+
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+    expect(screen.getByText("lin@example.com")).toBeTruthy();
+    expect(screen.getByText("grace@example.com")).toBeTruthy();
+    expect((input as HTMLInputElement).value).toBe("");
+    await waitFor(() =>
+      // parseEmailTextarea sorts each pasted batch alphabetically.
+      expect(putBodies).toEqual([
+        { cloudEmailAccess: ["ada@example.com", "grace@example.com", "lin@example.com"] },
+      ]),
+    );
+  });
+
+  it("keeps an invalid address in the input with an error and does not save", async () => {
+    const { putBodies } = mockSettingsBackend();
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Email of their Rome account");
+    await user.type(input, "not-an-email{Enter}");
+
+    expect((input as HTMLInputElement).value).toBe("not-an-email");
+    expect(screen.getByText("Invalid email address: not-an-email")).toBeTruthy();
+    expect(putBodies).toEqual([]);
+  });
+
+  it("removes an email and auto-saves the remaining list", async () => {
+    const { putBodies } = mockSettingsBackend({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+    });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Remove lin@example.com" }));
+    expect(screen.queryByText("lin@example.com")).toBeNull();
+    expect(screen.getByText("1 person")).toBeTruthy();
+    await waitFor(() => expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com"] }]));
+  });
+
+  it("rolls the list back when auto-save fails", async () => {
+    const { putBodies } = mockSettingsBackend({ failPut: true });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Email of their Rome account");
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() =>
+      expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
+    );
+    // The rejected address is removed again; the saved list is untouched.
+    await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+    expect(screen.getByText("1 person")).toBeTruthy();
+  });
+
+  it("shows a failed load with a retry, and lets no one be added until the list loads", async () => {
+    const { putBodies } = mockSettingsBackend({ failedLoads: 1 });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Failed to load the team")).toBeTruthy();
+    expect(screen.queryByText("Only you can use this Rome until you add someone.")).toBeNull();
+    expect(screen.queryByLabelText("Email of their Rome account")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    const input = await screen.findByLabelText("Email of their Rome account");
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() =>
+      expect(putBodies).toEqual([{ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }]),
+    );
+  });
+
+  it.each([
+    [{ error: "too_many_emails", limit: 500 }, "Up to 500 emails allowed"],
+    [{ error: "email_too_long", limit: 320 }, "Email longer than 320 characters"],
+  ])("names the limit a refused save broke (%o)", async (putError, message) => {
+    const toastError = rs.spyOn(toast, "error");
+    mockSettingsBackend({ putError });
+    renderSettings("/settings/team");
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Email of their Rome account");
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
+  });
+});

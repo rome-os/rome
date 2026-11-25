@@ -45,10 +45,8 @@ import {
 export { sendersOf, type SendDeps };
 
 /**
- * `deps` with its senders cut to the guardian's own accounts. A person's page
- * shows the guardian's chats with them, so it sends only from the guardian's
- * own accounts: a message sent from an agent's account would land in a chat
- * the page does not show.
+ * `deps` with its senders cut to the guardian's own accounts: an account's
+ * send state and last activity count only the guardian's own chats with it.
  */
 export function asGuardian<Deps extends SendDeps>(
   deps: Deps,

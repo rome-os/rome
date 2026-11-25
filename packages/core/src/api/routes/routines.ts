@@ -10,6 +10,7 @@ import type { ApiDeps } from "../deps.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 import { createRoutine } from "../../routines/create.js";
+import { listRoutinesWithLastRun } from "../../routines/list.js";
 import { listRoutineRuns, readRoutineRun } from "../../routines/runs.js";
 import { updateRoutine } from "../../routines/update.js";
 
@@ -45,16 +46,16 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   // status badge (Active / Running / Failed) and the "last run failed" line
   // without a per-card request.
   app.get("/routines", async (c) => {
-    const rows = await deps.db.select().from(routines);
-    const latest = await deps.routineRunsRepo.findLatestByRoutineIds(rows.map((r) => r.id));
-    const enriched = rows.map((row) => {
-      const lr = latest.get(row.id);
-      return {
-        ...publicRoutineRow(row),
-        lastRun: lr ? { status: lr.status, firedAt: lr.firedAt } : null,
-      };
+    const listed = await listRoutinesWithLastRun({
+      routines: deps.routinesRepo,
+      routineRuns: deps.routineRunsRepo,
     });
-    return c.json(enriched);
+    return c.json(
+      listed.map(({ row, lastRun }) => ({
+        ...publicRoutineRow(row),
+        lastRun: lastRun ? { status: lastRun.status, firedAt: lastRun.firedAt } : null,
+      })),
+    );
   });
 
   app.post("/routines", async (c) => {

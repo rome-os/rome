@@ -4,7 +4,6 @@ import {
   CalendarIcon,
   DashboardIcon,
   GearIcon,
-  PersonIcon,
   Pencil2Icon,
 } from "@radix-ui/react-icons";
 import { Bot, Chrome as ChromeIcon, FolderKanban } from "lucide-react";
@@ -39,7 +38,6 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     sidebarIconMotion: "tilt",
   },
   { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
-  { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
   // Off the sidebar until the guardian pins it: main answers assistants, so
   // their chats are read now and then rather than watched.
   { id: "assistants", href: "/assistants", labelKey: "nav.assistants", Icon: Bot },

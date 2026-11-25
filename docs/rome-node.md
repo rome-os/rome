@@ -376,8 +376,8 @@ filter, search, and the detail of the selected command. The dashboard opens
 `/ws/node`, and Rome Core forwards the observation methods to the daemon
 unchanged through `openConsoleBridge` from `@rome-os/node-core/client`. A browser cannot send the daemon's Authorization
 header, so it never connects to the daemon directly. Other methods, such as
-`devices.run` and `daemon.stop`, do not pass. The socket admits only the
-guardian, as [access control](architecture/access-control.md) describes.
+`devices.run` and `daemon.stop`, do not pass. The socket admits the
+[team](concepts/people.md#team), as [access control](architecture/access-control.md) describes.
 
 The device pages live in `@rome-os/node-ui` (`packages/rome-node-ui`), separate
 from the dashboard. A host mounts `<NodeDevices />` for the overview and
@@ -678,8 +678,8 @@ phone as a whole. A capability's actions follow its own Live access, and fail wi
 `live_off` while it is off. The phone reports its connections to the Rome open on
 it, as below, so Rome lists them. Each operation in the report carries its
 `usage` as `description`, and an `input` schema and `examples` where the phone
-declares them, so an agent finds and runs them with `core:device_describe` and
-`core:device_run`, with no shell.
+declares them, so an agent finds and runs them with `system:read_devices` and
+`system:run_on_device`, with no shell.
 Signed in with a Live access on, the phone is a device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
 unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
@@ -1084,14 +1084,12 @@ remains available for other devices.
 
 Instance startup and enrollment prepare the caller token through the core
 library. The existing Cloud device endpoints and Gateway protocol handle communication.
-Configure the npm Trusted Publishers for `@rome-os/node`, `@rome-os/node-core`,
-and `@rome-os/node-core-darwin-arm64` before their package releases. Building an
-archive does not publish it.
+Configure the npm Trusted Publishers for `@rome-os/node` and `@rome-os/node-core`
+before their package releases. Building an archive does not publish it.
 
 The main CI runs the unit suites of both packages on Linux. The
-[package workflow](../.github/workflows/rome-node.yml) packs `@rome-os/node`,
-`@rome-os/node-core`, and `@rome-os/node-core-darwin-arm64`, installs the archives
-with npm on Linux and Apple Silicon macOS, verifies that Linux skips the optional
-macOS helper while macOS installs it, and starts a daemon from the installed core
-package. Windows and browser/two-computer acceptance still require real environments.
+[package workflow](../.github/workflows/rome-node.yml) packs both packages, installs
+the archives with npm, and starts a daemon from the installed core package. CI does
+not run on macOS or Windows, so behavior specific to those platforms is unverified.
+Browser authorization and two-computer acceptance also require real environments.
 Platform simulations and type checks do not establish those results.

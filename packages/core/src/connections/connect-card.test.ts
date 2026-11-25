@@ -2,15 +2,36 @@ import { checkWidgetUi } from "@rome-os/app-runtime";
 import { locationCardUi } from "@rome/api-types/location-card";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  connectAccountToolOutput,
+  type ConnectCardSources,
+  connectCardRequest,
+  connectCardToolOutput,
   connectCardUiFromProps,
-  deviceConnectToolOutput,
+  type DeviceKind,
   deviceKinds,
-  parseConnectAccountInput,
+  parseConnectServiceInput,
 } from "./connect-card.js";
 import type { DeviceConnection } from "./device/repository.js";
 
-describe("connect_account", () => {
+/** What `connect_service` hands back for `kind`, where a card shows or not. */
+async function toolOutput(
+  kind: string,
+  widgetsShow: boolean,
+  sources: ConnectCardSources = {},
+): Promise<unknown> {
+  const request = await connectCardRequest({ kind }, sources);
+  if (request.status === "refused") throw new Error(request.error);
+  return connectCardToolOutput(request, widgetsShow);
+}
+
+/** The same for a device kind, in the guardian's `language`. */
+function deviceOutput(device: DeviceKind, widgetsShow: boolean, language?: string | null) {
+  return toolOutput(device.kind, widgetsShow, {
+    devices: [device],
+    language: async () => language ?? null,
+  });
+}
+
+describe("connect_service", () => {
   // Where Rome Cloud is set up, as on a provisioned instance.
   beforeEach(() => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
@@ -19,8 +40,8 @@ describe("connect_account", () => {
     rs.unstubAllEnvs();
   });
 
-  it("shows a card every reader can draw, which the agent waits on", () => {
-    expect(connectAccountToolOutput("github", true)).toMatchObject({
+  it("shows a card every reader can draw, which the agent waits on", async () => {
+    expect(await toolOutput("github", true)).toMatchObject({
       pendingInteraction: true,
       appId: "core",
       render: { componentId: "connect-card", props: { kind: "github" }, builtin: true },
@@ -29,25 +50,25 @@ describe("connect_account", () => {
     expect(ui && checkWidgetUi(ui)).toEqual([]);
   });
 
-  it("asks the model to send the guardian to Settings where no card shows", () => {
-    expect(connectAccountToolOutput("github", false)).toContain("Settings › Connections");
+  it("asks the model to send the guardian to Settings where no card shows", async () => {
+    expect(await toolOutput("github", false)).toContain("Settings › Connections");
   });
 
-  it("says why instead of showing a card whose Connect could only fail", () => {
+  it("says why instead of showing a card whose Connect could only fail", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
     rs.stubEnv("PANTHEON_DOMAIN", "");
-    const output = connectAccountToolOutput("github", true);
+    const output = await toolOutput("github", true);
     expect(typeof output).toBe("string");
     expect(output).toContain("Settings › Connections");
   });
 
   it("refuses a kind Rome does not connect itself", () => {
-    expect(parseConnectAccountInput({ kind: "notion" })).toMatchObject({ ok: false });
-    expect(parseConnectAccountInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });
+    expect(parseConnectServiceInput({ kind: "notion" })).toMatchObject({ ok: false });
+    expect(parseConnectServiceInput({ kind: "github" })).toEqual({ ok: true, kind: "github" });
   });
 });
 
-describe("connect_account for a device kind", () => {
+describe("connect_service for a device kind", () => {
   const row = (
     deviceId: string,
     capability: string,
@@ -96,19 +117,19 @@ describe("connect_account for a device kind", () => {
 
   it("parses a reported device kind, and lists it among the kinds when refusing", () => {
     const devices = [{ kind: "apple_health", label: "Apple Health" }];
-    expect(parseConnectAccountInput({ kind: "apple_health" }, devices)).toEqual({
+    expect(parseConnectServiceInput({ kind: "apple_health" }, devices)).toEqual({
       ok: true,
       kind: "apple_health",
       device: devices[0],
     });
-    const refused = parseConnectAccountInput({ kind: "location" }, devices);
+    const refused = parseConnectServiceInput({ kind: "location" }, devices);
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error).toContain('"apple_health"');
   });
 
-  it("shows a card every reader can draw, whose events say the kind is a device's", () => {
+  it("shows a card every reader can draw, whose events say the kind is a device's", async () => {
     const device = { kind: "apple_health", label: "Apple Health" };
-    expect(deviceConnectToolOutput(device, true)).toMatchObject({
+    expect(await deviceOutput(device, true)).toMatchObject({
       pendingInteraction: true,
       render: {
         componentId: "connect-card",
@@ -138,10 +159,10 @@ describe("connect_account for a device kind", () => {
         connect: "Connect",
       },
     });
-    expect(deviceConnectToolOutput(device, false)).toContain("Rome app");
+    expect(await deviceOutput(device, false)).toContain("Rome app");
   });
 
-  it("words the card as the capability's page does, in the guardian's language where the device has it", () => {
+  it("words the card as the capability's page does, in the guardian's language where the device has it", async () => {
     const device = {
       kind: "apple_calendar",
       label: "Calendar",
@@ -152,25 +173,28 @@ describe("connect_account for a device kind", () => {
         "zh-CN": { title: "日历", summary: "你的 Rome 会读取你的日历。" },
       },
     };
-    const props = (language: string | null) =>
+    const props = async (language: string | null) =>
       (
-        deviceConnectToolOutput(device, true, undefined, language) as {
+        (await deviceOutput(device, true, language)) as {
           render: { props: Record<string, unknown> };
         }
       ).render.props;
-    expect(props("zh-CN")).toMatchObject({ title: "日历", summary: "你的 Rome 会读取你的日历。" });
-    expect(props("ja")).toMatchObject({
+    expect(await props("zh-CN")).toMatchObject({
+      title: "日历",
+      summary: "你的 Rome 会读取你的日历。",
+    });
+    expect(await props("ja")).toMatchObject({
       title: "Calendar",
       summary: "Your Rome reads your calendars.",
     });
-    expect(props(null)).toMatchObject({ title: "Calendar" });
-    const ui = connectCardUiFromProps(props("zh-CN"));
+    expect(await props(null)).toMatchObject({ title: "Calendar" });
+    const ui = connectCardUiFromProps(await props("zh-CN"));
     expect(ui && checkWidgetUi(ui)).toEqual([]);
     const texts = (ui?.components ?? []).flatMap((c) => ("text" in c ? [c.text] : []));
     expect(texts.slice(0, 2)).toEqual(["日历", "你的 Rome 会读取你的日历。"]);
     expect(ui?.components.find((c) => c.id === "title")).toMatchObject({ icon: "calendar" });
     // A name no reader draws leaves the title without one.
-    const odd = connectCardUiFromProps({ ...props("en"), icon: "rocket" });
+    const odd = connectCardUiFromProps({ ...(await props("en")), icon: "rocket" });
     expect(odd && checkWidgetUi(odd)).toEqual([]);
     expect(odd?.components.find((c) => c.id === "title")).not.toHaveProperty("icon");
   });

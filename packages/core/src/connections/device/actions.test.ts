@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../../apps/actions/engine.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { whoMayAsk } from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
 import { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION, registerDeviceActions } from "./actions.js";
@@ -10,6 +11,11 @@ import { type DeviceReport, deviceReportSchema } from "./report.js";
 import { DeviceConnectionsRepository } from "./repository.js";
 
 const NOW = Date.parse("2026-11-14T09:00:00Z");
+
+/** A webchat chat a visitor owns. */
+const VISITOR_CHAT = "chat-visitor";
+
+type RunContext = NonNullable<Parameters<ActionEngine["run"]>[2]>;
 
 /** The guardian, signed in: a turn their own message started. */
 const GUARDIAN = { kind: "guardian" as const, userId: "guardian-1", via: "cookie" as const };
@@ -75,6 +81,9 @@ describe("device actions", () => {
         calls.push({ deviceId, action, args });
         return answer;
       },
+      whoMayAsk: whoMayAsk(async (chatId) =>
+        chatId === VISITOR_CHAT ? "visitor:acct-1" : "guardian",
+      ),
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
@@ -83,12 +92,36 @@ describe("device actions", () => {
   });
   afterEach(() => testDb.close());
 
+  // A turn in a chat on a connection unless the test names its chat: such a
+  // chat has no owner and works for the guardian.
+  const run = (name: string, args: Record<string, unknown>, context: RunContext) =>
+    engine.run(name, args, {
+      channelContext: { channel: "telegram", threadId: "tg-1" },
+      ...context,
+    });
+
+  it("refuses by either name a turn that does not work for the guardian, as the new names do", async () => {
+    devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
+    const visitor = {
+      audience: "private" as const,
+      channelContext: { channel: "webchat", threadId: VISITOR_CHAT },
+    };
+    for (const [name, args] of [
+      [DEVICE_DESCRIBE_ACTION, {}],
+      [DEVICE_RUN_ACTION, { operation: "device.status" }],
+    ] as const) {
+      const result = await run(name, args, visitor);
+      expect((result as { error: string }).error).toMatch(/^guardian_only:/);
+    }
+    expect(calls).toEqual([]);
+  });
+
   it("lists each device's capabilities, operations and state from the last report", async () => {
     devices.report(
       report("dev-1", "iPhone", [healthConnection(false), deviceConnection(true)]),
       NOW,
     );
-    const result = await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
+    const result = await run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
     expect(result).toEqual({
       status: "ok",
       data: {
@@ -104,7 +137,7 @@ describe("device actions", () => {
                 title: "Apple Health",
                 personal: true,
                 state: "off",
-                next: expect.stringContaining('connect_account and kind "apple_health"'),
+                next: expect.stringContaining('connect_service and kind "apple_health"'),
                 operations: [{ name: "health.stats", access: "read", description: "Aggregates." }],
               },
               {
@@ -141,7 +174,7 @@ describe("device actions", () => {
       live: true,
     };
     devices.report(report("dev-1", "iPhone", [deviceConnection(true), added]), NOW);
-    const result = await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
+    const result = await run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
     expect(result).toMatchObject({
       status: "ok",
       data: { devices: [{ capabilities: [{ kind: "device" }, { kind: "screen_time" }] }] },
@@ -175,7 +208,7 @@ describe("device actions", () => {
     // A Concierge turn in the main chat carries the chat's audience, here a
     // shared one: Device is not personal, so it still runs.
     for (const audience of ["private", "shared"] as const) {
-      const result = await engine.run(
+      const result = await run(
         DEVICE_RUN_ACTION,
         { operation: "device.status" },
         { audience, agentName: "concierge" },
@@ -206,7 +239,7 @@ describe("device actions", () => {
       live: true,
     };
     devices.report(report("dev-1", "iPhone", [calendar]), NOW);
-    const shared = await engine.run(
+    const shared = await run(
       DEVICE_RUN_ACTION,
       { operation: "lights.set", args: { on: true } },
       { audience: "shared" },
@@ -214,7 +247,7 @@ describe("device actions", () => {
     expect(shared).toMatchObject({ status: "error" });
     expect((shared as { error: string }).error).toMatch(/^write_private_only:/);
     expect(calls).toEqual([]);
-    const own = await engine.run(
+    const own = await run(
       DEVICE_RUN_ACTION,
       { operation: "lights.set", args: { on: true } },
       { audience: "private", actor: GUARDIAN },
@@ -236,7 +269,7 @@ describe("device actions", () => {
     // A routine or a followed mail runs with no actor; a loopback caller is
     // the guardian's seat, but not the guardian asking.
     for (const actor of [undefined, { ...GUARDIAN, via: "loopback" as const }]) {
-      const result = await engine.run(
+      const result = await run(
         DEVICE_RUN_ACTION,
         { operation: "device.ring" },
         { audience: "private", ...(actor ? { actor } : {}) },
@@ -247,7 +280,7 @@ describe("device actions", () => {
     // A read still runs in such a turn.
     devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
     expect(
-      await engine.run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" }),
+      await run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" }),
     ).toMatchObject({ status: "ok" });
   });
 
@@ -262,7 +295,7 @@ describe("device actions", () => {
       NOW,
     );
     answer = { ok: false, code: "target_unavailable", message: "offline" };
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.ring" },
       { audience: "private", actor: GUARDIAN },
@@ -276,7 +309,7 @@ describe("device actions", () => {
   it("refuses a personal capability in a shared turn and calls no device", async () => {
     devices.report(report("dev-1", "iPhone", [healthConnection(true)]), NOW);
     for (const audience of ["shared", undefined] as const) {
-      const result = await engine.run(
+      const result = await run(
         DEVICE_RUN_ACTION,
         { operation: "health.stats", args: { type: "stepCount" } },
         { audience },
@@ -284,7 +317,7 @@ describe("device actions", () => {
       expect(result).toEqual({ status: "error", error: PERSONAL_DATA_PRIVATE_ONLY });
     }
     expect(calls).toEqual([]);
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "health.stats", args: { type: "stepCount" } },
       { audience: "private" },
@@ -297,7 +330,7 @@ describe("device actions", () => {
 
   it("answers live_off with the connect card's step for an off connection, and calls no device", async () => {
     devices.report(report("dev-1", "iPhone", [deviceConnection(false)]), NOW);
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       { audience: "private" },
@@ -305,7 +338,7 @@ describe("device actions", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with connect_account and kind "device" when connect_account lists it, otherwise ask the guardian to turn on Live access in the Rome app on their device.',
+        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with connect_service and kind "device" when connect_service lists it, otherwise ask the guardian to turn on Live access in the Rome app on their device.',
     });
     expect(calls).toEqual([]);
   });
@@ -315,7 +348,7 @@ describe("device actions", () => {
       report("dev-1", "iPhone", [{ ...healthConnection(true), permission: "denied" }]),
       NOW,
     );
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "health.stats" },
       { audience: "private" },
@@ -328,14 +361,14 @@ describe("device actions", () => {
   });
 
   it("answers not_connected when no device offers the operation", async () => {
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       { audience: "private" },
     );
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^not_connected: .*core:device_describe/),
+      error: expect.stringMatching(/^not_connected: .*system:read_devices/),
     });
     expect(calls).toEqual([]);
   });
@@ -344,8 +377,8 @@ describe("device actions", () => {
     devices.report(report("dev-ipad", "iPad", [deviceConnection(true)]), NOW - 60_000);
     devices.report(report("dev-phone", "iPhone", [deviceConnection(true)]), NOW);
     devices.report(report("dev-old", "Old iPhone", [deviceConnection(false)]), NOW + 60_000);
-    await engine.run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" });
-    await engine.run(
+    await run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" });
+    await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status", device: "dev-ipad" },
       { audience: "private" },
@@ -356,7 +389,7 @@ describe("device actions", () => {
   it("asked from a device whose Device is off, answers its connect card and calls no other", async () => {
     devices.report(report("dev-asking", "iPhone", [deviceConnection(false)]), NOW);
     devices.report(report("dev-other", "iPad", [deviceConnection(true)]), NOW);
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       {
@@ -366,7 +399,7 @@ describe("device actions", () => {
     );
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringMatching(/^live_off: .*connect_account and kind "device"/),
+      error: expect.stringMatching(/^live_off: .*connect_service and kind "device"/),
     });
     expect(calls).toEqual([]);
   });
@@ -374,7 +407,7 @@ describe("device actions", () => {
   it("asked from a device that has no such connection, offers the card and calls no other", async () => {
     devices.report(report("dev-asking", "iPhone", []), NOW);
     devices.report(report("dev-other", "iPad", [deviceConnection(true)]), NOW);
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       {
@@ -394,7 +427,7 @@ describe("device actions", () => {
       report("dev-stale", "iPhone", [deviceConnection(true)]),
       NOW - STALE_AFTER_MS - 1,
     );
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       { audience: "private" },
@@ -404,7 +437,7 @@ describe("device actions", () => {
       error: expect.stringMatching(/^not_connected: /),
     });
     expect(calls).toEqual([]);
-    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" })).toMatchObject({
+    expect(await run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" })).toMatchObject({
       data: { devices: [{ id: "dev-stale", stale: true }] },
     });
   });
@@ -416,21 +449,21 @@ describe("device actions", () => {
       channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, deviceId),
     });
     // The guardian asks from a device that reports nothing.
-    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
+    expect(await run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
       data: {
         askingDevice: { id: "dev-asking", connected: false },
         devices: [{ id: "dev-other" }],
       },
     });
     devices.report(report("dev-asking", "iPhone", [deviceConnection(false)]), NOW);
-    expect(await engine.run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
+    expect(await run(DEVICE_DESCRIBE_ACTION, {}, from("dev-asking"))).toMatchObject({
       data: { askingDevice: { id: "dev-asking", connected: true } },
     });
     // A turn no device started names none.
-    const web = await engine.run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
+    const web = await run(DEVICE_DESCRIBE_ACTION, {}, { audience: "private" });
     expect((web as { data: Record<string, unknown> }).data.askingDevice).toBeUndefined();
     // "My iPad's battery": a device the guardian names is read, whatever device asks.
-    await engine.run(
+    await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status", device: "dev-other" },
       from("dev-asking"),
@@ -441,7 +474,7 @@ describe("device actions", () => {
   it("answers target_unavailable at once for a device that is offline", async () => {
     devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
     answer = { ok: false, code: "target_unavailable", message: "Device is not connected." };
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status" },
       { audience: "private" },
@@ -459,7 +492,7 @@ describe("device actions", () => {
   it("passes on the device's own error", async () => {
     devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
     answer = { ok: false, code: "invalid_args", message: "device.status takes no arguments." };
-    const result = await engine.run(
+    const result = await run(
       DEVICE_RUN_ACTION,
       { operation: "device.status", args: { x: 1 } },
       { audience: "private" },

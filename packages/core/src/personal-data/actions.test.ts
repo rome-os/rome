@@ -192,12 +192,12 @@ describe("personal-data actions", () => {
     });
     // A working connection is read live now, never by a check scheduled for later.
     const working = (await query()) as { data: { connection: { next?: string } } };
-    expect(working.data.connection.next).toContain('core:device_run and device "dev-1"');
+    expect(working.data.connection.next).toContain('system:run_on_device and deviceId "dev-1"');
     expect(working.data.connection.next).toContain("Do not schedule a later check");
     reportHealth("unknown", false);
     const off = (await query()) as { data: { connection: { next?: string } } };
     expect(off).toMatchObject({ data: { connection: { state: "off", kind: "apple_health" } } });
-    expect(off.data.connection.next).toContain('connect_account and kind "apple_health"');
+    expect(off.data.connection.next).toContain('connect_service and kind "apple_health"');
     reportHealth("denied", true);
     const broken = (await query()) as { data: { connection: { next?: string } } };
     expect(broken).toMatchObject({ data: { connection: { state: "broken" } } });
@@ -270,7 +270,7 @@ describe("personal-data actions", () => {
         connection: {
           device: { id: "dev-asking" },
           state: "off",
-          next: expect.stringContaining('connect_account and kind "apple_health"'),
+          next: expect.stringContaining('connect_service and kind "apple_health"'),
         },
       },
     });
@@ -323,6 +323,7 @@ describe("personal-data actions", () => {
     const lifecycle = withDeviceLifecycle(
       {
         removeDevice: async (_deviceId: string) => ({ ok: true as const }),
+        listDevices: async () => ({ devices: [] }),
       },
       {
         connections: () => devices,

@@ -28,7 +28,6 @@ import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { getBuiltinAppIcon } from "@/lib/builtin-app-icons";
 import { TileIcon } from "@/components/app-tile-icon";
-import { getHostAppRoute } from "@/lib/auth-routing";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
@@ -395,13 +394,8 @@ export default function AppsIndexPage() {
 
   const renderInstalledTile = (app: InstalledAppCard) => {
     const BuiltinIcon = getBuiltinAppIcon(app.id);
-    // An app is openable either via its own embedded frontend (`href`) or via a
-    // host route registered for a backend-only app (see HOST_APP_ROUTES in
-    // lib/auth-routing.ts — shared with App.tsx routing and auth classification).
-    // Everything else opens its details page — every tile goes somewhere.
-    const embeddedHref = app.hasFrontend && app.href ? app.href : null;
-    const hostRoute = getHostAppRoute(app.id);
-    const targetHref = embeddedHref ?? hostRoute;
+    // An app with a frontend opens it; any other app opens its details page.
+    const targetHref = app.hasFrontend && app.href ? app.href : null;
     const candidate = lifecycle.freshCandidate(app);
     const busyLabel =
       lifecycle.actingLabelFor(app) ?? (isInFlight(app.phase) ? t(`phase.${app.phase}`) : null);

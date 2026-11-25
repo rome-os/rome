@@ -12,9 +12,19 @@ final class VoiceInputService {
     /// Cloud, Rome Cloud does not allow the account, or the instance is older
     /// than voice input.
     private(set) var available = false
+    /// False hides the voice conversation control: the account is off Rome
+    /// Cloud's voice input list, or the instance is older than voice conversations.
+    private(set) var conversationAvailable = false
     /// What the instance last said, for Settings to name where speech goes.
     private(set) var info: VoiceInputInfo?
     private let backend: RomeBackend
+    private let defaults: UserDefaults
+    /// Where the instance's last answer on `available` is kept, so a field
+    /// opened before the next answer already has its voice control: one that
+    /// appears late lands where the field's end was, under a tap meant for it.
+    private let availableKey: String
+    /// The same for `conversationAvailable`.
+    private let conversationAvailableKey: String
     private var checkedAt: Date?
     /// Why listening stopped in a chat the guardian left, shown on return.
     private var leftNotices: [String: VoiceInputStop] = [:]
@@ -24,6 +34,11 @@ final class VoiceInputService {
 
     init(backend: RomeBackend, instance: String, defaults: UserDefaults = .standard) {
         self.backend = backend
+        self.defaults = defaults
+        availableKey = VoiceInputMarks.availablePrefix + instance
+        available = defaults.bool(forKey: availableKey)
+        conversationAvailableKey = VoiceInputMarks.conversationAvailablePrefix + instance
+        conversationAvailable = defaults.bool(forKey: conversationAvailableKey)
         marks = VoiceInputMarks(instance: instance, defaults: defaults)
         // The app closed while these chats listened, or before their notice went.
         for (chat, stop) in marks.takeLaunchNotices() { leftNotices[chat] = stop }
@@ -46,18 +61,37 @@ final class VoiceInputService {
             return
         }
         available = info?.available ?? false
+        if available { defaults.set(true, forKey: availableKey) } else { defaults.removeObject(forKey: availableKey) }
+        await refreshConversation()
+    }
+
+    /// Asks whether the instance offers a voice conversation, which follows
+    /// the same list. Kept as it was when the instance cannot say now.
+    private func refreshConversation() async {
+        let offered: Bool
+        do {
+            offered = try await backend.voiceConversationInfo()?.available ?? false
+        } catch APIError.notFound {
+            // An instance older than voice conversations.
+            offered = false
+        } catch {
+            return
+        }
+        conversationAvailable = offered
+        if offered { defaults.set(true, forKey: conversationAvailableKey) } else { defaults.removeObject(forKey: conversationAvailableKey) }
     }
 
     func socketRequest() -> URLRequest? { backend.voiceInputSocket() }
+    func conversationSocketRequest() -> URLRequest? { backend.voiceConversationSocket() }
 
     func keep(_ stop: VoiceInputStop, for chat: String) { leftNotices[chat] = stop }
     func takeNotice(for chat: String) -> VoiceInputStop? { leftNotices.removeValue(forKey: chat) }
 
     /// Listening started in `chat`.
     func listening(in chat: String) { marks.set(chat, .listening) }
-    /// Listening in `chat` stopped; a stop's notice is kept until an edit or a send.
+    /// Listening in `chat` stopped; a stop's notice is kept until it is seen.
     func stopped(in chat: String, _ stop: VoiceInputStop?) { marks.set(chat, stop.map(VoiceInputMarks.Mark.notice)) }
-    /// The guardian edited or sent in `chat`: its notice is gone.
+    /// The guardian edited or sent in `chat`, or its notice showed long enough: it is gone.
     func noticeSeen(in chat: String) {
         leftNotices[chat] = nil
         marks.set(chat, nil)
@@ -111,14 +145,20 @@ struct VoiceInputMarks {
         return notices
     }
 
-    /// Every instance's marks, on sign-out.
+    /// Every instance's marks, and whether it offered voice input and voice
+    /// conversations, on sign-out.
     static func removeAll(defaults: UserDefaults = .standard) {
-        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(prefix) || key.hasPrefix(availablePrefix) || key.hasPrefix(conversationAvailablePrefix) {
             defaults.removeObject(forKey: key)
         }
     }
 
     private static let prefix = "voiceInput.marks."
+    /// `VoiceInputService`'s last answer on whether the instance offers voice input.
+    static let availablePrefix = "voiceInput.available."
+    /// `VoiceInputService`'s last answer on whether the instance offers a voice conversation.
+    static let conversationAvailablePrefix = "voiceConversation.available."
     private static let listening = "listening:"
 }
 
@@ -159,8 +199,11 @@ final class VoiceInputController {
     enum State { case idle, listening, finishing }
 
     private(set) var state: State = .idle
-    /// Why listening last stopped on its own; it goes away on the next edit or send.
+    /// Why listening last stopped on its own; it goes away on the next edit
+    /// or send. A stop without a fault also goes once it has been on screen
+    /// for `VoiceNoticeTimer.lifetime`, or when the field leaves.
     private(set) var notice: VoiceInputStop?
+    @ObservationIgnored private let noticeTimer: VoiceNoticeTimer
     /// The loudness of this listening, for the waveform; a new one each start.
     @ObservationIgnored private(set) var meter = VoiceLevelMeter()
     @ObservationIgnored private var dictation: VoiceDictation?
@@ -177,6 +220,10 @@ final class VoiceInputController {
 
     var active: Bool { state != .idle }
 
+    init(noticeTimer: VoiceNoticeTimer = VoiceNoticeTimer()) {
+        self.noticeTimer = noticeTimer
+    }
+
     func toggle(service: VoiceInputService, chat: String?, field: VoiceInputField, text: Binding<String>, handle: ComposerTextHandle) {
         switch state {
         case .idle: start(service: service, chat: chat, field: field, text: text, handle: handle)
@@ -192,6 +239,7 @@ final class VoiceInputController {
         let range = handle.cursor(in: original)
         anchor = (original, range)
         notice = nil
+        noticeTimer.cancel()
         if let chat { service.listening(in: chat) }
         meter = VoiceLevelMeter()
         state = .listening
@@ -208,8 +256,11 @@ final class VoiceInputController {
                     self?.show(insertion, before: before, after: after, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
-                    self?.done(heard: heard, stop: stop, text: text, handle: handle)
-                    if let chat { service.stopped(in: chat, stop) }
+                    if let self {
+                        self.finished(heard: heard, stop: stop, service: service, chat: chat, text: text, handle: handle)
+                    } else if let chat {
+                        service.stopped(in: chat, stop?.notice(afterHearing: heard))
+                    }
                 }
             )
         )
@@ -241,35 +292,60 @@ final class VoiceInputController {
         stop()
     }
 
+    /// Listening ended: the last words go in the field, and the notice shown
+    /// is the one kept for the next launch, none when it says nothing.
+    func finished(heard: String, stop: VoiceInputStop?, service: VoiceInputService, chat: String?, text: Binding<String>, handle: ComposerTextHandle) {
+        let said = done(heard: heard, stop: stop, service: service, chat: chat, text: text, handle: handle)
+        if let chat { service.stopped(in: chat, said) }
+    }
+
     /// The field is going away with the chat: listening stops, the words stay
-    /// in the draft, and the chat says why when the guardian comes back.
+    /// in the draft, and the chat says why when the guardian comes back. A
+    /// notice that goes by itself counts as seen; a fault's shows again on
+    /// return, until an edit or send.
     func leave(service: VoiceInputService?, chat: String?) {
-        guard let dictation else { return }
+        guard let dictation else {
+            guard let notice else { return }
+            if notice.reason.endsWithoutFault {
+                dismissNotice(service: service, chat: chat)
+            } else if let service, let chat {
+                service.keep(notice, for: chat)
+            }
+            return
+        }
+        let heard = dictation.heard
         sendWhenDone = nil
         dictation.cancel()
         finishListening()
         anchor = nil
         guard let service, let chat else { return }
-        let stop = VoiceInputStop(reason: .leftChat)
-        service.keep(stop, for: chat)
+        let stop = VoiceInputStop(reason: .leftChat).notice(afterHearing: heard)
+        if let stop { service.keep(stop, for: chat) }
         service.stopped(in: chat, stop)
     }
 
-    /// The field opened: a chat left while listening says why.
+    /// The field came on screen: a chat left while listening says why. Call
+    /// it only once the field shows, since a notice's clock starts here.
     func arrive(service: VoiceInputService?, chat: String?) {
         guard let service, let chat, let stop = service.takeNotice(for: chat) else { return }
-        show(stop)
+        show(stop, service: service, chat: chat)
     }
 
     /// Call on the guardian's own edit in the field, or a send: the notice goes.
     /// Not on text the app puts there, such as a draft coming back.
     func edited(service: VoiceInputService?, chat: String?) {
         guard notice != nil, !active else { return }
+        dismissNotice(service: service, chat: chat)
+    }
+
+    private func dismissNotice(service: VoiceInputService?, chat: String?) {
         notice = nil
+        noticeTimer.cancel()
         if let service, let chat { service.noticeSeen(in: chat) }
     }
 
-    private func done(heard: String, stop: VoiceInputStop?, text: Binding<String>, handle: ComposerTextHandle) {
+    /// Puts the last words in the field, and returns the notice it shows.
+    private func done(heard: String, stop: VoiceInputStop?, service: VoiceInputService?, chat: String?, text: Binding<String>, handle: ComposerTextHandle) -> VoiceInputStop? {
         let send = sendWhenDone
         sendWhenDone = nil
         defer {
@@ -277,7 +353,7 @@ final class VoiceInputController {
             if stop == nil, let send { DispatchQueue.main.async(execute: send) }
         }
         finishListening()
-        guard let anchor else { return }
+        guard let anchor else { return stop?.notice(afterHearing: heard) }
         self.anchor = nil
         let original = anchor.original as NSString
         let before = original.substring(to: anchor.range.location)
@@ -288,11 +364,20 @@ final class VoiceInputController {
         } else if !handle.type(insertion, replacing: anchor.range, in: anchor.original) {
             text.wrappedValue = before + insertion + after
         }
-        if let stop { show(stop) }
+        let said = stop?.notice(afterHearing: insertion)
+        if let said { show(said, service: service, chat: chat) }
+        return said
     }
 
-    private func show(_ stop: VoiceInputStop) {
+    private func show(_ stop: VoiceInputStop, service: VoiceInputService?, chat: String?) {
         notice = stop
+        // A fault's notice may ask for something, such as allowing the
+        // microphone in Settings, so it stays until an edit or send.
+        if stop.reason.endsWithoutFault {
+            noticeTimer.start { [weak self] in self?.dismissNotice(service: service, chat: chat) }
+        } else {
+            noticeTimer.cancel()
+        }
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 
@@ -334,6 +419,83 @@ final class VoiceInputController {
             let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             guard raw == AVAudioSession.InterruptionType.began.rawValue else { return }
             MainActor.assumeIsolated { self?.dictation?.end(.interrupted) }
+        })
+    }
+}
+
+/// Takes a notice down once it has been on screen for `lifetime`. The clock
+/// runs only while the app is active, and starts over on each return, so a
+/// notice that arrives in the background (listening ended as the app left)
+/// still shows when the guardian comes back, and goes soon after. UIKit's
+/// notifications, not the scene phase, which may miss a trip to the
+/// background (see `ios/AGENTS.md`). The field leaving takes its notice down
+/// at once (`VoiceInputController.leave`), so the clock never runs unseen.
+@MainActor
+final class VoiceNoticeTimer {
+    static let lifetime: Duration = .seconds(7)
+
+    private let lifetime: Duration
+    nonisolated(unsafe) private let center: NotificationCenter
+    private let appActive: @MainActor () -> Bool
+    private var expire: (() -> Void)?
+    private var active = false
+    private var countdown: Task<Void, Never>?
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+
+    init(lifetime: Duration = VoiceNoticeTimer.lifetime, center: NotificationCenter = .default,
+         appActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }) {
+        self.lifetime = lifetime
+        self.center = center
+        self.appActive = appActive
+    }
+
+    deinit {
+        for observer in observers { center.removeObserver(observer) }
+    }
+
+    /// A notice went up: `expire` takes it down.
+    func start(_ expire: @escaping () -> Void) {
+        self.expire = expire
+        active = appActive()
+        if observers.isEmpty { observe() }
+        restart()
+    }
+
+    /// The notice went for another reason, such as an edit.
+    func cancel() {
+        expire = nil
+        countdown?.cancel()
+        countdown = nil
+        for observer in observers { center.removeObserver(observer) }
+        observers = []
+    }
+
+    private func restart() {
+        countdown?.cancel()
+        countdown = nil
+        guard expire != nil, active else { return }
+        countdown = Task { [weak self, lifetime] in
+            try? await Task.sleep(for: lifetime)
+            guard !Task.isCancelled, let self, let expire = self.expire else { return }
+            self.cancel()
+            expire()
+        }
+    }
+
+    private func observe() {
+        // Resigning active comes first on the way to the background, and alone
+        // under Notification Center or Control Center.
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.active = false
+                self?.restart()
+            }
+        })
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.active = true
+                self?.restart()
+            }
         })
     }
 }

@@ -46,7 +46,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     openDirectMessage: rs.fn(async () => "D_NEW"),
     addReaction: rs.fn(async () => {}),
     removeReaction: rs.fn(async () => {}),
-    userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
+    userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: TEAM })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),
     memberChannels: rs.fn(async () => ({ channels: [] })),
@@ -136,7 +136,6 @@ function adapter(
   api = fakeApi(),
   options: {
     chats?: ReturnType<typeof fakeChats>;
-    listened?: () => boolean;
     readGate?: SlackReadGate;
     bound?: () => Promise<boolean>;
   } = {},
@@ -153,7 +152,6 @@ function adapter(
     deliveryAttempts: 4,
     onFault: ({ kind }) => faults.push(kind),
     ...(options.readGate ? { readGate: options.readGate } : {}),
-    ...(options.listened ? { listened: options.listened } : {}),
   });
   a.onInbound(chats.accept);
   // The instance's drain hands frames to the connection while it runs.
@@ -224,7 +222,7 @@ describe("Slack app direct messages (R4)", () => {
     expect(receipt).toMatchObject({ chatId: "D_GUARDIAN", messageId: "2.0" });
   });
 
-  it("hears nothing but direct messages from people in the workspace", async () => {
+  it("hears nothing but direct messages someone said", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
@@ -232,10 +230,112 @@ describe("Slack app direct messages (R4)", () => {
     await mailbox.deposit(
       frame({ ...base, event_id: "E1", event: { ...base.event, user: BOT } }),
       frame({ ...base, event_id: "E3", event: { ...base.event, subtype: "message_changed" } }),
-      frame({ ...base, event_id: "E4", event: { ...base.event, user_team: "T_OTHER" } }),
       frame({ ...base, event_id: "E5", event: { ...base.event, type: "app_mention" } }),
     );
     expect(delivered).toHaveLength(0);
+  });
+
+  it("hands over an author from another workspace under that workspace", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "T_OTHER" } }),
+    );
+    userName.mockResolvedValue({ displayName: "Ann", username: "ann", teamId: "T_EXTERNAL" });
+    const second = dmEvent(2, {});
+    await mailbox.deposit(
+      frame({
+        ...second,
+        event: { ...second.event, user: "U_ANN", team: TEAM, source_team: "T_EXTERNAL" },
+      }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_OTHER/U_GUARDIAN", "T_EXTERNAL/U_ANN"]);
+  });
+
+  it("asks Slack's directory again when its answer named no workspace", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockResolvedValueOnce({ displayName: "Ouou", username: "ouou" })
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } }),
+    );
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
+  });
+
+  it("names a Grid member of the app's workspace there, whatever their home workspace", async () => {
+    const mailbox = fakeMailbox();
+    const api = fakeApi({
+      userName: rs.fn(async () => ({
+        displayName: "Ouou",
+        username: "ouou",
+        teamId: "T_HOME",
+        teams: ["T_HOME", TEAM],
+      })),
+    });
+    const { adapter: a, delivered } = adapter(mailbox, api);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1" }),
+      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, user_team: "T_POSTED_IN" } }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_A/U_GUARDIAN", "T_POSTED_IN/U_GUARDIAN"]);
+  });
+
+  it("holds a message that names another workspace but not its author's", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs.fn(async () => ({ displayName: "Ouou", username: "ouou" }));
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, team: TEAM, source_team: "T_EXTERNAL" } }),
+    );
+    expect(delivered).toHaveLength(0);
+    expect(mailbox.statuses).toEqual([500]);
+  });
+
+  it("names an author Slack places only in an Enterprise Grid org under their own workspace", async () => {
+    const mailbox = fakeMailbox();
+    const api = fakeApi({
+      userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" })),
+    });
+    const { adapter: a, delivered } = adapter(mailbox, api);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } }),
+    );
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
+  });
+
+  it("holds a message from an Enterprise Grid author until Slack's directory names their workspace", async () => {
+    const mailbox = fakeMailbox();
+    const userName = rs
+      .fn<SlackAppWebApi["userName"]>()
+      .mockRejectedValueOnce(new Error("users.info timed out"))
+      .mockResolvedValue({ displayName: "Ouou", username: "ouou", teamId: "T_GRID" });
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi({ userName }));
+    await a.start();
+    const base = dmEvent(1);
+    const held = frame({ ...base, event_id: "E1", event: { ...base.event, user_team: "E_ORG" } });
+    await mailbox.deposit(held);
+    expect(delivered).toHaveLength(0);
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.senderId)).toEqual(["T_GRID/U_GUARDIAN"]);
   });
 
   it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {
@@ -523,23 +623,6 @@ describe("Slack app acknowledging its mailbox", () => {
     await expect(answered).resolves.toEqual({ status: 200 });
   });
 
-  it("hands over nothing heard while Rome does not listen to the account", async () => {
-    const mailbox = fakeMailbox();
-    let listening = false;
-    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), {
-      listened: () => listening,
-    });
-    await a.start();
-
-    await mailbox.deposit(frame(dmEvent(1)));
-    expect(mailbox.statuses).toEqual([200]);
-    expect(delivered).toHaveLength(0);
-
-    listening = true;
-    await mailbox.deposit(frame(dmEvent(2)));
-    expect(delivered.map((m) => m.text)).toEqual(["message 2"]);
-  });
-
   it("hands a message Slack delivers again to Chats, which has it once", async () => {
     const mailbox = fakeMailbox();
     const chats = fakeChats();
@@ -724,18 +807,94 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: { gate?: SlackReadGate; listened?: () => boolean } = {},
+  options: { gate?: SlackReadGate; userName?: SlackAppWebApi["userName"] } = {},
 ) {
-  const api = fakeApi({ conversationHistory: slack.conversationHistory });
+  const api = fakeApi({
+    conversationHistory: slack.conversationHistory,
+    ...(options.userName ? { userName: options.userName } : {}),
+  });
   return adapter(mailbox, api, {
     readGate: options.gate ?? openGate(),
-    ...(options.listened ? { listened: options.listened } : {}),
   });
 }
 
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
+  it("reads a Grid member under the workspace they were heard under", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const userName = rs.fn(async () => ({
+      displayName: "Ouou",
+      username: "ouou",
+      teamId: "T_HOME",
+      teams: ["T_HOME", TEAM],
+    }));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(frame({ ...base, event: { ...base.event, user_team: "T_HOME" } }));
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_HOME/U_GUARDIAN",
+      "T_HOME/U_GUARDIAN",
+    ]);
+  });
+
+  it("names an author from another workspace the same when read as when heard, while the directory fails", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1), { user: "U_EXTERNAL" });
+    const userName = rs.fn<SlackAppWebApi["userName"]>().mockRejectedValue(new Error("timed out"));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, user: "U_EXTERNAL", user_team: "T_OTHER" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_OTHER/U_EXTERNAL",
+      "T_OTHER/U_EXTERNAL",
+    ]);
+  });
+
+  it("names an author from another workspace the same when read as when heard", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1), { user: "U_EXTERNAL" });
+    const userName = rs.fn(async () => ({
+      displayName: "Ann",
+      username: "ann",
+      teamId: "T_OTHER",
+    }));
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack, { userName });
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(
+      frame({ ...base, event: { ...base.event, user: "U_EXTERNAL", user_team: "T_OTHER" } }),
+    );
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect([...delivered, ...read].map((m) => m.senderId)).toEqual([
+      "T_OTHER/U_EXTERNAL",
+      "T_OTHER/U_EXTERNAL",
+    ]);
+  });
+
+  it("reads Rome's own post in the app's workspace when Slack names only an org on it", async () => {
+    const slack = fakeSlackHistory();
+    Object.assign(slack.say(1, "bot"), { user_team: "E_ORG" });
+    const { adapter: a } = historyAdapter(fakeMailbox(), slack);
+    await a.start();
+
+    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
+    expect(read.map((m) => m.senderId)).toEqual(["T_A/U_BOT"]);
+  });
+
   it("reads from Slack on every read, since the connection keeps no copy of the chat", async () => {
     const slack = fakeSlackHistory();
     for (let i = 1; i <= 10; i++) slack.say(i, i % 2 === 0 ? "bot" : "member");

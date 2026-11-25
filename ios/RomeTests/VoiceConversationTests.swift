@@ -1,0 +1,457 @@
+import AVFoundation
+import Foundation
+import Network
+import UIKit
+import Testing
+@testable import Rome
+
+@MainActor
+@Suite struct VoiceConversationTests {
+    // MARK: The socket's messages
+
+    @Test func readsWhatDrivesTheAudioAndTheCapsule() {
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"ready","sampleRate":24000}"#.utf8)) == .ready(sampleRate: 24000))
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"state","state":"thinking"}"#.utf8)) == .state(.thinking))
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"clear"}"#.utf8)) == .clear)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"alive"}"#.utf8)) == .alive)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"ended"}"#.utf8)) == .ended)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"error","reason":"chat-refused"}"#.utf8)) == .error(.chatRefused))
+    }
+
+    @Test func theWordsAndCaptionsAreLeftToTheChat() {
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"heard","settled":"a","pending":"b"}"#.utf8)) == nil)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"turn","text":"a"}"#.utf8)) == nil)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"caption","text":"a"}"#.utf8)) == nil)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"something-new"}"#.utf8)) == nil)
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"state","state":"dreaming"}"#.utf8)) == nil)
+    }
+
+    @Test func aReasonFromANewerInstanceStillEndsTheConversation() {
+        #expect(VoiceConversationServerMessage(json: Data(#"{"type":"error","reason":"from-the-future"}"#.utf8)) == .error(.badRequest))
+    }
+
+    @Test func theStartNamesTheChatAndTheMicrophonesRate() throws {
+        let start = VoiceConversationWire.start(chatId: #"chat "1""#, sampleRate: 16000)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(start.utf8)) as? [String: Any])
+        #expect(object["type"] as? String == "start")
+        #expect(object["chatId"] as? String == #"chat "1""#)
+        #expect(object["sampleRate"] as? Int == 16000)
+        #expect(VoiceConversationWire.sampleRate == VoiceInputWire.sampleRate)
+    }
+
+    @Test func onlyACallThatKeepsTheMicrophoneEndsWithoutAFault() {
+        let all: [VoiceConversationStopReason] = [
+            .unavailable, .listeningFailed, .speakingFailed, .chatRefused, .timeLimit, .badRequest,
+            .microphoneBlocked, .microphoneFailed, .connectionLost, .interrupted,
+        ]
+        #expect(all.filter(\.endsWithoutFault) == [.interrupted])
+        for reason in all { #expect(!reason.notice.isEmpty) }
+        #expect(VoiceConversationStopReason.microphoneBlocked.notice == String(localized: "Microphone blocked. Allow it in Settings"))
+    }
+
+    // MARK: Whether the field offers it
+
+    @Test func onlyChatAndTopicChatsOutsideAThreadOrReplyOfferAConversation() {
+        #expect(Composer.offersConversation(field: .chat, chat: "concierge", available: true, here: true))
+        #expect(Composer.offersConversation(field: .topicChat, chat: "topic", available: true, here: true))
+        // Spoken turns go to the chat itself, where a thread or a reply would not show them.
+        #expect(!Composer.offersConversation(field: .chat, chat: "concierge", available: true, here: false))
+        #expect(!Composer.offersConversation(field: .topicChat, chat: "topic", available: true, here: false))
+        #expect(!Composer.offersConversation(field: .taskChat, chat: "task", available: true, here: true))
+        #expect(!Composer.offersConversation(field: .chat, chat: nil, available: true, here: true))
+        #expect(!Composer.offersConversation(field: .chat, chat: "concierge", available: false, here: true))
+    }
+
+    @Test func theInstancesAnswerShowsTheControlAndIsKeptForTheNextLaunch() async {
+        let defaults = UserDefaults(suiteName: "voice-conversation-\(UUID())")!
+        let backend = StubBackend()
+        backend.conversationInfo = VoiceConversationInfo(available: true)
+        let service = VoiceInputService(backend: backend, instance: "a", defaults: defaults)
+        #expect(!service.conversationAvailable)
+        await service.refresh(now: true)
+        #expect(service.conversationAvailable)
+        #expect(VoiceInputService(backend: StubBackend(), instance: "a", defaults: defaults).conversationAvailable)
+        #expect(!VoiceInputService(backend: StubBackend(), instance: "b", defaults: defaults).conversationAvailable)
+    }
+
+    @Test func anInstanceOlderThanVoiceConversationsOffersNone() async {
+        let defaults = UserDefaults(suiteName: "voice-conversation-\(UUID())")!
+        defaults.set(true, forKey: VoiceInputMarks.conversationAvailablePrefix + "a")
+        let backend = StubBackend()
+        backend.conversationError = .notFound
+        let service = VoiceInputService(backend: backend, instance: "a", defaults: defaults)
+        #expect(service.conversationAvailable)
+        await service.refresh(now: true)
+        #expect(!service.conversationAvailable)
+        #expect(!VoiceInputService(backend: StubBackend(), instance: "a", defaults: defaults).conversationAvailable)
+    }
+
+    @Test func anInstanceThatCannotSayNowKeepsItsLastAnswer() async {
+        let defaults = UserDefaults(suiteName: "voice-conversation-\(UUID())")!
+        defaults.set(true, forKey: VoiceInputMarks.conversationAvailablePrefix + "a")
+        let backend = StubBackend()
+        backend.conversationError = .network
+        let service = VoiceInputService(backend: backend, instance: "a", defaults: defaults)
+        await service.refresh(now: true)
+        #expect(service.conversationAvailable)
+    }
+
+    @Test func signingOutForgetsWhichInstancesOfferVoiceConversations() {
+        let defaults = UserDefaults(suiteName: "voice-conversation-\(UUID())")!
+        defaults.set(true, forKey: VoiceInputMarks.conversationAvailablePrefix + "a")
+        VoiceInputMarks.removeAll(defaults: defaults)
+        #expect(!VoiceInputService(backend: StubBackend(), instance: "a", defaults: defaults).conversationAvailable)
+    }
+
+    @Test func standInsOfferNoVoiceConversation() async throws {
+        let backend = DemoBackend()
+        #expect(try await backend.voiceConversationInfo() == nil)
+        #expect(backend.voiceConversationSocket() == nil)
+    }
+
+    // MARK: Starting and ending
+
+    @Test func aRefusedMicrophoneEndsAtOnceAndSaysWhere() async {
+        let audio = FakeAudio(allowed: false)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        #expect(controller.active)
+        await waitUntil { !controller.active }
+        #expect(controller.notice == .microphoneBlocked)
+        #expect(!audio.started)
+        // The guardian's next edit takes the line down.
+        controller.edited()
+        #expect(controller.notice == nil)
+    }
+
+    @Test func lockingTheScreenOrOpeningAnotherAppKeepsItGoing() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        // The app's own center would send every other test to the background too.
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.active)
+        #expect(!audio.closed)
+        controller.end()
+    }
+
+    @Test func aCallThatEndsLetsItGoOnWithoutPlayingWhatWasSaidMeanwhile() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        #expect(controller.active)
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallThatKeepsTheMicrophoneEndsItWithALineThatGoesByItself() async throws {
+        // Rome never answers: the conversation waits, on.
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+        ])
+        await waitUntil { !controller.active }
+        #expect(!controller.active)
+        #expect(controller.notice == .interrupted)
+        #expect(audio.resumed == 0)
+        // Leaving the chat takes a line that goes by itself down with it.
+        controller.leave()
+        #expect(controller.notice == nil)
+    }
+
+    @Test func comingBackToTheAppResumesACallThatNeverSaidItEnded() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        // Coming to the front with no call under way resumes nothing.
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(audio.resumed == 0)
+        // iOS never says the call ended: coming back to the app resumes it.
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func comingBackToTheAppDuringTheCallKeepsItPaused() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call goes on: the audio cannot start, and the conversation waits.
+        audio.refusesResume = true
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(audio.resumed == 0)
+        // The call ends.
+        audio.refusesResume = false
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallThatEndsWhileTheAudioCannotStartWaitsForTheApp() async throws {
+        let server = try SilentServer()
+        defer { server.stop() }
+        let audio = FakeAudio(allowed: true)
+        let center = NotificationCenter()
+        let controller = VoiceConversationController(center: center, makeAudio: { audio })
+        controller.start(request: try await server.request(), chat: "chat")
+        await waitUntil { audio.started }
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+        ])
+        // The call ends with the phone locked, and the audio cannot start yet.
+        audio.refusesResume = true
+        center.post(name: AVAudioSession.interruptionNotification, object: nil, userInfo: [
+            AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+            AVAudioSessionInterruptionOptionKey: AVAudioSession.InterruptionOptions.shouldResume.rawValue,
+        ])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.resumed == 0)
+        // The guardian comes back to the app: the audio starts.
+        audio.refusesResume = false
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await waitUntil { audio.resumed == 1 }
+        #expect(controller.active)
+        #expect(audio.resumed == 1)
+        controller.end()
+    }
+
+    @Test func aCallPausesTheReconnectWindowAndItsEndGivesAWholeOne() {
+        var window = ReconnectWindow()
+        // A drop starts the window, once.
+        let first = window.dropped()
+        let again = window.dropped()
+        #expect(first && !again)
+        // A call: the window stops, and a drop meanwhile starts none.
+        window.pause()
+        let duringCall = window.dropped()
+        #expect(!duringCall && !window.running)
+        // The call ends with the connection still down: a whole window from now.
+        let afterCall = window.resumed(connected: false)
+        #expect(afterCall && window.running)
+        // Rome answers again; a call that ends with the connection up starts none.
+        window.recovered()
+        window.pause()
+        let connected = window.resumed(connected: true)
+        #expect(!connected && !window.running)
+    }
+
+    @Test func aFirstConnectionKeepsTheFirstWordsAndAReconnectWaitsForReady() {
+        var gate = MicrophoneGate()
+        // The guardian may speak at once: their first words go out behind `start`.
+        gate.attached(reconnecting: false)
+        #expect(gate.open)
+        // A reconnect drops what comes before Rome is ready, so no burst follows a slow handshake.
+        gate.attached(reconnecting: true)
+        #expect(!gate.open)
+        gate.ready()
+        #expect(gate.open)
+    }
+
+    @Test func aConversationRomeNeverAnsweredEndsAtOnceAndSaysSo() async {
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        // Nothing listens on port 9: the first connection fails, and is not called again.
+        controller.start(request: Self.request, chat: "chat")
+        await waitUntil { !controller.active }
+        #expect(!controller.active)
+        #expect(controller.notice == .connectionLost)
+    }
+
+    @Test func theGuardiansEndLeavesNoLine() async {
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        controller.end()
+        #expect(!controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.closed)
+    }
+
+    @Test func openingAThreadOrAReplyEndsTheConversationWithNoLine() async {
+        let audio = FakeAudio(allowed: true)
+        let controller = VoiceConversationController(makeAudio: { audio })
+        controller.start(request: Self.request, chat: "chat")
+        controller.fieldMoved(here: true)
+        #expect(controller.active)
+        // Its turns would go to the chat itself, where the thread hides them.
+        controller.fieldMoved(here: false)
+        #expect(!controller.active)
+        #expect(controller.notice == nil)
+        #expect(audio.closed)
+    }
+
+    @Test func theBarsFollowWhoeverIsTalking() {
+        let audio = FakeAudio(allowed: true)
+        audio.microphoneLevel = 0.4
+        audio.replyLevel = 0.8
+        let controller = VoiceConversationController(makeAudio: { audio })
+        #expect(controller.level() == 0)
+        controller.start(request: Self.request, chat: "chat")
+        #expect(controller.level() == 0.4)
+        controller.toggleMute()
+        #expect(controller.muted)
+        #expect(controller.level() == 0)
+        controller.toggleMute()
+        #expect(!controller.muted)
+        controller.end()
+    }
+
+    // MARK: The capsule and the audio
+
+    @Test func mutedBarsRestAndReduceMotionHoldsTheirShape() {
+        let muted = VoiceConversationCapsule.values(.muted, at: 12.3, eased: 1, still: false)
+        #expect(muted.allSatisfy { $0 == 0 })
+        let still = VoiceConversationCapsule.values(.listening, at: 12.3, eased: 1, still: true)
+        #expect(still == VoiceConversationCapsule.shape.map { $0 * 0.5 })
+        let thinking = VoiceConversationCapsule.values(.thinking, at: 4.2, eased: 0, still: false)
+        #expect(thinking.allSatisfy { $0 >= 0.12 && $0 <= 0.42 + 1e-9 })
+        let quiet = VoiceConversationCapsule.values(.listening, at: 4.2, eased: 0, still: false)
+        #expect(quiet.allSatisfy { $0 == 0 })
+        #expect(VoiceConversationCapsule.shape.count == 14)
+    }
+
+    @Test func theReplysSamplesPlayAsTheyCame() throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1))
+        var samples: [Int16] = [0, 16384, -16384, Int16.max, Int16.min]
+        let chunk = Data(bytes: &samples, count: samples.count * 2)
+        let buffer = try #require(SpeakerphoneAudio.buffer(chunk, format: format))
+        #expect(buffer.frameLength == 5)
+        let channel = try #require(buffer.floatChannelData?[0])
+        #expect(channel[0] == 0)
+        #expect(channel[1] == 0.5)
+        #expect(channel[2] == -0.5)
+        #expect(channel[4] == -1)
+        #expect(SpeakerphoneAudio.buffer(Data(), format: format) == nil)
+    }
+
+    @Test func anOldReadingIsSilence() async {
+        let reading = LevelReading()
+        reading.set(0.7)
+        #expect(reading.current == 0.7)
+        try? await Task.sleep(for: .milliseconds(Int(LevelReading.stale * 1000) + 100))
+        #expect(reading.current == 0)
+    }
+
+    // MARK: Helpers
+
+    /// Nowhere: no test reaches a socket.
+    private static let request = URLRequest(url: URL(string: "ws://127.0.0.1:9/ws/voice-conversation")!)
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<100 where !condition() { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+}
+
+/// The microphone and speaker, which Rome doesn't own: it says what was asked of it.
+@MainActor
+private final class FakeAudio: VoiceConversationAudio {
+    let allowed: Bool
+    private(set) var started = false
+    private(set) var closed = false
+    private(set) var resumed = 0
+    var microphoneLevel: Float = 0
+    var replyLevel: Float = 0
+
+    init(allowed: Bool) { self.allowed = allowed }
+
+    func requestAccess() async -> Bool { allowed }
+    func start(onChunk: @escaping @Sendable (Data) -> Void, onLost: @escaping @MainActor () -> Void) throws { started = true }
+    func play(_ chunk: Data, sampleRate: Int) {}
+    func clear() {}
+    /// The system still keeps the audio, as during a call.
+    var refusesResume = false
+    func resume() throws {
+        if refusesResume { throw VoiceAudioError.noInput }
+        resumed += 1
+    }
+    func close() { closed = true }
+}
+
+/// A local port that takes connections and never answers: a socket to it
+/// waits in its opening handshake, so a conversation on it stays on.
+private final class SilentServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var held: [NWConnection] = []
+
+    init() throws {
+        listener = try NWListener(using: .tcp, on: .any)
+        listener.newConnectionHandler = { [weak self] connection in
+            connection.start(queue: .global())
+            self?.hold(connection)
+        }
+        listener.start(queue: .global())
+    }
+
+    private func hold(_ connection: NWConnection) {
+        lock.withLock { held.append(connection) }
+    }
+
+    /// The socket's request, once the port is open.
+    func request() async throws -> URLRequest {
+        for _ in 0..<200 {
+            if let port = listener.port?.rawValue, port != 0 {
+                return URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/ws/voice-conversation")!)
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw CancellationError()
+    }
+
+    func stop() {
+        listener.cancel()
+        lock.withLock { for connection in held { connection.cancel() } }
+    }
+}

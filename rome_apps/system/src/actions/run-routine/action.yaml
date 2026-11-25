@@ -1,7 +1,0 @@
-name: run_routine
-type: system
-description: Run a routine now, as the Routines page's Run now does — its action runs for real, even when the routine is paused, and the run shows in its history. Use it when the guardian asks to run a routine, including a manual routine saved to run on demand. It answers once the run has started; check how it went with system:list_routine_runs. Only in the guardian's private chat, in a turn their own message started, so a routine cannot use it as its action. Find the routine's id with system:search_routine
-complexity: simple
-speed: fast
-reliability: high
-sideEffects: write

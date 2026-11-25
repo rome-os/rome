@@ -24,12 +24,19 @@ import {
   type SlackEventCallback,
   slackMessageId,
   slackSenderId,
-  type SlackUserName,
   slackUserIdOf,
   splitSlackText,
 } from "../slack/slack.js";
 import { isDepositedFor } from "./deposit.js";
-import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
+import {
+  authorOf,
+  inTimeline,
+  isSaid,
+  type SlackMember,
+  SlackWorkspaceUnknown,
+  slackMessage,
+  type SlackWireMessage,
+} from "./message.js";
 import { SlackReadGate } from "./read-gate.js";
 import { type FetchHistoryPage, readTimeline } from "./timeline.js";
 import { SlackMemberChannels } from "./channels.js";
@@ -88,23 +95,12 @@ export interface SlackAppAdapterConfig {
    *  it. */
   deliveryAttempts: number;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  /** Whether Rome listens to the account now. A message heard while it does
-   *  not is not handed over, so linking an agent later brings
-   *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
-  listened?: () => boolean;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
   /** How reads of a thread take turns. Slack allows conversations.replies
    *  its own request a minute, apart from conversations.history. Defaults to
    *  `readGate` when one is given, else to Slack's allowance. */
   repliesGate?: SlackReadGate;
-}
-
-function isExternalAuthor(payload: SlackEventCallback): boolean {
-  const event = payload.event;
-  return [event.team, event.user_team, event.source_team].some(
-    (team) => typeof team === "string" && team !== payload.team_id,
-  );
 }
 
 /** What a read of a channel says when the workspace was connected before
@@ -189,7 +185,10 @@ export class SlackAppAdapter {
    *  otherwise; the whole map goes when the adapter starts. */
   private readonly refusedWhileStopped = new Map<string, number>();
   private readonly dedup = new InboundDedup(5_000);
-  private readonly userNames = new Map<string, SlackUserName>();
+  private readonly userNames = new Map<string, SlackMember>();
+  /** The workspace each author was heard under, so a read names them as
+   *  they were heard. */
+  private readonly heardWorkspaces = new Map<string, string>();
   private abort = new AbortController();
   private depositKey: string;
   private readonly readGate: SlackReadGate;
@@ -283,21 +282,27 @@ export class SlackAppAdapter {
     // another bot that mentions the app is still heard. Its own post is never
     // handed over.
     if (event.user === this.config.botUserId) return { status: 200 };
-    // Slack user ids are per workspace: an author from another workspace
-    // (Slack Connect) never speaks under this workspace's address.
-    if (isExternalAuthor(payload)) return { status: 200 };
     // A bot or workflow that mentions the app posts as a bot_message, often
     // with no user: the bot is its author. Only a mention is taken from one,
     // since the app's own posts are told apart by their user.
     if (!isSaid(event.subtype)) return { status: 200 };
     const author = event.user ?? (mention ? authorOf(event) : undefined);
     if (!author || typeof event.text !== "string") return { status: 200 };
-    const said = slackMessage(this.context(event.channel), wire);
-    if (!said) return { status: 200 };
-    // Rome does not listen to the account, so the message is not handed over. A read once an agent is linked asks Slack for it.
-    if (this.config.listened && !this.config.listened()) return { status: 200 };
-
     const name = event.user ? await this.lookUpName(event.user) : {};
+    let said: ChannelMessage | null;
+    try {
+      said = slackMessage(this.context(event.channel), wire, name);
+    } catch (error) {
+      if (!(error instanceof SlackWorkspaceUnknown)) throw error;
+      // The mailbox delivers it again, and the directory is asked again.
+      log.info("slack app message held: author's workspace not known yet");
+      return { status: 500 };
+    }
+    if (!said) return { status: 200 };
+    if (event.user) {
+      this.rememberWorkspace(event.user, said.senderId.slice(0, said.senderId.indexOf("/")));
+    }
+
     const message: ChannelMessage = {
       ...said,
       ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
@@ -470,7 +475,7 @@ export class SlackAppAdapter {
     );
     const messages: Array<{ ts: string; message: ChannelMessage }> = [];
     for (const wire of wires) {
-      const name = (wire.user && names.get(wire.user)) || {};
+      const name = this.memberOf(wire.user, names);
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) {
         messages.push({
@@ -558,7 +563,7 @@ export class SlackAppAdapter {
     const messages: ChannelMessage[] = [];
     for (const wire of wires) {
       if (!withinRead(wire.ts, read)) continue;
-      const name = (wire.user && names.get(wire.user)) || {};
+      const name = this.memberOf(wire.user, names);
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push(message);
     }
@@ -601,7 +606,7 @@ export class SlackAppAdapter {
   /** The names of `authors`, each looked up once and all together. A page is
    *  answered without the names Slack has not given within
    *  {@link NAME_WAIT_MS}, so a slow lookup never holds up a read. */
-  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackUserName>> {
+  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackMember>> {
     const unique = [...new Set(authors)];
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<null>((resolve) => {
@@ -619,12 +624,36 @@ export class SlackAppAdapter {
     }
   }
 
+  /** What is known of `user` for a read: the workspace they were heard
+   *  under, which a read keeps over the directory's, or else the directory's
+   *  answer. */
+  private memberOf(user: string | undefined, names: Map<string, SlackMember>): SlackMember {
+    if (!user) return {};
+    const named = names.get(user) ?? {};
+    const heard = this.heardWorkspaces.get(user);
+    if (!heard) return named;
+    const { teams: _teams, ...rest } = named;
+    return { ...rest, teamId: heard };
+  }
+
+  private rememberWorkspace(user: string, workspace: string): void {
+    this.heardWorkspaces.delete(user);
+    if (this.heardWorkspaces.size >= USER_NAME_CACHE_SIZE) {
+      const oldest = this.heardWorkspaces.keys().next().value;
+      if (oldest !== undefined) this.heardWorkspaces.delete(oldest);
+    }
+    this.heardWorkspaces.set(user, workspace);
+  }
+
   /** A member's name, best effort: a failed lookup leaves the message unnamed. */
-  private async lookUpName(userId: string): Promise<SlackUserName> {
+  private async lookUpName(userId: string): Promise<SlackMember> {
     const cached = this.userNames.get(userId);
     if (cached) return cached;
     try {
       const name = await this.config.api.userName(this.config.teamId, userId, this.abort.signal);
+      // An answer without the member's workspace is not kept, so a message
+      // held for want of it asks again.
+      if (!name.teamId?.startsWith("T")) return name;
       if (this.userNames.size >= USER_NAME_CACHE_SIZE) {
         const oldest = this.userNames.keys().next().value;
         if (oldest !== undefined) this.userNames.delete(oldest);

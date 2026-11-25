@@ -20,7 +20,6 @@ const allowedWorkspaceGlobs = [
   "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
-  "packages/rome-node-core-darwin-arm64",
   "packages/rome-node-ui",
   "packages/ui",
   "packages/web",
@@ -83,7 +82,7 @@ async function main() {
       // The main agent's prompt names the docs only when they exist, so a missing
       // dir would ship an agent that silently falls back to web search.
       '[ -f /opt/rome/docs/rome-node.md ] || { echo "Missing /opt/rome/docs (Rome docs absent from image)" >&2; exit 1; }',
-      '[ ! -e /opt/rome/docs/northstars ] || { echo "Contributor-only docs present: /opt/rome/docs/northstars" >&2; exit 1; }',
+      '[ ! -e /opt/rome/docs/adrs ] || { echo "Contributor-only docs present: /opt/rome/docs/adrs" >&2; exit 1; }',
       'node /opt/rome/packages/discord-cli/bin/discord.js help >/dev/null || { echo "Discord CLI is not runnable" >&2; exit 1; }',
       'node /opt/rome/packages/rome-node-cli/bin/rome-node.js --help >/dev/null || { echo "Rome Node CLI is not runnable" >&2; exit 1; }',
       'node /opt/rome/packages/signer/bin/vault.js help >/dev/null || { echo "Vault CLI is not runnable" >&2; exit 1; }',
@@ -142,7 +141,6 @@ function isAllowedWorkspacePackage(packagePath) {
     packagePath === "packages/signer" ||
     packagePath === "packages/rome-node-cli" ||
     packagePath === "packages/rome-node-core" ||
-    packagePath === "packages/rome-node-core-darwin-arm64" ||
     packagePath === "packages/rome-node-ui" ||
     packagePath === "packages/ui" ||
     packagePath === "packages/web" ||
@@ -167,7 +165,6 @@ async function assertImportBoundary() {
     "packages/signer",
     "packages/rome-node-cli",
     "packages/rome-node-core",
-    "packages/rome-node-core-darwin-arm64",
     "packages/rome-node-ui",
     "packages/ui",
     "packages/web",

@@ -46,7 +46,6 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
       }
       return ok(settings);
     }
-    if (url === "/api/sentinel-log") return ok([]);
     if (url === "/api/public-access") {
       return ok({ allowedApps: [], cloudEmailAccess: {} });
     }

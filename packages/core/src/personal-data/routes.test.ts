@@ -1,5 +1,11 @@
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { COOKIE_NAME, createSession } from "../access/auth.js";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../access/auth.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { MAX_ITEMS_PER_BATCH } from "./domain/ingest.js";
 import { PersonalDataRepository } from "./repository.js";
@@ -8,15 +14,19 @@ import { PERSONAL_DATA_SOURCES } from "./sources/index.js";
 import { batch, NOV_10, ORIGIN, stepHour } from "./__fixtures__/apple-health.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("guardian-seat")}`;
+const ADMIN_COOKIE = `${VISITOR_COOKIE_NAME}=${createVisitorSession("ada", "ada@example.com")}`;
 
 describe("/personal-data routes", () => {
   let testDb: TestDb;
   let app: ReturnType<typeof personalDataRoutes>;
+  let dashboardAccess: DashboardAccessState;
 
   beforeEach(() => {
     testDb = createTestDb();
+    dashboardAccess = new DashboardAccessState();
     app = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: dashboardAccess,
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
       now: () => NOV_10 + 86_400_000,
     });
@@ -44,16 +54,35 @@ describe("/personal-data routes", () => {
   it("refuses the guardian's loopback session, which an agent's shell has", async () => {
     const loopback = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      guardianSession: async () => ({ userId: "guardian-seat", via: "loopback" }),
+      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
     });
     expect((await loopback.request("/personal-data/sources")).status).toBe(403);
     const cookie = personalDataRoutes({
       db: testDb.db,
+      dashboardAccessState: new DashboardAccessState(),
       personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      guardianSession: async () => ({ userId: "guardian-seat", via: "cookie" }),
+      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "cookie" }),
     });
     expect((await cookie.request("/personal-data/sources")).status).toBe(200);
+  });
+
+  it("lets a dashboard admin read the guardian's personal data, never write it", async () => {
+    await ingest(batch("b-1", { upserts: [stepHour(NOV_10, 812)] }));
+    dashboardAccess.setCloudEmailAccess(["ada@example.com"]);
+    const base = `/personal-data/sources/apple_health/origins/${ORIGIN}`;
+
+    expect((await send("/personal-data/sources", {}, ADMIN_COOKIE)).status).toBe(200);
+    expect((await ingest(batch("b-2"), ADMIN_COOKIE)).status).toBe(403);
+    const pause = { method: "PUT", body: JSON.stringify({ state: "paused" }) };
+    expect((await send(`${base}/state`, pause, ADMIN_COOKIE)).status).toBe(403);
+    expect((await send(base, { method: "DELETE" }, ADMIN_COOKIE)).status).toBe(403);
+
+    const log = await send("/personal-data/sources/apple_health/ingests", {}, ADMIN_COOKIE);
+    expect(log.status).toBe(200);
+    const { ingests } = (await log.json()) as { ingests: { status: string }[] };
+    expect(ingests.map((entry) => entry.status)).toEqual(["ok"]);
   });
 
   it("refuses a chunked body over 1 MB that names no length", async () => {

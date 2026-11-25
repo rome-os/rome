@@ -261,8 +261,59 @@ describe("/api/auth/verify", () => {
     expect(iconRes.status).toBe(204);
     const dispatcherRes = await verifyRequest(host, "/api/apps/public-app/anything/here");
     expect(dispatcherRes.status).toBe(204);
-    const rootRes = await verifyRequest(host, "/api/apps/public-app");
-    expect(rootRes.status).toBe(204);
+    const manifestRes = await verifyRequest(host, "/api/apps/public-app/manifest");
+    expect(manifestRes.status).toBe(204);
+  });
+
+  for (const access of ["public", "cloud-email"] as const) {
+    it(`keeps host routes private for a ${access} app, including app-scoped visitors`, async () => {
+      const host = buildHost(
+        await stubDeps([buildResolvedApp("shared-app", false)], {
+          ...(access === "public" ? { allowedApps: ["shared-app"] } : {}),
+          cloudEmailAccess: { "shared-app": ["ada@example.com"] },
+          dashboardEmailAccess: ["owner@example.com"],
+        }),
+      );
+      for (const [method, path] of [
+        ["GET", "/api/apps/shared-app"],
+        ["HEAD", "/api/apps/shared-app"],
+        ["DELETE", "/api/apps/shared-app?purge=true"],
+        ["PATCH", "/api/apps/shared-app"],
+        ["POST", "/api/apps/shared-app/publish"],
+        ["POST", "/api/apps/shared-app/%70ublish"],
+        ["GET", "/api/apps/updates"],
+        ["GET", "/api/apps/events"],
+        ["GET", "/api/app-readmes/shared-app"],
+      ]) {
+        const forwardedMethod = { "X-Forwarded-Method": method };
+        expect((await verifyRequest(host, path, forwardedMethod)).status, path).toBe(401);
+        expect(
+          (
+            await verifyRequest(host, path, {
+              ...forwardedMethod,
+              ...validVisitorCookieHeader("ada@example.com"),
+            })
+          ).status,
+          path,
+        ).toBe(403);
+        for (const headers of [
+          validCookieHeader(),
+          validVisitorCookieHeader("owner@example.com"),
+        ]) {
+          expect(
+            (await verifyRequest(host, path, { ...forwardedMethod, ...headers })).status,
+            path,
+          ).toBe(204);
+        }
+      }
+    });
+  }
+
+  it("does not treat reserved catalog paths as public app ids", async () => {
+    const host = buildHost(await stubDeps([], { allowedApps: ["updates", "events"] }));
+    for (const path of ["/api/apps/updates", "/api/apps/events"]) {
+      expect((await verifyRequest(host, path)).status).toBe(401);
+    }
   });
 
   it("returns 204 for /api/app-api/<id>/* when the app is in publicAccess.allowedApps", async () => {

@@ -23,7 +23,6 @@ export const runtimePackages = [
   "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
-  "packages/rome-node-core-darwin-arm64",
   "packages/rome-node-ui",
   "packages/ui",
   "packages/web",
@@ -53,14 +52,13 @@ export const sourceDirs = ["rome_apps", "example_apps", "opencli-plugins", "infr
 /** Root files the build context's own copies are generated from. */
 export const generatorInputs = ["pnpm-workspace.yaml"];
 
-// Contributor-only docs stay out of the image. northstars/ and adrs/ describe
-// goals and past options rather than what Rome does, so an agent answering the
-// guardian from them would claim features that do not exist.
+// Contributor-only docs stay out of the image. adrs/ describes the options
+// Rome rejected beside the ones it took, so an agent answering the guardian
+// from it would claim features that do not exist.
 export const excludedDocsPaths = [
   "docs/adrs",
   "docs/assets",
   "docs/authoring",
-  "docs/northstars",
   "docs/screenshots",
   "docs/ui",
   "docs/AGENTS.md",

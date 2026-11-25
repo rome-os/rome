@@ -9,6 +9,7 @@
   },
   "tabs": {
     "Appearance": "Appearance",
+    "Team": "Team",
     "Connections": "Connections",
     "Favors": "Favors",
     "Trust": "Trust",
@@ -413,23 +414,6 @@
     "neverUsed": "Never used",
     "grantedUntil": "Granted until {{time}}"
   },
-  "trust": {
-    "title": "Bond level rules",
-    "trustedLevels": {
-      "title": "Trusted messages",
-      "description": "Messages from persons with these bond levels bypass sentinel triage."
-    },
-    "replyToLevels": {
-      "title": "Reply to messages",
-      "description": "Rome replies only to incoming messages from these bond levels."
-    },
-    "levels": {
-      "guardian": "guardian",
-      "inner-circle": "inner-circle",
-      "acquaintance": "acquaintance",
-      "other": "other"
-    }
-  },
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "Search chats",
@@ -623,20 +607,23 @@
     "startingPackPurchase": "Starting favor pack purchase"
   },
   "publicAccess": {
-    "title": "Access and privacy",
-    "dashboardEmails": {
-      "title": "Admins",
-      "description": "These accounts get the full dashboard.",
-      "accountCount_one": "{{count}} account",
-      "accountCount_other": "{{count}} accounts",
-      "inputLabel": "Add email address",
+    "title": "Access and privacy"
+  },
+  "team": {
+    "members": {
+      "title": "People",
+      "description": "People here can use this Rome as you do.",
+      "peopleCount_one": "{{count}} person",
+      "peopleCount_other": "{{count}} people",
+      "inputLabel": "Email of their Rome account",
       "placeholder": "name@example.com",
       "add": "Add",
-      "empty": "No accounts yet. Shared dashboard access stays off until you add one.",
+      "empty": "Only you can use this Rome until you add someone.",
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
-      "savedFlash": "Admins saved",
-      "saveFailedFallback": "Failed to save admins.",
+      "savedFlash": "Team saved",
+      "saveFailedFallback": "Failed to save the team.",
+      "loadFailed": "Failed to load the team",
       "tooMany": "Up to {{limit}} emails allowed",
       "emailTooLong": "Email longer than {{limit}} characters"
     }
@@ -792,13 +779,6 @@
       "pause": "Chats pause until you log in again.",
       "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }
-  },
-  "sentinelLog": {
-    "title": "Sentinel log",
-    "empty": "No sentinel log entries.",
-    "responsePrefix": "Response: {{response}}",
-    "markReviewed": "Mark reviewed",
-    "reviewed": "Reviewed"
   },
   "advanced": {
     "presentationMode": {

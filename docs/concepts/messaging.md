@@ -32,13 +32,13 @@ Policy actions:
 
 The sentinel is a lightweight [agent](agents.md) that triages messages from untrusted senders. When the [policy engine](#policies) routes a message to sentinel review, the sentinel decides:
 
-- **Reply** — respond directly (logged for [guardian](people.md#guardian) review)
+- **Reply** — respond directly (logged)
 - **Escalate** — forward to the [main agent](agents.md#agent-hierarchy)
 - **Ignore** — drop the message (logged)
 
 **Contracts:**
 
-- All sentinel decisions are recorded in the sentinel log, which the guardian reviews from the Inbox triage view. Each entry names the channel the message arrived on and the sender's [account](../domains/chats.md#account), by its platform and the sender's id there.
+- All sentinel decisions are recorded in the sentinel log. The dashboard does not show it. Each entry names the channel the message arrived on and the sender's [account](../domains/chats.md#account), by its platform and the sender's id there.
 - The sentinel only sees messages the [policy engine](#policies) routes to it. It is not in the path of trusted senders' messages.
 
 **Not to be confused with:**

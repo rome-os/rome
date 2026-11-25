@@ -8,6 +8,15 @@ import { z } from "zod";
 export const VOICE_CONVERSATION_SOCKET_PATH = "/ws/voice-conversation";
 
 /**
+ * `GET /api/voice-conversation`. `available` is true only for the guardian,
+ * and only while Rome Cloud lets their account use voice input, as the
+ * microphone shows. A client offers the voice conversation button only then,
+ * and only in a Concierge chat.
+ */
+export const voiceConversationInfoSchema = z.object({ available: z.boolean() });
+export type VoiceConversationInfo = z.infer<typeof voiceConversationInfoSchema>;
+
+/**
  * What a client sends as text frames. `start` comes first and names the chat
  * to talk in, then binary audio frames: raw PCM, signed 16-bit little-endian,
  * mono, at `sampleRate`. `stop` ends the conversation.
@@ -38,7 +47,7 @@ export const voiceConversationStopReasonSchema = z.enum([
   "listening-failed",
   /** Rome could not speak: the speech provider or its credential failed. */
   "speaking-failed",
-  /** The chat could not take the turn: one the guardian may not open, or whose agent could not start. */
+  /** The chat could not take the turn: one the speaker may not open, or whose agent could not start. */
   "chat-refused",
   /** The listening session reached its time limit. */
   "time-limit",
@@ -58,7 +67,7 @@ export const VOICE_CONVERSATION_ALIVE_INTERVAL_MS = 1_000;
  * - `ready`: listening has started. The audio Rome sends has this rate.
  * - `state`: the conversation's state changed.
  * - `heard`: the guardian's turn so far: `settled` text and the unsettled `pending` tail.
- * - `turn`: the guardian finished a turn, and Rome sent `text` to the chat.
+ * - `turn`: the guardian finished a turn, and Rome sent `text` to the chat as the message `inputId`.
  * - `caption`: the next sentence of the reply, sent before its audio. Plain text, never HTML: show it as text.
  * - `clear`: the guardian spoke over the reply: drop the audio not played yet.
  * - `alive`: every `VOICE_CONVERSATION_ALIVE_INTERVAL_MS`.
@@ -68,7 +77,7 @@ export const voiceConversationServerMessageSchema = z.discriminatedUnion("type",
   z.object({ type: z.literal("ready"), sampleRate: z.number().int() }),
   z.object({ type: z.literal("state"), state: voiceConversationStateSchema }),
   z.object({ type: z.literal("heard"), settled: z.string(), pending: z.string() }),
-  z.object({ type: z.literal("turn"), text: z.string() }),
+  z.object({ type: z.literal("turn"), text: z.string(), inputId: z.string() }),
   z.object({ type: z.literal("caption"), text: z.string() }),
   z.object({ type: z.literal("clear") }),
   z.object({ type: z.literal("alive") }),

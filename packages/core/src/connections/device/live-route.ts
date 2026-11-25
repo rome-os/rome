@@ -1,5 +1,5 @@
 // Which device connection answers a live read for a turn, and in what state.
-// The one place that chooses a device: `core:device_run` and the personal-data
+// The one place that chooses a device: a device run and the personal-data
 // pointer both ask here, so neither reads the device table. Concept:
 // docs/domains/connections.md#device-connection.
 
@@ -7,6 +7,10 @@ import type { ThreadContext } from "@rome-os/app-runtime";
 import type { DeviceConnection, DeviceConnectionsRepository } from "./repository.js";
 import type { DeviceConnectionState } from "./report.js";
 
+/** The tools agents read and run a device with (agent-tools.ts). */
+export const READ_DEVICES_TOOL = "system:read_devices";
+export const RUN_ON_DEVICE_TOOL = "system:run_on_device";
+/** Their older names, which keep working (actions.ts). */
 export const DEVICE_DESCRIBE_ACTION = "core:device_describe";
 export const DEVICE_RUN_ACTION = "core:device_run";
 
@@ -46,7 +50,7 @@ export interface LiveTurn {
 export type LivePointer =
   | {
       id: string;
-      /** The connection's capability, the kind `connect_account` takes for it. */
+      /** The connection's capability, the kind `connect_service` takes for it. */
       kind: string;
       title: string;
       device: { id: string; name: string | null };
@@ -59,7 +63,7 @@ export type LivePointer =
   | {
       state: "not_connected";
       connect: string;
-      /** The kind `connect_account` takes, when another device names it. */
+      /** The kind `connect_service` takes, when another device names it. */
       kind?: string;
       /** The asking device, which has no such connection. */
       device?: { id: string };
@@ -83,7 +87,7 @@ export function createLiveRoutes(
 ): LiveRoutes & {
   /** The connection of one capability for this turn, as a connect card checks it. */
   forKind(kind: string, turn: LiveTurn): LivePointer;
-  /** The connection for one operation, as `core:device_run` runs it. */
+  /** The connection for one operation, as a device run runs it. */
   forOperation(
     operation: string,
     turn: LiveTurn & { deviceId?: string },

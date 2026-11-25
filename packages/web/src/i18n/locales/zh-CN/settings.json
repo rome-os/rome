@@ -9,6 +9,7 @@
   },
   "tabs": {
     "Appearance": "外观",
+    "Team": "团队",
     "Connections": "连接",
     "Favors": "Favors",
     "Trust": "信任",
@@ -413,23 +414,6 @@
     "neverUsed": "从未使用",
     "grantedUntil": "授权至 {{time}}"
   },
-  "trust": {
-    "title": "关系层级规则",
-    "trustedLevels": {
-      "title": "受信消息",
-      "description": "来自这些关系层级的消息将跳过哨兵筛查。"
-    },
-    "replyToLevels": {
-      "title": "回复消息",
-      "description": "Rome 只回复来自这些关系层级的传入消息。"
-    },
-    "levels": {
-      "guardian": "守护者",
-      "inner-circle": "核心圈",
-      "acquaintance": "熟人",
-      "other": "其他"
-    }
-  },
   "channels": {
     "conversationSettings": {
       "searchPlaceholder": "搜索聊天",
@@ -623,20 +607,23 @@
     "startingPackPurchase": "正在购买 favor 套餐"
   },
   "publicAccess": {
-    "title": "访问与隐私",
-    "dashboardEmails": {
-      "title": "管理员",
-      "description": "这些账号可以使用完整仪表盘。",
-      "accountCount_one": "{{count}} 个账号",
-      "accountCount_other": "{{count}} 个账号",
-      "inputLabel": "添加邮箱地址",
+    "title": "访问与隐私"
+  },
+  "team": {
+    "members": {
+      "title": "成员",
+      "description": "这里的人可以像你一样使用这个 Rome。",
+      "peopleCount_one": "{{count}} 人",
+      "peopleCount_other": "{{count}} 人",
+      "inputLabel": "对方 Rome 账号的邮箱",
       "placeholder": "name@example.com",
       "add": "添加",
-      "empty": "还没有账号。添加账号之前，共享仪表盘访问保持关闭。",
+      "empty": "添加成员之前，只有你能使用这个 Rome。",
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
-      "savedFlash": "管理员已保存",
-      "saveFailedFallback": "保存管理员失败。",
+      "savedFlash": "团队已保存",
+      "saveFailedFallback": "保存团队失败。",
+      "loadFailed": "加载团队失败",
       "tooMany": "最多允许 {{limit}} 个邮箱",
       "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }
@@ -792,13 +779,6 @@
       "pause": "聊天会暂停，直到你重新登录。",
       "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
-  },
-  "sentinelLog": {
-    "title": "哨兵日志",
-    "empty": "暂无哨兵日志条目。",
-    "responsePrefix": "回复：{{response}}",
-    "markReviewed": "标记为已审阅",
-    "reviewed": "已审阅"
   },
   "advanced": {
     "presentationMode": {

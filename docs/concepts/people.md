@@ -1,6 +1,6 @@
-# People: Guardian, Visitor, Dashboard Admin, Persons, Accounts, Addresses, Links & Sending
+# People: Guardian, Visitor, Dashboard Admin, Team, Persons, Accounts, Addresses, Links & Sending
 
-What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, dashboard admin and address.
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, dashboard admin, team and address.
 
 ## Guardian
 
@@ -25,7 +25,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 **Contracts:**
 
-- A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard as a [dashboard admin](#dashboard-admin). A visitor can never hold guardian privileges.
+- A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard as a [dashboard admin](#dashboard-admin). A visitor never holds the guardian's credential.
 - A dashboard admin sees an instance upgrade when one is offered and can start it, exactly as the guardian can, on the web and in the phone app. The upgrade restarts the instance for everyone on it.
 - The visitor's email is authoritative from the Rome Cloud sign-in exchange. Nothing the browser supplies can set or change it.
 - Every request re-checks allow-list membership, so removing an email revokes access immediately rather than at the next sign-in. The email comparison is case-insensitive.
@@ -38,11 +38,11 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Dashboard admin
 
-A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow-list. The guardian adds them in Settings, and they use the dashboard apart from the parts kept for the guardian.
+A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow-list. The guardian adds them in Settings > Team, and they use the dashboard as the guardian does, as part of the [team](#team).
 
 **Contracts:**
 
-- A dashboard admin never passes a guardian-only check, such as approvals, the vault or app-connection access. Which raw sockets admit them is in [access control](../architecture/access-control.md#request-flow).
+- A dashboard admin passes every dashboard check the guardian passes, approvals, the vault and app-connection access included, apart from the four [exceptions](#team).
 - A dashboard admin has their own Concierge while it is on. Memory and connections stay shared.
 - Removing the email ends dashboard admin access at the next request.
 
@@ -50,6 +50,21 @@ A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow
 
 - **[Guardian](#guardian)** — the guardian owns the instance. A dashboard admin's access is granted and revocable.
 - **An app visitor** — a visitor allow-listed for one app reaches only that app, never the dashboard.
+
+## Team
+
+The team is the guardian and every [dashboard admin](#dashboard-admin). Access answers whether a session actor is on the team, reading the dashboard allow-list at the moment it is asked ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
+
+**Contracts:**
+
+- Every dashboard check admits the team, except four that stay the guardian's: billing for the instance, deleting the instance, removing or replacing the guardian's seat or its credentials, and what is the guardian's own person.
+- What is the guardian's own person covers their personal data, their device connections and their detected time zone. A dashboard admin reads the guardian's personal data and device connections. A dashboard admin pushes no personal data, pauses or deletes no personal-data origin, registers no device connection, and reports no detected time zone.
+- Each person's Concierge chats stay private to that person, the guardian's included.
+
+**Not to be confused with:**
+
+- **A role** — the team has one level of access. Rome has no roles or per-route permissions.
+- **An app visitor** — a visitor allow-listed for one app is not on the team.
 
 ## Person
 
@@ -74,11 +89,10 @@ An account is a party on an external messaging platform — a Telegram user, a W
 - An account is identified by its [channel](../architecture/channels.md) plus its own [address](#address). The same pair always names the same account.
 - Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
 - An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
-- An account is in exactly one of three states: unlinked (a [stranger](../domains/people.md#stranger)), linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
+- An account is in exactly one of three states: unlinked (a [stranger](../domains/people.md#stranger)), linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks.
 - The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
 - The guardian's own accounts on a platform are accounts like any other, linked to the guardian.
-- A history is one account's. A person's page reads one account's timeline at a time, and nothing joins the timelines of a person's accounts into one.
-- A person's timeline holds only the guardian's chats with them: the direct messages between the account and the guardian's own connected accounts, the ones linked to the guardian. What an agent's own account said to them, and what Rome only triaged before deciding whether to answer, stay in those chats and are not shown here.
+- An account's last activity, as the people listing shows it, is the newest message in the guardian's chats with it: the direct messages between the account and the guardian's own connected accounts, the ones linked to the guardian. What an agent's own account said to them, and what Rome only triaged before deciding whether to answer, do not count.
 
 **Not to be confused with:**
 
@@ -112,8 +126,8 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
-- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it.
-- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the agent keeps it that way.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked.
+- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**
@@ -123,14 +137,14 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 
 ## Sending
 
-A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message, or the channel refused it and the request says why. A message the channel took joins the [timeline](#account) once the store that answers for its conversation holds it. Rome records its own copy before answering, and a channel with a mirror of its own answers for the conversation with the mirror's copy, which may land after the send answered, so a client keeps reading the timeline while it is open. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
+A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message, or the channel refused it and the request says why. A message the channel took joins the chat's history once the store that answers for its conversation holds it. Rome records its own copy before answering, and a channel with a mirror of its own answers for the conversation with the mirror's copy, which may land after the send answered, so a client keeps reading the chat while it is open. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
 
 **Contracts:**
 
 - A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
 - A send leaves no doubt about either end. It names the person's account it goes to, and `from` names which of [Rome's accounts](messaging.md#romes-accounts) it goes out from. `from` names Rome's account by its platform and the platform's own id, as any account is named. The person read lists, as `from` on each account, Rome's accounts on that account's platform that can be named. A `from` that is not among them is refused, and Rome never substitutes another account for it.
-- A person's page sends only from the guardian's own connected accounts, since a message sent from an agent's account would land in a chat the page does not show. Where the guardian holds no connected account of their own on the platform, the account reads as `not-connected`.
-- Rome never picks among its own accounts on one platform. A link keys an account by its platform, so a send that names no `from` goes out only while Rome holds exactly one account on that platform that can send. While Rome holds several, the account reads as sendable, since a send may name any of them, but a send that names none is refused as `not-connected`. The account's timeline reads its conversations with every one of the guardian's own accounts on the platform. A send without `from` stays accepted only until the dashboard names it on every send.
+- An account's send state counts only the guardian's own connected accounts. Where the guardian holds no connected account of their own on the platform, the account reads as `not-connected`.
+- Rome never picks among its own accounts on one platform. A link keys an account by its platform, so a send that names no `from` goes out only while Rome holds exactly one account on that platform that can send. While Rome holds several, the account reads as sendable, since a send may name any of them, but a send that names none is refused as `not-connected`. A send without `from` stays accepted only until the dashboard names it on every send.
 - A channel can be sent to only if it says so. Its `send` port's `direct` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
 - A send that cannot go out is refused before the channel is called, with a 409 naming why (`SendRefusal`). A send the channel refuses answers 502 with the channel's own words. A send the channel took answers 200, even when Rome then fails to record its copy, since the message went out and a retry would send it twice.
 - There is no idempotency key. A client that lost the answer to a send cannot tell whether it went out, and a retry may send it twice. Delivery guarantees come back with Chats.

@@ -687,7 +687,7 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
     {
       componentId: "connect-card",
-      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+      emittedBy: (tool) => tool === "connect_service" || tool.endsWith("__connect_service"),
     },
     {
       componentId: LOCATION_CARD_ID,
@@ -1133,10 +1133,16 @@ export interface WebchatRuntime {
    * the turn that answers it, or, for an agent whose text is private, the
    * messages that turn adds to the chat. Throws the route's error, and also for
    * a chat the guardian may not open or a send that started no turn. Once
-   * `signal` aborts, it lets go of what it gathered and rejects.
+   * `signal` aborts, it lets go of what it gathered and rejects. `inputId`
+   * names the stored message, as a composer's send does.
    */
-  sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
-  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
+  sendSpoken(
+    chatId: string,
+    text: string,
+    signal?: AbortSignal,
+    inputId?: string,
+  ): Promise<ReplyTurn>;
+  /** Whether `sendSpoken` would take a turn for `chatId`: one the ambient session actor may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
@@ -5759,11 +5765,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
-  const spokenRefusal = async (chatId: string): Promise<string | null> =>
-    (await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+  // A socket reaches the chats its person's dashboard opens, as the routes' gate allows.
+  // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
+  const spokenRefusal = async (chatId: string): Promise<string | null> => {
+    const owner = await currentChatOwner();
+    if (!owner || !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
+      return "Session not found";
+    }
+    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
       ? null
-      : "Session not found";
+      : "A voice conversation is only for a Concierge chat";
+  };
 
   const runtime: WebchatRuntime = {
     activeStreams,
@@ -5886,7 +5898,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     },
     canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
-    async sendSpoken(chatId, text, signal) {
+    async sendSpoken(chatId, text, signal, inputId = randomUUID()) {
       const refusal = await spokenRefusal(chatId);
       if (refusal) throw new Error(refusal);
       // An agent whose text is private answers with the messages its tools add,
@@ -5903,7 +5915,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       try {
         const sent = await handleChatSend(
           chatId,
-          { inputId: randomUUID(), text, spoken: true, priority: "now" },
+          { inputId, text, spoken: true, priority: "now" },
           { onTurn: (turn) => (started.turn = turn) },
         );
         if (sent.status >= 400) throw new Error(routeError(sent));

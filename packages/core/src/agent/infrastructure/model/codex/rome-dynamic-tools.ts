@@ -15,6 +15,8 @@ export interface RomeDynamicToolCallResult {
 export interface RomeDynamicTools {
   readonly definitions: readonly DynamicToolSpec[];
   hasTool(name: string): boolean;
+  /** The tool's name now, for a name the thread's catalog may hold from before; else `name`. */
+  currentName(name: string): string;
   callTool(
     name: string,
     input: unknown,
@@ -64,6 +66,7 @@ export function alignRomeDynamicToolsToInheritedCatalog(
   return {
     definitions,
     hasTool: (name) => inheritedNames.has(name),
+    currentName: (name) => runtimeTools.currentName(name),
     async callTool(name, input, context) {
       if (!inheritedNames.has(name)) return errorResult(`Unknown dynamic tool: ${name}`);
       if (!runtimeTools.hasTool(name)) {
@@ -77,6 +80,7 @@ export function alignRomeDynamicToolsToInheritedCatalog(
 /** Flatten the Rome tools into one app-server dynamic-tool catalog. */
 export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
   const groupByName = new Map<string, RomeToolGroup>();
+  const nameByFormerName = new Map<string, string>();
   const definitions: DynamicToolSpec[] = [];
 
   for (const group of ROME_TOOL_GROUPS) {
@@ -88,6 +92,7 @@ export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
         );
       }
       groupByName.set(tool.name, group);
+      for (const former of tool.formerNames ?? []) nameByFormerName.set(former, tool.name);
       definitions.push({
         type: "function",
         name: tool.name,
@@ -97,10 +102,14 @@ export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
     }
   }
 
+  const currentName = (name: string) =>
+    groupByName.has(name) ? name : (nameByFormerName.get(name) ?? name);
   return {
     definitions,
-    hasTool: (name) => groupByName.has(name),
-    async callTool(name, input, context) {
+    hasTool: (name) => groupByName.has(currentName(name)),
+    currentName,
+    async callTool(calledName, input, context) {
+      const name = currentName(calledName);
       const group = groupByName.get(name);
       if (!group) return errorResult(`Unknown dynamic tool: ${name}`);
       const args = recordInput(input);

@@ -336,28 +336,19 @@ describe("DiscordAdapter gateway order", () => {
 });
 
 describe("DiscordAdapter gateway filters", () => {
-  it("hears nothing in a chat switched off but a link code and a stop said to Rome", async () => {
+  it("hands over every message in a chat switched off, since keeping them is Rome's call", async () => {
     const { say, captured } = await startedAdapter({
       connectionId: "conn-1",
       chatSettings: chatSettingsOf(false),
     });
 
-    await say(guildMessage("m1", "ROME-7KQ2M9XA"));
-    await say(guildMessage("m2", "hi"));
-    await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
-    await say(guildMessage("m4", `<@${BOT.id}> /stop`, { mentions: [BOT.id] }));
-    await say(guildMessage("m5", `<@${BOT.id}> ROME-7KQ2M9XB`, { mentions: [BOT.id] }));
-    await say(guildMessage("m6", `<@${BOT.id}> <@ann> /stop`, { mentions: [BOT.id, "ann"] }));
+    await say(guildMessage("m1", "hi"));
+    await say(guildMessage("m2", `<@${BOT.id}> /stop`, { mentions: [BOT.id] }));
 
     expect(captured.map((m) => [m.messageId, m.text])).toStrictEqual([
-      ["m1", "ROME-7KQ2M9XA"],
-      ["m4", "/stop"],
-      // A code said to Rome is still the bare code admission voids.
-      ["m5", "ROME-7KQ2M9XB"],
-      // A stop said to Rome and someone else is still a stop said to Rome.
-      ["m6", "/stop"],
+      ["m1", "hi"],
+      ["m2", "/stop"],
     ]);
-    expect(captured[0].thread?.kind).toBe("group");
   });
 
   it("hears every message in a chat switched on, and tells how each addressed Rome", async () => {

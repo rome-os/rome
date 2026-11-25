@@ -42,8 +42,8 @@ describe("routeTitle", () => {
   });
 
   it("matches on segment boundaries", () => {
-    expect(routeTitle("/peopled", APP_NAV)).toBeNull();
-    expect(routeTitle("/people/person/alice", APP_NAV)?.key).toBe("nav.people");
+    expect(routeTitle("/memoryd", APP_NAV)).toBeNull();
+    expect(routeTitle("/memory/notes/today", APP_NAV)?.key).toBe("nav.memory");
   });
 
   it("returns null for a path no destination owns", () => {

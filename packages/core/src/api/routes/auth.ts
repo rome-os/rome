@@ -165,11 +165,12 @@ function isAppApiPathPublic(forwardedUri: string, deps: ApiDeps): boolean {
 
 /**
  * If `forwardedUri` targets an app's dashboard-side surface
- * (`/api/apps/<appId>` or `/api/apps/<appId>/*`) and the app is in
+ * (`/api/apps/<appId>/*`) and the app is in
  * `publicAccess.allowedApps`, treat it as public. The toggle is
  * user-driven (AppsIndexPage "public" switch) and means "anonymous
- * visitors can use this app's full HTTP surface" — so it covers
- * `/api/apps/<id>/{icon,manifest,...}` and the dispatcher fall-through.
+ * visitors can use the app's HTTP surface" — so it covers
+ * `/api/apps/<id>/{icon,manifest,...}` and the dispatcher fall-through,
+ * but not host-owned installation details or lifecycle operations.
  *
  * Per-path manifest `noAuth` does NOT apply here on purpose — `noAuth`
  * is the public-webhook surface (`/api/app-api/...`), which is governed
@@ -183,8 +184,9 @@ function isAppDashboardPathPublic(forwardedUri: string, deps: ApiDeps): boolean 
 
 function decodeDashboardAppId(forwardedUri: string): string | null {
   const path = forwardedUri.split("?")[0];
-  const match = path.match(/^\/api\/apps\/([^/]+)(?:\/.*)?$/);
-  if (!match) return null;
+  // Host-owned paths must not inherit either public or app-scoped email access.
+  const match = path.match(/^\/api\/apps\/([^/]+)\/(.+)$/);
+  if (!match || /^publish\/?$/.test(match[2])) return null;
 
   try {
     return decodeAppIdPathSegment(match[1]);
@@ -393,8 +395,8 @@ export function authRoutes(deps: ApiDeps): Hono {
   // session cookie.
   //
   // Direct (non-probe) calls to `/auth/verify` have no `X-Forwarded-Uri` and
-  // fall through to the cookie check — effectively "am I logged in" with a
-  // userId-in-header response.
+  // fall through to the cookie check — effectively "is a team member signed
+  // in", with their identity in the response headers.
   app.get("/auth/verify", async (c) => {
     const rawForwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
     const forwardedUri = rawForwardedUri ? resolveRoutedUri(rawForwardedUri) : "";
@@ -496,13 +498,8 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    const session = getGuardianSession();
-    if (!session) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    applyGuardianHeaders(c, session);
-    return c.body(null, 204);
+    if (allowFullDashboardSession()) return c.body(null, 204);
+    return c.json({ error: "Unauthorized" }, 401);
   });
 
   return app;

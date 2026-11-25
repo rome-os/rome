@@ -2,6 +2,71 @@ import SwiftUI
 import Testing
 @testable import Rome
 
+// These suites wait for conditions, never for a fixed time: the whole bundle
+// runs at once on CI, so a sleep that is enough alone can miss a layout pass.
+
+private struct TimedOut: Error {}
+
+@MainActor private var aWaitTimedOut = false
+
+/// Waits until `condition` holds, polling between run-loop turns. The
+/// default deadline is long because CI's first seconds can starve the main
+/// actor for most of a minute. After one wait times out, the rest give up
+/// in 5 s, so a regression that fails every case still reports its named
+/// failures inside the CI job's limit.
+@MainActor
+private func until(_ what: String, timeout: Duration = .seconds(60), _ condition: () throws -> Bool) async throws {
+    let deadline = ContinuousClock.now + (aWaitTimedOut ? .seconds(5) : timeout)
+    while try !condition() {
+        guard ContinuousClock.now < deadline else {
+            aWaitTimedOut = true
+            Issue.record("Timed out waiting for \(what)")
+            throw TimedOut()
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+/// Waits until `value` reads the same on three polls in a row.
+@MainActor
+private func settled<T: Equatable>(_ what: String, _ value: () -> T) async throws {
+    var last = value()
+    var same = 0
+    try await until("\(what) to settle") {
+        let now = value()
+        same = now == last ? same + 1 : 0
+        last = now
+        return same >= 3
+    }
+}
+
+/// Handoff animators the test holds and steps, instead of letting them run
+/// against the wall clock.
+@MainActor
+private final class HeldAnimators {
+    var all: [UIViewPropertyAnimator] = []
+
+    func next(after count: Int) async throws -> UIViewPropertyAnimator {
+        try await until("handoff \(count + 1) to start") { all.count > count }
+        let animator = all[count]
+        animator.pauseAnimation()
+        return animator
+    }
+
+    func finish(_ animator: UIViewPropertyAnimator) {
+        animator.stopAnimation(false)
+        animator.finishAnimation(at: .end)
+    }
+
+    /// UIKit raises if an active animator is released, as on a failed test.
+    func release() {
+        for animator in all {
+            if animator.state == .active { animator.stopAnimation(true) }
+            if animator.state == .stopped { animator.finishAnimation(at: .current) }
+        }
+    }
+}
+
 @MainActor
 @Suite(.serialized) struct ThreadFocusLayoutTests {
     @Test(arguments: [CGFloat(180), CGFloat(470), CGFloat(700)])
@@ -28,9 +93,14 @@ import Testing
             window.rootViewController = nil
             window.windowScene = nil
         }
-        try await Task.sleep(for: .milliseconds(600))
+        func anchorCell() -> UICollectionViewCell? {
+            guard let list = ColdLaunchAnchorTests.transcript(in: host.view) as? UICollectionView, list.alpha == 1 else { return nil }
+            return list.visibleCells.first { $0.accessibilityIdentifier == "m10:0" }
+        }
+        try await until("the focused list shows its anchor") { anchorCell() != nil }
+        try await settled("the anchor's frame") { anchorCell()?.convert(anchorCell()?.bounds ?? .zero, to: nil) }
         let list = try #require(ColdLaunchAnchorTests.transcript(in: host.view) as? UICollectionView)
-        let cell = try #require(list.visibleCells.first { $0.accessibilityIdentifier == "m10:0" })
+        let cell = try #require(anchorCell())
         let index = try #require(focus.transcript.rows.firstIndex { $0.id == "m10:0" })
         let gap = TranscriptSpacing.top(focus.transcript.rows[index], after: index > 0 ? focus.transcript.rows[index - 1] : nil)
         let actual = cell.convert(cell.bounds, to: nil).minY + gap
@@ -51,8 +121,12 @@ import Testing
     }
 
     private func bubbleY(_ list: UICollectionView, store: TranscriptStore, row: String) throws -> CGFloat {
-        let cell = try #require(list.visibleCells.first { $0.accessibilityIdentifier == row }, "Require visible row \(row), offset \(list.contentOffset), visible \(list.visibleCells.compactMap(\.accessibilityIdentifier))")
-        let at = try #require(store.rows.firstIndex { $0.id == row })
+        try #require(shownY(list, store: store, row: row), "Require visible row \(row), offset \(list.contentOffset), visible \(list.visibleCells.compactMap(\.accessibilityIdentifier))")
+    }
+
+    private func shownY(_ list: UICollectionView, store: TranscriptStore, row: String) -> CGFloat? {
+        guard let cell = list.visibleCells.first(where: { $0.accessibilityIdentifier == row }),
+              let at = store.rows.firstIndex(where: { $0.id == row }) else { return nil }
         return cell.convert(cell.bounds, to: nil).minY + TranscriptSpacing.top(store.rows[at], after: at > 0 ? store.rows[at - 1] : nil)
     }
 
@@ -140,6 +214,9 @@ import Testing
         let store = workspace.concierge
         if pinned { await store.readChatSession() }
         store.focusPosition.reduceMotion = { reduced }
+        let animators = HeldAnimators()
+        store.focusPosition.runAnimation = { animators.all.append($0) }
+        defer { animators.release() }
         if longRows { AgentBubble.startsExpanded = expandSource }
         defer { if longRows { AgentBubble.startsExpanded = false } }
         let model = AppModel()
@@ -150,8 +227,12 @@ import Testing
         window.rootViewController = host
         window.isHidden = false
         defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil }
-        try await Task.sleep(for: .milliseconds(450))
+        try await until("the main transcript and composer to mount") {
+            guard let main = list(host.view, "transcript"), !main.visibleCells.isEmpty, store.focusPosition.surface != nil else { return false }
+            return descendants(host.view).contains { $0 is PastingTextView }
+        }
         let mainList = try #require(list(host.view, "transcript"))
+        try await settled("the main transcript") { [mainList.contentOffset.y, mainList.contentSize.height] }
         if pinned {
             #expect(descendants(mainList).contains { $0.accessibilityIdentifier == "transcript.footer" }, "Require a real main footer cell before testing its visibility")
             let footer = try #require(mainList.visibleCells.first { $0.accessibilityIdentifier == "transcript.footer" })
@@ -168,7 +249,7 @@ import Testing
         let input = try #require(descendants(host.view).compactMap { $0 as? PastingTextView }.first)
         input.text = "Unsent thread draft"
         input.delegate?.textViewDidChange?(input)
-        try await Task.sleep(for: .milliseconds(100))
+        try await settled("the composer") { input.convert(input.bounds, to: nil) }
         let inputFrame = input.convert(input.bounds, to: nil)
         let row = try #require(store.rows.first { $0.ownMessageId == target })
         if pinned {
@@ -179,16 +260,28 @@ import Testing
             mainList.layoutIfNeeded()
         }
         store.jump(to: target)
-        try await Task.sleep(for: .milliseconds(450))
+        try await until("the jump to reach the source row") { mainList.visibleCells.contains { $0.accessibilityIdentifier == row.id } }
+        try await settled("the jump's scroll") { mainList.contentOffset }
         store.focusPosition.pause()
         // Allow the same top/middle/bottom positions as a real reader's scroll.
         mainList.contentInset.top = 1000
         mainList.contentInset.bottom = 1000
-        let beforeY = try bubbleY(mainList, store: store, row: row.id)
-        mainList.contentOffset.y += beforeY - y
-        mainList.layoutIfNeeded()
+        // A row that finishes sizing late can still shift the bubble on a
+        // busy runner, so scroll again until it rests at the requested Y.
         // A real pointer lands on a displayed frame, not a model-only scroll.
-        try await Task.sleep(for: .milliseconds(32))
+        var resting = 0
+        try await until("the source bubble to rest at \(y)") {
+            guard let shown = shownY(mainList, store: store, row: row.id) else { return false }
+            if abs(shown - y) < 0.5 {
+                resting += 1
+            } else {
+                resting = 0
+                mainList.contentOffset.y += shown - y
+                mainList.layoutIfNeeded()
+                CATransaction.flush()
+            }
+            return resting >= 3
+        }
         // A quote tap stops a pending reveal correction or glide before
         // taking its pointer anchor, as the actual quote action does.
         store.focusPosition.pause()
@@ -231,7 +324,7 @@ import Testing
         var directions: [String: Set<Int>] = [:]
         var sawPictures = false
         var fadingMain = Set<String>()
-        func sample(_ phase: String) throws {
+        func sample(_ phase: String, picture: Bool = false) throws {
             let focusList = list(host.view, "reply-chain-transcript")
             if pinned {
                 #expect(!descendants(focusList ?? UIView()).contains { $0.accessibilityIdentifier == "transcript.footer" }, "The focused collection never owns the main pinned hint")
@@ -298,9 +391,8 @@ import Testing
                 }
             }
             if !pictures.isEmpty { sawPictures = true }
-            // Diagnostic rendering can outlast the animation on a busy runner.
-            // Observe its actual intermediate opacity before taking a picture.
-            if width == 390 && y == 440 && (count == 25 || pinned) && samples.isMultiple(of: 4) && (!pinned || fadingMain.contains(phase)) {
+            // A picture of the held midpoint, for a reader of the test report.
+            if picture && width == 390 && y == 440 && (count == 25 || pinned) && (!pinned || fadingMain.contains(phase)) {
                 let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
                     window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
                 }
@@ -308,13 +400,30 @@ import Testing
             }
             samples += 1
         }
-        for tick in 0..<22 {
-            await Task.yield()
-            if interrupted && tick == 4 { store.closeThread(); store.closeThread() }
-            try sample("open")
-            try await Task.sleep(for: .milliseconds(16))
+        // Each handoff is held and stepped through its fractions, so every
+        // run checks the same in-flight frames however busy the runner is.
+        // A frame's wait at each fraction lets UIKit and SwiftUI lay out
+        // while the handoff is in flight, as they do in the app.
+        func step(_ animator: UIViewPropertyAnimator, _ phase: String, through fractions: [CGFloat]) async throws {
+            for fraction in fractions {
+                animator.fractionComplete = fraction
+                CATransaction.flush()
+                try await Task.sleep(for: .milliseconds(16))
+                try sample(phase, picture: fraction == 0.5)
+            }
         }
+        await Task.yield()
+        try sample("open")
+        let entry = try await animators.next(after: 0)
         if interrupted {
+            try await step(entry, "open", through: [0, 0.25])
+            store.closeThread(); store.closeThread()
+            let close = try await animators.next(after: 1)
+            try await step(close, "close", through: [0, 0.25, 0.5, 0.75])
+            animators.finish(close)
+            try await until("the interrupted focus to close") { store.threadFocus == nil && mainList.alpha == 1 }
+            try sample("close")
+            #expect(animators.all.count == 2, "Closing during entry reverses the one handoff, never starts a third")
             #expect(store.threadFocus == nil && mainList.alpha == 1)
             #expect(mainList.contentOffset == originalOffset)
             #expect(abs(try bubbleY(mainList, store: store, row: row.id) - pressedY) < 1)
@@ -323,6 +432,10 @@ import Testing
             #expect(store.threadFocus == nil, "Late response cannot reopen an interrupted focus")
             return
         }
+        try await step(entry, "open", through: [0, 0.25, 0.5, 0.75, 1])
+        animators.finish(entry)
+        try await until("the open handoff to finish") { !store.focusPosition.transitioning }
+        try sample("open")
         let focus = try #require(store.threadFocus)
         let focused = try #require(list(host.view, "reply-chain-transcript"))
         #expect(focus.initial == .loading && focused.alpha == 1)
@@ -360,9 +473,11 @@ import Testing
             readingRow = try #require(readingCell?.accessibilityIdentifier)
         }
         let readingY = try bubbleY(focused, store: focus.transcript, row: readingRow)
+        let heldItems = focused.numberOfItems(inSection: 0)
         release?.resume()
         await opening.value
-        try await Task.sleep(for: .milliseconds(150))
+        try await until("the hydrated page to reach the focused list") { focused.numberOfItems(inSection: 0) != heldItems }
+        try await settled("the hydrated focused list") { [focused.contentOffset.y, focused.contentSize.height] }
         #expect(focus.initial == nil && focus.transcript.message(missing) != nil)
         let hydratedY = try bubbleY(focused, store: focus.transcript, row: readingRow)
         #expect(abs(hydratedY - readingY) < 1, "Hydration preserves CURRENT reading row \(readingRow): \(readingY) → \(hydratedY)")
@@ -371,7 +486,10 @@ import Testing
             for follows in [true, false] {
                 backend.chatSessionRead = ChatSession(id: "concierge", name: "", followsDefault: follows, pinnedModel: follows ? nil : .init(by: "kept", providerId: "openai"))
                 await store.readChatSession()
-                try await Task.sleep(for: .milliseconds(100))
+                try await until("the main footer to follow the session") {
+                    mainList.visibleCells.contains { $0.accessibilityIdentifier == "transcript.footer" } != follows
+                }
+                try await settled("the focused list") { [focused.contentOffset.y, focused.contentSize.height] }
                 #expect(mainList.alpha == 0 && focused.alpha == 1, "A footer update belongs to the hidden main collection, never to focus")
                 #expect(abs(try bubbleY(focused, store: focus.transcript, row: readingRow) - readingY) < 1, "Changing the main footer cannot move the current focused reading anchor")
                 #expect(mainList.contentOffset == originalOffset)
@@ -384,10 +502,14 @@ import Testing
         focused.contentOffset.y += try bubbleY(focused, store: focus.transcript, row: row.id) - pressedY
         focused.delegate?.scrollViewDidEndDragging?(focused, willDecelerate: false)
         store.closeThread()
-        for _ in 0..<22 {
-            try sample("close")
-            try await Task.sleep(for: .milliseconds(16))
+        let close = try await animators.next(after: 1)
+        try await step(close, "close", through: [0, 0.25, 0.5, 0.75, 1])
+        animators.finish(close)
+        try await until("the focused list to unmount") {
+            store.threadFocus == nil && !store.focusPosition.transitioning && list(host.view, "reply-chain-transcript") == nil
         }
+        try sample("close")
+        #expect(animators.all.count == 2, "Hydration starts no handoff of its own")
         #expect(store.threadFocus == nil && mainList.alpha == 1)
         #expect(mainList.contentOffset == originalOffset)
         #expect(abs(try bubbleY(mainList, store: store, row: row.id) - pressedY) < 1)
@@ -410,6 +532,46 @@ import Testing
         }
     }
 
+    /// The same chat on screen twice, as when the shell fades out while a
+    /// new one fades in: the newest owns the shared rows, the old one never
+    /// takes them back, and the old one leaving keeps the new surface.
+    @Test func aSecondCopyOfTheChatTakesTheSharedRowsAndKeepsThem() async throws {
+        let backend = FakeBackend()
+        backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
+        backend.stored = (0..<12).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "concierge", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index)", createdAt: String(format: "2026-11-22T10:%02d:00Z", index), chatThreadId: "m\(index)")
+        }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "rcf-copies-\(UUID().uuidString)")
+        let workspace = Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: directory.appending(path: "Drafts"), instance: "test"))
+        defer { workspace.stop(); try? FileManager.default.removeItem(at: directory) }
+        await workspace.openConcierge()
+        await workspace.concierge.reload()
+        let store = workspace.concierge
+        let copies = ChatCopies()
+        let host = UIHostingController(rootView: ChatCopiesView(workspace: workspace, copies: copies).environment(AppModel()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil }
+        func lists() -> [UICollectionView] { descendants(host.view).compactMap { $0.accessibilityIdentifier == "transcript" ? $0 as? UICollectionView : nil } }
+        try await until("the first copy to mount") { lists().count == 1 && !(lists().first?.visibleCells.isEmpty ?? true) && store.focusPosition.surface != nil }
+        let old = try #require(lists().first)
+        let oldSurface = try #require(store.focusPosition.surface)
+        copies.new = true
+        try await until("the second copy to mount") { lists().count == 2 && store.focusPosition.surface !== oldSurface }
+        let new = try #require(lists().first { $0 !== old })
+        try await settled("both copies") { [old.contentOffset.y, new.contentOffset.y, new.contentSize.height] }
+        #expect(store.focusPosition.main === new, "The newest copy owns the shared rows")
+        let surface = try #require(store.focusPosition.surface)
+        copies.old = false
+        try await until("the old copy to go") { lists().count == 1 }
+        try await settled("the new copy") { [new.contentOffset.y, new.contentSize.height] }
+        #expect(store.focusPosition.main === new)
+        #expect(store.focusPosition.surface === surface && surface.window != nil, "The old copy leaving keeps the new surface")
+        #expect(surface.subviews.contains { $0.alpha > 0 }, "The new copy still shows its rows")
+    }
 
 }
 
@@ -495,5 +657,22 @@ struct SeededThreadFocusHTTPTests {
         #expect(abs(try y(main, transcript: store) - before) < 1)
         capture("closed")
         print("RCF real held HTTP native anchor=\(before), successful hydration and inverse, no sends")
+    }
+}
+
+/// Two copies of Chat on one store, each shown on its own switch.
+@MainActor @Observable private final class ChatCopies {
+    var old = true
+    var new = false
+}
+
+private struct ChatCopiesView: View {
+    let workspace: Workspace
+    let copies: ChatCopies
+    var body: some View {
+        ZStack {
+            if copies.old { ChatScreen(workspace: workspace, shell: ShellActions()).id("old") }
+            if copies.new { ChatScreen(workspace: workspace, shell: ShellActions()).id("new") }
+        }
     }
 }

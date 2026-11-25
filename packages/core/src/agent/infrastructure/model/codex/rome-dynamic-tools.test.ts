@@ -83,6 +83,22 @@ describe("Rome dynamic tools", () => {
     });
   });
 
+  it("answers a former name with the tool it names, and offers only the name now", async () => {
+    const romeTools = fakeTools({ ask_user: ["connect_new"] });
+    const listTools = romeTools.listTools;
+    romeTools.listTools = (group) =>
+      listTools(group).map((tool) => ({ ...tool, formerNames: ["connect_old"] }));
+    const tools = createRomeDynamicTools(romeTools);
+
+    expect(tools.definitions.map((definition) => definition.name)).toEqual(["connect_new"]);
+    expect(tools.hasTool("connect_old")).toBe(true);
+    expect(tools.currentName("connect_old")).toBe("connect_new");
+    expect(tools.currentName("other")).toBe("other");
+    const result = await tools.callTool("connect_old", {});
+    expect(romeTools.callTool).toHaveBeenCalledWith("ask_user", "connect_new", {}, undefined);
+    expect(result.response).toMatchObject({ success: true });
+  });
+
   it("keeps a native fork aligned with its inherited catalog but fails closed for disabled tools", async () => {
     const sourceTools = createRomeDynamicTools(fakeTools({ subagents: ["source_researcher"] }));
     const forkRomeTools = fakeTools({ actions: ["fork_action"] });

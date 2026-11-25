@@ -338,3 +338,39 @@ final class HugeProtocol: URLProtocol, @unchecked Sendable {
         #expect(try Data(contentsOf: shared.url) == png)
     }
 }
+
+/// A tap on one photo of a message opens the viewer at that photo.
+@MainActor
+@Suite struct PhotoViewerStartTests {
+    private func upload(_ name: String) -> UserImage {
+        .stored(UploadLines.Upload(name: name, linkPath: "/api/assets/\(name)"))
+    }
+
+    @Test func eachTappedPhotoIsItsOwnPage() {
+        let images = [upload("a.jpg"), upload("b.jpg"), upload("c.jpg")]
+        let gallery = ViewerImage.gallery(images)
+        #expect(images.map { PhotoViewerStart(id: $0.viewerID, in: gallery)?.index } == [0, 1, 2])
+    }
+
+    /// A file between the photos is no page, so the photos after it move up one.
+    @Test func aFileIsNoPage() {
+        let images = [upload("a.jpg"), upload("notes.pdf"), upload("c.jpg")]
+        let gallery = ViewerImage.gallery(images)
+        #expect(gallery.count == 2)
+        #expect(PhotoViewerStart(id: images[2].viewerID, in: gallery)?.index == 1)
+        #expect(PhotoViewerStart(id: images[1].viewerID, in: gallery) == nil)
+    }
+
+    /// A reply's image, then a set of three: the set's third is the fourth page.
+    @Test func aPictureInASetIsItsOwnPage() {
+        let blocks: [MarkdownBlock] = [
+            .image(alt: "Front", src: "/projects/a.png"),
+            .paragraph("Rooms:"),
+            .pictures(layout: .grid, items: ["b", "c", "d"].map { PictureItem(alt: $0, src: "/projects/\($0).png", note: "") }),
+        ]
+        let gallery = MarkdownText.gallery(blocks, origin: nil)
+        #expect(gallery.count == 4)
+        #expect(PhotoViewerStart(position: 0, in: gallery).index == 0)
+        #expect(PhotoViewerStart(position: MarkdownText.pictureKey(block: 2, item: 2), in: gallery).index == 3)
+    }
+}

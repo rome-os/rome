@@ -16,12 +16,12 @@ enum UpdateGate {
     /// `blocking` entry raises it: one where sending, reading or streaming a
     /// chat calls an API a newer release brought. The app cannot be used
     /// during that update.
-    static let blockingMinimumInstanceVersion = "1.1.196"
+    static let blockingMinimumInstanceVersion = "1.1.222"
 
     /// The oldest instance release with every API the app calls. Every entry
     /// raises it; the update it asks for runs in the background. Never below
     /// `blockingMinimumInstanceVersion`.
-    static let minimumInstanceVersion = "1.1.219"
+    static let minimumInstanceVersion = "1.1.222"
 
     /// The first release with each feature's API, for a feature that checks
     /// the instance's version itself. A feature never checks against the

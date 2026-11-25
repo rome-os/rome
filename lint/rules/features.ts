@@ -8,7 +8,7 @@ import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Domains laid out as `<domain>/<feature>`, each with its features. A domain adopting the layout joins this list. */
 export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
-  people: ["guardian-profile", "link-code", "person-history", "phone-book"],
+  people: ["guardian-profile", "person-history", "phone-book"],
 };
 
 /**
@@ -17,13 +17,9 @@ export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
  * the wiring or a test.
  */
 const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> = {
-  "people/link-code": {
-    files: ["connections/kinds/discord/discord.ts", "connections/kinds/feishu/feishu.ts"],
-    why: "Discord and Feishu hold back a message that is a link code, so it never reaches a chat",
-  },
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
-    why: "an assistant's page sends to an account the way a person's page does, through directPlace, and answers with the same respondToSend so the dashboard reads one shape",
+    why: "an assistant's page sends to an account through directPlace, and answers with person history's respondToSend so every send the dashboard reads has one shape",
   },
   "people/guardian-profile": {
     files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],
@@ -150,6 +146,6 @@ export const featureCrossings: ListedCrossing[] = [
     from: "people/phone-book/application/resource.ts",
     to: "people/person-history/index.ts",
     ticket: "ZHA-213",
-    why: "A person on the People page carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
+    why: "A person in the people listing carries each account's send state and last activity, which person history reads, until the phone book gets them through the people root.",
   },
 ];

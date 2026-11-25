@@ -1,43 +1,144 @@
-// Renaming a routine and turning it off or back on. The Routines page does this
-// through `PATCH /routines/:id`, and agents through `system:pause_routine` and
-// `system:resume_routine` (routines/control.ts), so both keep one rule.
+// Changing a routine: renaming it and turning it off or back on, as the
+// Routines page does through `PATCH /routines/:id`, and changing what it runs
+// and when. Agents reach it through `system:change_routine`,
+// `system:pause_routine` and `system:resume_routine` (routines/agent-tools.ts),
+// so every caller keeps one rule.
 
-import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
+import {
+  chatNamedByArgs,
+  PERSONAL_DATA_ROUTINE_REFUSED,
+  type RoutinesRepository,
+  toRoutine,
+} from "../db/repositories/routines.js";
+import {
+  checkRoutineAction,
+  checkRoutineName,
+  checkRoutineTrigger,
+  type CreateRoutineDeps,
+  type CreateRoutineInput,
+} from "./create.js";
 import type { RoutineEngine } from "./engine.js";
+import { isSyncedRoutineKey } from "./synced-routine-key.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
-import type { Routine } from "./types.js";
+import type { Routine, Trigger } from "./types.js";
 
 export type UpdateRoutineResult =
   | { status: "updated"; routine: Routine }
   | { status: "not-found" }
   | { status: "refused"; error: string };
 
-/** Renames a routine or turns it off or on, and brings its trigger in line. A
- * one-off whose time has passed cannot be turned back on: it would stay on with
- * nothing left to fire. */
+/** What a change stores, each field already checked. */
+export interface RoutineChanges {
+  name?: string;
+  enabled?: boolean;
+  trigger?: Trigger;
+  actionName?: string;
+  args?: Record<string, unknown>;
+}
+
+/** Stores a routine's changes and brings its trigger in line. A one-off whose
+ * time has passed cannot be turned back on: it would stay on with nothing left
+ * to fire. */
 export async function updateRoutine(
   deps: {
     routines: Pick<RoutinesRepository, "findById" | "update">;
     engine: Pick<RoutineEngine, "activate" | "deactivate">;
   },
   id: string,
-  changes: { name?: string; enabled?: boolean },
+  changes: RoutineChanges,
 ): Promise<UpdateRoutineResult> {
   const row = await deps.routines.findById(id);
   if (!row) return { status: "not-found" };
 
   if (changes.enabled === true) {
-    const error = cannotResume(toRoutine(row));
+    const error = cannotResume({ ...toRoutine(row), ...changes });
     if (error) return { status: "refused", error };
   }
 
-  await deps.routines.update(id, changes);
+  try {
+    // A new trigger's next fire is set again when it is activated.
+    await deps.routines.update(id, changes.trigger ? { ...changes, nextRunAt: null } : changes);
+  } catch (err) {
+    if (err instanceof Error && err.message === PERSONAL_DATA_ROUTINE_REFUSED) {
+      return { status: "refused", error: err.message };
+    }
+    throw err;
+  }
   const updated = await deps.routines.findById(id);
   if (!updated) return { status: "not-found" };
   const routine = toRoutine(updated);
   await deps.engine.deactivate(id);
   if (routine.enabled) await deps.engine.activate(routine);
   return { status: "updated", routine };
+}
+
+/** A change someone asks for: a new name, what the routine runs, or when. */
+export interface RoutineChangeRequest {
+  name?: string;
+  actionName?: string;
+  args?: Record<string, unknown>;
+  trigger?: CreateRoutineInput["trigger"];
+}
+
+/** Changes a routine's name, what it runs or when, each by the rules a new
+ * routine meets. A routine an app manages, or one core keeps in line with the
+ * Concierge's records, keeps what it runs and when, and a routine keeps the
+ * chat it works for. */
+export async function changeRoutine(
+  deps: Parameters<typeof updateRoutine>[0] &
+    Pick<
+      CreateRoutineDeps,
+      "actionRegistry" | "agentRunner" | "resolveOneOffDate" | "hasTriggerType"
+    >,
+  id: string,
+  request: RoutineChangeRequest,
+): Promise<UpdateRoutineResult> {
+  const row = await deps.routines.findById(id);
+  if (!row) return { status: "not-found" };
+  const routine = toRoutine(row);
+  const changesWhat = request.actionName !== undefined || request.args !== undefined;
+  if ((changesWhat || request.trigger) && routine.managedBy) {
+    return {
+      status: "refused",
+      error: `This routine is managed by the "${routine.managedBy}" app, which decides what it runs and when. Change it from that app.`,
+    };
+  }
+  if ((changesWhat || request.trigger) && isSyncedRoutineKey(routine.key)) {
+    return {
+      status: "refused",
+      error:
+        "This routine follows the Concierge's own records, which decide what it runs and when. Change a task's schedule with chat_update, and a follow or the digest with core:concierge_following_configure.",
+    };
+  }
+
+  const changes: RoutineChanges = {};
+  if (request.name !== undefined) {
+    const name = checkRoutineName(request.name);
+    if (!name.ok) return { status: "refused", error: name.error };
+    changes.name = name.value;
+  }
+  if (changesWhat) {
+    const args = request.args ?? routine.args;
+    const action = await checkRoutineAction(deps, request.actionName ?? routine.actionName, args);
+    if (!action.ok) return { status: "refused", error: action.error };
+    // Who may read what its fires say follows the chat it works for.
+    const chat = chatNamedByArgs(action.value, args);
+    if (chat && chat !== row.chatId) {
+      return {
+        status: "refused",
+        error:
+          "A routine keeps the chat it works for. Create a new routine to send into another chat.",
+      };
+    }
+    changes.actionName = action.value;
+    changes.args = args;
+  }
+  if (request.trigger) {
+    const trigger = await checkRoutineTrigger(deps, request.trigger);
+    if (!trigger.ok) return { status: "refused", error: trigger.error };
+    changes.trigger = trigger.value;
+  }
+  return updateRoutine(deps, id, changes);
 }
 
 /** Why a routine cannot be turned back on, or null when it can. */

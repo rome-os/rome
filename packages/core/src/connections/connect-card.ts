@@ -39,7 +39,7 @@ export interface DeviceKindState {
   askingDeviceId?: string;
 }
 
-/** A live route's pointer as `connect_account` reads it. */
+/** A live route's pointer as `connect_service` reads it. */
 export function deviceKindState(pointer: LivePointer, turn: LiveTurn): DeviceKindState {
   return {
     state: pointer.state,
@@ -168,7 +168,7 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   const rank = { working: 0, off: 1, broken: 2 } as const;
   const kinds = new Map<string, DeviceKind>();
   // A kind's summary is the first one reported in device-id order, whatever
-  // each connection's state, so `connect_account`'s description does not
+  // each connection's state, so `connect_service`'s description does not
   // change when the devices' states do.
   const summaries = new Map<string, string>();
   for (const connection of connections) {
@@ -196,8 +196,8 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   return [...kinds.values()];
 }
 
-/** The connection kind `connect_account` was asked for, or why it can't connect it. */
-export function parseConnectAccountInput(
+/** The connection kind `connect_service` was asked for, or why it can't connect it. */
+export function parseConnectServiceInput(
   input: unknown,
   devices: readonly DeviceKind[] = [],
   options: { devicesOnly?: boolean } = {},
@@ -217,79 +217,137 @@ export function parseConnectAccountInput(
 }
 
 /**
- * What `connect_account` hands back for a device kind. The card's Connect
- * opens the device's page, which the device's own app turns into its flow.
+ * What asking the guardian to connect one kind comes to, wherever it is
+ * asked from. `card` is the connect card's props, for the chat to draw;
+ * `noCard` is what the agent says instead where no card draws; `shown` is what
+ * it reads once the card is up. `answer` is said with no card: the kind
+ * already works, or it cannot be connected here.
  */
-export function deviceConnectToolOutput(
+export type ConnectCardRequest =
+  | { status: "refused"; error: string }
+  | { status: "answer"; message: string }
+  | {
+      status: "card";
+      props: Record<string, unknown>;
+      noCard: string;
+      shown: string;
+    };
+
+/** A request that names a kind the card connects. */
+export type ConnectCardAnswer = Exclude<ConnectCardRequest, { status: "refused" }>;
+
+/** Where the connect card's kinds and a device kind's state come from. */
+export interface ConnectCardSources {
+  /** The device kinds devices reported. */
+  devices?: readonly DeviceKind[];
+  /** How a device kind stands for the turn that asks, on its asking device alone when it has one. */
+  deviceState?: (kind: string) => DeviceKindState | undefined;
+  /** The guardian's language, which a device card's words follow. */
+  language?: () => Promise<string | null>;
+  /** Only device kinds, beside a session's own card for the rest. */
+  devicesOnly?: boolean;
+}
+
+/** The connect card for the kind `input` names, or why there is none. */
+export async function connectCardRequest(
+  input: unknown,
+  sources: ConnectCardSources,
+): Promise<ConnectCardRequest> {
+  const devices = sources.devices ?? [];
+  const parsed = parseConnectServiceInput(input, devices, { devicesOnly: sources.devicesOnly });
+  if (!parsed.ok) return { status: "refused", error: parsed.error };
+  if (!parsed.device) return oauthCardRequest(parsed.kind);
+  // A device kind that already works needs no card: read as it stands now.
+  const now = sources.deviceState?.(parsed.kind);
+  if (now?.state === "working") {
+    return {
+      status: "answer",
+      message: `${parsed.device.label} is already connected${now.device ? ` on ${now.device}` : ""}. Go ahead; no card shown.`,
+    };
+  }
+  return deviceCardRequest(parsed.device, now?.askingDeviceId, await sources.language?.());
+}
+
+/** The card's closing words for the agent: it waits for the guardian. */
+function cardShown(label: string): string {
+  return (
+    `The card to connect ${label} has been shown to the guardian. Whether they connected it ` +
+    "or dismissed the card arrives as the next turn's prompt — do not call any further tools " +
+    "or send another message until then."
+  );
+}
+
+/** The connect card for a device kind. Its Connect opens the device's page,
+ *  which the device's own app turns into its flow. */
+function deviceCardRequest(
   device: DeviceKind,
-  widgetsShow: boolean,
   /** The device the guardian asks from: the card's checks read its connection alone. */
   askingDeviceId?: string,
   /** The guardian's language (`en`, `zh-CN`): the card's words follow it where the device has them. */
   language?: string | null,
-): unknown {
+): ConnectCardAnswer {
   const words = deviceWords(device, language);
-  if (!widgetsShow) {
-    return (
+  return {
+    status: "card",
+    props: {
+      kind: device.kind,
+      label: device.label,
+      title: words.title,
+      ...(words.summary ? { summary: words.summary } : {}),
+      ...(device.icon ? { icon: device.icon } : {}),
+      device: true,
+      ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
+    },
+    noCard:
       "This conversation cannot show the connect card. Ask the guardian, in a message, " +
-      `to turn on ${device.label} in the Rome app on their device, then wait for their reply.`
-    );
+      `to turn on ${device.label} in the Rome app on their device, then wait for their reply.`,
+    shown: cardShown(device.label),
+  };
+}
+
+/** The connect card for a kind Rome connects itself. */
+function oauthCardRequest(kind: OAuthProvider): ConnectCardAnswer {
+  const label = OAUTH_PROVIDER_DESCRIPTORS[kind].label;
+  // Where this instance cannot start the kind's authorization, a card's
+  // Connect could only fail: say why instead.
+  const link = createRomeCloudOAuthStartUrl(kind);
+  if (!link.available) {
+    return {
+      status: "answer",
+      message:
+        `${label} can't be connected from the chat on this instance: ${link.unavailableReason ?? "it is not set up"}. ` +
+        `Tell the guardian, in a message, to connect ${label} in Settings › Connections.`,
+    };
   }
+  return {
+    status: "card",
+    props: { kind },
+    noCard:
+      "This conversation cannot show the connect card. Ask the guardian, in a message, " +
+      `to connect ${label} in Settings › Connections, then wait for their reply.`,
+    shown: cardShown(label),
+  };
+}
+
+/**
+ * What `connect_service` hands back for a request. Where a widget shows, the
+ * turn waits on the connect card; `builtin: true` marks it as core's own,
+ * which the drain checks against the tool that emitted it. Otherwise the
+ * model asks the guardian in a message.
+ */
+export function connectCardToolOutput(request: ConnectCardAnswer, widgetsShow: boolean): unknown {
+  if (request.status === "answer") return request.message;
+  if (!widgetsShow) return request.noCard;
   return {
     pendingInteraction: true,
     appId: "core",
     render: {
       kind: "inline",
       componentId: CONNECT_CARD_ID,
-      props: {
-        kind: device.kind,
-        label: device.label,
-        title: words.title,
-        ...(words.summary ? { summary: words.summary } : {}),
-        ...(device.icon ? { icon: device.icon } : {}),
-        device: true,
-        ...(askingDeviceId ? { deviceId: askingDeviceId } : {}),
-      },
+      props: request.props,
       builtin: true,
     },
-    message:
-      `The card to connect ${device.label} has been shown to the guardian. Whether they connected it ` +
-      "or dismissed the card arrives as the next turn's prompt — do not call any further tools " +
-      "or send another message until then.",
-  };
-}
-
-/**
- * What a valid `connect_account` call hands back. Where a widget shows, the
- * turn waits on the connect card; `builtin: true` marks it as core's own, which
- * the drain checks against the tool that emitted it. Otherwise the model asks
- * the guardian to connect in Settings, in a message.
- */
-export function connectAccountToolOutput(kind: OAuthProvider, widgetsShow: boolean): unknown {
-  const label = OAUTH_PROVIDER_DESCRIPTORS[kind].label;
-  // Where this instance cannot start the kind's authorization, a card's
-  // Connect could only fail: say why instead.
-  const link = createRomeCloudOAuthStartUrl(kind);
-  if (!link.available) {
-    return (
-      `${label} can't be connected from the chat on this instance: ${link.unavailableReason ?? "it is not set up"}. ` +
-      `Tell the guardian, in a message, to connect ${label} in Settings › Connections.`
-    );
-  }
-  if (!widgetsShow) {
-    return (
-      "This conversation cannot show the connect card. Ask the guardian, in a message, " +
-      `to connect ${label} in Settings › Connections, then wait for their reply.`
-    );
-  }
-  return {
-    pendingInteraction: true,
-    appId: "core",
-    render: { kind: "inline", componentId: CONNECT_CARD_ID, props: { kind }, builtin: true },
-    message:
-      `The card to connect ${label} has been shown to the guardian. Whether they connected it ` +
-      "or dismissed the card arrives as the next turn's prompt — do not call any further tools " +
-      "or send another message until then.",
+    message: request.shown,
   };
 }
 

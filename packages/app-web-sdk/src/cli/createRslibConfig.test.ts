@@ -1,10 +1,15 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { LibConfig } from "@rslib/core";
 import { expect, it } from "@rstest/core";
-import { createBuildContext, resolveSdkReactAliases } from "./createRslibConfig.js";
+import {
+  cleanBackendOutput,
+  createBuildContext,
+  resolveSdkReactAliases,
+} from "./createRslibConfig.js";
 
 const require = createRequire(import.meta.url);
 
@@ -64,5 +69,29 @@ it("fails before bundling a mismatched SDK-owned React pair", async () => {
     ).toThrow(/must resolve matching React packages, found react@19\.1\.0 and react-dom@19\.2\.8/);
   } finally {
     await rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+it("builds an app with no web section without a web bundle", async () => {
+  const appDir = await mkdtemp(join(tmpdir(), "rome-no-web-"));
+  try {
+    await mkdir(join(appDir, "src", "actions", "act"), { recursive: true });
+    await writeFile(
+      join(appDir, "app.yaml"),
+      ["formatVersion: 1", "id: no-web-test", "version: 0.1.0", "appRoot: dist", ""].join("\n"),
+    );
+    await writeFile(join(appDir, "src", "actions", "act", "index.ts"), "export const run = 1;\n");
+    await mkdir(join(appDir, "dist", "web"), { recursive: true });
+
+    const context = await createBuildContext({ cwd: appDir, mode: "production" });
+    const libs = context.rslibConfig.lib as LibConfig[];
+
+    expect(libs.map((lib) => lib.output?.target)).toEqual(["node"]);
+    expect(existsSync(join(appDir, "node_modules", ".rome", "main.tsx"))).toBe(false);
+
+    cleanBackendOutput(context);
+    expect(existsSync(join(appDir, "dist", "web"))).toBe(false);
+  } finally {
+    await rm(appDir, { recursive: true, force: true });
   }
 });

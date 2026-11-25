@@ -2,9 +2,9 @@
   "entries": [
     {
       "tier": "background",
-      "reason": "Reply-chain focus reads the message thread endpoint.",
-      "pr": 2574,
-      "server": "#2574"
+      "reason": "The voice conversation button asks whether the account is on the voice input list.",
+      "pr": 2640,
+      "server": "#2636"
     }
   ]
 }

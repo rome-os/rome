@@ -213,7 +213,7 @@ describe("the prompts and device connections", () => {
     };
 
   // How a device capability is used comes from the device's report, through
-  // core:device_describe and core:device_run, so a new capability changes no prompt.
+  // system:read_devices and system:run_on_device, so a new capability changes no prompt.
   it("hold no device- or Health-specific text", () => {
     for (const name of ["main", "concierge"]) {
       const { systemPromptPrefix, actions, policy } = definition(name);
@@ -242,7 +242,7 @@ describe("the prompts and device connections", () => {
       { ...material, charter: "", identity: "" },
     );
     expect(prompt).toContain(
-      "goes through `core:device_describe` and `core:device_run`, never `rome-node`",
+      "goes through `system:read_devices` and `system:run_on_device`, never `rome-node`",
     );
     expect(prompt).toContain(
       "`rome-node` runs programs and reads files on the guardian's computers",

@@ -16,11 +16,6 @@ import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
-import {
-  createGuardianLinkAdmission,
-  GuardianLinkCodes,
-  linkCode,
-} from "./people/link-code/index.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -63,11 +58,7 @@ import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import {
-  isGuardianSession,
-  type SessionActor,
-  withoutSessionActor,
-} from "./access/session-actor.js";
+import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./instance/runtime.js";
@@ -196,7 +187,7 @@ import { AppTurnHooks, inOneHookChain } from "./app-host/app-turn-hooks.js";
 import { AppTurnMiddleware } from "./app-host/app-turn-middleware.js";
 import { TurnUsageReporter } from "./app-host/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
-import { ActionRegistryImpl, fullIdsByUniqueLocalName } from "./apps/actions/registry.js";
+import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
 import { readMemoryHeadroom } from "./instance/memory-headroom.js";
@@ -248,10 +239,9 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
-import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
-import { routineControlService, routineOperations } from "./routines/control.js";
+import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -260,6 +250,7 @@ import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
 import { GMAIL_SEND_ACTION, registerGmailActions } from "./connections/gmail/actions.js";
 import { OUTLOOK_SEND_ACTION, registerOutlookActions } from "./connections/outlook/actions.js";
+import { whoMayAsk } from "./apps/actions/who-may-ask.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
@@ -402,7 +393,6 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import type { KindMount } from "./connections/kind-mount.js";
-import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
 import {
@@ -411,7 +401,12 @@ import {
   isDiscordFrame,
   romeCloudDiscordApp,
 } from "./connections/kinds/discord-app/index.js";
-import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
+import {
+  ChatSettingsRepository,
+  ChatSettingsService,
+  chatCommands,
+  heardUnlessSwitchedOff,
+} from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
   APP_CONNECTION_WRITE_ACTION,
@@ -759,16 +754,14 @@ async function main() {
     platform: AGENTS_KIND,
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
-  const guardianLinkCodes = new GuardianLinkCodes();
-  const linkCodeAdmission = createGuardianLinkAdmission({
-    codes: guardianLinkCodes,
-    peopleRepo,
-    registry: connectionRegistry,
-    accountOf: (connectionId) => accounts.accountOf(connectionId),
+  // Read at each message, once the chat settings below exist.
+  const heardInChat = heardUnlessSwitchedOff({
+    settings: { get: (ref) => chatSettings.get(ref) },
+    rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
   });
   // Every sender is admitted: Rome never asks a sender to pair
-  // (docs/domains/people.md#stranger). Only the guardian's link code is taken
-  // out of the chat.
+  // (docs/domains/people.md#stranger). Only a message said in a chat switched
+  // off is taken out, unless it is a stop said to Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
@@ -777,7 +770,7 @@ async function main() {
     const platform =
       accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
     await readBotsOfPeople(platform, message);
-    return linkCodeAdmission(connectionId, connectionKind, message);
+    return heardInChat(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the connection kind
@@ -798,7 +791,7 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
-  // The agents this Rome can message, one read for the People page and for
+  // The agents this Rome can message, one read for the people listing and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
@@ -830,19 +823,12 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
-  const storedLegacyBindings = await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING);
   const artifactIdentity = {
-    legacyBindings: parseLegacyArtifactBindings(storedLegacyBindings),
+    legacyBindings: parseLegacyArtifactBindings(
+      await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
+    ),
   };
-  // Routines saved before action names carried their app fire by the full ID.
-  // Renamed before boot removal, which pauses a removed app's routines by it.
-  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
-    artifactIdentity.legacyBindings.action,
-  );
-  if (renamedRoutines > 0) {
-    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
-  }
-  // Boot removal matches routines' actions before actions register.
+  // Boot removal matches qualified names and legacy bindings before actions register.
   // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
   let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -852,6 +838,7 @@ async function main() {
     romeCloudListings,
     pauseRoutines: appRoutinePauser({
       repository: routinesRepo,
+      legacyBindings: artifactIdentity.legacyBindings,
       engine: {
         deactivate: async (id) => {
           await deactivateRoutine?.(id);
@@ -1015,6 +1002,13 @@ async function main() {
   if (renamedAgents.sessions + renamedAgents.chats > 0) {
     appsLog.info("old agent names renamed", renamedAgents);
   }
+  // Routines saved before action names carried their app fire by the full ID.
+  const renamedRoutines = await routinesRepo.deprecatedQualifyActionNames(
+    artifactIdentity.legacyBindings.action,
+  );
+  if (renamedRoutines > 0) {
+    appsLog.info("old action names on routines renamed", { routines: renamedRoutines });
+  }
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
@@ -1056,6 +1050,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      mainActions: agentToolNames,
       placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
@@ -1342,8 +1337,8 @@ async function main() {
     },
   });
   // Speech credentials for voice conversation mode. Only the speaker source
-  // asks for one, and only while `voice_mode` is on. At boot this reports the
-  // usage of speech sessions an earlier run left, if any.
+  // asks for one, when a conversation starts. At boot this reports the usage
+  // of speech sessions an earlier run left, if any.
   const speechCredentials = createRomeCloudSpeechCredentials({
     romeCloud: romeCloudAccess,
     settings: settingsRepo,
@@ -1901,20 +1896,39 @@ async function main() {
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+    // The check system:read_devices and system:run_on_device pass, so the
+    // older names let in the same turns.
+    whoMayAsk: whoMayAsk((chatId) => concierge.ownerOfChat(chatId)),
   });
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // What the system app's routine actions do beyond create, search and
-  // delete: in this process directly, from a worker over `routines.control`.
-  const routineOps = routineOperations({
-    routines: routinesRepo,
-    engine: routineEngine,
-    routineRuns: routineRunsRepo,
-    actionExecutions: actionExecutionsRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    // The Routines page's records, and the rules a changed routine meets as a new one does.
+    routines: {
+      routines: routinesRepo,
+      engine: routineEngine,
+      routineRuns: routineRunsRepo,
+      actionExecutions: actionExecutionsRepo,
+      actionRegistry,
+      agentRunner,
+      resolveOneOffDate: (trigger: Trigger) =>
+        resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
+      hasTriggerType: (type) => routineEngine.hasProvider(type),
+    },
+    // The service the Devices page calls, and what each device reported.
+    devices: {
+      devices: nodeDevices,
+      connections: deviceConnectionsRepo,
+      run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+    },
+    // The projection `GET /connections` serves, and the Connections page's disconnect.
+    connections: {
+      connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+      registry: connectionRegistry,
+    },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
@@ -2052,7 +2066,6 @@ async function main() {
     wakeGateFor,
     routinesRepo,
     routineEngine,
-    routineControl: routineControlService(routineOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2359,20 +2372,27 @@ async function main() {
       // A setup's hold ends with the setup; frames held behind it then reach
       // its connection or are dropped.
       holdSlackFrames: () => slackSetupHolds.hold(),
-      listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
     chatSettings,
-    chatStop,
     peopleRepo,
     whatsAppSyncSink: refreshingAfter(
       whatsAppStoreRepo,
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),
-    listAgents: () => agentLoader.list().map((agent) => agent.name),
-    hasAgent: (name) => agentLoader.find(name) !== undefined,
-    accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
+    // A Discord bot's slash commands read and change its chats' rules.
+    discordCommandsOf: (connectionId) =>
+      chatCommands({
+        connectionId,
+        service: "discord",
+        settings: chatSettings,
+        chatStop,
+        personOf: (accountId) => peopleRepo.byAccount({ platform: "discord", id: accountId }),
+        listAgents: () => agentLoader.list().map((agent) => agent.name),
+        hasAgent: (name) => agentLoader.find(name) !== undefined,
+        accountAgent: () => accountAgentOf(connectionId) ?? null,
+      }),
     // The account that connected is the guardian's own, so People links it.
     onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
@@ -2698,7 +2718,7 @@ async function main() {
       appStore,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
-      suggestAction: (name) => actionRegistry.suggest(name),
+      canonicalActionName: (name) => actionRegistry.getCanonicalName(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -2707,7 +2727,6 @@ async function main() {
         routinesRepo,
         routineEngine,
         routineCreation,
-        routineOperations: routineOps,
       }),
       ...mailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
@@ -2861,7 +2880,6 @@ async function main() {
       actionEngine,
       actionLoader,
       peopleRepo,
-      guardianLinkCodes,
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
@@ -2949,9 +2967,7 @@ async function main() {
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
     apiDeps.features = [
-      linkCode({ ...apiDeps, isGuardian: isGuardianSession }),
       phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
-      personHistory(apiDeps),
     ];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);
@@ -2968,19 +2984,6 @@ async function main() {
     actionEngine,
     canSync: () => isInstanceLinked(),
   });
-
-  // A profile from before the old-name map was stored has routines with bare
-  // action names the map cannot rename; a name one registered action has is
-  // that action's. Only its first boot renames, since this boot stores the map,
-  // so a bare name no action had stays unmatched when an app adds one later.
-  if (storedLegacyBindings == null) {
-    const renamedByRegistry = await routinesRepo.deprecatedQualifyActionNames(
-      fullIdsByUniqueLocalName(actionRegistry.list()),
-    );
-    if (renamedByRegistry > 0) {
-      appsLog.info("old action names on routines renamed", { routines: renamedByRegistry });
-    }
-  }
 
   await routineEngine.start();
 

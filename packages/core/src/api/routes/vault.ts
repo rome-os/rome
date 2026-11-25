@@ -7,10 +7,11 @@ import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { request } from "node:http";
 import { currentSessionActor } from "../../access/session-actor.js";
+import { isOnTeam } from "../../access/team.js";
 import { signerSocketPath } from "../../instance/instance-identity.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
-import { approvalCall, resolveApproval, VAULT_APPLY_ACTION } from "./approvals.js";
+import { approvalCall, resolveApproval, resolverOf, VAULT_APPLY_ACTION } from "./approvals.js";
 
 const NO_SIGNER = "The vault needs the signer, which is not running on this instance.";
 const SIGNER_OUTDATED = "The signer is too old for the vault. Upgrade the instance.";
@@ -76,19 +77,26 @@ function askedNames(source: Record<string, unknown>): string[] | null {
 }
 
 // The vault's values and the PIN live in the signer, which alone checks the
-// PIN. These routes forward the guardian's requests to its unix socket and keep
+// PIN. These routes forward the team's requests to its unix socket and keep
 // nothing: no database row, no log line with a body, no process.env entry. The
 // PIN passes through memory from the request body to the signer's.
-export function vaultRoutes(deps: Pick<ApiDeps, "approvalHandler" | "approvalsRepo">): Hono {
+export function vaultRoutes(
+  deps: Pick<ApiDeps, "approvalHandler" | "approvalsRepo" | "dashboardAccessState">,
+): Hono {
   const app = new Hono();
 
   app.use("/vault/*", async (c, next) => {
     const actor = await currentSessionActor();
-    if (actor?.kind !== "guardian")
+    if (!isOnTeam(actor, deps.dashboardAccessState))
       return c.json({ error: "Guardian authentication required" }, 403);
     const readOnly = ["GET", "HEAD", "OPTIONS"].includes(c.req.method);
     // Only a browser session types a PIN. A loopback caller is any process in the container.
-    if (!readOnly && c.req.method !== "DELETE" && actor.via !== "cookie")
+    if (
+      !readOnly &&
+      c.req.method !== "DELETE" &&
+      actor.kind === "guardian" &&
+      actor.via !== "cookie"
+    )
       return c.json({ error: "Use the dashboard to change the vault." }, 403);
     if (!readOnly && !isSameOriginMutationRequest(c.req.raw))
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -117,7 +125,11 @@ export function vaultRoutes(deps: Pick<ApiDeps, "approvalHandler" | "approvalsRe
     return reply.status === 200 ? c.json({ ok: true }) : relayFailure(c, reply, PIN_FAILED);
   });
 
+  // A reset deletes every secret and replaces the PIN without the old one, and
+  // the PIN is the guardian's credential, so a dashboard admin may not reset.
   app.post("/vault/reset", async (c) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "Only the guardian can reset the vault." }, 403);
     const { pin } = await c.req.json<{ pin?: unknown }>().catch(() => ({}) as { pin?: unknown });
     const reply = await signerCall("POST", "/v1/reset", { pin });
     return reply.status === 200 ? c.json({ ok: true }) : relayFailure(c, reply, PIN_FAILED);
@@ -125,7 +137,7 @@ export function vaultRoutes(deps: Pick<ApiDeps, "approvalHandler" | "approvalsRe
 
   app.post("/vault/grants", async (c) => {
     const actor = await currentSessionActor();
-    if (actor?.kind !== "guardian")
+    if (!isOnTeam(actor, deps.dashboardAccessState))
       return c.json({ error: "Guardian authentication required" }, 403);
     const input = await c.req
       .json<Record<string, unknown>>()
@@ -157,7 +169,7 @@ export function vaultRoutes(deps: Pick<ApiDeps, "approvalHandler" | "approvalsRe
     if (reply.status !== 200) {
       return relayFailure(c, reply, "The vault could not grant the secrets.");
     }
-    const resolved = await resolveApproval(deps, approvalId, "approve", actor.userId);
+    const resolved = await resolveApproval(deps, approvalId, "approve", resolverOf(actor));
     return resolved.status === 202 ? c.json({ ok: true }) : c.json(resolved.body, resolved.status);
   });
 

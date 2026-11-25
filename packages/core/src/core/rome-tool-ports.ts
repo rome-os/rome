@@ -16,7 +16,6 @@ import {
   type TurnFacts,
 } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
-import { didYouMean } from "../apps/actions/registry.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
 import { validateActionArgs } from "../apps/actions/validate-action-args.js";
 import type { WebChatRepository } from "../webchat/repository.js";
@@ -28,7 +27,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
-import { connectAccountTools } from "./connect-account-tool.js";
+import { connectServiceTools } from "./connect-service-tool.js";
 import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
@@ -54,7 +53,7 @@ export interface RomeToolPortsDeps {
    * only a task chat of its own chat's owner. When absent, no check names one.
    */
   taskOwner?: (chatId: string) => Promise<string | null>;
-  /** The device kinds `connect_account` connects. When absent, none. */
+  /** The device kinds `connect_service` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
   deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
@@ -98,23 +97,18 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   };
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
-    if (!requestedAction) {
-      throw new Error(`Unknown action: ${name}${permittedHint(turn, name)}`);
-    }
-    return permitted(turn, requestedAction);
+    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
+    return permittedActions(turn).find(
+      (action) => action.config.name === requestedAction.config.name,
+    );
   };
-  const permitted = (turn: TurnFacts, requested: Action): Action | undefined =>
-    permittedActions(turn).find((action) => action.config.name === requested.config.name);
-  // Names only an action the agent may call, so the hint reveals nothing more.
-  const permittedHint = (turn: TurnFacts, name: string): string =>
-    didYouMean(actionRegistry, name, (id) => {
-      const action = actionRegistry.get(id);
-      return action !== undefined && permitted(turn, action) !== undefined;
-    });
 
   const actions: AgentActions = {
     list: (turn) => permittedActions(turn).map(toAgentAction),
-    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
+    find: (turn, name) => {
+      const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
+      return actions.list(turn).find((action) => action.name === canonical);
+    },
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
@@ -205,11 +199,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     canCallAction: (name) => {
       if (!actionRegistry.get(name)) return "unknown";
       return findPermittedAction(turn, name) ? "permitted" : "denied";
-    },
-    suggestAction: (name) => {
-      const suggestion = actionRegistry.suggest?.(name);
-      const action = suggestion ? actionRegistry.get(suggestion) : undefined;
-      return action && permitted(turn, action) ? suggestion : undefined;
     },
     validateArgs: (actionName, args) => {
       const action = actionRegistry.get(actionName);
@@ -303,9 +292,9 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
         // A session whose own tools already show a connect card (the
         // Concierge's `connect_card`) keeps that one for the kinds Rome
         // connects itself, so the agent has one way to ask for each, and gets
-        // `connect_account` for device kinds alone, which that card does not
+        // `connect_service` for device kinds alone, which that card does not
         // connect.
-        ...connectAccountTools({
+        ...connectServiceTools({
           widgets: turn.widgets,
           hasSpeaker,
           devices: deps.deviceKinds?.(),

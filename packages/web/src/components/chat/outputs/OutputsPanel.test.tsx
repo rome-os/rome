@@ -20,6 +20,7 @@ import {
   OutputFile,
   OutputsPanel,
   outputTitle,
+  pageHrefOf,
   outputTypeOf,
   previewOf,
   readPrefix,
@@ -514,6 +515,39 @@ describe("OutputsPanel", () => {
     expect(download.getAttribute("download")).toBe("bundle.zip");
   });
 
+  it("sends a page to a new tab, since it never runs in the panel", async () => {
+    const user = userEvent.setup();
+    outputs = [
+      output("map", {
+        name: "trip-map.html",
+        mimeType: "text/html",
+        link: "/projects/demo/trip-map.html",
+      }),
+      output("copy", {
+        name: "copy.html",
+        mimeType: "text/html",
+        kind: "shown",
+        link: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html",
+        links: ["/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html"],
+      }),
+    ];
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Trip map" }));
+    expect(
+      screen.getByText("This page does not run here. Open it in a new tab to see it."),
+    ).toBeTruthy();
+    const open = screen.getByRole("link", { name: "Open in new tab" });
+    expect(open.getAttribute("href")).toBe("/projects/demo/trip-map.html");
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+    await user.click(screen.getByRole("button", { name: "Back to outputs" }));
+
+    // A copy of a file outside both folders only downloads, so it has nowhere to open.
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(screen.getByText("This file has no preview.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
+  });
+
   it("says quietly while earlier outputs are still being read back", async () => {
     indexing = true;
     renderPanel();
@@ -819,6 +853,58 @@ describe("previewOf", () => {
     expect(previewOf({ name: "a.html", mimeType: "text/html" })).toBe("file");
     expect(previewOf({ name: "a.svg", mimeType: "image/svg+xml" })).toBe("file");
     expect(previewOf({ name: "a.json", mimeType: "application/json" })).toBe("text");
+  });
+});
+
+describe("pageHrefOf", () => {
+  const page = { name: "trip map.html", mimeType: "text/html" };
+
+  it("opens a written page in the projects folder on its own page", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        link: "/projects/demo/trip map.html",
+        links: ["/home/rome/projects/demo/trip map.html", "/projects/demo/trip map.html"],
+      }),
+    ).toBe("/projects/demo/trip%20map.html");
+  });
+
+  it("opens a written page in the memory folder from its links, as the server gives it", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        link: null,
+        links: ["/home/rome/memory/notes/trip map.html", "/memory/notes/trip map.html"],
+      }),
+    ).toBe("/memory/notes/trip%20map.html");
+  });
+
+  it("opens the file a shown copy was made from, when it is in either folder", () => {
+    expect(
+      pageHrefOf({
+        ...page,
+        link: "/api/assets/0f3c.html",
+        links: [
+          "/api/assets/0f3c.html",
+          "/home/rome/projects/demo/trip map.html",
+          "/projects/demo/trip map.html",
+        ],
+      }),
+    ).toBe("/projects/demo/trip%20map.html");
+  });
+
+  it("leaves a copy with no such file, a page outside both folders and any other file alone", () => {
+    expect(
+      pageHrefOf({ ...page, link: "/api/assets/0f3c.html", links: ["/api/assets/0f3c.html"] }),
+    ).toBeNull();
+    expect(pageHrefOf({ ...page, link: null, links: ["/tmp/trip map.html"] })).toBeNull();
+    expect(
+      pageHrefOf({
+        name: "bundle.zip",
+        mimeType: "application/zip",
+        link: "/projects/demo/bundle.zip",
+      }),
+    ).toBeNull();
   });
 });
 

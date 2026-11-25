@@ -837,13 +837,18 @@ export class CodexAppServerProvider implements ModelProvider {
       // Tool calls: tool_use on start, tool_result on completion. Non-tool
       // items (userMessage echo, plan, todoList, …) are skipped.
       if (!TOOL_ITEM_TYPES.has(item.type)) return;
-      const tool = toolNameForItem(item);
       // External MCP tools arrive as `mcpToolCall`, which nests the real result
       // in `item.result`. Rome-owned tools arrive as `dynamicToolCall` and use
       // the in-process tool output retained by callId. Normalize both so the
       // drain loop sees the real args/result rather than the wrapper item.
       const isMcp = item.type === "mcpToolCall";
       const isDynamic = item.type === "dynamicToolCall";
+      // A resumed thread keeps its first tool catalog, so it may call a Rome
+      // tool by a former name. The trace names the tool as it is now.
+      const tool =
+        isDynamic && activeTurn
+          ? activeTurn.romeTools.currentName(toolNameForItem(item))
+          : toolNameForItem(item);
       const rec = item as {
         arguments?: unknown;
         result?: unknown;

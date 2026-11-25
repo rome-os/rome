@@ -5,8 +5,8 @@
 // `kinds/slack/slack.ts`, so `isSlackCredentialError` reads them.
 
 import { cloudBearer } from "../../../instance/instance-identity.js";
-import { SlackApiError, type SlackUserName } from "../slack/slack.js";
-import type { SlackWireMessage } from "./message.js";
+import { SlackApiError } from "../slack/slack.js";
+import type { SlackMember, SlackWireMessage } from "./message.js";
 import { SlackTooSoonError } from "./read-gate.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
@@ -37,7 +37,7 @@ export interface SlackAppWebApi {
     input: { channel: string; timestamp: string; name: string },
     signal?: AbortSignal,
   ): Promise<void>;
-  userName(teamId: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
+  userName(teamId: string, userId: string, signal?: AbortSignal): Promise<SlackMember>;
   /** One page of a conversation's history, newest first: at most `limit`
    *  messages before `latest` (exclusive), or the newest. */
   conversationHistory(
@@ -256,11 +256,25 @@ export function createSlackAppWebApi(
     async userName(teamId, userId, signal) {
       const body = await get(teamId, "users.info", { user: userId }, signal);
       const user = body.user as
-        | { name?: unknown; real_name?: unknown; profile?: { display_name?: unknown } }
+        | {
+            name?: unknown;
+            real_name?: unknown;
+            team_id?: unknown;
+            enterprise_user?: { teams?: unknown };
+            profile?: { display_name?: unknown };
+          }
         | undefined;
       return {
         displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
         username: stringField(user?.name),
+        teamId: stringField(user?.team_id),
+        ...(Array.isArray(user?.enterprise_user?.teams)
+          ? {
+              teams: user.enterprise_user.teams.filter(
+                (team): team is string => typeof team === "string",
+              ),
+            }
+          : {}),
       };
     },
     async conversationHistory(teamId, input, signal) {

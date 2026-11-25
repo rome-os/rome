@@ -10,10 +10,11 @@ import type {
   VoiceConversationState,
   VoiceConversationStopReason,
 } from "@rome/api-types/voice-conversation";
+import { randomUUID } from "node:crypto";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { SpeakerListener, SpeakerSession } from "../voice-output/speaker.js";
-import { enoughWords, isEcho } from "./barge-in.js";
+import { enoughWords, isEcho, isLateEcho } from "./barge-in.js";
 import { createSentenceSplitter, type SentenceSplitter } from "./sentences.js";
 import {
   createSpeakableFilter,
@@ -70,11 +71,12 @@ export interface ReplyTurn {
 
 export interface ConversationDeps {
   /**
-   * Sends the guardian's turn to the chat, and resolves with the turn that
-   * answers it. Rejects when the chat refuses it. `signal` aborts once the
-   * conversation no longer waits for that turn, so the send lets go of what it holds.
+   * Sends the guardian's turn to the chat as the message `inputId`, and
+   * resolves with the turn that answers it. Rejects when the chat refuses it.
+   * `signal` aborts once the conversation no longer waits for that turn, so
+   * the send lets go of what it holds.
    */
-  send(text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  send(text: string, inputId: string, signal: AbortSignal): Promise<ReplyTurn>;
   /** A text frame to the client. */
   message(message: VoiceConversationServerMessage): void;
   /** Reply audio to the client, in the order to play it. */
@@ -119,6 +121,8 @@ interface Queued {
   /** Audio that came before the sentence's turn to play. */
   waiting: Uint8Array[];
   started: boolean;
+  /** Some of its audio has gone to the client, so its words may come back. */
+  sounded: boolean;
   done: boolean;
 }
 
@@ -139,11 +143,16 @@ export function createConversation(deps: ConversationDeps): Conversation {
   // The guardian's turn so far.
   let settled = "";
   let pending = "";
-  // The turn began while Rome's audio still played, and did not count as
-  // speaking over it. A turn begun after Rome stopped is the guardian's.
+  // The turn began while Rome's words could still come back, and did not
+  // count as speaking over them. A turn begun after that is the guardian's.
   let maybeEcho = false;
   let begun = false;
-  let echo = "";
+  let begunAt = 0;
+  // For a turn begun once Rome's audio had played, the sentences that could
+  // come back then: only a whole run of the last ones is an echo.
+  let lateEcho: string[] | null = null;
+  // The sentences Rome played again during such a turn: any of their words may come back.
+  let lateAfter: Queued[] = [];
 
   let reply: Reply | null = null;
   let replies = 0;
@@ -152,6 +161,12 @@ export function createConversation(deps: ConversationDeps): Conversation {
   let playsUntil = 0;
   // Until when what is heard may be Rome's own voice.
   let echoUntil = 0;
+  // Rome's sentences whose audio may still come back. Those of the reply now
+  // playing last as long as `echoUntil`. Those of a reply stopped keep their
+  // own end, however soon the next reply plays.
+  let spoken: { text: string; until: number | null }[] = [];
+  const echoAt = (at: number) =>
+    spoken.filter((s) => at < (s.until ?? echoUntil)).map((s) => s.text);
   let stopPlayed = () => {};
   let stopLooking: (() => void) | null = null;
 
@@ -199,6 +214,23 @@ export function createConversation(deps: ConversationDeps): Conversation {
     update();
   };
 
+  // Sends audio of the head sentence. Only words with audio can come back, so
+  // a sentence counts as said from its first audio, not from its turn to play.
+  const playOf = (head: Queued, pcm: Uint8Array) => {
+    if (pcm.byteLength === 0) return;
+    if (!head.sounded) {
+      head.sounded = true;
+      // Rome's words are kept while any of its audio may still be heard, however far
+      // the speech runs ahead of playback, and forgotten after: for a turn under
+      // way, after the time it began, as it still matches them.
+      const from = begun ? begunAt : now();
+      spoken = spoken.filter((s) => from < (s.until ?? echoUntil));
+      spoken.push({ text: head.text, until: null });
+    }
+    if (begun && lateEcho && lateAfter.at(-1) !== head) lateAfter.push(head);
+    play(pcm);
+  };
+
   // Sends the head sentence's audio, and moves on past each finished one.
   const pump = () => {
     while (queue.length > 0) {
@@ -206,11 +238,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
       if (!head.started) {
         head.started = true;
         deps.message({ type: "caption", text: head.text });
-        // Rome's words are kept while any of its audio may still be heard, however far
-        // the speech runs ahead of playback, and forgotten after.
-        echo = now() < echoUntil ? `${echo} ${head.text}` : head.text;
       }
-      for (const pcm of head.waiting.splice(0)) play(pcm);
+      for (const pcm of head.waiting.splice(0)) playOf(head, pcm);
       if (!head.done) break;
       queue.shift();
     }
@@ -221,7 +250,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
     if (!speaker || reply !== to) return;
     to.quietOver = true;
     const id = `${replies}-${to.said++}`;
-    queue.push({ id, text, waiting: [], started: false, done: false });
+    queue.push({ id, text, waiting: [], started: false, sounded: false, done: false });
     speaker.say(id, text);
     pump();
   };
@@ -253,6 +282,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
     playsUntil = 0;
     // The client drops the audio not played, so only the recognition tail can come back.
     echoUntil = Math.min(echoUntil, now() + ECHO_TAIL_MS);
+    for (const s of spoken) s.until ??= echoUntil;
     stopPlayed();
     if (unplayed) deps.message({ type: "clear" });
     update();
@@ -309,7 +339,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
       onAudio(frame) {
         const queued = queue.find((q) => q.id === frame.sentenceId);
         if (!queued) return;
-        if (queued === queue[0]) play(frame.pcm);
+        if (queued === queue[0]) playOf(queued, frame.pcm);
         else queued.waiting.push(frame.pcm);
       },
       onSentenceEnd(sentenceId) {
@@ -341,9 +371,18 @@ export function createConversation(deps: ConversationDeps): Conversation {
       const words = `${settled}${pending}`;
       if (!begun && words.trim()) {
         begun = true;
-        maybeEcho = now() < playsUntil;
+        begunAt = now();
+        // Recognition runs behind the audio, so Rome's words may come back after it played.
+        const playing = begunAt < playsUntil;
+        const back = echoAt(begunAt);
+        maybeEcho = playing || back.length > 0;
+        lateEcho = playing ? null : back;
+        lateAfter = [];
       }
-      if (state === "speaking" && enoughWords(words) && !isEcho(words, echo)) {
+      // A turn begun after the audio keeps the sentences that could come back
+      // then, even once their time has passed, and adds what Rome played since.
+      const back = lateEcho ? [...lateEcho, ...lateAfter.map((q) => q.text)] : echoAt(begunAt);
+      if (state === "speaking" && enoughWords(words) && !isEcho(words, back.join(" "))) {
         log.info("guardian spoke over the reply");
         maybeEcho = false;
         drop();
@@ -354,13 +393,23 @@ export function createConversation(deps: ConversationDeps): Conversation {
       if (closed) return;
       const text = `${settled}${pending}`.trim();
       const suspect = maybeEcho;
+      const late = lateEcho;
+      const after = lateAfter.map((q) => q.text);
       settled = "";
       pending = "";
       maybeEcho = false;
+      lateEcho = null;
+      lateAfter = [];
       begun = false;
       // Rome's own words coming back are not a turn. A short answer is always
       // the guardian's: "No" or "香蕉" is likely to be part of what Rome just said.
-      if (!text || (suspect && enoughWords(text) && isEcho(text, echo))) {
+      // Heard after the audio played, only Rome's whole last sentences are its
+      // own: "下午的航班" picks from them.
+      const romes =
+        suspect &&
+        enoughWords(text) &&
+        (late ? isLateEcho(text, late, after) : isEcho(text, echoAt(begunAt).join(" ")));
+      if (!text || romes) {
         if (text) deps.message({ type: "heard", settled: "", pending: "" });
         return;
       }
@@ -376,9 +425,11 @@ export function createConversation(deps: ConversationDeps): Conversation {
         left: new AbortController(),
       };
       reply = to;
-      deps.message({ type: "turn", text });
+      // The client shows the turn as this message until the chat has it.
+      const inputId = randomUUID();
+      deps.message({ type: "turn", text, inputId });
       update();
-      deps.send(text, to.left.signal).then(
+      deps.send(text, inputId, to.left.signal).then(
         (turn) =>
           read(to, turn).catch((err: unknown) => {
             // The reply still shows in the chat. Rome says what it has.

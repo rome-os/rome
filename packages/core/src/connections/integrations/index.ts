@@ -14,7 +14,7 @@ import {
 } from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { Commands } from "../command.js";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
@@ -44,15 +44,10 @@ export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   chatSettings: ChatSettingsPort;
-  chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
-  /** Loaded-agent lister (Discord agent-binding validation + autocomplete). */
-  listAgents: () => string[];
-  /** The agent linked to a Connection's channel (Discord in-chat settings). */
-  accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** Whether an agent is loaded, aliases included. */
-  hasAgent?: (name: string) => boolean;
+  /** The commands a Discord Connection's bot offers. */
+  discordCommandsOf?: (connectionId: string) => Commands;
   /** Told the WhatsApp account's canonical self JID each time it connects. */
   onWhatsAppAccountConnected: (selfJid: string) => void;
   /** Rome Cloud mail client for the Email adapter. */
@@ -84,11 +79,7 @@ export function registerBuiltinConnections(
   registry.register(
     makeDiscordDescriptor({
       chatSettings: deps.chatSettings,
-      chatStop: deps.chatStop,
-      peopleRepo: deps.peopleRepo,
-      listAgents: deps.listAgents,
-      accountAgentOf: deps.accountAgentOf,
-      hasAgent: deps.hasAgent,
+      ...(deps.discordCommandsOf ? { commandsOf: deps.discordCommandsOf } : {}),
     }),
   );
   registry.register(makeTelegramUserDescriptor());

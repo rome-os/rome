@@ -3,7 +3,7 @@ type: custom
 description: |
   Connect a third-party toolkit (e.g. github, gmail, slack, supabase, neon) so
   its tools become usable in workflows and agent steps. GitHub, Slack and Shopify
-  are connected by Rome itself: for those, call the connect_account tool instead,
+  are connected by Rome itself: for those, call the connect_service tool instead,
   never this action.
   For Composio toolkits, sign in with connector:connector_login first, then re-run
   connector:connector_connect per toolkit. If already connected, this reports so. Otherwise

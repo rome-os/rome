@@ -493,23 +493,6 @@ describe("ChatSearchDialog", () => {
     expect(options[1].textContent).toContain("N");
   });
 
-  it("opens a registered host-owned app route", async () => {
-    mockSessionSearch(
-      [],
-      [],
-      [installedApp("inbox", "Inbox", { hasFrontend: false, href: null, fullHref: null })],
-    );
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
-      "inbox",
-    );
-    await user.click(await screen.findByRole("option", { name: "Inbox" }));
-    expect(screen.getByTestId("location").textContent).toBe("/apps/inbox");
-  });
-
   it("preserves hidden-sidebar mode alongside an app's existing query string", async () => {
     mockSessionSearch(
       [],

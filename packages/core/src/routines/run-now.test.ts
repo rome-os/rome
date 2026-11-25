@@ -6,22 +6,16 @@ import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import {
-  type RoutineOperations,
-  type RoutineTurn,
-  routineControlService,
-  routineOperations,
-} from "./control.js";
+import { actionOf, callTool, GUARDIAN_TURN } from "../apps/actions/agent-tool-contract.js";
+import type { ToolTurn } from "../apps/actions/agent-tool.js";
+import { type RoutineToolDeps, runRoutine, stopRoutine, stopRoutineRun } from "./agent-tools.js";
 import { RoutineEngine } from "./engine.js";
 
-const guardianAsked: RoutineTurn = {
-  actor: { kind: "guardian", userId: "guardian", via: "cookie" },
-  audience: "private",
-};
+const guardianAsked = GUARDIAN_TURN;
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
-let ops: RoutineOperations;
+let deps: RoutineToolDeps;
 let finishRun: () => void;
 const routineEngine = {
   activate: rs.fn(async () => {}),
@@ -42,13 +36,14 @@ beforeEach(() => {
   routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
-  ops = routineOperations({
+  deps = {
     routines,
     engine: routineEngine,
     routineRuns: new RoutineRunsRepository(testDb.db),
     actionExecutions: new ActionExecutionsRepository(testDb.db),
-    ownerOfChat: async () => "guardian",
-  });
+    actionRegistry: { has: () => true, isExplicit: () => false, validateArgs: () => null },
+    resolveOneOffDate: async (trigger) => trigger,
+  };
 });
 
 afterEach(() => {
@@ -69,7 +64,7 @@ describe("running a routine now", () => {
   it("starts the run and answers with its id without waiting for it to finish", async () => {
     const id = await createRoutine();
 
-    const result = await ops.runNow({ routineId: id }, guardianAsked);
+    const result = await callTool(runRoutine, deps, { routineId: id }, guardianAsked);
 
     expect(result).toEqual({
       status: "ok",
@@ -81,7 +76,12 @@ describe("running a routine now", () => {
   it("passes its input to the run as a trigger's payload", async () => {
     const id = await createRoutine();
 
-    await ops.runNow({ routineId: id, input: { repo: "acme/widgets" } }, guardianAsked);
+    await callTool(
+      runRoutine,
+      deps,
+      { routineId: id, input: { repo: "acme/widgets" } },
+      guardianAsked,
+    );
 
     expect(routineEngine.runNow).toHaveBeenCalledWith(
       id,
@@ -91,27 +91,27 @@ describe("running a routine now", () => {
   });
 
   it("names the action to find the right id when the routine does not exist", async () => {
-    const result = await ops.runNow({ routineId: "nope" }, guardianAsked);
+    const result = await callTool(runRoutine, deps, { routineId: "nope" }, guardianAsked);
     expect(result).toMatchObject({
       status: "error",
-      error: expect.stringContaining("search_routine"),
+      error: expect.stringContaining("read_routines"),
     });
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 
-  it("names the field to pass when the id comes under another name", async () => {
-    const result = await ops.runNow({ id: "a-routine" }, guardianAsked);
+  it("asks for the routine's id when none is given", async () => {
+    const result = await callTool(runRoutine, deps, { routineId: "" }, guardianAsked);
     expect(result).toEqual({
       status: "error",
-      error: "Pass the routine's id as routineId. Find it with system:search_routine.",
+      error: "Pass the routine's id as routineId. Find it with system:read_routines.",
     });
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 
   it("refuses a turn the guardian's own message did not start, and runs nothing", async () => {
     const id = await createRoutine();
-    const result = await ops.runNow({ routineId: id }, { audience: "private" });
-    expect((result as { error: string }).error).toMatch(/^routine_needs_guardian:/);
+    const result = await callTool(runRoutine, deps, { routineId: id }, { audience: "private" });
+    expect((result as { error: string }).error).toMatch(/^needs_guardian:/);
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 });
@@ -124,7 +124,7 @@ describe("a routine's fire", () => {
       run: (_name: string, args: Record<string, unknown>, context: ActionRunContext) =>
         actionExecutionContext.run(
           { ...context, executionId: "fire", rootExecutionId: "fire", initiator: "routine" },
-          () => routineControlService(ops).call("runNow", args),
+          () => actionOf(runRoutine, deps).execute(args),
         ),
     } as unknown as ActionEngine;
     const id = await actionExecutionContext.run(
@@ -154,7 +154,7 @@ describe("a routine's fire", () => {
 
     const run = await fires.runNow(id);
 
-    expect(run.error).toMatch(/routine_needs_guardian:/);
+    expect(run.error).toMatch(/needs_guardian:/);
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 });
@@ -163,7 +163,7 @@ describe("stopping a routine's run", () => {
   it("stops the routine's running run", async () => {
     const id = await createRoutine();
 
-    const result = await ops.stop({ routineId: id }, guardianAsked);
+    const result = await callTool(stopRoutineRun, deps, { routineId: id }, guardianAsked);
 
     expect(result).toEqual({
       status: "ok",
@@ -172,10 +172,26 @@ describe("stopping a routine's run", () => {
     expect(routineEngine.cancelRun).toHaveBeenCalledWith(id);
   });
 
+  it("still stops it under its older name", async () => {
+    const id = await createRoutine();
+
+    const result = await callTool(stopRoutine, deps, { routineId: id }, guardianAsked);
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { routineId: id, name: "Weekly report", stopped: true },
+    });
+  });
+
   it("refuses a chat that is not private with the guardian, and stops nothing", async () => {
     const id = await createRoutine();
-    const result = await ops.stop({ routineId: id }, { ...guardianAsked, audience: "shared" });
-    expect((result as { error: string }).error).toMatch(/^routine_private_only:/);
+    const result = await callTool(
+      stopRoutineRun,
+      deps,
+      { routineId: id },
+      { ...guardianAsked, audience: "shared" },
+    );
+    expect((result as { error: string }).error).toMatch(/^private_only:/);
     expect(routineEngine.cancelRun).not.toHaveBeenCalled();
   });
 });

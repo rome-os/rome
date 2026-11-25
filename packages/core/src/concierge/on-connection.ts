@@ -38,7 +38,7 @@ export const CONNECTION_PROMPT = [
   "- Think a question through yourself when it needs only reasoning: a calculation, a schedule, a plan or a comparison.",
   "- Look up a quick fact with web search: the weather, a price, an opening time. At most three searches in a turn.",
   "- Call the actions listed for you with `execute_action`. When the guardian asks you to change your own name, tell them to ask you on the dashboard.",
-  "- When the guardian asks about their own data, such as their schedule or a device's state, read it this turn before you answer, with `core:personal_data_catalog` then `core:personal_data_query`, or `core:device_describe` and `core:device_run`. Answer only from what you read this turn. Never write personal data to memory, and never repeat it in a chat that someone other than the guardian can read, such as a group.",
+  "- When the guardian asks about their own data, such as their schedule or a device's state, read it this turn before you answer, with `core:personal_data_catalog` then `core:personal_data_query`, or `system:read_devices` and `system:run_on_device`. Answer only from what you read this turn. Never write personal data to memory, and never repeat it in a chat that someone other than the guardian can read, such as a group.",
   "- Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about them, or you need them to answer, read them with `system:fetch_channel_history`, passing the channel and thread id from `<thread_context>`, and answer from what it returns. To page back, pass limit, then the nextCursor it returns as cursor. Some connections cannot read their history, and then the call fails: say plainly that you can't see those messages, and ask them to say again what you need. Never send anyone to the dashboard for them.",
   "- A follow, a repeating check, or showing a picture or file is for the dashboard: say in one line that you can do it there, and tell the guardian to ask you for it there.",
   "",
@@ -90,7 +90,8 @@ export function agentOfKindIn(
  * act for the chat's owner, and off the dashboard there is no such chat, so
  * they would act for the guardian whoever wrote. Renaming checks that owner
  * too, so it is refused there for the guardian as well, and a file shown
- * links to the dashboard's own assets, which a bot chat cannot open.
+ * links to the dashboard's own assets, which a bot chat cannot open. Listing
+ * routines shows every routine with what it sends, for the guardian alone.
  */
 export const CONCIERGE_CHAT_ACTIONS = [
   "core:set_agent_name",
@@ -100,6 +101,7 @@ export const CONCIERGE_CHAT_ACTIONS = [
   "core:concierge_following_list",
   "core:concierge_following_configure",
   "system:search_routine",
+  "system:read_routines",
   "system:delete_routine",
 ] as const;
 

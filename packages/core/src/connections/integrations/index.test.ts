@@ -45,7 +45,6 @@ function registerEveryKind(registry: ConnectionRegistry): void {
       api: {},
       cloud: {},
       openMailbox: () => ({ stop() {}, attempts: 4 }),
-      listens: () => true,
     },
   } as unknown as BuiltinConnectionDeps);
   const mounted = [

@@ -17,7 +17,15 @@ import type {
 import { ActionLoader } from "../../apps/actions/loader.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
 import { AgentLoader } from "../../app-host/agent-loader.js";
-import { COOKIE_NAME, createSession } from "../../access/auth.js";
+import {
+  COOKIE_NAME,
+  VISITOR_COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+} from "../../access/auth.js";
+import { settings } from "../../db/schema.js";
+import * as appPublishing from "../../apps/publish.js";
+import { appApiDashboardRoutes } from "./app-api.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(
@@ -146,6 +154,201 @@ function sseReader(res: Response) {
 function guardianCookie(): string {
   return `${COOKIE_NAME}=${createSession("guardian-1")}`;
 }
+
+describe("host app route authorization", () => {
+  it("rejects anonymous and app-scoped visitors before any lifecycle work, without an edge proxy", async () => {
+    const testDb = createTestDb();
+    const publish = rs.spyOn(appPublishing, "publishAppBundle");
+    try {
+      testDb.db
+        .insert(settings)
+        .values({
+          key: "publicAccess",
+          value: {
+            allowedApps: ["shared-app"],
+            cloudEmailAccess: { "shared-app": ["ada@example.com"] },
+          },
+          updatedAt: new Date(),
+        })
+        .run();
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalogWith(buildResolvedApp("shared-app")),
+      };
+      const uninstall = rs.spyOn(deps.appManager, "uninstall");
+      const setEnabled = rs.spyOn(deps.appManager, "setEnabled");
+      const lookup = rs.spyOn(deps.appCatalog, "get");
+      const app = new Hono()
+        .route("/api", appsRoutes(deps))
+        .route("/api", appApiDashboardRoutes(deps));
+      for (const [headers, status] of [
+        [{}, 401],
+        [
+          { Cookie: `${VISITOR_COOKIE_NAME}=${createVisitorSession("acct-1", "ada@example.com")}` },
+          403,
+        ],
+        [
+          {
+            "X-Rome-User-Id": "guardian-1",
+            "X-Rome-Visitor-Email": "owner@example.com",
+            "X-Forwarded-For": "127.0.0.1",
+          },
+          401,
+        ],
+        [{ Cookie: `${COOKIE_NAME}=invalid` }, 401],
+        [{ Cookie: `${COOKIE_NAME}=${createVisitorSession("acct-1", "ada@example.com")}` }, 401],
+      ] as const) {
+        for (const [method, path, body] of [
+          ["GET", "/api/apps/shared-app", undefined],
+          ["HEAD", "/api/apps/shared-app", undefined],
+          ["DELETE", "/api/apps/shared-app", { purge: true }],
+          ["PATCH", "/api/apps/shared-app", { enabled: false }],
+          ["POST", "/api/apps/shared-app/publish", undefined],
+          ["GET", "/api/apps/updates", undefined],
+        ] as const) {
+          const res = await app.request(path, {
+            method,
+            headers,
+            ...(body ? { body: JSON.stringify(body) } : {}),
+          });
+          expect(res.status, `${method} ${path}`).toBe(status);
+        }
+      }
+      expect(uninstall).not.toHaveBeenCalled();
+      expect(setEnabled).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(lookup).not.toHaveBeenCalled();
+    } finally {
+      publish.mockRestore();
+      testDb.close();
+    }
+  });
+
+  for (const caller of ["guardian", "dashboard visitor"] as const) {
+    it(`allows a ${caller} to read details, enable, uninstall and publish`, async () => {
+      const testDb = createTestDb();
+      const publish = rs.spyOn(appPublishing, "publishAppBundle").mockResolvedValue({
+        status: "ok",
+        listing: { id: "shared-app", handle: "owner", slug: "shared-app" },
+        version: {
+          version: "0.0.1",
+          contentHash: "0".repeat(64),
+          sizeBytes: 1,
+          sourceAvailable: true,
+        },
+        claimed: false,
+      });
+      try {
+        testDb.db
+          .insert(settings)
+          .values({
+            key: "dashboardAccess",
+            value: { cloudEmailAccess: ["owner@example.com"] },
+            updatedAt: new Date(),
+          })
+          .run();
+        const deps = {
+          ...(await buildTestDeps(testDb.db)),
+          appCatalog: catalogWith(buildResolvedApp("shared-app")),
+        };
+        const uninstall = rs
+          .spyOn(deps.appManager, "uninstall")
+          .mockResolvedValue({ alreadyAbsent: true, purged: false, diskCleanupError: null });
+        const setEnabled = rs.spyOn(deps.appManager, "setEnabled").mockResolvedValue();
+        const app = new Hono().route("/api", appsRoutes(deps));
+        const headers = {
+          Cookie:
+            caller === "guardian"
+              ? guardianCookie()
+              : `${VISITOR_COOKIE_NAME}=${createVisitorSession("owner-1", "owner@example.com")}`,
+        };
+        const detail = await app.request("/api/apps/shared-app", { headers });
+        expect(detail.status).toBe(200);
+        expect(await detail.json()).toEqual({
+          spec: { source: { mode: "bundle", path: "/tmp/unused" }, enabled: true },
+          phase: "installed",
+        });
+        expect(
+          (
+            await app.request("/api/apps/shared-app", {
+              method: "PATCH",
+              headers,
+              body: JSON.stringify({ enabled: true }),
+            })
+          ).status,
+        ).toBe(200);
+        expect(setEnabled).toHaveBeenCalledWith("shared-app", true);
+        expect(
+          (await app.request("/api/apps/shared-app", { method: "DELETE", headers })).status,
+        ).toBe(200);
+        expect(uninstall).toHaveBeenCalledWith("shared-app", { purge: false });
+        expect(
+          (await app.request("/api/apps/shared-app/publish", { method: "POST", headers })).status,
+        ).toBe(201);
+        expect(publish).toHaveBeenCalledWith("/tmp/unused", "0".repeat(64));
+      } finally {
+        publish.mockRestore();
+        testDb.close();
+      }
+    });
+  }
+
+  it("keeps public icons, manifests and app-owned HTTP handlers reachable", async () => {
+    const testDb = createTestDb();
+    const root = await mkdtemp(join(tmpdir(), "rome-public-app-"));
+    try {
+      const icon = join(root, "icon.svg");
+      const entry = join(root, "api.mjs");
+      await writeFile(icon, '<svg xmlns="http://www.w3.org/2000/svg"/>');
+      await writeFile(
+        entry,
+        `export function createApiHandler() { return { async handle(request) { return Response.json({ caller: request.caller.kind, method: request.method, path: request.path }); } }; }`,
+      );
+      testDb.db
+        .insert(settings)
+        .values({
+          key: "publicAccess",
+          value: { allowedApps: ["shared-app"] },
+          updatedAt: new Date(),
+        })
+        .run();
+      const resolved = buildResolvedApp("shared-app");
+      resolved.iconAbsolutePath = icon;
+      resolved.api = { appId: "shared-app", entryPath: entry, noAuth: false, relayWebhook: null };
+      resolved.web = {
+        appId: "shared-app",
+        version: "0.0.1",
+        entry: "index.js",
+        styles: [],
+        assetVersion: "abc",
+        displayName: "Shared app",
+        manifestPath: join(root, "web.json"),
+        distPath: root,
+      };
+      const deps = { ...(await buildTestDeps(testDb.db)), appCatalog: catalogWith(resolved) };
+      const app = new Hono()
+        .route("/api", appsRoutes(deps))
+        .route("/api", appApiDashboardRoutes(deps));
+      expect((await app.request("/api/apps/shared-app/icon")).status).toBe(200);
+      const manifest = await app.request("/api/apps/shared-app/manifest");
+      expect(manifest.status).toBe(200);
+      expect(
+        ((await manifest.json()) as { bootstrap: { caller: { kind: string } } }).bootstrap.caller
+          .kind,
+      ).toBe("anonymous");
+      for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
+        for (const path of ["state", "readme", "updates", "events"]) {
+          const res = await app.request(`/api/apps/shared-app/${path}`, { method });
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual({ caller: "anonymous", method, path: [path] });
+        }
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      testDb.close();
+    }
+  });
+});
 
 describe("deriveAppProjectPath", () => {
   it("returns a chat-ready relative path for a remembered source workspace", () => {

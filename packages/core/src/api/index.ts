@@ -22,6 +22,7 @@ import { attachAppWebSocket } from "./routes/app-websocket-server.js";
 import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
 import { attachVoiceConversationServer } from "../voice-conversation/conversation-server.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
+import { voiceConversationRoutes } from "./routes/voice-conversation.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
@@ -53,7 +54,6 @@ import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { assistantsRoutes } from "./routes/assistants.js";
-import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
@@ -92,6 +92,8 @@ import { byChannel, readAccountAgent } from "../chats/connected-accounts/account
 import { SessionQueryService } from "../sessions/query-service.js";
 import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
+import { requireConnectionRegistry, requireSetupManager } from "./helpers.js";
+import { startConnectionSetup } from "../connections/setup/start.js";
 
 const log = createLogger("api");
 
@@ -199,6 +201,7 @@ export function buildApp(
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", voiceInputRoutes(deps));
+  api.route("/", voiceConversationRoutes(deps));
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
@@ -210,7 +213,6 @@ export function buildApp(
   api.route("/", eventCatalogRoutes(deps));
   for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
@@ -251,6 +253,13 @@ export function buildApp(
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
       chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
+      // The setup `POST /connections/:id/grants/:name/setup` starts, so the
+      // connect card's Connect is the Connections page's.
+      startSetup: (request) =>
+        startConnectionSetup(
+          { registry: requireConnectionRegistry(deps), manager: requireSetupManager(deps) },
+          request,
+        ),
     }),
   );
   // The backend-turn orchestrator is the single holder of the webchat runtime
@@ -404,7 +413,11 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.phoneWatching,
         deps.dashboardActivity,
       );
-      const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
+      const nodeConsole = attachNodeConsoleServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+      );
       const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       const voiceInput = attachVoiceInputServer(
@@ -416,10 +429,15 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       );
       const voiceConversation = deps.speaker
         ? attachVoiceConversationServer(server as Server, deps.db, {
+            dashboardAccess: deps.dashboardAccessState,
             listening: deps.voiceInput ?? NO_VOICE_INPUT,
             speaker: deps.speaker,
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
-            send: (chatId, text, signal) => webchatRuntime.sendSpoken(chatId, text, signal),
+            send: (chatId, text, inputId, signal) =>
+              webchatRuntime.sendSpoken(chatId, text, signal, inputId),
+            ...(deps.phoneWatching
+              ? { follow: deps.phoneWatching.watch.bind(deps.phoneWatching) }
+              : {}),
             usage: deps.transcriptionUsage ?? null,
           })
         : null;

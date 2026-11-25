@@ -27,7 +27,6 @@ interface IpcHandlerOptions {
     start(): Promise<void>;
     stop(): Promise<void>;
     setEnabled(enabled: boolean): Promise<void>;
-    openComputerUsePermissions?(): Promise<void>;
   };
 }
 
@@ -145,10 +144,6 @@ export function registerIpcHandlers(
   handleFromAppOrInstance("device:openAuditLog", instanceOrigin, () => {
     options.openAuditWindow();
   });
-
-  handleFromAppOrInstance("device:openComputerUsePermissions", instanceOrigin, () =>
-    options.device.openComputerUsePermissions?.(),
-  );
 
   handleFromAppOrInstance("device:setEnabled", instanceOrigin, async (_event, value) => {
     await options.device.setEnabled(z.boolean().parse(value));

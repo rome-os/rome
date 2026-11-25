@@ -9,9 +9,7 @@ import enChat from "./locales/en/chat.json";
 import enCommon from "./locales/en/common.json";
 import enRoutines from "./locales/en/routines.json";
 import enFiles from "./locales/en/files.json";
-import enInbox from "./locales/en/inbox.json";
 import enOnboard from "./locales/en/onboard.json";
-import enPeople from "./locales/en/people.json";
 import enSettings from "./locales/en/settings.json";
 import zhActivity from "./locales/zh-CN/activity.json";
 import zhApps from "./locales/zh-CN/apps.json";
@@ -20,9 +18,7 @@ import zhChat from "./locales/zh-CN/chat.json";
 import zhCommon from "./locales/zh-CN/common.json";
 import zhRoutines from "./locales/zh-CN/routines.json";
 import zhFiles from "./locales/zh-CN/files.json";
-import zhInbox from "./locales/zh-CN/inbox.json";
 import zhOnboard from "./locales/zh-CN/onboard.json";
-import zhPeople from "./locales/zh-CN/people.json";
 import zhSettings from "./locales/zh-CN/settings.json";
 
 export const SUPPORTED_LANGUAGES = ["en", "zh-CN"] as const;
@@ -62,10 +58,8 @@ export const resources = {
     activity: enActivity,
     routines: enRoutines,
     chat: enChat,
-    people: enPeople,
     apps: enApps,
     files: enFiles,
-    inbox: enInbox,
     onboard: enOnboard,
   },
   "zh-CN": {
@@ -75,10 +69,8 @@ export const resources = {
     activity: zhActivity,
     routines: zhRoutines,
     chat: zhChat,
-    people: zhPeople,
     apps: zhApps,
     files: zhFiles,
-    inbox: zhInbox,
     onboard: zhOnboard,
   },
 } as const;

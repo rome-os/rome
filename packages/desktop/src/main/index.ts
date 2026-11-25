@@ -1,6 +1,4 @@
 import { release } from "os";
-import { join } from "path";
-import { createComputerUseHost } from "@rome-os/node-core/computer-use";
 import {
   app,
   BrowserWindow,
@@ -105,17 +103,6 @@ async function bootstrap() {
     // Opened before the device connects, and never fatal: an unavailable log makes this
     // computer refuse remote requests and shows why in Rome → Computer Use Log…
     const audit = await openAudit();
-    const nativeComputerUse =
-      process.platform === "darwin"
-        ? createComputerUseHost({
-            bundledAppPath: app.isPackaged
-              ? join(process.resourcesPath, "native/Rome Computer Use.app")
-              : join(
-                  __dirname,
-                  "../../../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app",
-                ),
-          })
-        : undefined;
     if (audit.state.state === "unavailable")
       log.warn(`Audit log unavailable: ${audit.state.message}`);
     registerAuditHandlers(audit);
@@ -133,7 +120,6 @@ async function bootstrap() {
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
           audit,
-          computerUse: nativeComputerUse,
           // Rome Cloud also sends each push to the desktop apps of the person it is for.
           onNotification: (notification) =>
             showDesktopNotification(notification, {
@@ -176,11 +162,6 @@ async function bootstrap() {
         writeDeviceEnabled(enabled);
         await deviceHost?.stop();
         await device.start();
-      },
-      openComputerUsePermissions: async () => {
-        if (!nativeComputerUse) throw new Error("Screen control is available on macOS only.");
-        const reply = await nativeComputerUse.requestPermissions();
-        if (!reply.ok) throw new Error(reply.error.message);
       },
     };
     const active = controller.activeTarget();

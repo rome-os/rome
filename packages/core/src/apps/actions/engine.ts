@@ -9,12 +9,14 @@ import type {
   ActionExecutionContext,
   ActionEvent,
 } from "@rome-os/app-runtime";
-import type {
-  Action,
-  ActionRegistry,
-  ActionResult,
-  PendingApproval,
-  PreviewPayload,
+import {
+  CallRefusal,
+  decidesApprovalPerCall,
+  type Action,
+  type ActionRegistry,
+  type ActionResult,
+  type PendingApproval,
+  type PreviewPayload,
 } from "./types.js";
 import type {
   ActionExecutionStatus,
@@ -22,7 +24,6 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
-import { didYouMean } from "./registry.js";
 import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
@@ -323,6 +324,10 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+  /** Main-only: actions core registers in main alone, such as its agent tools
+   *  (agent-tool.ts). Each runs as a root in main while the registry says core
+   *  owns it, whatever any app's first-party flag says. */
+  mainActions?: ReadonlySet<string>;
   /** Main-only: who can read a chat. A first-party root run given a chat and
    *  no audience, such as the inbox's message handler, takes the chat's. */
   placeAudience?: (context: ThreadContext) => Promise<"private" | "shared">;
@@ -436,8 +441,8 @@ interface ActionWorkerProcess {
  * Typed so the app-facing invocation port can map it to `code: "not_found"`
  * without matching on the message. */
 export class ActionNotFoundError extends Error {
-  constructor(actionName: string, hint = "") {
-    super(`Action "${actionName}" not found${hint}`);
+  constructor(actionName: string) {
+    super(`Action "${actionName}" not found`);
     this.name = "ActionNotFoundError";
   }
 }
@@ -455,6 +460,7 @@ export class ActionEngine {
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
   private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
+  private mainActions: ReadonlySet<string>;
   private placeAudience: ActionEngineOptions["placeAudience"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
@@ -492,6 +498,7 @@ export class ActionEngine {
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
     this.isFirstPartyAction = options?.isFirstPartyAction;
+    this.mainActions = options?.mainActions ?? new Set();
     this.placeAudience = options?.placeAudience;
     this.workerWarmPoolSize =
       this.processRole === "main"
@@ -577,7 +584,7 @@ export class ActionEngine {
   ): Promise<ActionResult> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
+      throw new ActionNotFoundError(name);
     }
     if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
       log.info("personal-data action refused outside a private turn", {
@@ -630,7 +637,7 @@ export class ActionEngine {
   ): Promise<ActionDispatchReceipt> {
     const action = this.registry.get(name);
     if (!action) {
-      throw new ActionNotFoundError(name, didYouMean(this.registry, name));
+      throw new ActionNotFoundError(name);
     }
     const store = replayContext.getStore();
     if (store?.coordinationRoot) {
@@ -781,7 +788,16 @@ export class ActionEngine {
 
     // Root action itself is sensitive: short-circuit before executing it
     // unless we're replaying after the guardian has already approved it.
-    if (action.config.requiresApproval && replayStore.mode === "record" && !approvedRootResume) {
+    let approval: CallApproval = { asks: false };
+    if (replayStore.mode === "record" && !approvedRootResume) {
+      try {
+        approval = await this.approvalOf(action, args, replayStore, context);
+      } catch (err) {
+        return { status: "error", error: approvalFailure(action.config.name, err) };
+      }
+    }
+    if (approval.asks) {
+      const card = approval;
       const pending = await this.withTrace(
         action.config.name,
         buildRomeSpanAttrs(context),
@@ -791,6 +807,7 @@ export class ActionEngine {
             args,
             replayStore,
             context,
+            card,
           );
           if (span) {
             span.setAttribute("rome.action.approval_required", true);
@@ -965,8 +982,20 @@ export class ActionEngine {
       }
     }
 
-    if (action.config.requiresApproval) {
-      const pending = await this.recordPendingApproval(action.config.name, args, store, context);
+    let approval: CallApproval;
+    try {
+      approval = await this.approvalOf(action, args, store, context);
+    } catch (err) {
+      return { status: "error", error: approvalFailure(action.config.name, err) };
+    }
+    if (approval.asks) {
+      const pending = await this.recordPendingApproval(
+        action.config.name,
+        args,
+        store,
+        context,
+        approval,
+      );
       return { status: "pending_approval", approval: pending };
     }
 
@@ -1363,10 +1392,7 @@ export class ActionEngine {
       throw new Error("Only the main ActionEngine can accept detached actions");
     }
     if (!this.registry.get(payload.actionName)) {
-      throw new ActionNotFoundError(
-        payload.actionName,
-        didYouMean(this.registry, payload.actionName),
-      );
+      throw new ActionNotFoundError(payload.actionName);
     }
     const executionId = payload.context.executionId;
     if (!executionId || payload.context.rootExecutionId !== executionId) {
@@ -1910,13 +1936,19 @@ export class ActionEngine {
     }
   }
 
-  /** Whether a root runs in main: a first-party coordination action that is
-   * not cancellable. Cancellable actions keep their worker so process-level
+  /** Whether a root runs in main: a core-owned main action, or a first-party
+   * coordination action, that is not cancellable. Cancellable actions keep their worker so process-level
    * termination stays available. A failing or absent trust check means a
    * worker, as before. */
   private runsRootInMain(action: Action): boolean {
     if (action.config.cancellable) return false;
-    if (!COORDINATION_ACTIONS.has(action.config.name)) return false;
+    const name = action.config.name;
+    // Core registers its own tools in main alone, so no app's trust decides
+    // where they run, and an app action of the same name is never placed here.
+    if (this.mainActions.has(name) && this.registry.getMetadata?.(name)?.ownerType === "core") {
+      return true;
+    }
+    if (!COORDINATION_ACTIONS.has(name) && !this.mainActions.has(name)) return false;
     if (!this.isFirstPartyAction) return false;
     try {
       return this.isFirstPartyAction(action.config.name);
@@ -2152,11 +2184,29 @@ export class ActionEngine {
     }
   }
 
+  /** Whether this call of `action` waits for the guardian, and the card it
+   *  waits on. An action that decides per call (`decidesApprovalPerCall`)
+   *  waits only when its preview words a card, and a preview of one that
+   *  throws, refusal of the turn included, throws here, so the call does not
+   *  run. */
+  private async approvalOf(
+    action: Action,
+    args: Record<string, unknown>,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+  ): Promise<CallApproval> {
+    if (!action.config.requiresApproval) return { asks: false };
+    if (!decidesApprovalPerCall(action)) return { asks: true };
+    const preview = await this.renderPreview(action.config.name, args, store, context);
+    return preview ? { asks: true, preview } : { asks: false };
+  }
+
   private async recordPendingApproval(
     actionName: string,
     args: Record<string, unknown>,
     store: ReplayStore,
     context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
   ): Promise<PendingApproval> {
     const seq = store.nextSequence++;
     store.journal.push({
@@ -2175,6 +2225,7 @@ export class ActionEngine {
       description,
       store,
       context,
+      approval,
     );
     const ref: PendingApproval = { approvalId, actionName, description };
     // First pending approval in this run becomes the root-level signal. Later
@@ -2193,6 +2244,7 @@ export class ActionEngine {
     description: string,
     store: ReplayStore,
     context: ActionRunContext | undefined,
+    approval: CallApproval & { asks: true },
   ): Promise<string> {
     // The preview and the replay both run as the turn that asked: without
     // them a chatless turn reads as outside any turn (app-host chat-calls). A
@@ -2200,39 +2252,16 @@ export class ActionEngine {
     const caller = actionExecutionContext.getStore();
     const turnId = context?.turnId ?? caller?.turnId;
     const audience = context?.audience ?? caller?.audience;
-    // The preview is the action's own code, so it runs with what its execute
-    // would get (executeNestedInvocation): the audience only for a
-    // first-party action in main, and the caller's accountable human. The
-    // replay goes back through run(), which gates the audience itself.
-    const previewAudience =
-      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
-    let preview: PreviewPayload | undefined;
-    try {
-      const action = this.registry.get(actionName);
-      const previewStore: ActionExecutionStore = {
-        actionName,
-        executionId: context?.executionId ?? store.rootExecutionId,
-        rootExecutionId: store.rootExecutionId,
-        parentExecutionId: context?.parentExecutionId,
-        parentActionName: context?.parentActionName,
-        initiator: context?.initiator ?? "unknown",
-        actor: caller?.actor ?? context?.actor,
-        callerAppId: context?.callerAppId,
-        engine: this,
-        channelContext: context?.channelContext,
-        sharedContext: context?.sharedContext,
-        sessionId: context?.sessionId,
-        turnId,
-        audience: previewAudience,
-        agentName: context?.agentName,
-        channelThreadKey: context?.channelThreadKey,
-      };
-      preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
-    } catch (previewErr) {
-      log.warn("action preview renderer threw", {
-        actionName,
-        error: previewErr instanceof Error ? previewErr.message : String(previewErr),
-      });
+    let preview = approval.preview;
+    if (!preview) {
+      try {
+        preview = await this.renderPreview(actionName, args, store, context);
+      } catch (previewErr) {
+        log.warn("action preview renderer threw", {
+          actionName,
+          error: previewErr instanceof Error ? previewErr.message : String(previewErr),
+        });
+      }
     }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
@@ -2275,4 +2304,53 @@ export class ActionEngine {
 
     return approvalId;
   }
+
+  /** The action's own preview of a call, run as the turn that asked. */
+  private async renderPreview(
+    actionName: string,
+    args: Record<string, unknown>,
+    store: ReplayStore,
+    context: ActionRunContext | undefined,
+  ): Promise<PreviewPayload | undefined> {
+    const caller = actionExecutionContext.getStore();
+    // The preview is the action's own code, so it runs with what its execute
+    // would get (executeNestedInvocation): the audience only for a
+    // first-party action in main, and the caller's accountable human. The
+    // replay goes back through run(), which gates the audience itself.
+    const audience = context?.audience ?? caller?.audience;
+    const previewAudience =
+      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
+    const action = this.registry.get(actionName);
+    const previewStore: ActionExecutionStore = {
+      actionName,
+      executionId: context?.executionId ?? store.rootExecutionId,
+      rootExecutionId: store.rootExecutionId,
+      parentExecutionId: context?.parentExecutionId,
+      parentActionName: context?.parentActionName,
+      initiator: context?.initiator ?? "unknown",
+      actor: caller?.actor ?? context?.actor,
+      callerAppId: context?.callerAppId,
+      engine: this,
+      channelContext: context?.channelContext,
+      sharedContext: context?.sharedContext,
+      sessionId: context?.sessionId,
+      turnId: context?.turnId ?? caller?.turnId,
+      audience: previewAudience,
+      agentName: context?.agentName,
+      channelThreadKey: context?.channelThreadKey,
+    };
+    return actionExecutionContext.run(previewStore, () => action?.preview?.(args));
+  }
+}
+
+/** Whether a call waits for the guardian, and with which card when its
+ *  action worded one in deciding. */
+type CallApproval = { asks: false } | { asks: true; preview?: PreviewPayload };
+
+/** The error of a call whose approval could not be decided. A refusal of the
+ *  turn (`CallRefusal`) is the call's error as worded. */
+function approvalFailure(actionName: string, err: unknown): string {
+  if (err instanceof CallRefusal) return err.message;
+  const reason = err instanceof Error ? err.message : String(err);
+  return `${actionName} did not run: whether it needs the guardian's approval could not be decided (${reason}).`;
 }

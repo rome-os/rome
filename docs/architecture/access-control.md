@@ -7,7 +7,7 @@ How a Rome instance decides who is on the other end of a request and what that r
 Two policies decide reach, each held as its own setting:
 
 - **App access** — per app: private (the default), link-public, or restricted to an email allow-list of visitors.
-- **Dashboard access** — one email allow-list. Each visitor on it is a [dashboard admin](../concepts/people.md#dashboard-admin) with the full dashboard.
+- **Dashboard access** — one email allow-list. Each visitor on it is a [dashboard admin](../concepts/people.md#dashboard-admin) on the [team](../concepts/people.md#team), with the full dashboard.
 
 ### Invariants
 
@@ -15,7 +15,7 @@ Two policies decide reach, each held as its own setting:
 - Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
-- Dashboard access does not grant approval authority. Approval reads and decisions require a verified guardian identity at the approval API, even after edge authorization.
+- Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/people.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
 - An app manifest's no-auth declaration opens only that app's public webhook paths. The dashboard-side app surface stays gated regardless.
@@ -31,7 +31,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/people.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/desktop-proxy/*`, `/ws/terminal` and `/ws/events` also admit a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` they get the chat topics but not the app catalog, as on the matching SSE routes. `/ws/node` stays guardian-only. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard, and so does `/ws/voice-conversation`. On `/ws/events` a dashboard admin gets every topic the guardian gets. Once their email leaves the allow-list, `/ws/events`, `/ws/node` and `/ws/voice-conversation` refuse their next request and close their open socket within 25 seconds. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

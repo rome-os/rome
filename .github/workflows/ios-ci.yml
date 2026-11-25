@@ -121,6 +121,10 @@ jobs:
     name: UI tests
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      # The voice input suite is off while a run of it takes about 35 minutes; ZHA-241
+      # speeds it up. "on" brings it back, with its stand-in instance and rule 1 and 9 checks.
+      VOICE_INPUT_UI_TESTS: "off"
     defaults:
       run:
         working-directory: ios
@@ -197,7 +201,7 @@ jobs:
       # launch test runs.
       - name: Fetch the stand-in instance
         id: standin
-        if: steps.scope.outputs.voice == 'true'
+        if: steps.scope.outputs.voice == 'true' && env.VOICE_INPUT_UI_TESTS == 'on'
         run: |
           # The job runs in ios/, but the stand-in's path is from the repository root.
           set -o pipefail
@@ -221,6 +225,7 @@ jobs:
       - name: Run the UI tests
         env:
           STANDIN: ${{ steps.standin.outputs.present }}
+          SCOPE: ${{ steps.scope.outputs.voice }}
           LONG: ${{ steps.scope.outputs.long }}
         run: |
           # xcodebuild hands TEST_RUNNER_* environment variables to the tests
@@ -235,6 +240,9 @@ jobs:
                      -skip-testing:RomeUITests/VoiceInputTests/testRule5OnlyTheGuardianSends
                      -skip-testing:RomeUITests/VoiceInputTests/testRule14TheWaveformIsFlatInSilence)
             fi
+          elif [ "$SCOPE" = "true" ] && [ "$VOICE_INPUT_UI_TESTS" != "on" ]; then
+            # The voice input suite is off, so the rest of the UI suite runs without it.
+            extra=(-skip-testing:RomeUITests/VoiceInputTests)
           else
             # The launch test alone gets a second try, so a simulator hiccup does
             # not fail the job. The voice input suite gets none: its rules exist to
