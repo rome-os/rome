@@ -24,7 +24,6 @@ import { isAbsolute } from "node:path";
 import { isUuid } from "./frame.js";
 import { copyWithDevice, TRANSFER_VERSION, TransferError } from "./transfer.js";
 import type { CopyRequest } from "./daemon-protocol.js";
-import { sanitizeComputerUseArgs } from "./computer-use/protocol.js";
 
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const { version: NODE_CORE_VERSION } = createRequire(import.meta.url)("../package.json") as {
@@ -76,9 +75,7 @@ function actionStart(
   let text: string | null = null;
   if (!exec)
     try {
-      text = JSON.stringify(
-        action.startsWith("computer.") ? sanitizeComputerUseArgs(action, args) : (args ?? {}),
-      );
+      text = JSON.stringify(args ?? {});
     } catch {}
   return {
     direction: "out",

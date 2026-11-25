@@ -20,7 +20,6 @@ packages/ui/src/test/
 !packages/rome-node-core/src/
 !packages/rome-node-core/src/**
 packages/rome-node-core/src/**/*.test.ts
-!packages/rome-node-core-darwin-arm64/package.json
 !packages/rome-node-ui/package.json
 !packages/rome-node-ui/tsconfig*.json
 !packages/rome-node-ui/src/

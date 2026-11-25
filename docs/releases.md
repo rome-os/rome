@@ -98,7 +98,7 @@ Only the release job writes to the repository, and it does not see the update fe
 
 ## npm packages (via release-please)
 
-Eight workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
+Seven workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
 
 - `@rome-os/app-runtime` (`packages/app-runtime-sdk/`)
 - `@rome-os/app-web-sdk` (`packages/app-web-sdk/`)
@@ -107,7 +107,6 @@ Eight workspace packages are managed for npm publication via [release-please](ht
 - `@rome-os/rome-web-components` (`packages/web-content/`) — internal web content components shared by Rome surfaces
 - `@rome-os/node` (`packages/rome-node-cli/`) — the standalone device CLI
 - `@rome-os/node-core` (`packages/rome-node-core/`) — the device library and shared caller daemon
-- `@rome-os/node-core-darwin-arm64` (`packages/rome-node-core-darwin-arm64/`) — optional Apple Silicon macOS native computer-use helper (version-linked with `@rome-os/node-core`)
 
 The SDKs and `@rome-os/ui` are supported public packages. `@rome-os/libs` and
 `@rome-os/rome-web-components` will be published so Rome and Rome Cloud can
@@ -128,8 +127,7 @@ Releases are driven by **Conventional Commits**, not by hand-authored changeset 
   "packages/lib":             { "package-name": "@rome-os/libs" },
   "packages/web-content":     { "package-name": "@rome-os/rome-web-components" },
   "packages/rome-node-cli":       { "package-name": "@rome-os/node" },
-  "packages/rome-node-core":      { "package-name": "@rome-os/node-core", "component": "node-core" },
-  "packages/rome-node-core-darwin-arm64": { "package-name": "@rome-os/node-core-darwin-arm64", "component": "node-core-darwin-arm64" }
+  "packages/rome-node-core":      { "package-name": "@rome-os/node-core" }
 }
 ```
 
@@ -151,7 +149,7 @@ Commit messages drive both the changelog and the version bump. The release workf
 
 The pre-1.0 column reflects our config (`bump-minor-pre-major: true`, `bump-patch-for-minor-pre-major: true`). Once a package cuts `1.0.0`, drop those flags for that entry to get standard semver.
 
-All eight packages are still under `0.x.y` today, so the practical rules are:
+All seven packages are still under `0.x.y` today, so the practical rules are:
 
 - Removed export, changed signature, behavior change consumers must adapt to → `feat!:` or include `BREAKING CHANGE:` in the body → minor bump.
 - New API or backwards-compatible additive change → `feat:` → patch bump.
