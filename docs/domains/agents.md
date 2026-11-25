@@ -33,17 +33,10 @@ Know-how an agent reads and follows. An agent has the skills its installed apps 
 
 ## Rome tools
 
-The tools Rome serves the model during a turn, grouped as actions, subagents, skills, computer use, and the group that asks the person. The agent context builds the groups, and a provider mounts each group as one server. Their external sources are the actions an agent may call, the scheduling of a deferred wake, session tools, and computer use. Each is asked for the turn that calls it.
+The tools Rome serves the model during a turn, in four groups: actions, subagents, skills, and the group that asks the person. The agent context builds the groups, and a provider mounts each group as one server. Three of their sources lie outside the agent context: the actions an agent may call, the scheduling of a deferred wake, and the session tools. Each is asked for the turn that calls it.
 
 - How an agent finds actions and skills, what a call on an action hands back, and what `ask_question` and `defer` accept are rules in [`packages/core/src/agent/domain/`](../../packages/core/src/agent/domain/).
-- In code, the ports are `AgentActions`, `DeferTool`, `SessionTools` and `AgentComputerUse`, each taking the turn's `TurnFacts`. Rome's action, scheduling and session-tool adapters are in [`packages/core/src/core/rome-tool-ports.ts`](../../packages/core/src/core/rome-tool-ports.ts). The computer-use adapter is in [`packages/core/src/core/native-computer-use.ts`](../../packages/core/src/core/native-computer-use.ts).
-
-- Computer use requires `core:computer_use` in the agent's action allow-list, or `*`, and a live guardian turn in a private chat. Its `AgentComputerUse` port checks admission on every call. A bound window belongs to one actor, agent session and device. A fork receives no binding from its source.
-- The agent discovers capabilities for the device it selects. It chooses from the device, window binding and element advertisements. Peer versions can differ, and missing capability information stays unknown.
-- In a private browser chat whose agent declares computer use, the guardian can authorize each Mac device once for the instance and revoke it later. A message can use an authorized device. Its turn holds short-lived authority in memory, and the port rechecks the stored approval. Any signed-in guardian browser session can authorize the instance-local device or paired Macs reached through Rome Node. Loopback callers and native iPhone sessions without a same-origin browser cookie cannot grant window-control requests.
-- The guardian can separately allow replacing the automation on a selected window. The turn must use the token of the current window binding to replace it.
-- Computer observations may contain text and image blocks. The model receives them, while Rome's activity records omit native observation contents and input text. A dispatched action remains unverified until independent evidence confirms its effect. An unknown outcome is never automatically replayed.
-- Window control requires an explicit background window reference. The shared helper provides semantic AX actions, window-directed events, an independent virtual cursor and versioned state changes. Global desktop input is disabled. [Computer use](../architecture/computer-use.md) describes the distinct boundaries of implemented actions, independently verified effects and application qualification.
+- In code, the three sources are the ports `AgentActions`, `DeferTool` and `SessionTools`, each taking the turn's `TurnFacts`. Rome's adapters for them are in [`packages/core/src/core/rome-tool-ports.ts`](../../packages/core/src/core/rome-tool-ports.ts).
 
 ## Session tools
 
