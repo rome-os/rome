@@ -94,19 +94,24 @@ export default defineConfig({
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
-      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
-      "/ws/events": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
-      "/ws/node": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
-      "/ws/voice-input": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
+      // Explicitly set `changeOrigin: false` (Rsbuild defaults it to `true`):
+      // Rsbuild's WS `xfwd` pass stamps `X-Forwarded-For/Port/Proto` without
+      // `X-Forwarded-Host`, so rewriting `Host` to the loopback API target
+      // breaks `gateUpgrade`'s same-origin check when browsers omit
+      // `Sec-Fetch-Site` on WS upgrades.
+      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: false, xfwd: true },
+      "/ws/events": { target: internalApiTarget, ws: true, changeOrigin: false, xfwd: true },
+      "/ws/node": { target: internalApiTarget, ws: true, changeOrigin: false, xfwd: true },
+      "/ws/voice-input": { target: internalApiTarget, ws: true, changeOrigin: false, xfwd: true },
       "/ws/voice-conversation": {
         target: internalApiTarget,
         ws: true,
-        changeOrigin: true,
+        changeOrigin: false,
         xfwd: true,
       },
       // Route /desktop-proxy through the backend so its WebSocket upgrade
       // handler can authorize the connection before reaching noVNC.
-      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
+      "/desktop-proxy": { target: internalApiTarget, ws: true, changeOrigin: false, xfwd: true },
     },
   },
   output: {
