@@ -11,8 +11,8 @@ export type Entry<Person = unknown> =
   | { kind: "entered"; person: Person }
   /** Nobody holds the account. */
   | { kind: "unknown" }
-  /** The account's person has no role, its connection could not verify it, or
-   *  no answer could be had. */
+  /** The account's person has no role or is a member whose sign-in cannot be
+   *  found, its connection could not verify it, or no answer could be had. */
   | { kind: "refused" };
 
 /** Access's answer, asked once for each message, command and press. */
