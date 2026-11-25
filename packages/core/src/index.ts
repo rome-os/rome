@@ -334,6 +334,7 @@ import { ApprovalHandler, executionRequester } from "./apps/actions/approval-han
 import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
+import { unknownSenders } from "./participation/unknown-senders.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -792,7 +793,7 @@ async function main() {
     await readBotsOfPeople(platform, message);
     return heardInChat(connectionId, connectionKind, message);
   };
-  const letInAs: MessageEntry = (connectionId, message) =>
+  const entryOf: MessageEntry = (connectionId, message) =>
     entrance.message({
       platform: platformReached({ connectionId, channel: message.channel }),
       id: message.senderId,
@@ -2447,7 +2448,7 @@ async function main() {
     connections: {
       registry: connectionRegistry,
       admit,
-      entry: letInAs,
+      entry: entryOf,
       channelOf,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -2504,6 +2505,16 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
+      // Nobody is told yet. Answering such a sender with the way to connect
+      // their account passes `tell` here.
+      onRecord: unknownSenders({
+        isRomes: (account) =>
+          connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
+        isOwnAccount: (connectionId) => {
+          const kind = connectionKindOf(connectionRegistry)(connectionId);
+          return kind !== null && accountLinkOf(connectionRegistry)(kind) === "own_account";
+        },
+      }),
     },
     hookChannels,
   );
@@ -2585,7 +2596,7 @@ async function main() {
       {
         registry: connectionRegistry,
         admit,
-        entry: letInAs,
+        entry: entryOf,
         channelOf,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
