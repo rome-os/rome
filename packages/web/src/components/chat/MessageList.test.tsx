@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 // RomeLogo (the avatar fallback) renders an SVG mask that jsdom can't construct;
@@ -32,10 +32,6 @@ import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 import { questionCardRender } from "../../../mock/fixtures/question-card";
 import { MemoryRouter } from "react-router-dom";
 import "@/i18n";
-
-beforeAll(async () => {
-  await import("./entries/widget-ui/WidgetUiCard");
-});
 
 afterEach(() => cleanup());
 
@@ -161,12 +157,12 @@ describe("MessageList archived steps", () => {
 });
 
 describe("MessageList inline-card state across streaming→settled", () => {
-  it("keeps an inline question card's typed input when the turn finalizes", async () => {
+  it("keeps an inline question card's typed input when the turn finalizes", () => {
     const streamingView = renderList(true);
     const { rerender } = render(streamingView.element);
 
     // Type into the card mid-stream.
-    const input = (await screen.findByPlaceholderText("Type your answer…")) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText("Type your answer…") as HTMLTextAreaElement;
     expect(input.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
       "a-card",
     );

@@ -61,19 +61,6 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
 }
 
 describe("conversational input lane", () => {
-  it("refuses to enqueue a computer-use grant even for an existing input id", () => {
-    const s = setup();
-    s.submit("a");
-    expect(() =>
-      s.queue.submit(
-        { inputId: "a", prompt: "same input" },
-        { computerUseGrant: { deviceId: "test-device", expiresAt: Date.now() + 30_000 } },
-      ),
-    ).toThrow("requires a separate turn");
-    expect(s.started).toHaveLength(1);
-    expect(s.steer).not.toHaveBeenCalled();
-  });
-
   it("reserves one turn before async startup, then steers in submission order", async () => {
     const s = setup();
     const a = s.submit("a");

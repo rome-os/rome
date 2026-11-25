@@ -243,10 +243,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     }, [inputText]);
 
     const invokeOnSend = useCallback(
-      (snapshot: ChatComposerSnapshot, userSubmitted?: true) =>
-        trackUpload(snapshot.uploads, (controls) =>
-          onSend(snapshot, userSubmitted ? { ...controls, userSubmitted } : controls),
-        ),
+      (snapshot: ChatComposerSnapshot) =>
+        trackUpload(snapshot.uploads, (controls) => onSend(snapshot, controls)),
       [onSend, trackUpload],
     );
 
@@ -305,10 +303,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         clearedAt = replyDraft?.clear();
       }
       try {
-        await invokeOnSend(
-          snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name),
-          true,
-        );
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();

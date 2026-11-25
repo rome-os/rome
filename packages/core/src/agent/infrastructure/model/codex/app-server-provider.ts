@@ -107,11 +107,6 @@ import {
 } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./tool-result-error.js";
 import type { RomeToolResult } from "../../../domain/rome-tools.js";
-import {
-  computerToolTraceInput,
-  computerToolTraceOutput,
-  isComputerTool,
-} from "../../../domain/computer-use.js";
 import { codexStop } from "./stop.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
 import { markCodexAuthRevoked } from "./cli-auth.js";
@@ -867,7 +862,7 @@ export class CodexAppServerProvider implements ModelProvider {
           type: "tool_use",
           id: item.id,
           tool,
-          input: computerToolTraceInput(tool, isMcp || isDynamic ? (rec.arguments ?? item) : item),
+          input: isMcp || isDynamic ? (rec.arguments ?? item) : item,
           startedAt: new Date().toISOString(),
         });
         return;
@@ -878,13 +873,11 @@ export class CodexAppServerProvider implements ModelProvider {
         type: "tool_result",
         toolUseId: item.id,
         tool,
-        output: isComputerTool(tool)
-          ? computerToolTraceOutput(dynamicOutput?.isError)
-          : isDynamic
-            ? (dynamicOutput ?? rec.contentItems ?? rec.error ?? item)
-            : isMcp
-              ? (rec.result ?? rec.error ?? item)
-              : item,
+        output: isDynamic
+          ? (dynamicOutput ?? rec.contentItems ?? rec.error ?? item)
+          : isMcp
+            ? (rec.result ?? rec.error ?? item)
+            : item,
         endedAt: new Date().toISOString(),
         isError: codexToolItemIsError(item, dynamicOutput?.isError),
       });

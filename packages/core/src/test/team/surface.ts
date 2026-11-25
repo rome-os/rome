@@ -93,7 +93,6 @@ function paramValue(name: string, pattern: string, ids: SeededIds): string {
     if (under("sentinel-log")) return ids.sentinelId;
   }
   if (name === "personId") return ids.personId;
-  if (name === "deviceId") return ids.deviceId;
   return `verifier-${name}`;
 }
 
@@ -112,7 +111,7 @@ export function fillPattern(pattern: string, ids: SeededIds): string {
     .join("/");
 }
 
-// A chat's routes, which some capabilities (computer use) answer only in a
+// A chat's routes, which some capabilities answer only in a
 // chat private to the caller.
 const CHAT_ROUTE = /^\/api\/chat\/sessions\/:(id|sessionId)(\/|$)/;
 
