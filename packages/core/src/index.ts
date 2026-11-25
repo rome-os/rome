@@ -336,6 +336,7 @@ import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
+import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -2545,9 +2546,11 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
-      // Nobody is told yet. Answering such a sender with the way to connect
-      // their account passes `tell` here.
       onRecord: unknownSenders({
+        tell: answerUnknownSenders({
+          registry: connectionRegistry,
+          publicOrigin: () => getConfiguredInstanceOrigin(),
+        }),
         isRomes: (account) =>
           connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
         isOwnAccount: (connectionId) => {
