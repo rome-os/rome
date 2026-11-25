@@ -11,6 +11,7 @@ import {
   canOpenChat,
   type ConciergeService,
   isConciergeChat,
+  privateOwnerOf,
   isMainConciergeChat,
   TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
@@ -2784,8 +2785,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
     app.use(path, chatGate);
   }
-  // Only its owner sends into a Concierge or task chat, since a turn there
-  // speaks to the owner.
+  // Only its owner sends into a Concierge or task chat, forks it or rates its
+  // turns, since a turn there speaks to the owner.
   const maySend = async (chatId: string) =>
     canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, await currentChatOwner());
   // A turn answers for the chat it runs in: its dashboard stream's, its
@@ -3215,7 +3216,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const session = await deps.webchatRepo.markSessionRead(sessionId);
+    // What a Concierge or task chat counts as unread is its owner's.
+    const owner = privateOwnerOf(lookup.session);
+    const session =
+      owner === null || owner === (await currentChatOwner())
+        ? await deps.webchatRepo.markSessionRead(sessionId)
+        : lookup.session;
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json({
       sessionId,
@@ -3748,6 +3754,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    if (!(await maySend(sessionId))) return c.json({ error: "Session not found" }, 404);
     const { session } = lookup;
     const turnInSession = await deps.webchatRepo.hasTurnInSession(sessionId, turnId);
     if (!turnInSession) return c.json({ error: "Turn not found in session" }, 404);
@@ -3838,6 +3845,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    if (!(await maySend(sessionId))) return c.json({ error: "Session not found" }, 404);
     const { session } = lookup;
     // Reject feedback whose turnId is not anchored to a row in this session
     // (e.g. a turnId copy-pasted from another session). The feedback footer

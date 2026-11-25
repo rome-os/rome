@@ -279,6 +279,24 @@ describe("Webchat API", () => {
       expect(await status(visitor, `/chat/sessions/${id}/turns`, post)).toBe(404);
     }
     expect(await status(guardian, "/chat/sessions/visitor-main/turns", post)).toBe(404);
+    // So do a fork of a turn and its rating.
+    for (const path of ["forks", "feedback"]) {
+      const refused = await runWithSessionActor(visitor, () =>
+        app.request(`/chat/sessions/concierge/turns/t/${path}`, post),
+      );
+      expect(await refused.json()).toEqual({ error: "Session not found" });
+    }
+
+    // Reading another person's Concierge chat leaves what its owner has not read.
+    const marked = rs.spyOn(deps.webchatRepo, "markSessionRead");
+    for (const [actor, id] of [
+      [visitor, "concierge"],
+      [guardian, "concierge"],
+      [visitor, "shared"],
+    ] as const) {
+      expect(await status(actor, `/chat/sessions/${id}/read`, { method: "POST" })).toBe(200);
+    }
+    expect(marked.mock.calls.flat()).toEqual(["concierge", "shared"]);
 
     const listed = async (actor: typeof guardian | typeof visitor) =>
       (
