@@ -7,6 +7,7 @@ When an agent takes part in a chat: what wakes it, what it reads, and where it s
 A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
 
 - A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
+- When a turn starts on a chat's message, Participation picks its session by the chat's [session scope](chats.md#session-scope): the chat's own, or its account's one session, which then has a speaker in every chat of the account.
 
 ## Wake
 

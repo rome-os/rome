@@ -203,7 +203,8 @@ import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-clien
 import { connectionTyping, observeTurnWith } from "./core/connection-typing.js";
 import { ConnectionStatusMarks } from "./concierge/connection-status.js";
 import { AgentRunner } from "./core/agent-runner.js";
-import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
+import type { ChatResetPolicy, ChatSessionScopeOf } from "./core/chat-reset-policy.js";
+import { sessionOfChat } from "./participation/session-scope.js";
 import {
   AnthropicProvider,
   ClaudeAccount,
@@ -1399,6 +1400,14 @@ async function main() {
       if (!added) throw new Error("This chat's account takes no reaction.");
       await added;
     },
+    // A report runs in the session the chat's messages run in.
+    chatSessionKey: async ({ channel, threadId }) => {
+      const connectionId = channelRecords.byId(channel)?.connectionId;
+      const scope = connectionId
+        ? await chatSessionScope({ connectionId, chatId: threadId as ChatId })
+        : "chat";
+      return sessionOfChat({ channel, chatId: threadId }, scope ?? "chat").continuityKey;
+    },
     // What the Concierge says in a chat on a connection goes out as the inbox
     // sends an agent's reply: past the send gate, and Envoy where it asks, to
     // the platform through the chat's speaker, which records it.
@@ -1656,6 +1665,8 @@ async function main() {
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
     (await chatSettings.get(chat)).effective.session.reset;
+  const chatSessionScope: ChatSessionScopeOf = async (chat) =>
+    (await chatSettings.get(chat)).effective.session.scope;
   // Whether an agent's text stays private on a channel: the Concierge's
   // does everywhere, and it speaks through `say` (docs/architecture/concierge.md).
   const isTextPrivate = (agentName: string, channel: string) => {
@@ -1693,6 +1704,7 @@ async function main() {
       (turn) => concierge.observeConnectionTurn(turn),
     ),
     isTextPrivate,
+    chatSessionScope,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1705,6 +1717,7 @@ async function main() {
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
+    chatSessionScope,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

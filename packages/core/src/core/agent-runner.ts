@@ -16,7 +16,13 @@ import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.
 import type { AgentSession, Sessions } from "../agent/index.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
-import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import {
+  type ChatResetPolicy,
+  type ChatSessionScopeOf,
+  resetPolicyOfMessage,
+  sessionOfMessage,
+} from "./chat-reset-policy.js";
+import { answersManyChats } from "../participation/session-scope.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -189,6 +195,9 @@ export class AgentRunner {
     private openingFor: SessionOpeningFor = sessionOpeningFor({
       channelSurface: () => null,
     }),
+    /** The session scope of a connected account's chat. Absent, every chat
+     *  has its own session. */
+    private sessionScopeOf?: ChatSessionScopeOf,
   ) {}
 
   /**
@@ -219,8 +228,18 @@ export class AgentRunner {
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
     // runs). Real conversations always pass a `channelThreadKey`.
-    const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
+    const askedKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
+    const threadContext = await this.withChatId(params.threadContext);
+    // A message's chat may share its account's session.
+    const chatSession = explicitSessionId
+      ? { continuityKey: askedKey }
+      : await sessionOfMessage(
+          this.sessionScopeOf,
+          { platformMessageId: params.platformMessageId, threadContext },
+          askedKey,
+        );
+    const requestedChannelThreadKey = chatSession.continuityKey;
 
     log.info("agent run started", {
       agent: params.agentName,
@@ -229,12 +248,19 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
-    const threadContext = await this.withChatId(params.threadContext);
     const openedKey = explicitSessionId
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
+    const stated = await this.openingFor(openedKey ?? "", threadContext);
+    // A session that answers many chats opens shared, resumed by id or not.
     const opening = {
-      ...(await this.openingFor(openedKey ?? "", threadContext)),
+      ...stated,
+      ...(answersManyChats(openedKey ?? "")
+        ? {
+            audience: "shared" as const,
+            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: "shared" },
+          }
+        : {}),
       kind: threadContext ? ("conversation" as const) : ("action" as const),
       workingDir: params.workingDir,
       threadContext,
@@ -274,21 +300,33 @@ export class AgentRunner {
     threadContext: ThreadContext | undefined,
     held: { submitted: boolean },
   ): AsyncIterable<AgentEvent> {
-    await openedInChat(this.webchatRepo, session, params.romeSessionId);
+    // A session that answers many chats records each turn in its own chat:
+    // the one the caller names, else the one its message was said in. The
+    // chat that opened the session never stands in for it.
+    const manyChats = answersManyChats(session.key.channelThreadKey);
+    const turnChat = manyChats
+      ? (params.romeSessionId ?? threadContext?.romeSessionId)
+      : params.romeSessionId;
+    await openedInChat(
+      this.webchatRepo,
+      session,
+      turnChat,
+      manyChats ? { replace: false } : undefined,
+    );
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
     // canonical key returned by the session row rather than requiring callers
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
-    const opened = openerChat(session);
+    const opened = manyChats ? undefined : openerChat(session);
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
-      romeSessionId: params.romeSessionId,
+      romeSessionId: turnChat,
       openerChat: opened,
       sessionChat:
-        (opened ?? params.romeSessionId)
+        (opened ?? turnChat)
           ? undefined
           : await findSessionChat(this.webchatRepo, session.sessionId),
       channelThreadKey,

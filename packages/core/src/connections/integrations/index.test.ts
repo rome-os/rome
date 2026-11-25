@@ -276,6 +276,7 @@ const VALUES: { [R in ChatRuleName]: readonly ChatRules[R][] } = {
   "replies.placement": ["thread", "inline"],
   "routing.agentName": [null, "helper"],
   "session.reset": [{ mode: "none" }, { mode: "idle", idleMinutes: 30 }],
+  "session.scope": ["chat", "account"],
 };
 
 /** `values` as the overrides a guardian's choices store. */
@@ -410,6 +411,7 @@ const RULE_CASES: { [R in ChatRuleName]: readonly RuleCase<R>[] } = {
   "replies.placement": [{ value: "inline" }, { value: "thread" }],
   "routing.agentName": [{ value: "helper" }, { value: null }],
   "session.reset": [{ value: { mode: "none" } }, { value: { mode: "daily", atHour: 4 } }],
+  "session.scope": [{ value: "chat" }, { value: "account" }],
 };
 
 describe("chat rule conformance", () => {

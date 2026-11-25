@@ -26,7 +26,13 @@ import type {
   AgentTurnInput,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
-import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import {
+  type ChatResetPolicy,
+  type ChatSessionScopeOf,
+  resetPolicyOfMessage,
+  sessionOfMessage,
+} from "./chat-reset-policy.js";
+import { answersManyChats } from "../participation/session-scope.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { narrowerAudience } from "../agent/index.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
@@ -141,6 +147,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
      *  does: its words reach a chat only through `say`, so a turn's result
      *  reaches the worker that asked for it without them. Absent, none is. */
     private isTextPrivate?: (agentName: string, channel: string) => boolean,
+    /** The session scope of a connected account's chat. Absent, every chat
+     *  has its own session. */
+    private sessionScopeOf?: ChatSessionScopeOf,
   ) {}
 
   /**
@@ -223,16 +232,28 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // that lets it go (docs/concepts/sessions.md#session-in-use).
         let acquired: AgentSession | undefined;
         try {
+          // A message's chat may share its account's session.
+          const chatSession = req.sessionId
+            ? { continuityKey: req.key.channelThreadKey }
+            : await sessionOfMessage(
+                this.sessionScopeOf,
+                {
+                  platformMessageId: req.platformMessageId,
+                  threadContext: sessionInit.threadContext,
+                },
+                req.key.channelThreadKey,
+              );
           const openedKey = req.sessionId
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
-            : req.key.channelThreadKey;
+            : chatSession.continuityKey;
           const stated = await this.openingFor(openedKey ?? "", sessionInit.threadContext);
           // The session reads no more privately than the caller main read.
           // A session with no chat opens shared, so its shell stays shared
           // even when its turns take a private caller's audience. A session
           // already live keeps the reading it opened with.
           const audience = narrowerAudience(
-            stated.audience,
+            // A session that answers many chats opens shared, resumed by id or not.
+            answersManyChats(openedKey ?? "") ? "shared" : stated.audience,
             ctx.callerActionContext?.audience ?? "shared",
           );
           const opening = {
@@ -249,7 +270,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             ? await this.manager.resume({ id: req.sessionId, agent: req.key.agentName }, opening)
             : await this.manager.open(
                 // Only the key's own fields, never the rest of the worker's request.
-                { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },
+                { agentName: req.key.agentName, channelThreadKey: chatSession.continuityKey },
                 {
                   ...opening,
                   // Read here, never taken from the worker's request.
@@ -286,13 +307,20 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         });
 
         const prepared = await (async () => {
+          // A session that answers many chats records each turn in its own
+          // chat, never in the chat that opened the session.
+          const manyChats = answersManyChats(session.key.channelThreadKey);
+          const turnChat = manyChats
+            ? (namedChat ?? sessionInit.threadContext?.romeSessionId)
+            : namedChat;
+          const opened = manyChats ? undefined : openerChat(session);
           const conversation = resolveTurnConversation({
             agentName: req.key.agentName,
             agentSessionId: session.sessionId,
-            romeSessionId: namedChat,
-            openerChat: openerChat(session),
+            romeSessionId: turnChat,
+            openerChat: opened,
             sessionChat:
-              (openerChat(session) ?? namedChat)
+              (opened ?? turnChat)
                 ? undefined
                 : await findSessionChat(this.webchatRepo, session.sessionId),
             channelThreadKey: req.key.channelThreadKey,

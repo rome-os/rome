@@ -146,7 +146,7 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
     },
     replies: { placement: "thread" },
     routing: { agentName: null },
-    session: { reset: { mode: "idle", idleMinutes: 10_080 } },
+    session: { reset: { mode: "idle", idleMinutes: 10_080 }, scope: "chat" },
   };
   let effective: ChatSettings = {
     ...defaults,
