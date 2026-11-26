@@ -14,6 +14,23 @@ export const SHARE_PANEL_DEFAULT_SIZE = { width: 420, height: 560 };
 // A URL carries the text, and servers refuse very long ones. A selection this
 // long is a passage, which no quick lookup needs whole.
 export const MAX_SHARED_TEXT = 2000;
+// The cap on the text once percent-encoded. A CJK character takes nine bytes
+// there, so 2,000 of them would pass Node's 16 KiB header limit (HTTP 431);
+// this leaves room for the rest of the request.
+export const MAX_ENCODED_TEXT = 6000;
+
+/** The longest start of `text` within both caps, never splitting a character. */
+export function clipSharedText(text: string): string {
+  const chars = Array.from(text).slice(0, MAX_SHARED_TEXT);
+  let encoded = 0;
+  let end = 0;
+  for (const char of chars) {
+    encoded += encodeURIComponent(char).length;
+    if (encoded > MAX_ENCODED_TEXT) break;
+    end += 1;
+  }
+  return chars.slice(0, end).join("");
+}
 
 const recordSchema = z.object({
   appId: z.string().min(1),
@@ -44,7 +61,7 @@ export function shareUrl(
   text: string | null,
 ): string {
   const url = new URL(app.url);
-  const trimmed = text?.trim().slice(0, MAX_SHARED_TEXT);
+  const trimmed = text ? clipSharedText(text.trim()) : "";
   if (trimmed) url.searchParams.set(app.param, trimmed);
   return url.toString();
 }

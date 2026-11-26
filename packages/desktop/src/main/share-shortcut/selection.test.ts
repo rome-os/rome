@@ -13,7 +13,7 @@ const platform = Object.getOwnPropertyDescriptor(process, "platform");
 
 /** A fake Mac whose clipboard holds `clipboard` and whose ⌘C copies `copied`. */
 function fakeMac(selected: string | null, copied: string | null, clipboard = "what you had") {
-  const board = { text: clipboard as string | null, count: 1 };
+  const board = { text: clipboard as string | null, count: 1, concealed: false };
   const snapshots: Array<{ restore: ReturnType<typeof rs.fn>; discard: ReturnType<typeof rs.fn> }> =
     [];
   const text: MacText = {
@@ -23,6 +23,7 @@ function fakeMac(selected: string | null, copied: string | null, clipboard = "wh
     snapshotPasteboard: rs.fn(() => {
       const saved = board.text;
       const snapshot = {
+        concealed: board.concealed,
         restore: rs.fn(() => {
           board.text = saved;
           board.count += 1;
@@ -55,10 +56,20 @@ describe("readSelectedText", () => {
     expect(text.snapshotPasteboard).not.toHaveBeenCalled();
   });
 
-  it("does not press ⌘C when Accessibility answers that nothing is selected", async () => {
-    const { text } = fakeMac("", "the current line");
+  it("still copies when Accessibility answers with an empty selection", async () => {
+    // Chromium in basic accessibility mode reports "" while text is selected.
+    const { text } = fakeMac("", "selected in Chrome");
+    expect(await readSelectedText(text)).toBe("selected in Chrome");
+    expect(text.pressCopy).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a copied password alone instead of copying over it", async () => {
+    const { text, board, snapshots } = fakeMac(null, "selection", "hunter2");
+    board.concealed = true;
     expect(await readSelectedText(text)).toBeNull();
     expect(text.pressCopy).not.toHaveBeenCalled();
+    expect(snapshots[0].discard).toHaveBeenCalledOnce();
+    expect(board.text).toBe("hunter2");
   });
 
   it("copies the selection when Accessibility can't answer, then puts the clipboard back", async () => {

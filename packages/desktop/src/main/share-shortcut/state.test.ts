@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  MAX_ENCODED_TEXT,
   MAX_SHARED_TEXT,
   panelPosition,
   readShareShortcutApp,
@@ -39,6 +40,14 @@ describe("shareUrl", () => {
   it("opens the plain page when nothing is selected", () => {
     expect(shareUrl(APP, null)).toBe(APP.url);
     expect(shareUrl(APP, "   ")).toBe(APP.url);
+  });
+
+  it("cuts non-ASCII text to what a server accepts in a URL, without splitting a character", () => {
+    const chinese = new URL(shareUrl(APP, "温".repeat(MAX_SHARED_TEXT))).searchParams.get("text");
+    expect(encodeURIComponent(chinese ?? "").length).toBeLessThanOrEqual(MAX_ENCODED_TEXT);
+    expect(chinese).toBe("温".repeat(MAX_ENCODED_TEXT / 9));
+    const emoji = new URL(shareUrl(APP, "😀".repeat(2000))).searchParams.get("text") ?? "";
+    expect(Array.from(emoji).every((char) => char === "😀")).toBe(true);
   });
 
   it("cuts a passage down to what a URL can carry", () => {
