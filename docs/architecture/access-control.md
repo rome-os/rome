@@ -23,7 +23,7 @@ Two policies decide reach, each held as its own setting:
 
 ## Entry
 
-Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)).
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)). It is asked once on each boundary, and what is inside asks nothing.
 
 ### Invariants
 

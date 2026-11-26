@@ -146,7 +146,7 @@ export function buildApp(
   app.route("/", appHomeScreenRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. The entry step below
-  // asks who may enter, once for every route here
+  // asks who may enter once, so no route here asks again
   // (docs/architecture/access-control.md#entry).
   const api = new Hono();
 
