@@ -14,7 +14,7 @@ import {
   createSession,
   createVisitorSession,
 } from "../../access/auth.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import { inviteMember, memberContext } from "../../access/application/members.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppManager } from "../../apps/manager.js";
@@ -79,12 +79,8 @@ beforeAll(async () => {
       },
       updatedAt: new Date(0),
     },
-    {
-      key: DASHBOARD_ACCESS_SETTING_KEY,
-      value: { cloudEmailAccess: [TEAMMATE_EMAIL] },
-      updatedAt: new Date(0),
-    },
   ]);
+  await inviteMember(memberContext(testDb.db), TEAMMATE_EMAIL);
 });
 
 afterAll(async () => {

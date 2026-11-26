@@ -1,10 +1,8 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { mayEnter } from "../../access/entry.js";
-import { currentSessionActor } from "../../access/session-actor.js";
+import { enteredPerson } from "../../access/require-entry.js";
 import type { TeamActor } from "../../access/team.js";
-import { teamOnly } from "../../access/team-only.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -84,8 +82,6 @@ export async function resolveApproval(
 
 async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve" | "reject") {
   const approvalId = c.req.param("id") as string;
-  const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
-  if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
   if (action === "approve") {
     const approval = await deps.approvalsRepo.findById(approvalId);
     if (approvalCall(approval).actionName === VAULT_APPLY_ACTION) {
@@ -95,15 +91,17 @@ async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve"
       );
     }
   }
-  const { status, body } = await resolveApproval(deps, approvalId, action, resolverOf(actor));
+  const { status, body } = await resolveApproval(
+    deps,
+    approvalId,
+    action,
+    resolverOf(enteredPerson(c)),
+  );
   return c.json(body, status);
 }
 
 export function approvalsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
-  const team = teamOnly(deps.dashboardAccessState);
-  app.use("/approvals", team);
-  app.use("/approvals/*", team);
   app.use("/approvals/*", async (c, next) => {
     if (
       !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&

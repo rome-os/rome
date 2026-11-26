@@ -27,9 +27,8 @@ export interface PlaceAudienceDeps {
 }
 
 /**
- * Who can read a dashboard chat. A chat private to the guardian (their
- * Concierge's chats, its task chats and their children) is private. Every
- * other dashboard chat opens for every dashboard user, so it is private only
+ * A dashboard chat's audience. One of the guardian's Concierge (its chats,
+ * its task chats and their children) is private. Any other is private only
  * while nobody but the guardian may open the dashboard.
  */
 export function dashboardChatAudience(

@@ -1,7 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
-import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
+import { conciergeOpenTasks } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import {
   startUsageLimitContinuation,
@@ -48,6 +48,7 @@ import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./instance/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
+import { guardianAuth } from "./db/schema.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
 import { createRomeCloudAgentsClient } from "./connections/integrations/rome-cloud-agents.js";
@@ -146,12 +147,7 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import {
-  refuseAnotherOwnersChat,
-  WEBCHAT_CHANNEL,
-  WEBCHAT_SURFACE,
-  webchatChannel,
-} from "./webchat/dashboard-account.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
 import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -171,9 +167,9 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { invitedEmailsSaved, memberContext } from "./access/application/members.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -347,6 +343,7 @@ import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
+import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -535,9 +532,6 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  // The members as persons with a role (docs/domains/access.md), on top of
-  // Identity. Kept beside the allow-list and the seat, and nothing reads them yet.
-  const memberSteps = memberContext(db);
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -666,8 +660,8 @@ async function main() {
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   // Made here so the Concierge can tell whether a visitor is still served,
-  // and who can read a dashboard chat; it is loaded with the other access
-  // settings further down.
+  // and who can read a dashboard chat; it is loaded from the members further
+  // down, after their backfill.
   const dashboardAccessState = new DashboardAccessState();
   // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
   const chatAudience = placeAudience({
@@ -1398,7 +1392,7 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
-  // A chat private to one person rings them when an action in it notifies.
+  // A chat private to one person rings them when a turn that acts for no one notifies.
   const privateOwnerOfChat = async (chatId: string) =>
     privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
@@ -1510,6 +1504,8 @@ async function main() {
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
+      guardianEmail: async () =>
+        (await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1))[0]?.email,
     }),
     webchatRepo,
     sessionRepository,
@@ -1666,10 +1662,14 @@ async function main() {
             limit,
             before: before as MessagePageCursor | undefined,
           });
-          return { rows: page.rows, next: page.nextCursor };
+          const actors = await webchatRepo.getUserMessageActors(
+            chatId,
+            page.rows.flatMap((row) => (row.role === "user" ? [row.id] : [])),
+          );
+          const rows = page.rows.map((row) => ({ ...row, actor: actors.get(row.id) }));
+          return { rows, next: page.nextCursor };
         },
         openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
-        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
         tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
       }),
     },
@@ -2065,7 +2065,6 @@ async function main() {
   // a quiet system turn instead (docs/architecture/concierge.md).
   const intoConciergeChat = conciergeChatGuard({
     isConciergeChat: async (chatId) => isConciergeChat(await webchatRepo.getSession(chatId)),
-    refuseAnotherOwnersChat: (chatId) => refuseAnotherOwnersChat(webchatRepo, chatId),
     senderOf: async (agentName) =>
       (agentName
         ? await resolveAutomatedSender({ agentLoader, appCatalog, settingsRepo }, agentName)
@@ -2570,10 +2569,12 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
-      // Nobody is told yet. Answering such a sender with the way to connect
-      // their account passes `tell` here.
       onRecord: unknownSenders({
         heardForMs: HEARD_FOR_MS,
+        tell: answerUnknownSenders({
+          registry: connectionRegistry,
+          publicOrigin: () => getConfiguredInstanceOrigin(),
+        }),
         isRomes: (account) =>
           connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
         isOwnAccount: (connectionId) => {
@@ -2724,11 +2725,15 @@ async function main() {
   // Question cards stored before cards were described as data get their
   // description (src/webchat/question-card-backfill.ts).
   backfillQuestionCards(db);
-  // The members learn the guardian's seat and the allow-list. Nothing reads
-  // them yet, so a failure is logged and Rome starts
-  // (src/access/application/backfill-members.ts).
+  // The members learn the guardian's seat, and on the first run the invited
+  // emails, before the dashboard snapshot below is loaded from them. A failure
+  // is logged and Rome starts, so the guardian can still sign in. Until a run
+  // or a save of the invited emails succeeds, Rome Cloud is not sent the list,
+  // and when an older build saved a list the run did not read, no member gets
+  // in (src/access/application/backfill-members.ts). The run is retried only at
+  // the next start.
   await backfillMembers(db).catch((err: unknown) => {
-    log.warn("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
+    log.error("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
   });
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
@@ -2869,16 +2874,14 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, (emails) =>
-    invitedEmailsSaved(memberSteps, emails),
-  );
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, db);
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
   });
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
-    log.warn("Failed to load dashboardAccess settings; starting with empty allow-list", {
+    log.warn("Failed to load the members' emails; starting with an empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -3246,6 +3249,11 @@ async function main() {
   void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // The seat may have gained or changed its email, and the dashboard
+      // snapshot holds it.
+      await dashboardAccessState
+        .load(db)
+        .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
       // Signer mode links the instance during this check, so provisioning waits for it.
       await provisionAfterLink();
       if (identity.status !== "ok") return;
