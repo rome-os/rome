@@ -1,7 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
-import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
+import { conciergeOpenTasks } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import {
   startUsageLimitContinuation,
@@ -1668,10 +1668,14 @@ async function main() {
             limit,
             before: before as MessagePageCursor | undefined,
           });
-          return { rows: page.rows, next: page.nextCursor };
+          const actors = await webchatRepo.getUserMessageActors(
+            chatId,
+            page.rows.flatMap((row) => (row.role === "user" ? [row.id] : [])),
+          );
+          const rows = page.rows.map((row) => ({ ...row, actor: actors.get(row.id) }));
+          return { rows, next: page.nextCursor };
         },
         openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
-        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
         tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
       }),
     },
