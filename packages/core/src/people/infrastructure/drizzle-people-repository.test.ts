@@ -509,16 +509,18 @@ describe("PeopleRepository", () => {
       expect((await repo.byId(alice))!.links).toEqual([{ ...agent, delegate: true }]);
     });
 
-    it("says when the link is removed or goes to another person, and not otherwise", async () => {
+    it("tells the hook when the link is removed or goes to another person, and not otherwise", async () => {
       const left: string[] = [];
-      const told = new DrizzlePeopleRepository(testDb.db, ({ id }) => {
-        left.push(id);
+      const told = new DrizzlePeopleRepository(testDb.db, ({ account, before, after }) => {
+        const kept = after?.delegate && after.personId === before?.personId;
+        if (before?.delegate && !kept) left.push(account.id);
       });
       const owner = await told.create({ displayName: "Owner", bondLevel: "guardian" });
       const alice = await told.create({ displayName: "Alice", bondLevel: "other" });
       for (const id of ["a1", "a2", "a3"]) told.linkDelegate({ platform: "agents", id }, owner);
 
       told.linkDelegate({ platform: "agents", id: "a1" }, owner);
+      told.linkStated({ platform: "agents", id: "a1" }, owner);
       await told.unlink({ platform: "agents", id: "a1" }, alice);
       expect(left).toEqual([]);
 
@@ -676,6 +678,35 @@ describe("PeopleRepository", () => {
         links: [{ platform: "whatsapp", id: "+15557777" }],
       });
       expect((await repo.byId(retried))!.displayName).toBe("Bob");
+    });
+  });
+
+  describe("the link-change hook", () => {
+    it("tells each change of who holds a link, and nothing for a write that changes none", async () => {
+      const told: string[] = [];
+      const people = new DrizzlePeopleRepository(testDb.db, ({ account, before, after }) => {
+        const as = (h: typeof before) => (h ? `${h.personId}${h.delegate ? "*" : ""}` : "-");
+        told.push(`${account.id} ${as(before)}>${as(after)}`);
+      });
+      const owner = await people.create({ displayName: "Owner", bondLevel: "guardian" });
+      const alice = await people.create({ displayName: "Alice", bondLevel: "other" });
+
+      people.linkStated({ platform: "wechat", id: "w1" }, owner);
+      people.linkStated({ platform: "wechat", id: "w1" }, owner);
+      people.readdress(owner, { platform: "wechat", id: "w1" }, "w2");
+      await people.move({ platform: "wechat", id: "w2" }, owner, alice);
+      people.linkDelegate({ platform: "wechat", id: "w2" }, alice);
+      await people.unlink({ platform: "wechat", id: "w2" });
+      await people.unlink({ platform: "wechat", id: "w2" });
+
+      expect(told).toEqual([
+        `w1 ->${owner}`,
+        `w1 ${owner}>-`,
+        `w2 ->${owner}`,
+        `w2 ${owner}>${alice}`,
+        `w2 ${alice}>${alice}*`,
+        `w2 ${alice}*>-`,
+      ]);
     });
   });
 });

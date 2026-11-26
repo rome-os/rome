@@ -3,12 +3,9 @@
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import {
-  actsForGuardian,
-  startedActingForGuardian,
-  stoppedActingForGuardian,
-} from "./access/acts-for-guardian.js";
+import { actsForGuardian, startedActingForGuardian } from "./access/acts-for-guardian.js";
 import { accountEntry } from "./access/application/account-entry.js";
+import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { guardianSeatCreated, memberContext } from "./access/application/members.js";
 import { channelMessageOf } from "./chats/connected-accounts/channel-message.js";
 import { toAgentInboundMessage } from "./connections/integrations/agents.js";
@@ -40,8 +37,8 @@ describe("a same-account agent acting for the guardian", () => {
   let people: DrizzlePeopleRepository;
   beforeEach(async () => {
     testDb = createTestDb();
-    people = new DrizzlePeopleRepository(testDb.db, (account, tx) =>
-      stoppedActingForGuardian(tx, account),
+    people = new DrizzlePeopleRepository(testDb.db, (change) =>
+      peopleLinkChanged(testDb.db, change),
     );
     testDb.db
       .insert(persons)
@@ -72,5 +69,22 @@ describe("a same-account agent acting for the guardian", () => {
 
     expect(actsForGuardian(testDb.db, ATLAS)).toBe(false);
     expect(await accountEntry({ db: testDb.db })(ATLAS)).toEqual({ kind: "unknown" });
+  });
+
+  it("stops acting for the guardian when its link moves to another person in People", async () => {
+    const alice = await people.create({ displayName: "Alice", bondLevel: "other" });
+    await people.move(ATLAS, "owner", alice);
+
+    expect(actsForGuardian(testDb.db, ATLAS)).toBe(false);
+  });
+
+  it("keeps acting for the guardian through a change to the guardian's other accounts", async () => {
+    const wechat = { platform: "wechat", id: "w-owner" };
+    people.linkStated(wechat, "owner");
+    people.readdress("owner", wechat, "w-owner-2");
+    await people.unlink({ platform: "wechat", id: "w-owner-2" }, "owner");
+    people.linkStated(ATLAS, "owner");
+
+    expect(actsForGuardian(testDb.db, ATLAS)).toBe(true);
   });
 });

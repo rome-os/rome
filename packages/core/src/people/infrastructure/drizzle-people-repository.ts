@@ -50,15 +50,29 @@ function toPerson(row: PersonRow, links: PersonLink[]): Person {
   };
 }
 
-/** Told, in the same transaction, of each account whose link was removed or
- *  went to another person. */
-export type AccountLeft = (account: Link, exec: SqliteExec) => void;
+/** Which person holds an account's link, and whether it is a delegate link. */
+export interface LinkHolding {
+  personId: string;
+  delegate: boolean;
+}
+
+/** An account whose link a write changed: its holding before and after, null
+ *  when nobody held it. */
+export interface LinkChange {
+  account: Link;
+  before: LinkHolding | null;
+  after: LinkHolding | null;
+}
+
+/** Told of each account whose link a write gave, took, moved or marked,
+ *  inside the write's transaction, so a throw rolls the write back. */
+export type LinkChanged = (change: LinkChange) => void;
 
 /** {@link PeopleRepository} on the persons, links and dismissed-accounts tables. */
 export class DrizzlePeopleRepository implements PeopleRepository {
   constructor(
     private readonly db: DrizzleDb,
-    private readonly accountLeft: AccountLeft = () => {},
+    private readonly linkChanged: LinkChanged = () => {},
   ) {}
 
   async byId(id: string): Promise<Person | null> {
@@ -145,8 +159,10 @@ export class DrizzlePeopleRepository implements PeopleRepository {
     const claims = await this.resolveClaims(data.links ?? []);
 
     this.db.transaction((tx) => {
+      const tell = this.watch(claims);
       this.insertPerson(tx, id, data);
       for (const claim of claims) this.writeClaim(tx, id, claim);
+      tell();
     });
 
     return id;
@@ -183,8 +199,10 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         return { merged: false, reason: "guardian-source" };
       }
 
+      const tell = this.watch(this.linksOf(from));
       const moved = tx.update(links).set({ personId: into }).where(eq(links.personId, from)).run();
       tx.delete(persons).where(eq(persons.id, from)).run();
+      tell();
 
       return { merged: true, links: moved.changes };
     });
@@ -200,8 +218,10 @@ export class DrizzlePeopleRepository implements PeopleRepository {
       if (!row) return { deleted: false, reason: "unknown" };
       if (protectedPersonReason(row) === "guardian") return { deleted: false, reason: "guardian" };
 
+      const tell = this.watch(this.linksOf(personId));
       const released = tx.delete(links).where(eq(links.personId, personId)).run();
       tx.delete(persons).where(eq(persons.id, personId)).run();
+      tell();
       return { deleted: true, links: released.changes };
     });
   }
@@ -248,9 +268,8 @@ export class DrizzlePeopleRepository implements PeopleRepository {
     if (!inTransaction(this.db)) {
       return this.db.transaction((tx) => this.claim(account, personId, delegate, tx));
     }
+    const tell = this.watch([account]);
     this.releaseDismissals(exec, account.platform, [account.id]);
-    const holder = this.holderOf(account);
-    if (holder && holder.personId !== personId) this.accountLeft(account, exec);
     const row = exec
       .insert(links)
       .values({
@@ -268,12 +287,19 @@ export class DrizzlePeopleRepository implements PeopleRepository {
       // above. Returning the row's own id keeps the reported link real.
       .returning({ id: links.id })
       .get();
+    tell();
     return row.id;
   }
 
   readdress(personId: string, account: Link, to: string, exec: SqliteExec = this.db): boolean {
+    // One transaction, joining the caller's, so the re-point and what the
+    // link-change hook writes commit or roll back together.
+    if (!inTransaction(this.db)) {
+      return this.db.transaction((tx) => this.readdress(personId, account, to, tx));
+    }
     const { platform } = account;
     const from = account.id;
+    const tell = this.watch([account, { platform, id: to }]);
     // The row this call re-points, as a subquery so the guard runs inside the
     // caller's transaction rather than as a read before it.
     const rePointed = this.db
@@ -294,7 +320,7 @@ export class DrizzlePeopleRepository implements PeopleRepository {
     // their accounts into one. Conditioned, too, on the re-pointed row still
     // being there: a `from` that went away leaves the rival holding an account
     // nothing is about to take.
-    const yielded = exec
+    exec
       .delete(links)
       .where(
         and(
@@ -305,7 +331,6 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         ),
       )
       .run();
-    if (yielded.changes > 0) this.accountLeft({ platform, id: to }, exec);
     // A dismissal of `to` yields on the same terms: the account is about to be
     // this person's, and a linked account is never also dismissed.
     exec
@@ -341,17 +366,18 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         ),
       )
       .run();
-    if (result.changes > 0) this.accountLeft(account, exec);
+    tell();
     return result.changes > 0;
   }
 
   async unlink(account: Link, from?: string): Promise<boolean> {
     return this.db.transaction((tx) => {
+      const tell = this.watch([account]);
       const result = tx
         .delete(links)
         .where(and(accountIs(account), from === undefined ? undefined : eq(links.personId, from)))
         .run();
-      if (result.changes > 0) this.accountLeft(account, tx);
+      tell();
       return result.changes > 0;
     });
   }
@@ -382,6 +408,7 @@ export class DrizzlePeopleRepository implements PeopleRepository {
           : holder?.personId === expected;
       if (!swapped) return { linked: false, holder };
 
+      const tell = this.watch([account]);
       this.releaseDismissals(tx, account.platform, [account.id]);
       if (link == null) {
         tx.insert(links)
@@ -391,10 +418,37 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         // The row moves rather than being replaced, so a delegate mark it
         // carries survives a move.
         tx.update(links).set({ personId: to }).where(eq(links.id, link.id)).run();
-        this.accountLeft(account, tx);
       }
+      tell();
       return { linked: true };
     });
+  }
+
+  /** Reads how each account is held, inside the write's transaction, and
+   *  returns the call that tells {@link linkChanged} of each one whose holding
+   *  the write then changed. */
+  private watch(accounts: readonly Link[]): () => void {
+    const before = accounts.map((account) => this.holdingOf(account));
+    return () =>
+      accounts.forEach((account, i) => {
+        const after = this.holdingOf(account);
+        const was = before[i];
+        if (was?.personId === after?.personId && was?.delegate === after?.delegate) return;
+        this.linkChanged({ account, before: was ?? null, after: after ?? null });
+      });
+  }
+
+  private holdingOf(account: Link): LinkHolding | undefined {
+    const holding = { personId: links.personId, delegate: links.delegate };
+    return this.db.select(holding).from(links).where(accountIs(account)).get();
+  }
+
+  private linksOf(personId: string): Link[] {
+    return this.db
+      .select({ platform: links.platform, id: links.accountId })
+      .from(links)
+      .where(eq(links.personId, personId))
+      .all();
   }
 
   private async mintId(displayName: string): Promise<string> {
