@@ -322,4 +322,27 @@ describe("core:request_connection_access", () => {
       close();
     }
   });
+
+  it("ignores RoutineEngine's __triggerPayload while still rejecting unknown caller keys", async () => {
+    const { deps, close } = makeFixture();
+    try {
+      const withTrigger = await resolveConnectionAccessRequest(deps, {
+        appId: "lark",
+        connectionKind: "feishu",
+        reason: "Routine run",
+        __triggerPayload: { firedBy: "manual" },
+      });
+      expect(withTrigger.ok).toBe(true);
+
+      const withTypo = await resolveConnectionAccessRequest(deps, {
+        appId: "lark",
+        connectionKind: "feishu",
+        reason: "Routine run",
+        unexpectedField: true,
+      });
+      expect(withTypo.ok).toBe(false);
+    } finally {
+      close();
+    }
+  });
 });

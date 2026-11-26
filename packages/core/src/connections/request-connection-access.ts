@@ -104,7 +104,15 @@ export async function resolveConnectionAccessRequest(
       error: "App connection access is unavailable until startup reconciliation completes.",
     };
   }
-  const parsed = requestConnectionAccessSchema.safeParse(rawArgs);
+  const normalizedArgs =
+    rawArgs && typeof rawArgs === "object" && "__triggerPayload" in rawArgs
+      ? Object.fromEntries(
+          Object.entries(rawArgs as Record<string, unknown>).filter(
+            ([key]) => key !== "__triggerPayload",
+          ),
+        )
+      : rawArgs;
+  const parsed = requestConnectionAccessSchema.safeParse(normalizedArgs);
   if (!parsed.success) {
     return {
       ok: false,
