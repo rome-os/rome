@@ -3,7 +3,8 @@ import { type StoredRoot, walkToRoot } from "../agent/index.js";
 
 // Builds and reads channelThreadKeys. Each builder serializes to the exact
 // string stored in `sessions.channel_thread_key`, so existing rows keep
-// resolving. The inbox app still spells messaging-channel and sentinel keys.
+// resolving. The inbox app still spells messaging-channel keys, and rows of a
+// past release hold sentinel keys.
 
 const WEBCHAT_KEY_PREFIX = "webchat:";
 
@@ -54,9 +55,9 @@ function parseRootKey(key: string): ParsedSessionKey {
 
 /**
  * The channel a key's turns are delivered on: the root session's, so a
- * subagent's or a fork's session takes its root's. Undefined for a sentinel,
- * which watches a channel without replying on it, and for a key with no
- * channel part.
+ * subagent's or a fork's session takes its root's. Undefined for a past
+ * release's sentinel, which watched a channel without replying on it, and for
+ * a key with no channel part.
  */
 export function sessionKeyChannel(key: string): string | undefined {
   return channelOf(parseSessionKey(walkToRoot(key)));

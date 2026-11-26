@@ -60,14 +60,12 @@ describe("host root action grants", () => {
     const agents = await agentManifests();
     // Guard against a vacuous pass if manifest directories move.
     expect(agents.map((agent) => agent.id)).toEqual(
-      expect.arrayContaining(["main", "inbox:sentinel", "assistant:explore"]),
+      expect.arrayContaining(["main", "assistant:explore"]),
     );
     const holders = agents
       .filter((agent) => registry.getForAgent(agent.actions).length > 0)
       .map((agent) => agent.id);
     expect(holders).toEqual(["main"]);
-    // The untrusted-input triage agent holds nothing it could be steered into.
-    expect(agents.find((agent) => agent.id === "inbox:sentinel")?.actions).toEqual([]);
     expect(
       registry
         .getForAgent(agents.find((agent) => agent.id === "main")!.actions)

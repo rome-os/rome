@@ -4,7 +4,7 @@ import type { Agent } from "../agent/index.js";
 
 /**
  * The apps whose agents may run their own turns. Inbox then stands aside on
- * the accounts linked to such an agent, so no wake gate, Sentinel or Envoy
+ * the accounts linked to such an agent, so no wake gate or Envoy
  * judges what they hear or send. The guardian linking an account does not
  * show that, so only first-party apps on this list get it.
  */

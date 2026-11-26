@@ -85,7 +85,6 @@ The check that decides whether a message an agent wrote may go out. It looks at 
 
 - A reply to the guardian goes out unchecked, even in a group where others read it, and a reply to anyone else is checked first.
 - The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
-- The sentinel's own reply to a message it triaged does not pass the send gate.
 - An agent whose own app runs its turns has no send gate: its app decides what goes out.
 
 ## Audience
