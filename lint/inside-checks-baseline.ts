@@ -5,7 +5,6 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/agent/application/subagent-calls.ts": 1,
   "packages/core/src/agent/domain/turn-audience.ts": 6,
   "packages/core/src/api/routes/webchat.ts": 3,
-  "packages/core/src/app-host/chat-calls.ts": 2,
   "packages/core/src/apps/actions/agent-tool-contract.ts": 1,
   "packages/core/src/apps/actions/agent-tool.ts": 1,
   "packages/core/src/apps/actions/approval-card.ts": 1,
