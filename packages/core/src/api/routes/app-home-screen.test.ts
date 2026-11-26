@@ -15,10 +15,15 @@ describe("home-screen routes", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "rome-app-home-screen-"));
     writeFileSync(join(root, "icon.svg"), ICON_SVG);
-    const webApp = (appId: string, displayName: string, iconAbsolutePath?: string) => ({
+    const webApp = (
+      appId: string,
+      displayName: string,
+      iconAbsolutePath?: string,
+      web: Record<string, unknown> = {},
+    ) => ({
       appId,
       displayName,
-      manifest: {},
+      manifest: { web },
       updatedAt: "2026-09-23T00:00:00.000Z",
       web: { assetVersion: "abc123def456" },
       iconAbsolutePath,
@@ -27,6 +32,8 @@ describe("home-screen routes", () => {
       ttt: webApp("ttt", "Sevenfold Tic-Tac-Toe", join(root, "icon.svg")),
       "@acme/radar": webApp("@acme/radar", "Radar", join(root, "icon.svg")),
       plain: webApp("plain", "Plain"),
+      translate: webApp("translate", "Translate", undefined, { shareTarget: { path: "/quick" } }),
+      "@acme/notes": webApp("@acme/notes", "Notes", undefined, { shareTarget: {} }),
       headless: { appId: "headless", displayName: "Headless", manifest: {}, web: null },
     };
     const appCatalog = { get: (id: string) => apps[id] ?? null } as ApiDeps["appCatalog"];
@@ -64,6 +71,27 @@ describe("home-screen routes", () => {
           },
         ],
       });
+    });
+
+    it("publishes a declared share target as the page that reads ?text=", async () => {
+      const res = await app.request("/app-manifest/translate.webmanifest");
+      const manifest = (await res.json()) as { share_target?: unknown };
+      expect(manifest.share_target).toEqual({
+        action: "/full/apps/translate/quick",
+        method: "GET",
+        params: { text: "text" },
+      });
+    });
+
+    it("sends shared text to the app's own page when the target has no path", async () => {
+      const res = await app.request("/app-manifest/%40acme%2Fnotes.webmanifest");
+      const manifest = (await res.json()) as { share_target?: { action: string } };
+      expect(manifest.share_target?.action).toBe("/full/apps/%40acme%2Fnotes");
+    });
+
+    it("has no share target when the app declares none", async () => {
+      const res = await app.request("/app-manifest/ttt.webmanifest");
+      expect(await res.json()).not.toHaveProperty("share_target");
     });
 
     it("keeps scoped ids encoded in every path", async () => {

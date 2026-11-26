@@ -360,6 +360,29 @@ An app sets up the state it depends on, such as a routine it must always have, w
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
 
+## Share targets
+
+A share target is an app's declaration, under `web.shareTarget` in its manifest, that its web page takes text the user sends to it from elsewhere. It is the [Web Share Target](https://developer.mozilla.org/en-US/docs/Web/Manifest/share_target) member of the app's web manifest, declared once in `app.yaml`.
+
+```yaml
+web:
+  manifest: web/manifest.json
+  shareTarget:
+    path: /share   # app route; optional, defaults to the app's own page
+```
+
+Rome opens `/full/apps/<appId><path>?text=<the text>`. The page reads `text` from the query, starts its work with it, and treats a missing `text` as an ordinary open.
+
+Surfaces that send text:
+
+- **A phone's share sheet**, for an app installed to the home screen from a browser that honors `share_target`.
+
+**Contracts:**
+
+- `path` starts with `/` and carries no query or fragment. Rome adds `text` itself.
+- The target is always the app's full-screen route, on the same Rome.
+- The installed-apps list marks such an app with `acceptsSharedText`, so surfaces offer only apps that take text.
+
 ## Event sources
 
 An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.

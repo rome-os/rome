@@ -76,6 +76,8 @@ web:                             # Optional — enables the web UI
   manifest: web/manifest.json    # rslib output manifest
   displayName: Coding            # Title Case, like `name`
   navLabel: Coding               # Title Case, like `name`
+  # shareTarget:                 # Optional — the page takes shared text in `?text=`
+  #   path: /share               # App route; defaults to the app's own page
 
 api:                             # Optional — enables the HTTP API
   entry: api/index               # Without extension
@@ -1077,6 +1079,14 @@ use [<appName>](/apps/<appId>) to get the correct URL. DO NOT present the localh
   (soft pushState). From another app, deep-link with
   `navigateRome({ path: "apps", appId, subPath: "<detailId>" })`. See
   "Frontend SDK → Common helpers" above. AUTHORING.md §9 covers the design rule.
+
+### Taking shared text: `web.shareTarget`
+
+Declare `web.shareTarget` when the app does something useful with a piece of text the user is looking at elsewhere: translate it, define it, save it, reply to it. Phones list the app in their share sheet, and Rome surfaces such as the Mac app's share shortcut open the page with the text. Rome opens `/full/apps/<appId><path>?text=…`. The page:
+
+- reads `text` once on load (`new URLSearchParams(location.search).get("text")`), starts its work with it, and removes it from the URL so a reload does not repeat the work;
+- treats no `text` as an ordinary open;
+- fits a 420 × 560 window.
 
 ### Mobile / responsive design
 

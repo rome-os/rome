@@ -23,6 +23,12 @@ export interface RomeAppArtifactEntry {
 
 export interface RomeAppWebDeclaration {
   manifest: string;
+  /**
+   * Declares that the app accepts text shared to it. Rome opens the app's
+   * full-screen page at `path` (default `/`) with the text in `?text=`, and
+   * publishes it as the `share_target` of the app's web manifest.
+   */
+  shareTarget?: { path?: string };
 }
 
 export interface RomeAppApiDeclaration {

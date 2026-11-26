@@ -57,6 +57,15 @@ const WebDeclarationSchema = z
     displayName: z.string().min(1).optional(),
     navLabel: z.string().min(1).optional(),
     entry: z.string().min(1).optional(),
+    shareTarget: z
+      .object({
+        path: z
+          .string()
+          .regex(/^\/[^?#]*$/, "must be an app route starting with / and without ? or #")
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
