@@ -30,8 +30,8 @@ export interface Entrance<Person> {
     commands: All & RunCommands<C, Person>,
   ): Omit<All, "ran"> & { ran(command: C): Promise<string> };
   /** Runs `answer` to a press, told whom as, when whoever pressed is let in,
-   *  else nothing. */
-  press(presser: EntryAccount, answer: (by: Person) => Promise<void>): Promise<void>;
+   *  else nothing. Answers whether it ran. */
+  press(presser: EntryAccount, answer: (by: Person) => Promise<void>): Promise<boolean>;
 }
 
 export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
@@ -64,7 +64,9 @@ export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
     },
     async press(presser, answer) {
       const entered = await ask(presser, "press");
-      if (entered.kind === "entered") await answer(entered.person);
+      if (entered.kind !== "entered") return false;
+      await answer(entered.person);
+      return true;
     },
   };
 }
