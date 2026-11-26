@@ -57,6 +57,17 @@ const WebDeclarationSchema = z
     displayName: z.string().min(1).optional(),
     navLabel: z.string().min(1).optional(),
     entry: z.string().min(1).optional(),
+    shareTarget: z
+      .object({
+        path: z
+          .string()
+          // Plain segments only: a dot segment, even percent-encoded, would
+          // resolve the target out of the app's own route.
+          .regex(/^(\/[A-Za-z0-9_-]+)*\/?$/, "must be an app route of plain /segments")
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
