@@ -49,7 +49,7 @@ A tool's name is `system:<verb>_<thing>`, in lower-case words joined by `_`. The
 - Use one word for one thing everywhere. When the page says "AI tool", the tool says `ai_tool`, never `provider`.
 - Name exactly the thing the tool acts on. A tool that stops a run is `system:stop_routine_run`, not `system:stop_routine`.
 - Give `core:` no new names. Everything core offers an agent carries `system:`.
-- Keep an older name that breaks these rules beside the name that replaces it. The test lists each one.
+- Keep an older name that breaks these rules beside the name that replaces it. The test lists each one its check refuses.
 
 **Example:**
 

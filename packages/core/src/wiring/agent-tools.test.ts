@@ -35,8 +35,8 @@ const VERBS = [
   "disconnect",
 ];
 
-// Names that break the naming rules and stay, since a tool is never renamed.
-// Add none.
+// Older names this check refuses, which stay since a tool is never renamed.
+// A new tool's name never joins the list.
 const OLDER_NAMES = ["system:list_routine_runs"];
 
 function namingProblem(name: string): string | null {
