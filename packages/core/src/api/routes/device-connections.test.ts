@@ -1,4 +1,12 @@
+import { Hono } from "hono";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { requireEntry } from "../../access/require-entry.js";
+import {
+  runWithSessionActor,
+  type SessionActor,
+  sessionActorMiddleware,
+} from "../../access/session-actor.js";
+import { entryStep } from "../../test/entry-step.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   COOKIE_NAME,
@@ -43,7 +51,7 @@ function report(id: string, connections: unknown[]) {
 
 describe("/device-connections routes", () => {
   let testDb: TestDb;
-  let app: ReturnType<typeof deviceConnectionRoutes>;
+  let app: Hono;
   let now = NOW;
   let dashboardAccess: DashboardAccessState;
 
@@ -51,12 +59,19 @@ describe("/device-connections routes", () => {
     testDb = createTestDb();
     now = NOW;
     dashboardAccess = new DashboardAccessState();
-    app = deviceConnectionRoutes({
-      db: testDb.db,
-      dashboardAccessState: dashboardAccess,
-      deviceConnections: new DeviceConnectionsRepository(testDb.db),
-      now: () => now,
-    });
+    app = new Hono()
+      .use(
+        "*",
+        sessionActorMiddleware(testDb.db),
+        requireEntry(dashboardAccess, () => false),
+      )
+      .route(
+        "/",
+        deviceConnectionRoutes({
+          deviceConnections: new DeviceConnectionsRepository(testDb.db),
+          now: () => now,
+        }),
+      );
   });
   afterEach(() => testDb.close());
 
@@ -137,13 +152,14 @@ describe("/device-connections routes", () => {
   });
 
   it("refuses a caller without the guardian's cookie session", async () => {
-    expect((await send({}, null)).status).toBe(403);
-    const loopback = deviceConnectionRoutes({
-      db: testDb.db,
-      dashboardAccessState: new DashboardAccessState(),
-      deviceConnections: new DeviceConnectionsRepository(testDb.db),
-      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
-    });
+    expect((await send({}, null)).status).toBe(401);
+    const actor: SessionActor = { kind: "guardian", userId: "guardian-seat", via: "loopback" };
+    const loopback = new Hono()
+      .use("*", (_c, next) => runWithSessionActor(actor, next), entryStep())
+      .route(
+        "/",
+        deviceConnectionRoutes({ deviceConnections: new DeviceConnectionsRepository(testDb.db) }),
+      );
     expect((await loopback.request("/device-connections")).status).toBe(403);
   });
 

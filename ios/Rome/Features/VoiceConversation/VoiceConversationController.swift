@@ -21,14 +21,18 @@ final class VoiceConversationController {
     @ObservationIgnored private var conversation: VoiceConversation?
     @ObservationIgnored private var audio: VoiceConversationAudio?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// The Lock Screen and Dynamic Island's sign that a conversation runs.
+    @ObservationIgnored private let presence: VoiceConversationPresence
     /// Where the app's trips to the background and audio interruptions are told.
     @ObservationIgnored private let center: NotificationCenter
 
     init(noticeTimer: VoiceNoticeTimer = VoiceNoticeTimer(), center: NotificationCenter = .default,
-         makeAudio: @escaping @MainActor () -> VoiceConversationAudio = VoiceConversationAudios.make) {
+         makeAudio: @escaping @MainActor () -> VoiceConversationAudio = VoiceConversationAudios.make,
+         presence: VoiceConversationPresence = VoiceConversationLiveActivityPresence()) {
         self.noticeTimer = noticeTimer
         self.center = center
         self.makeAudio = makeAudio
+        self.presence = presence
     }
 
     /// Starts a voice conversation in `chat`. Does nothing while one runs, or
@@ -47,6 +51,8 @@ final class VoiceConversationController {
         active = true
         // In front, the screen stays on while the conversation runs.
         UIApplication.shared.isIdleTimerDisabled = true
+        // On the Lock Screen and in the Dynamic Island, while it runs.
+        presence.show()
         let audio = makeAudio()
         self.audio = audio
         let conversation = VoiceConversation(
@@ -108,6 +114,7 @@ final class VoiceConversationController {
         muted = false
         state = .listening
         UIApplication.shared.isIdleTimerDisabled = false
+        presence.hide()
         for observer in observers { center.removeObserver(observer) }
         observers = []
         guard let reason else { return }

@@ -433,13 +433,13 @@ describe("an event on a widget", () => {
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/todos/delete"]);
   });
 
-  it("is not found to a caller who may not open its chat, checked by the route itself", async () => {
+  it("is any member's to fire, in a Concierge chat someone else owns", async () => {
     const { fire, forwarded } = setup(
       { m1: { chatId: "private", content: [mealWidget("w1", "meals", "water")] } },
       "visitor:someone",
     );
-    expect((await fire("m1", { name: "water" })).status).toBe(404);
-    expect(forwarded).toEqual([]);
+    expect((await fire("m1", { name: "water" })).status).toBe(200);
+    expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/meals/water"]);
   });
 
   it("is not found when the message holds no widget, or more than one part", async () => {
@@ -512,29 +512,6 @@ describe("an event on a widget, over the dashboard's own storage", () => {
       await repo.addMessage("dup", "chat-1", "assistant", widget);
       await repo.addMessage("dup", "chat-2", "assistant", widget);
       expect(await repo.widgetMessage("dup")).toBeNull();
-    } finally {
-      testDb.close();
-    }
-  });
-
-  it("leaves a trace found by its own id when a dashboard line takes that id as its key", async () => {
-    const { createTestDb } = await import("../../test/helpers.js");
-    const { TurnLinks } = await import("../../sessions/turn-links.js");
-    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
-    const testDb = createTestDb();
-    try {
-      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
-      await repo.createSession("private", "Private");
-      await repo.createSession("mine", "Mine");
-      await repo.addMessage("trace-1", "private", "trace", "[]");
-      // A client picks a user line's key, so it can pick a trace's id.
-      await repo.addMessage(
-        "trace-1",
-        "mine",
-        "user",
-        JSON.stringify([{ type: "text", content: "hi" }]),
-      );
-      expect(await repo.sessionIdOfMessage("trace-1")).toBe("private");
     } finally {
       testDb.close();
     }
@@ -924,6 +901,12 @@ describe("an event on the share-location card core owns", () => {
   };
 
   it("answers the agent with the position the client read on Share", async () => {
+    const theirs = setup({ m: { chatId: "private", content: [locationCard] } }, "visitor:v");
+    expect((await theirs.fire("m", { name: "share-location", context: position })).status).toBe(
+      404,
+    );
+    expect(theirs.forwarded).toEqual([]);
+
     const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
     const res = await fire("m", { name: "share-location", context: position });
     expect(await res.json()).toMatchObject({ answered: true });

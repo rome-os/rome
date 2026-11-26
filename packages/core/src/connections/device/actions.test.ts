@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../../apps/actions/engine.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
-import { whoMayAsk } from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
 import { DEVICE_DESCRIBE_ACTION, DEVICE_RUN_ACTION, registerDeviceActions } from "./actions.js";
@@ -11,9 +10,6 @@ import { type DeviceReport, deviceReportSchema } from "./report.js";
 import { DeviceConnectionsRepository } from "./repository.js";
 
 const NOW = Date.parse("2026-11-14T09:00:00Z");
-
-/** A webchat chat a visitor owns. */
-const VISITOR_CHAT = "chat-visitor";
 
 type RunContext = NonNullable<Parameters<ActionEngine["run"]>[2]>;
 
@@ -81,9 +77,6 @@ describe("device actions", () => {
         calls.push({ deviceId, action, args });
         return answer;
       },
-      whoMayAsk: whoMayAsk(async (chatId) =>
-        chatId === VISITOR_CHAT ? "visitor:acct-1" : "guardian",
-      ),
     });
     engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
@@ -92,28 +85,22 @@ describe("device actions", () => {
   });
   afterEach(() => testDb.close());
 
-  // A turn in a chat on a connection unless the test names its chat: such a
-  // chat has no owner and works for the guardian.
+  // A turn in a chat on a connection unless the test names its chat.
   const run = (name: string, args: Record<string, unknown>, context: RunContext) =>
     engine.run(name, args, {
       channelContext: { channel: "telegram", threadId: "tg-1" },
       ...context,
     });
 
-  it("refuses by either name a turn that does not work for the guardian, as the new names do", async () => {
+  it("answers by either name whoever the turn is for", async () => {
     devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
-    const visitor = {
-      audience: "private" as const,
-      channelContext: { channel: "webchat", threadId: VISITOR_CHAT },
-    };
+    const member = { actor: { kind: "visitor", accountId: "a", email: "a@example.test" } } as const;
     for (const [name, args] of [
       [DEVICE_DESCRIBE_ACTION, {}],
       [DEVICE_RUN_ACTION, { operation: "device.status" }],
     ] as const) {
-      const result = await run(name, args, visitor);
-      expect((result as { error: string }).error).toMatch(/^guardian_only:/);
+      expect((await run(name, args, member)).status).toBe("ok");
     }
-    expect(calls).toEqual([]);
   });
 
   it("lists each device's capabilities, operations and state from the last report", async () => {

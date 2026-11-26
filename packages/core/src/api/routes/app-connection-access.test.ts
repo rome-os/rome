@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { createTestDb } from "../../test/db.js";
 import { AppConnectionAccessRepository } from "../../connections/app-connection-access.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -91,7 +90,6 @@ function makeApp(
         })),
     },
     appConnectionAccessRepo: access,
-    dashboardAccessState: new DashboardAccessState(),
   } as unknown as ApiDeps;
   const app = new Hono();
   app.route("/", appConnectionAccessRoutes(deps));
@@ -263,33 +261,6 @@ describe("App connection access management", () => {
     }
   });
 
-  it("requires guardian identity for policy and audit routes", async () => {
-    const { request, close } = makeApp();
-    try {
-      const visitor = {
-        kind: "visitor",
-        accountId: "visitor-1",
-        email: "visitor@example.com",
-      } as const;
-      expect((await request("/app-connection-access/notes", undefined, visitor)).status).toBe(403);
-      expect(
-        (
-          await request(
-            "/app-connection-access/notes/connection-1/account/documents.get",
-            {
-              method: "PUT",
-              headers: sameOrigin,
-              body: JSON.stringify({ approval: "not_required", constraints: [] }),
-            },
-            visitor,
-          )
-        ).status,
-      ).toBe(403);
-    } finally {
-      close();
-    }
-  });
-
   it("accepts an encoded scoped App id", async () => {
     const { request, close } = makeApp();
     try {
@@ -358,7 +329,7 @@ describe("App connection access management", () => {
 });
 
 describe("Document access discovery", () => {
-  it("shows guardian-only safe provider guidance without inspecting scopes or exposing grant material", async () => {
+  it("shows safe provider guidance without inspecting scopes or exposing grant material", async () => {
     const h = makeApp({
       connectionKind: "feishu",
       getGrant: async () => ({
@@ -386,15 +357,6 @@ describe("Document access discovery", () => {
         ],
       });
       expect(JSON.stringify(value)).not.toContain("SYNTHETIC_NOT_FOR_UI");
-      expect(
-        (
-          await h.request(path, undefined, {
-            kind: "visitor",
-            accountId: "visitor",
-            email: "visitor@example.com",
-          })
-        ).status,
-      ).toBe(403);
       expect((await h.request("/app-connection-access/missing/documents")).status).toBe(404);
       expect((await h.request("/app-connection-access/notes/documents?limit=101")).status).toBe(
         400,
