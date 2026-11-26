@@ -1,5 +1,6 @@
-// The one place what a connection delivers inward passes. It asks the entry once
-// for each, before any agent or app sees it.
+// The one place what a connection delivers inward passes: a message or a
+// command. It asks the entry once for each, before any agent or app sees it,
+// and hands on only what someone let in said or did.
 // Vocabulary: docs/domains/participation.md#entry.
 
 import { createLogger } from "../logger.js";
@@ -7,18 +8,56 @@ import type { Entry, EntryAccount, EntryPort } from "./entry.js";
 
 const log = createLogger("entrance");
 
+/** Why whoever ran a command gets no answer to it, shown only to them. */
+const COMMAND_REFUSED = "Only the guardian and members of this Rome can run its commands.";
+
+/** Commands a connection reports, as `connections/command.ts` describes them,
+ *  each run told whom it was let in as. */
+interface RunCommands<C, Person> {
+  ran(command: C, by: Person): Promise<string>;
+  suggest(command: C, option: string, typed: string): Promise<readonly string[]>;
+}
+
 export interface Entrance<Person> {
   /** Whether a message's sender is let in, and as whom. The port that hears the
    *  message marks it ({@link markArrival}), since it is recorded either way. */
   message(sender: EntryAccount): Promise<Entry<Person>>;
+  /** `commands`, reached only by someone let in, and told whom as. Anyone
+   *  else is told so and gets no suggestions. `platform` is the one the
+   *  commands are run on. */
+  commands<C extends { sender: { accountId: string } }, All extends RunCommands<C, Person>>(
+    platform: string,
+    commands: All & RunCommands<C, Person>,
+  ): Omit<All, "ran"> & { ran(command: C): Promise<string> };
 }
 
 export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
+  const ask = async (account: EntryAccount, what: string): Promise<Entry<Person>> => {
+    const answer = await entry.enter(account);
+    if (answer.kind !== "entered") {
+      const fields = { what, ...account, entry: answer.kind };
+      // A refused command shows to whoever ran it, so it is logged where it can be seen.
+      if (what === "command") log.info("not let in", fields);
+      else log.debug("not let in", fields);
+    }
+    return answer;
+  };
   return {
-    async message(sender) {
-      const answer = await entry.enter(sender);
-      if (answer.kind !== "entered") log.debug("not let in", { ...sender, entry: answer.kind });
-      return answer;
+    message: (sender) => ask(sender, "message"),
+    commands(platform, commands) {
+      const entryOf = async (command: { sender: { accountId: string } }) => {
+        const answer = await ask({ platform, id: command.sender.accountId }, "command");
+        return answer.kind === "entered" ? answer : null;
+      };
+      return {
+        ...commands,
+        ran: async (command) => {
+          const entered = await entryOf(command);
+          return entered ? commands.ran(command, entered.person) : COMMAND_REFUSED;
+        },
+        suggest: async (command, option, typed) =>
+          (await entryOf(command)) ? commands.suggest(command, option, typed) : [],
+      };
     },
   };
 }

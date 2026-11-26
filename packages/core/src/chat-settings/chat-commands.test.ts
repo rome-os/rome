@@ -6,11 +6,14 @@ import type {
   ChatSettingsSnapshot,
 } from "@rome-os/app-runtime";
 import type { Command } from "../connections/index.js";
-import { type ChatCommandsDeps, chatCommands } from "./chat-commands.js";
+import { entrance } from "../participation/entrance.js";
+import type { Entry, EntryAccount } from "../participation/entry.js";
+import { type ChatCommandsDeps, chatCommands, type RanBy } from "./chat-commands.js";
 
 const CONNECTION_ID = "connection:discord";
 const CHANNEL_ID = "channel-1" as ChatId;
 const GUARDIAN_ID = "discord-guardian-777";
+const MEMBER_ID = "discord-member-555";
 const UNLINKED_ID = "discord-user-888";
 
 function makeSettings() {
@@ -44,17 +47,22 @@ function makeSettings() {
 
 function commands(overrides: Partial<ChatCommandsDeps> = {}) {
   const settings = makeSettings();
-  const personOf = rs.fn(async (accountId: string) =>
-    accountId === GUARDIAN_ID ? { id: "guardian", bondLevel: "guardian" as const } : null,
-  );
-  const answer = chatCommands({
-    connectionId: CONNECTION_ID,
-    service: "discord",
-    settings: settings.control as unknown as ChatSettingsControl,
-    personOf,
-    ...overrides,
+  const enter = rs.fn(async ({ id }: EntryAccount): Promise<Entry<RanBy>> => {
+    if (id === GUARDIAN_ID) return { kind: "entered", person: { kind: "guardian" } };
+    if (id === MEMBER_ID) return { kind: "entered", person: { kind: "visitor" } };
+    return { kind: "unknown" };
   });
-  return { answer, settings, personOf };
+  // As the host hands them to a connection.
+  const answer = entrance({ enter }).commands(
+    "discord",
+    chatCommands({
+      connectionId: CONNECTION_ID,
+      service: "discord",
+      settings: settings.control as unknown as ChatSettingsControl,
+      ...overrides,
+    }),
+  );
+  return { answer, settings, enter };
 }
 
 function command(
@@ -184,36 +192,34 @@ describe("chat commands, for the guardian", () => {
   });
 });
 
+describe("chat commands, for a member", () => {
+  it("records a member's change as theirs", async () => {
+    const { answer, settings } = commands();
+
+    await answer.ran(command(["channel", "ignore"], { by: MEMBER_ID }));
+    await answer.ran(command(["channel", "reset"], { by: MEMBER_ID }));
+
+    expect(settings.control.update).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { kind: "member", id: "discord-slash" } }),
+    );
+    expect(settings.control.reset).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { kind: "member", id: "discord-slash" } }),
+    );
+  });
+});
+
 describe("chat commands, for anyone else", () => {
-  it("refuses a sender no person is linked to, and logs why without the command's values", async () => {
-    const warn = rs.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { answer, settings, personOf } = commands({ listAgents: () => ["pm-assistant"] });
+  it("refuses a sender no person is linked to", async () => {
+    const { answer, settings, enter } = commands({ listAgents: () => ["pm-assistant"] });
 
     const said = await answer.ran(
       command(["channel", "agent", "set"], { by: UNLINKED_ID, options: { name: "pm-assistant" } }),
     );
 
-    expect(personOf).toHaveBeenCalledWith(UNLINKED_ID);
+    expect(enter).toHaveBeenCalledWith({ platform: "discord", id: UNLINKED_ID });
     expect(settings.control.get).not.toHaveBeenCalled();
     expect(settings.control.update).not.toHaveBeenCalled();
-    expect(said).toBe("Only the linked guardian can configure this Discord conversation.");
-    const entry = JSON.parse(warn.mock.calls.at(-1)?.[0] as string) as {
-      message: string;
-      data: Record<string, unknown>;
-    };
-    expect(entry).toMatchObject({
-      message: "chat command authorization rejected",
-      data: {
-        connectionId: CONNECTION_ID,
-        senderId: UNLINKED_ID,
-        command: "channel",
-        authorized: false,
-        decision: "deny",
-        authorizationResult: "unlinked",
-        personId: null,
-        bondLevel: null,
-      },
-    });
+    expect(said).toBe("Only the guardian and members of this Rome can run its commands.");
   });
 
   it("suggests no agents to a sender no person is linked to", async () => {
@@ -226,18 +232,20 @@ describe("chat commands, for anyone else", () => {
     expect(listAgents).not.toHaveBeenCalled();
   });
 
-  it("stops the chat's turn on `/stop` before asking who the sender is", async () => {
+  it("stops the chat's turn on `/stop`, for someone let in alone", async () => {
     const chatStop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
-    const { answer, personOf } = commands({ chatStop });
+    const { answer } = commands({ chatStop });
 
-    const said = await answer.ran(command(["stop"], { by: "user-1" }));
+    expect(await answer.ran(command(["stop"], { by: UNLINKED_ID }))).toBe(
+      "Only the guardian and members of this Rome can run its commands.",
+    );
+    expect(chatStop).not.toHaveBeenCalled();
 
+    expect(await answer.ran(command(["stop"]))).toBe("Stopped.");
     expect(chatStop).toHaveBeenCalledWith({
       ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
       service: "discord",
-      senderId: "user-1",
+      senderId: GUARDIAN_ID,
     });
-    expect(said).toBe("Stopped.");
-    expect(personOf).not.toHaveBeenCalled();
   });
 });
