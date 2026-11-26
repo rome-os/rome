@@ -6,7 +6,18 @@
   "include-component-in-tag": true,
   "separate-pull-requests": false,
   "pull-request-title-pattern": "chore: release ${component} ${version}",
-  "plugins": ["node-workspace"],
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "node-core",
+      "components": ["node-core", "node-core-darwin-arm64"],
+      "merge": false
+    },
+    {
+      "type": "node-workspace",
+      "merge": false
+    }
+  ],
   "packages": {
     "packages/app-runtime-sdk": {
       "package-name": "@rome-os/app-runtime"
@@ -27,7 +38,12 @@
       "package-name": "@rome-os/node"
     },
     "packages/rome-node-core": {
-      "package-name": "@rome-os/node-core"
+      "package-name": "@rome-os/node-core",
+      "component": "node-core"
+    },
+    "packages/rome-node-core-darwin-arm64": {
+      "package-name": "@rome-os/node-core-darwin-arm64",
+      "component": "node-core-darwin-arm64"
     }
   }
 }

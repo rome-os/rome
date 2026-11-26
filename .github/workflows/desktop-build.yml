@@ -143,6 +143,15 @@ jobs:
           echo "::error::Refusing to build a tagged release unsigned — Gatekeeper would block it for every user."
           exit 1
 
+      - name: Build computer-use helper
+        if: matrix.arch == 'arm64'
+        uses: ./.github/actions/build-computer-use
+        with:
+          sign: ${{ steps.mac-signing.outputs.enabled == 'true' }}
+          notarize: "false"
+          certificate: ${{ secrets.CSC_LINK }}
+          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
+
       - name: Package macOS app (unsigned)
         if: ${{ env.HAS_MAC_SIGNING_SECRETS != 'true' || steps.mac-signing.outputs.enabled != 'true' }}
         working-directory: packages/desktop
@@ -152,6 +161,7 @@ jobs:
         env:
           # Avoid exporting empty CSC_LINK; electron-builder treats it as a file path and fails.
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          ROME_DESKTOP_ALLOW_UNSIGNED_COMPUTER_USE: "1"
 
       - name: Write App Store Connect API key
         if: ${{ steps.mac-signing.outputs.enabled == 'true' }}
@@ -205,7 +215,35 @@ jobs:
           app="$(find release -maxdepth 2 -name 'Rome.app' -print -quit)"
           if [ -z "$app" ]; then echo "::error::No Rome.app found in release/"; exit 1; fi
 
+          resources="$app/Contents/Resources"
+          test -f "$resources/native/better_sqlite3.node"
+          require_artifact "tray icons" "$resources"/tray/*.png
+
+          helper="$resources/native/Rome Computer Use.app"
+          helper_copies="$(find "$app" -name 'Rome Computer Use.app')"
+          if [ "$BUILD_ARCH" = arm64 ]; then
+            test "$helper_copies" = "$helper"
+            test -x "$helper/Contents/MacOS/RomeComputerUse"
+            test "$(lipo -archs "$helper/Contents/MacOS/RomeComputerUse")" = arm64
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$helper/Contents/Info.plist")" = com.rome.computer-use
+          else
+            test -z "$helper_copies"
+          fi
+          test ! -e "$resources/app.asar.unpacked/node_modules/@rome-os/node-core-darwin-arm64"
+
           if [ "${SIGNING_ENABLED}" = "true" ]; then
+            if [ "$BUILD_ARCH" = arm64 ]; then
+              codesign --verify --strict --verbose=2 "$helper"
+              helper_signature="$(codesign --display --verbose=4 "$helper" 2>&1)"
+              printf '%s\n' "$helper_signature" | grep -Fx 'Identifier=com.rome.computer-use'
+              printf '%s\n' "$helper_signature" | grep -q '^Authority=Developer ID Application:'
+              helper_team="$(printf '%s\n' "$helper_signature" | sed -n 's/^TeamIdentifier=//p')"
+              app_team="$(codesign --display --verbose=4 "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+              test "$helper_team" = 4YWXB26F39
+              test "$helper_team" = "$app_team"
+              helper_entitlements="$(codesign --display --entitlements - --xml "$helper" 2>/dev/null)"
+              test -z "$helper_entitlements"
+            fi
             codesign --verify --deep --strict --verbose=2 "$app"
             spctl --assess --type execute --verbose "$app"
             xcrun stapler validate "$app"
@@ -229,6 +267,7 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.app_version }}
           SIGNING_ENABLED: ${{ steps.mac-signing.outputs.enabled }}
+          BUILD_ARCH: ${{ matrix.arch }}
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7

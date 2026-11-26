@@ -58,3 +58,16 @@ test("every released package declares this repository", () => {
     );
   }
 });
+
+test("Rome Node Core and its optional platform package release at the same version", () => {
+  const platformPath = "packages/rome-node-core-darwin-arm64";
+  const corePath = "packages/rome-node-core";
+  const core = JSON.parse(read(`${corePath}/package.json`));
+  const platform = JSON.parse(read(`${platformPath}/package.json`));
+  const releases = JSON.parse(read(".release-please-manifest.json"));
+  assert.equal(core.version, platform.version);
+  assert.equal(releases[corePath], releases[platformPath]);
+  assert.equal(core.optionalDependencies[platform.name], "workspace:*");
+  assert.deepEqual(platform.os, ["darwin"]);
+  assert.deepEqual(platform.cpu, ["arm64"]);
+});

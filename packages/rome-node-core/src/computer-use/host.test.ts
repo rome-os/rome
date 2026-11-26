@@ -112,7 +112,7 @@ const noAudit: HostAudit = {
 };
 const error = (code: string) => ({ ok: false, error: { code } });
 
-function executor(audit: HostAudit = noAudit) {
+function executor(audit: HostAudit = noAudit, computerUseHelperPath?: string) {
   const replies = new Map<string, OutboundEnvelope>();
   const frames = new Map<string, Frame>();
   const exec = createExecutor(
@@ -127,6 +127,7 @@ function executor(audit: HostAudit = noAudit) {
       frames.set(frame.id, frame);
       return true;
     },
+    computerUseHelperPath,
   );
   cleanups.push(exec.disconnect);
   const json = async (action: string, args: unknown = {}, from = peer) => {
@@ -166,6 +167,7 @@ it("discovers paths without signature verification and stops at an invalid expli
     platform: "darwin" as const,
     applications: [join(root, "preferred"), root],
     envPath: app,
+    bundledAppPath: preferred,
   };
   await expect(discovery.discoverHelper({ ...env, platform: "linux" })).rejects.toMatchObject({
     code: "computer_use_unsupported_platform",
@@ -180,13 +182,12 @@ it("discovers paths without signature verification and stops at an invalid expli
   });
   await expect(discovery.discoverHelper(env)).resolves.toBe(app);
   await expect(discovery.discoverHelper({ ...env, envPath: undefined })).resolves.toBe(preferred);
-  await expect(
-    discovery.discoverHelper({
-      ...env,
-      envPath: undefined,
-      applications: [join(root, "missing"), root],
-    }),
-  ).resolves.toBe(app);
+});
+
+it("passes the host's bundled app to discovery", async () => {
+  const bundledAppPath = "/resources/native/Rome Computer Use.app";
+  await executor(noAudit, bundledAppPath).json("system.info");
+  expect(mock.discover).toHaveBeenCalledWith({ bundledAppPath });
 });
 
 it.each([
