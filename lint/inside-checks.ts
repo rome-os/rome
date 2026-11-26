@@ -207,10 +207,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     ],
     why: "labels usage by whether a person pressed Run",
   },
-  "packages/core/src/index.ts": {
-    lines: ['return person?.bondLevel === "guardian" && whoIs(account, person).delegate;'],
-    why: "the entry check lets in an agent that acts for the guardian",
-  },
   "packages/core/src/people/infrastructure/drizzle-people-repository.ts": {
     lines: [
       'if (protectedPersonReason(source) === "guardian") {',

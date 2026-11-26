@@ -25,10 +25,12 @@ export interface PeopleLinkChange {
  * inside People's transaction, so a throw rolls People's write back too. An
  * account People now links to its guardian becomes the guardian's, moving from
  * any other person. One People linked to its guardian before the write, and no
- * longer does, stops being the guardian's. A delegate link and a Rome Cloud id
- * count as no link. Nothing changes while Rome has no guardian, or for an
- * account People's write did not take from its guardian, so an account added
- * with an account code that People never linked stays.
+ * longer does, stops being the guardian's. A delegate link counts as a link,
+ * so the account of an agent in the guardian's own Rome Cloud account is the
+ * guardian's like any other. A Rome Cloud id counts as no link. Nothing changes
+ * while Rome has no guardian, or for an account People's write did not take
+ * from its guardian, so an account added with an account code that People
+ * never linked stays.
  */
 export function peopleLinkChanged(db: DrizzleDb, change: PeopleLinkChange): void {
   if (change.account.platform === ROME_CLOUD_ID_PLATFORM) return;
@@ -40,8 +42,7 @@ export function peopleLinkChanged(db: DrizzleDb, change: PeopleLinkChange): void
       .limit(1)
       .get();
     if (!peopleGuardian) return;
-    const guardians = (holding: Holding | null) =>
-      holding?.personId === peopleGuardian.id && !holding.delegate;
+    const guardians = (holding: Holding | null) => holding?.personId === peopleGuardian.id;
     const was = guardians(change.before);
     const is = guardians(change.after);
     if (was === is) return;

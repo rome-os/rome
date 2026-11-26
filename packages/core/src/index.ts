@@ -378,7 +378,6 @@ import {
   getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
-import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import { enteredChannels } from "./app-host/entered-channels.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
@@ -778,13 +777,7 @@ async function main() {
   // What people say on a connection passes this before it starts anything
   // (docs/domains/participation.md#entry).
   const entrance = entranceOf({
-    enter: accountEntry({
-      db,
-      actsForGuardian: async (account) => {
-        const person = await peopleRepo.byAccount(account);
-        return person?.bondLevel === "guardian" && whoIs(account, person).delegate;
-      },
-    }),
+    enter: accountEntry({ db }),
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
   // The platform a message's sender is on. A grant that recorded no account
