@@ -126,6 +126,10 @@ describe("a Slack app backlog, end to end", () => {
       {
         registry,
         channelOf: (connection) => connection.connectionKind,
+        entry: async () => ({
+          kind: "entered",
+          person: { kind: "guardian", userId: "owner", via: "account" },
+        }),
         accepted: (on, ref) => recording?.accepted(on, ref) ?? Promise.resolve(),
       },
       SLACK_APP_KIND,

@@ -12,10 +12,12 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 Whether what someone says on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names.
 
-- The guardian, a member, and an agent acting for the guardian ([delegate link](people.md#delegate-link)) are let in, as they are at that moment.
+- The guardian and a member are let in by any account of theirs, as they are at that moment. The account of an agent in the guardian's own Rome Cloud account is one of the guardian's ([delegate link](people.md#delegate-link)).
 - Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a member whose sign-in Rome cannot find, a sender whose address the connection could not verify, and everyone when no answer can be had.
-- The answer is asked before anything hears the message, and stays with it. Nothing acts on it yet.
+- The answer is asked before anything hears the message, and stays with it. The message of someone not let in is recorded in its chat and wakes no agent, and no app hears it. An agent woken later may read it.
+- Whom the wake gate would wake for, and what Rome starts itself, are other questions: entry comes before the one and never asks about the other.
 - A message from an unknown sender that addresses one of Rome's [own accounts](chats.md#own-account) can be told of once it is on record, at most once, and nothing waits for that. What a bot or an app posted, and what one of Rome's accounts said, is never told of.
+- Rome answers such a sender with a link to the dashboard's connect page, where a person gets a code to send back. The link is the same for everyone, so Rome answers in the chat itself, to the sender alone where the connection offers that, at most once a day for an account. An answer the whole chat sees goes to a chat at most once in ten minutes, and an account it holds back is answered later.
 
 ## Wake
 
@@ -60,7 +62,7 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 - A session that opens in a direct message on a connection first reads the chat's latest messages from where the chat lives, so its first turn knows what was said before it opened, whether or not Rome holds a copy. A group reads none, because the platform also holds what was said there before Rome joined, and neither does a personal account's chat, such as WhatsApp's, for the same reason: the read is only from a platform that answers it live, such as Rome's own Slack app. A chat whose channel hands the agent every message, such as the dashboard's, needs none. A read that fails or takes too long opens the session without them, and the agent reads further back on its own.
 - Every message a wake hands the agent names who said it: the message that woke it, the messages it catches up on, and the message it answers. Each carries the name the message showed and, apart from it, People's answer to [who is this](people.md#who-is-this): a person with their bond level, or nobody. A message from an account with a [delegate link](people.md#delegate-link) says it is an agent acting for that person.
 - A message a person writes in a [Concierge chat](chats.md#concierge-chat) carries the name of who wrote it the same way: the guardian's name, or the email a dashboard admin signed in with. It carries no answer of People's, who knows no dashboard sign-in.
-- An app that hears every message said to Rome gets the same answer with each message, so an app running its own agent names a sender as Rome's own turns do.
+- An app that hears the messages of people [let in](#entry) gets the same answer with each message, so an app running its own agent names a sender as Rome's own turns do.
 - Participation asks People when the turn runs and never keeps the answer on the message, so a link the guardian makes or removes shows from the next turn. It never takes a person from the name a message showed, and no name a sender picks can pass for People's answer.
 - A message's text is what a person sees on the platform, whichever of Rome's accounts heard it. On Discord every mention shows as `@name`, the agent's own account included. Whether the message addressed the agent's account is a fact the connection reports beside the text, not something read from it.
 - A woken agent is told the name of the account it speaks as in the chat, so it can tell its own mention from another of Rome's accounts.

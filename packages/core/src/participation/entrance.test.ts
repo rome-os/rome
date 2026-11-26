@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { arrivalOf, entrance, markArrival } from "./entrance.js";
+import { arrivalOf, enteredAs, entrance, markArrival } from "./entrance.js";
 import type { Entry, EntryAccount } from "./entry.js";
 
 describe("entrance", () => {
@@ -27,5 +27,15 @@ describe("markArrival", () => {
     expect(arrivalOf({ ...marked })).toEqual(arrival);
     expect(arrivalOf(JSON.parse(JSON.stringify(marked)))).toBeUndefined();
     expect(arrivalOf({ text: "hi", arrival })).toBeUndefined();
+  });
+});
+
+describe("enteredAs", () => {
+  it("names only someone let in", () => {
+    const event = (entry: Entry) => markArrival({ text: "hi" }, { entry, automated: false });
+    expect(enteredAs(event({ kind: "entered", person: "Ada" }))).toBe("Ada");
+    expect(enteredAs(event({ kind: "unknown" }))).toBeUndefined();
+    expect(enteredAs(event({ kind: "refused" }))).toBeUndefined();
+    expect(enteredAs({ text: "hi" })).toBeUndefined();
   });
 });

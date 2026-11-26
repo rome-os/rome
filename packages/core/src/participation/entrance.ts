@@ -42,3 +42,9 @@ export function markArrival<Event extends object>(event: Event, arrival: Arrival
 export function arrivalOf<Person>(event: object): Arrival<Person> | undefined {
   return (event as { [ARRIVAL]?: Arrival<Person> })[ARRIVAL];
 }
+
+/** Whom `event` was let in as, or nothing for one that was not. */
+export function enteredAs<Person>(event: object): Person | undefined {
+  const entry = arrivalOf<Person>(event)?.entry;
+  return entry?.kind === "entered" ? entry.person : undefined;
+}

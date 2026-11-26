@@ -169,6 +169,7 @@ import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -343,6 +344,7 @@ import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
+import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -376,8 +378,8 @@ import {
   getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
-import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
+import { enteredChannels } from "./app-host/entered-channels.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
   createCodexImageGenerationProvider,
@@ -530,7 +532,9 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new DrizzlePeopleRepository(db);
+  // Each link People writes for the guardian reaches Identity in the same
+  // transaction (docs/domains/access.md#steps-rome-takes-today).
+  const peopleRepo = new DrizzlePeopleRepository(db, (change) => peopleLinkChanged(db, change));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -770,15 +774,10 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
-  // What people say on a connection passes this (docs/domains/participation.md#entry).
+  // What people say on a connection passes this before it starts anything
+  // (docs/domains/participation.md#entry).
   const entrance = entranceOf({
-    enter: accountEntry({
-      db,
-      actsForGuardian: async (account) => {
-        const person = await peopleRepo.byAccount(account);
-        return person?.bondLevel === "guardian" && whoIs(account, person).delegate;
-      },
-    }),
+    enter: accountEntry({ db }),
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
   // The platform a message's sender is on. A grant that recorded no account
@@ -2571,10 +2570,12 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
-      // Nobody is told yet. Answering such a sender with the way to connect
-      // their account passes `tell` here.
       onRecord: unknownSenders({
         heardForMs: HEARD_FOR_MS,
+        tell: answerUnknownSenders({
+          registry: connectionRegistry,
+          publicOrigin: () => getConfiguredInstanceOrigin(),
+        }),
         isRomes: (account) =>
           connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
         isOwnAccount: (connectionId) => {
@@ -2596,6 +2597,8 @@ async function main() {
     wakes: chatsWired.links,
     labels: chatsWired.labels,
   });
+  // A hook may also hear a channel itself. The host appends to this list too.
+  const hookHeardChannels = enteredChannels(hookChannels);
   const hookChatStop = legacyChatIdStop(chatStop);
   // Every app that declares a channel-message hook hears through its own,
   // each created with the same deps. The app that owns `inbox:message_handler`
@@ -2612,7 +2615,7 @@ async function main() {
       chatSettings: appChatSettings,
       conversationSettings: appChatSettings,
       chatStop: hookChatStop,
-      channels: hookChannels,
+      channels: hookHeardChannels,
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
@@ -2677,10 +2680,11 @@ async function main() {
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
     );
-    hookChannels.push(...added);
     inboundRecorder.addChannels(added);
     // Subscribe before the new talker starts.
-    void messageHooks.addChannels(added);
+    const heard = enteredChannels(added);
+    hookHeardChannels.push(...heard);
+    void messageHooks.addChannels(heard);
   });
 
   // Hydrate connection/grant state without starting provider transports, so

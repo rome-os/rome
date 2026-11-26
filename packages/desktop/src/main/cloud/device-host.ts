@@ -47,6 +47,7 @@ export interface DeviceHostOptions {
   onNotification?: HostOptions["onNotification"];
   /** Every remote request is recorded here before it runs. */
   audit: HostOptions["audit"];
+  computerUseHelperPath?: HostOptions["computerUseHelperPath"];
   connect?: (options: HostOptions) => Promise<void>;
   /** The connection used while Computer use is off. It answers and runs nothing. */
   connectLimited?: (options: LimitedHostOptions) => Promise<void>;
@@ -177,7 +178,11 @@ export class DeviceHost {
       },
     };
     try {
-      if (computerUse) await (this.options.connect ?? connectHost)(shared);
+      if (computerUse)
+        await (this.options.connect ?? connectHost)({
+          ...shared,
+          computerUseHelperPath: this.options.computerUseHelperPath,
+        });
       else await (this.options.connectLimited ?? connectLimitedHost)(shared);
     } catch (err) {
       if (signal.aborted) return;

@@ -10,6 +10,7 @@
   "files": [
     "bin",
     "dist",
+    "!dist/**/*.app/**",
     "README.md"
   ],
   "exports": {
@@ -54,6 +55,9 @@
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@rome-os/node-core-darwin-arm64": "workspace:*"
   },
   "devDependencies": {
     "@rstest/core": "^0.11.11",

@@ -141,7 +141,7 @@ LinkedIn replies use the shared [People send](../concepts/people.md#sending) and
 
 ## Unknown senders
 
-Every channel delivers every sender. Rome never asks a sender to pair or to do anything else to be heard ([Stranger](../domains/people.md#stranger)). A sender with no link reaches the inbox as a stranger, and the reply rule and the sentinel decide what it gets.
+Every channel delivers every sender. Rome never asks a sender to pair or to do anything else to be heard ([Stranger](../domains/people.md#stranger)). A message is recorded whoever sent it, and reaches the inbox only when its sender is let in ([Entry](../domains/participation.md#entry)).
 
 ### Invariants
 
