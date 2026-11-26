@@ -41,11 +41,12 @@ export function accountEntry(deps: AccountEntryDeps) {
 
   const profiles = new VisitorProfilesRepository(deps.db);
 
-  const guardian = async (): Promise<AccountEntry> => {
+  /** The guardian, by their own account, or by an agent acting for them: one
+   *  that is not the guardian's own message is not marked as theirs. */
+  const guardian = async (ownAccount: boolean): Promise<AccountEntry> => {
     const actor = await guardianActor(deps.db);
-    return actor?.kind === "guardian"
-      ? { kind: "entered", person: { ...actor, via: "account" } }
-      : REFUSED;
+    if (actor?.kind !== "guardian") return REFUSED;
+    return { kind: "entered", person: ownAccount ? { ...actor, via: "account" } : actor };
   };
 
   /** A member as their own sign-in names them. A member adds an account only
@@ -69,9 +70,9 @@ export function accountEntry(deps: AccountEntryDeps) {
     try {
       const person = await members.identity.personOf({ platform, accountId: id });
       const role = person ? await members.access.roleOf(person.id) : null;
-      if (role === "guardian") return await guardian();
+      if (role === "guardian") return await guardian(true);
       if (person && role === "member") return await member(person.id);
-      if (await deps.actsForGuardian(account)) return await guardian();
+      if (await deps.actsForGuardian(account)) return await guardian(false);
       return person ? REFUSED : { kind: "unknown" };
     } catch (err) {
       log.warn("could not tell who an account is", {
