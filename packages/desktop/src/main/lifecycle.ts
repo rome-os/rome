@@ -1,19 +1,13 @@
 import { app } from "electron";
 import { createLogger } from "./logger";
 
-type AppWithUpdateQuitEvent = typeof app & {
-  on(event: "before-quit-for-update", listener: () => void): typeof app;
-};
-
 const log = createLogger("lifecycle");
 
-// Disconnecting this computer as a device only closes a socket, so quit waits
-// for it briefly and then goes anyway: a quit must never hang on the network.
-const SHUTDOWN_TIMEOUT_MS = 3_000;
+// The host has up to three seconds to drain work. Leave time for closing the audit log.
+const SHUTDOWN_TIMEOUT_MS = 4_000;
 
 let shutdownPromise: Promise<void> | null = null;
 let shutdownComplete = false;
-let quittingForUpdate = false;
 let quitting = false;
 let onShutdownRef: (() => Promise<void>) | null = null;
 
@@ -27,7 +21,6 @@ export function isQuitting(): boolean {
 }
 
 export function prepareForUpdateInstall(): Promise<void> {
-  quittingForUpdate = true;
   quitting = true;
   return shutdown();
 }
@@ -71,17 +64,12 @@ export function setupLifecycle(options: SetupLifecycleOptions): void {
   onShutdownRef = options.onShutdown;
 
   app.on("before-quit", async (event) => {
-    if (shutdownComplete || quittingForUpdate) return;
+    if (shutdownComplete) return;
     event.preventDefault();
+    if (shutdownPromise) return;
     quitting = true;
     await shutdown();
     app.quit();
-  });
-
-  (app as AppWithUpdateQuitEvent).on("before-quit-for-update", () => {
-    quittingForUpdate = true;
-    quitting = true;
-    void shutdown();
   });
 
   process.on("SIGINT", async () => {
