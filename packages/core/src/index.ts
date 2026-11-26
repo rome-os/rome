@@ -1942,10 +1942,7 @@ async function main() {
       registry: connectionRegistry,
     },
   });
-  const agentNameEvents = registerAgentNameAction(actionRegistry, {
-    settingsRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
-  });
+  const agentNameEvents = registerAgentNameAction(actionRegistry, { settingsRepo });
   // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,
