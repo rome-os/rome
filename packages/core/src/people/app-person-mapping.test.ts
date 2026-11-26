@@ -88,27 +88,13 @@ describe("appPersonMapping", () => {
   });
 
   it("refuses every link an app asks for, so only the guardian links an account", async () => {
-    const id = await app.create({ displayName: "Bob", bondLevel: "acquaintance" });
+    const id = await people.create({ displayName: "Bob", bondLevel: "acquaintance", links: [] });
     const other = await people.create({
       displayName: "Carol",
       bondLevel: "acquaintance",
       links: [{ platform: "telegram", id: "tg-carol" }],
     });
 
-    await expect(
-      app.create({
-        displayName: "Dana",
-        bondLevel: "acquaintance",
-        channelMappings: [{ channel: "telegram", channelUserId: "tg-dana" }],
-      }),
-    ).rejects.toThrow(/only the guardian/i);
-    await expect(
-      app.create({
-        displayName: "Dana",
-        bondLevel: "acquaintance",
-        accounts: [{ platform: "telegram", id: "tg-dana" }],
-      }),
-    ).rejects.toThrow(/only the guardian/i);
     await expect(app.addChannelMapping(id, "telegram", "tg-carol")).rejects.toThrow(
       /only the guardian/i,
     );
@@ -116,9 +102,13 @@ describe("appPersonMapping", () => {
       /only the guardian/i,
     );
 
-    // Nothing moved, and the refused create made no person.
     expect((await app.findByChannelUser("telegram", "tg-carol"))?.id).toBe(other);
-    expect(await app.findByName("Dana")).toEqual([]);
-    expect((await app.findByName("Bob")).map((person) => person.id)).toEqual([id]);
+  });
+
+  it("refuses an app's request to add a person, and writes nothing", async () => {
+    await expect(app.create({ displayName: "Dana", bondLevel: "acquaintance" })).rejects.toThrow(
+      "Apps cannot add persons. Rome no longer lets an app add a person.",
+    );
+    expect(await people.all()).toEqual([]);
   });
 });

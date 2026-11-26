@@ -56,6 +56,54 @@ export const voiceConversationStopReasonSchema = z.enum([
 ]);
 export type VoiceConversationStopReason = z.infer<typeof voiceConversationStopReasonSchema>;
 
+/**
+ * The voices Settings offers for a voice conversation: English voices of the
+ * speech provider's, three female and three male. `Iris` is the voice Rome
+ * Cloud names, and the default.
+ */
+export const VOICE_CONVERSATION_VOICES = [
+  { id: "Iris", gender: "female" },
+  { id: "Grace", gender: "female" },
+  { id: "Nina", gender: "female" },
+  { id: "Adrian", gender: "male" },
+  { id: "Daniel", gender: "male" },
+  { id: "Reid", gender: "male" },
+] as const;
+export type VoiceConversationVoice = (typeof VOICE_CONVERSATION_VOICES)[number]["id"];
+export const voiceConversationVoiceSchema = z.enum(
+  VOICE_CONVERSATION_VOICES.map((voice) => voice.id) as [
+    VoiceConversationVoice,
+    ...VoiceConversationVoice[],
+  ],
+);
+
+/** The speeds Settings offers, as multiples of the voice's own pace. The speech provider takes 0.7 to 1.3. */
+export const VOICE_CONVERSATION_SPEEDS = [0.9, 1, 1.1, 1.2, 1.3] as const;
+
+/**
+ * `GET` and `PUT /api/voice-conversation/settings`: the voice Rome speaks in,
+ * and how fast. A conversation reads them when it starts, on any client.
+ */
+export const voiceConversationSettingsSchema = z.object({
+  voice: voiceConversationVoiceSchema,
+  speed: z.number().min(0.7).max(1.3),
+});
+export type VoiceConversationSettings = z.infer<typeof voiceConversationSettingsSchema>;
+
+export const DEFAULT_VOICE_CONVERSATION_SETTINGS: VoiceConversationSettings = {
+  voice: "Iris",
+  speed: 1,
+};
+
+/**
+ * `POST /api/voice-conversation/preview`: a sample sentence in `language`,
+ * spoken in `voice` at `speed`. Answers a WAV file.
+ */
+export const voiceConversationPreviewSchema = voiceConversationSettingsSchema.extend({
+  language: z.enum(["zh", "en"]),
+});
+export type VoiceConversationPreview = z.infer<typeof voiceConversationPreviewSchema>;
+
 /** How often Rome says it is still there, so a client notices a dead connection. */
 export const VOICE_CONVERSATION_ALIVE_INTERVAL_MS = 1_000;
 

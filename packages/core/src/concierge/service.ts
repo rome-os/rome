@@ -58,7 +58,6 @@ import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/c
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
-  canOpenChat,
   isConciergeAgent,
   isConciergeChat,
   privateOwnerOf,
@@ -112,7 +111,6 @@ export const POSTPONED_CHECKS = 3;
 export { CONCIERGE_CHAT_ID };
 export {
   CONCIERGE_AGENT_ID,
-  canOpenChat,
   isConciergeAgent,
   isConciergeChat,
   isMainConciergeChat,
@@ -145,7 +143,7 @@ export function conciergeChatLine(chat: ConciergeChatRef): string {
   return `<concierge_chat id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"/>`;
 }
 
-/** The line naming the person a Concierge chat serves. */
+/** The line naming the person whose a Concierge chat is. */
 export function conciergeOwnerLine(owner: OwnerProfile): string {
   const fields = [
     `role="${owner.role}"`,
@@ -557,7 +555,7 @@ export class ConciergeService {
 
   /**
    * What every turn in a Concierge chat opens with: the chat it runs in, and
-   * the person it serves, who may not be the guardian.
+   * the person whose chat it is, who may not be the guardian.
    */
   async turnHeader(chat: ConciergeChatRef): Promise<string> {
     // A chat whose owner cannot be found serves no one: never the guardian by default.

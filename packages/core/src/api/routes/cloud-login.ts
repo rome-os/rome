@@ -325,6 +325,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           return c.json({ error: "not_owner" }, 403);
         }
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
+        await reloadDashboardAccess();
       } else {
         await createGuardianSeat(identity);
       }
@@ -385,11 +386,12 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
       // The login UI has a single "Continue with Rome Cloud" button, so this
-      // callback owns the fork: when the guardian has invited emails to the
-      // dashboard, re-route the browser into the visitor attestation flow
-      // (they already hold a Rome Cloud session — one redirect hop, no second
-      // credential entry, and the visitor callback still enforces the
-      // allow-list). With no allow-list there is nothing to dispatch to.
+      // callback owns the fork: when a member is invited, re-route the
+      // browser into the visitor attestation flow (they already hold a Rome
+      // Cloud session — one redirect hop, no second credential entry, and the
+      // visitor callback still enforces the allow-list). With no member
+      // invited there is nothing to dispatch to: the seat's email belongs to
+      // the Rome Cloud account that owns this box, which is never refused.
       // The error redirect carries `iss` like every authorize response
       // (RFC 9207); validate it before acting on the error, same as below.
       if (oauthError === "access_denied") {
@@ -475,6 +477,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // owner); on an existing username/password instance this IS the implicit
       // link — the accountId lands on the guardian row, the local password stays.
       await setGuardianAccount(deps.db, accountId, accountEmail, accountAvatarUrl);
+      await reloadDashboardAccess();
       return await finishSignedIn(c, identity);
     } catch (err) {
       // A network throw at any leg is non-terminal: offer retry/local fallback.
@@ -579,6 +582,14 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     }
   }
 
+  // The dashboard snapshot holds the guardian's email, so a seat that gained
+  // or changed its email reloads it.
+  async function reloadDashboardAccess(): Promise<void> {
+    await deps.dashboardAccessState
+      .load(deps.db)
+      .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
+  }
+
   // On a fresh instance the cloud round trip is the sole account source, so
   // the guardian seat is created from the consenting cloud account, and setup
   // finishes right here: the names the guardian gave Rome Cloud's signup survey,
@@ -596,6 +607,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       name: guardianName,
       avatarUrl: identity.avatarUrl ?? undefined,
     }).catch(logStepFailure("guardian not made from the new seat"));
+    await reloadDashboardAccess();
     await applySetupDefaults(
       guardianName,
       {

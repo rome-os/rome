@@ -30,6 +30,8 @@ export const OWNERS_BY_ROLE: ConciergeOwners = {
 export function createConciergeOwners(deps: {
   settingsRepo: Pick<SettingsRepository, "get">;
   visitorProfiles: Pick<VisitorProfilesRepository, "getMany">;
+  /** The email the guardian signs in with, which names them until they set a name. */
+  guardianEmail?: () => Promise<string | null | undefined>;
 }): ConciergeOwners {
   const emailOf = async (owner: ConciergeOwner): Promise<string | undefined> => {
     if (!owner.startsWith(VISITOR_PREFIX)) return undefined;
@@ -40,7 +42,9 @@ export function createConciergeOwners(deps: {
     async profileOf(owner) {
       if (owner === GUARDIAN_OWNER) {
         const name = await deps.settingsRepo.get("guardianName");
-        return { role: "guardian", ...(typeof name === "string" && name ? { name } : {}) };
+        if (typeof name === "string" && name) return { role: "guardian", name };
+        const email = await deps.guardianEmail?.();
+        return { role: "guardian", ...(email ? { email } : {}) };
       }
       const email = await emailOf(owner);
       return { role: "visitor", ...(email ? { email } : {}) };

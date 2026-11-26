@@ -2,6 +2,7 @@ import { DevicesSection } from "@/components/devices-section";
 import { SettingsGroup, SettingsGroupFooter } from "@/components/settings-group";
 import { Measure, Section } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
+import { VoiceConversationRows } from "@/components/voice-conversation-rows";
 import { VoiceInputRow } from "@/components/voice-input-row";
 import { ComputerUseRow } from "@/components/computer-use-section";
 import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
@@ -908,6 +909,7 @@ function AdvancedSection({
             <SystemDiagnosisRow details={<RelayHealthSection />} />
             <ComputerUseRow />
             <VoiceInputRow />
+            <VoiceConversationRows />
           </FormRows>
         </SettingsGroup>
         <FeaturesSection />

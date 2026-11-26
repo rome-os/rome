@@ -25,13 +25,30 @@ function recorder() {
 }
 
 describe("send_notification's recipient", () => {
-  it("rings the owner of a private chat", async () => {
+  it("rings the one person the turn acts for in a private chat, whoever owns it", async () => {
+    const { notify, sent } = recorder();
+    await sendForCaller(
+      notify,
+      ownerOfChat,
+      { actor: visitor, chatId: "guardian-concierge" },
+      { body: "a" },
+    );
+    await sendForCaller(
+      notify,
+      ownerOfChat,
+      { actor: guardian, chatId: "visitor-concierge" },
+      { body: "b" },
+    );
+    expect(sent).toEqual([{ body: "a", recipient: "acct-v" }, { body: "b" }]);
+  });
+
+  it("rings the owner of a private chat when the turn acts for no one", async () => {
     const { notify, sent } = recorder();
     await sendForCaller(notify, ownerOfChat, { chatId: "visitor-concierge" }, { body: "a" });
     await sendForCaller(
       notify,
       ownerOfChat,
-      { actor: guardian, chatId: "guardian-concierge" },
+      { chatId: "guardian-concierge" },
       {
         body: "b",
       },

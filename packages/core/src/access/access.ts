@@ -3,7 +3,7 @@
 // need Identity are in application/. Vocabulary: docs/domains/access.md.
 
 import { eq, sql } from "drizzle-orm";
-import type { DrizzleDb } from "../db/index.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { members } from "../db/schema.js";
 
 /** What a person is in this Rome: its guardian, or a member. */
@@ -37,27 +37,22 @@ export class GuardianTakenError extends Error {
  * separate modules of the Access context, not part of this class.
  */
 export class Access {
-  constructor(private readonly db: DrizzleDb) {}
+  /** The same reads and writes, answered synchronously. */
+  readonly sync: SyncAccess;
+
+  constructor(db: DrizzleDb) {
+    this.sync = new SyncAccess(db);
+  }
 
   /** The person's role, or null when they have none. */
   async roleOf(personId: string): Promise<Role | null> {
-    return (
-      this.db
-        .select({ role: members.role })
-        .from(members)
-        .where(eq(members.identityId, personId))
-        .get()?.role ?? null
-    );
+    return this.sync.roleOf(personId);
   }
 
   /** Every person with a role, the guardian first, then members in the order
    *  they were granted it. */
   async members(): Promise<Member[]> {
-    return this.db
-      .select({ personId: members.identityId, role: members.role })
-      .from(members)
-      .orderBy(sql`${members.role} = 'guardian' DESC`, members.createdAt, sql`"members".rowid`)
-      .all();
+    return this.sync.members();
   }
 
   /**
@@ -67,10 +62,50 @@ export class Access {
    * `role` is guardian and another person is the guardian.
    */
   async grant(personId: string, role: Role): Promise<void> {
-    const current = await this.roleOf(personId);
+    this.sync.grant(personId, role);
+  }
+
+  /**
+   * Takes the person's role away. Does nothing for a person with none.
+   * Rejects with {@link GuardianRemovalError}, changing nothing, for the
+   * guardian.
+   */
+  async revoke(personId: string): Promise<void> {
+    this.sync.revoke(personId);
+  }
+}
+
+/**
+ * {@link Access}'s reads and writes, with the same answers and rules, run
+ * synchronously so a caller can put several in one synchronous transaction.
+ * Each throws where Access's rejects.
+ */
+export class SyncAccess {
+  constructor(private readonly db: DrizzleDb | DrizzleTx) {}
+
+  roleOf(personId: string): Role | null {
+    return (
+      this.db
+        .select({ role: members.role })
+        .from(members)
+        .where(eq(members.identityId, personId))
+        .get()?.role ?? null
+    );
+  }
+
+  members(): Member[] {
+    return this.db
+      .select({ personId: members.identityId, role: members.role })
+      .from(members)
+      .orderBy(sql`${members.role} = 'guardian' DESC`, members.createdAt, sql`"members".rowid`)
+      .all();
+  }
+
+  grant(personId: string, role: Role): void {
+    const current = this.roleOf(personId);
     if (current === role || current === "guardian") return;
     if (role === "guardian") {
-      const guardian = (await this.members()).find((m) => m.role === "guardian");
+      const guardian = this.members().find((m) => m.role === "guardian");
       if (guardian) throw new GuardianTakenError(personId);
     }
     if (current === null) {
@@ -80,13 +115,8 @@ export class Access {
     }
   }
 
-  /**
-   * Takes the person's role away. Does nothing for a person with none.
-   * Rejects with {@link GuardianRemovalError}, changing nothing, for the
-   * guardian.
-   */
-  async revoke(personId: string): Promise<void> {
-    const current = await this.roleOf(personId);
+  revoke(personId: string): void {
+    const current = this.roleOf(personId);
     if (current === null) return;
     if (current === "guardian") throw new GuardianRemovalError();
     this.db.delete(members).where(eq(members.identityId, personId)).run();
@@ -96,4 +126,9 @@ export class Access {
 /** Access over `db`. */
 export function createAccess(db: DrizzleDb): Access {
   return new Access(db);
+}
+
+/** Access's synchronous reads and writes on `tx`, so they join its transaction. */
+export function accessWithinTx(tx: DrizzleTx): SyncAccess {
+  return new SyncAccess(tx);
 }
