@@ -31,8 +31,8 @@ describe("entrance", () => {
     const ran: string[] = [];
     const commands = door.commands("discord", {
       list: ["stop"],
-      ran: async (command: { sender: { accountId: string } }) => {
-        ran.push(command.sender.accountId);
+      ran: async (command: { sender: { accountId: string } }, by: string) => {
+        ran.push(`${command.sender.accountId} as ${by}`);
         return "Stopped.";
       },
       suggest: async (
@@ -47,22 +47,22 @@ describe("entrance", () => {
     expect(await commands.ran(by("sam"))).toBe(
       "Only the guardian and members of this Rome can run its commands.",
     );
-    expect(ran).toEqual(["ada"]);
+    expect(ran).toEqual(["ada as Ada"]);
     expect(await commands.suggest(by("ada"), "name", "")).toEqual(["main"]);
     expect(await commands.suggest(by("sam"), "name", "")).toEqual([]);
     expect(asked[0]).toEqual({ platform: "discord", id: "ada" });
     expect(asked).toHaveLength(4);
   });
 
-  it("answers a press by someone let in alone", async () => {
+  it("answers a press by someone let in alone, told whom as", async () => {
     const { entrance: door } = onlyAda();
     const answered: string[] = [];
     for (const id of ["sam", "ada"]) {
-      await door.press({ platform: "feishu", id }, async () => {
-        answered.push(id);
+      await door.press({ platform: "feishu", id }, async (by) => {
+        answered.push(`${id} as ${by}`);
       });
     }
-    expect(answered).toEqual(["ada"]);
+    expect(answered).toEqual(["ada as Ada"]);
   });
 });
 
