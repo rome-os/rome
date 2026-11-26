@@ -54,15 +54,15 @@ describe("entrance", () => {
     expect(asked).toHaveLength(4);
   });
 
-  it("answers a press by someone let in alone", async () => {
+  it("answers a press by someone let in alone, told whom as", async () => {
     const { entrance: door } = onlyAda();
     const answered: string[] = [];
     for (const id of ["sam", "ada"]) {
-      await door.press({ platform: "feishu", id }, async () => {
-        answered.push(id);
+      await door.press({ platform: "feishu", id }, async (by) => {
+        answered.push(`${id} as ${by}`);
       });
     }
-    expect(answered).toEqual(["ada"]);
+    expect(answered).toEqual(["ada as Ada"]);
   });
 });
 
