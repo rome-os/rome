@@ -227,13 +227,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
               const sourceChatId = thread?.threadId;
               const channel = thread?.channel;
               const threadType = thread?.threadType;
-              const audience = turn.audience();
               const sameSource = () => {
                 const live = turn.threadContext();
                 return (
                   turn.turnId() === turnId &&
                   sameActor(turn.actor(), actor) &&
-                  turn.audience() === audience &&
                   live?.channel === channel &&
                   live?.threadType === threadType &&
                   live?.threadId === sourceChatId
@@ -256,7 +254,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                       chatId: sourceChatId,
                       turnId,
                       actor,
-                      audience,
                       isCurrent: sourceCurrent,
                     }
                   : undefined;

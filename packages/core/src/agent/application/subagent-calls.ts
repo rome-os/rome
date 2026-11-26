@@ -4,7 +4,6 @@
 import type { StreamAgentEvent, ThreadContext } from "@rome-os/app-runtime";
 import type { RecordedSessions } from "../domain/recorded-sessions.js";
 import type { AgentName, SessionId } from "../domain/session.js";
-import type { Audience } from "../domain/turn-audience.js";
 import type { TurnActor } from "../domain/turn-facts.js";
 import {
   newSubagentSession,
@@ -46,8 +45,6 @@ export interface CallingTurn {
   at: SessionPlace;
   /** Who the calling turn acts for: the subagent's turn acts for the same person. */
   actor?: TurnActor;
-  /** Who can read the calling turn: the subagent's turn is never more private. */
-  audience?: Audience;
 }
 
 /** One subagent call, from its start to its outcome. */
@@ -97,7 +94,6 @@ export interface SubagentSession {
       threadContext?: ThreadContext;
       sharedContext?: Record<string, unknown>;
       actor?: TurnActor;
-      audience?: Audience;
     },
   ): { turnId: string; events: AsyncIterable<StreamAgentEvent> };
   stop(reason?: string): Promise<void>;
@@ -173,7 +169,6 @@ export function createSubagentCalls(deps: {
           threadContext: from.at.threadContext,
           sharedContext: from.at.sharedContext,
           ...(from.actor ? { actor: from.actor } : {}),
-          ...(from.audience ? { audience: from.audience } : {}),
         },
       );
 

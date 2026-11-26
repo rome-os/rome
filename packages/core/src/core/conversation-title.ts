@@ -90,7 +90,6 @@ const TITLE_TURN: TurnFacts = {
   sharedContext: () => undefined,
   pushLevel: () => undefined,
   actor: () => undefined,
-  audience: () => "shared",
   reportedTask: () => undefined,
   inTurn: (fn) => fn(),
 };
