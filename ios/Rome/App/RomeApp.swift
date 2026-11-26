@@ -39,6 +39,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         model.health.launch()
         model.calendarSync.launch()
         registerCalendarRefresh()
+        // No voice conversation runs yet: one left on the Lock Screen by a crash goes.
+        VoiceConversationLiveActivityPresence.endLeftovers()
         return true
     }
 

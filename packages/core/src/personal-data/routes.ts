@@ -1,16 +1,10 @@
 // `/api/personal-data/*`: where the guardian's devices push personal data, and where
 // they read what Rome holds. Contract: docs/personal-data.md#routes.
 
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
-import { mayEnter } from "../access/entry.js";
-import {
-  resolveSessionActorFromMaterial,
-  type SessionActor,
-  sessionActorMaterial,
-} from "../access/session-actor.js";
-import { bySignedInSession, type DashboardAllowList } from "../access/team.js";
-import type { DrizzleDb } from "../db/index.js";
+import { enteredPerson } from "../access/require-entry.js";
+import { bySignedInSession } from "../access/team.js";
 import { readCappedBody } from "../lib/read-capped-body.js";
 import { createLogger } from "../logger.js";
 import { ingestEnvelopeSchema, MAX_BATCH_BYTES, MAX_ITEMS_PER_BATCH } from "./domain/ingest.js";
@@ -25,29 +19,21 @@ const INGESTS_PER_MINUTE = 60;
 const stateSchema = z.object({ state: z.enum(["active", "paused", "off"]) });
 
 export interface PersonalDataRoutesDeps {
-  db: DrizzleDb;
   personalData: PersonalDataRepository;
   now?: () => number;
-  dashboardAccessState: DashboardAllowList;
-  /** Who the request is. Default: the session actor resolved from the request's cookies. */
-  sessionActor?: (c: Context) => Promise<SessionActor>;
 }
 
 export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
   const app = new Hono();
   const now = deps.now ?? Date.now;
-  const sessionActor =
-    deps.sessionActor ??
-    ((c: Context) => resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db));
   const recentIngests = new Map<string, number[]>();
 
-  // A team member's own signed-in session reads personal data. Only the
-  // guardian's writes it, because the store has no owner and agents read
-  // everything in it as the guardian's. A loopback caller, which an agent's
-  // shell is, does not count here.
+  // Only the guardian writes personal data, because the store has no owner and
+  // agents read everything in it as the guardian's. A loopback caller, which an
+  // agent's shell is, neither reads nor writes it here.
   app.use("/personal-data/*", async (c, next) => {
-    const actor = await mayEnter(await sessionActor(c), deps.dashboardAccessState);
-    if (!actor || !bySignedInSession(actor)) {
+    const actor = enteredPerson(c);
+    if (!bySignedInSession(actor)) {
       return c.json({ error: "Guardian session required" }, 403);
     }
     const reads = c.req.method === "GET" || c.req.method === "HEAD";
