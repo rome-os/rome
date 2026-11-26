@@ -1,5 +1,6 @@
-// Which paths are public, and which are an app's, whose own access decides
-// them. Contract: docs/architecture/access-control.md.
+// Which paths need no entry: the public ones, and an app's, which its own
+// access decides. The edge probe and the entry step (access/require-entry.ts)
+// both read this list. Contract: docs/architecture/access-control.md#entry.
 
 import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
 
@@ -110,4 +111,9 @@ export function appApiPath(forwardedUri: string): { appId: string; subPath: stri
 /** The app whose API a path is on, or null for any other path. */
 export function appApiAppId(forwardedUri: string): string | null {
   return appApiPath(forwardedUri)?.appId ?? null;
+}
+
+/** Whether entry does not decide `path`: it is public, or an app's. */
+export function needsNoEntry(path: string): boolean {
+  return isPublicPath(path) || dashboardAppId(path) !== null || appApiAppId(path) !== null;
 }

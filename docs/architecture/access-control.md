@@ -27,7 +27,8 @@ Entry is the one question asked before anything from outside Rome runs: may this
 
 ### Invariants
 
-- A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
+- Every `/api` request passes the entry step, `requireEntry` in `packages/core/src/access/require-entry.ts`, before its route. The public paths and an app's, which follow the app's own access, need no entry. `packages/core/src/api/ways-in.ts` lists both, for the step and the verify probe alike, and any other path needs entry. A route may still ask for more than entry, such as the guardian.
+- Every WebSocket upgrade but an app's passes `gateUpgrade`. Onboarding and visitor sign-in, on public paths, read the allow-list themselves.
 - A message a connection delivers passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once, before anything else hears it. The answer stays on the message's event. Nothing acts on it yet.
 - The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.

@@ -130,7 +130,8 @@ function respondPathError(c: Context<AppApiEnv>, err: unknown, appId: string | n
 }
 
 /**
- * Public app-api surface mounted at `/api/app-api/<appId>/*`. Auth is
+ * Public app-api surface mounted at `/api/app-api/<appId>/*`. An app's paths
+ * need no entry (docs/architecture/access-control.md#entry). Auth is
  * enforced at the Caddy edge via `forward_auth` → `/api/auth/verify`;
  * the verify handler consults the resolved app's `api.noAuth` declaration
  * and short-circuits to 204 for covered sub-paths, so this dispatcher

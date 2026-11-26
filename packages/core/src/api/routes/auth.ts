@@ -13,6 +13,7 @@ import {
 } from "../../access/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { mayEnter } from "../../access/entry.js";
+import { entryRefusal } from "../../access/require-entry.js";
 import {
   readSessionActor,
   type SessionActor,
@@ -375,15 +376,10 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    if (forwardedUri && deps.dashboardAccessState.hasSignInEmails()) {
-      if (await allowFullDashboardSession()) return c.body(null, 204);
-      return (await visitor())
-        ? c.json({ error: "Forbidden" }, 403)
-        : c.json({ error: "Visitor authentication required" }, 401);
-    }
-
     if (await allowFullDashboardSession()) return c.body(null, 204);
-    return c.json({ error: "Unauthorized" }, 401);
+    if (!forwardedUri) return c.json({ error: "Unauthorized" }, 401);
+    const { status, error } = entryRefusal(await person(), deps.dashboardAccessState);
+    return c.json({ error }, status);
   });
 
   return app;
