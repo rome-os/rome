@@ -96,6 +96,7 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 - The web-side caller is advisory, for UI gating only. Enforcement lives server-side.
 - The SDKs ship the standard visitor gate, so apps do not re-implement it. An anonymous caller receives the wire-stable `visitor_auth_required` error, and app frontends key on that code to start visitor sign-in.
 - A caller holding both a guardian and a visitor session resolves as the guardian.
+- What an agent does in a turn the app starts is what the app gave it, whoever the caller is. An app whose visitors can reach an agent chooses that agent's tools and actions with them in mind. `actions: ["*"]` includes Rome's own read tools, such as the people, device and routine lists.
 - A visitor session may carry a favor credential. It stays host-side — app code can cause the runtime to spend it, never read it.
 
 **Not to be confused with:**

@@ -12,9 +12,21 @@ import {
 } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../dashboard-access-config.js";
+import { SettingsRepository } from "../../db/repositories/settings.js";
+import {
+  DASHBOARD_ACCESS_SETTING_KEY,
+  normalizeDashboardAccessConfig,
+} from "../dashboard-access-config.js";
+import { DashboardAccessState } from "../dashboard-access-state.js";
+import { DashboardAccessStore } from "../dashboard-access-store.js";
 import { backfillMembers } from "./backfill-members.js";
-import { listMembers, memberContext, roleOfAccount } from "./members.js";
+import {
+  guardianSeatRebound,
+  listMembers,
+  memberContext,
+  roleOfAccount,
+  seatAccounts,
+} from "./members.js";
 
 const now = new Date("2026-11-25T00:00:00Z");
 
@@ -126,15 +138,211 @@ describe("backfillMembers", () => {
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("removes a member off the list on the next run", async () => {
+  it("reads the invited emails again only under a higher revision than it read", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
     await backfillMembers(db);
 
     db.update(settings)
-      .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 4 } })
+      .set({ value: { cloudEmailAccess: ["lin@example.com"], revision: 3 } })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
       .run();
+    await backfillMembers(db);
+
+    const ctx = memberContext(db);
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "ada@example.com" }),
+    ).toBe("member");
+  });
+
+  it("makes the members the source of the invited emails once it has run", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    expect(store.membersAreSource()).toBe(false);
+
+    await backfillMembers(db);
+
+    expect(store.membersAreSource()).toBe(true);
+  });
+
+  it("makes the members the source of the invited emails after a save", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    await store.save({ cloudEmailAccess: ["ada@example.com"] });
+
+    expect(store.membersAreSource()).toBe(true);
+  });
+
+  it("changes nothing on members an older build already brought in line with the list", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    // An older build kept the members in line with the list but recorded no run.
+    db.delete(settings).where(eq(settings.key, "backfill.membersFromInvitedEmails")).run();
+    const before = snapshot(db);
+
+    await backfillMembers(db);
+
+    expect(snapshot(db)).toEqual(before);
+  });
+
+  it("keeps an email invited after the first run a member across a restart and a rollback, and a removed one removed", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    const restart = async () => {
+      await backfillMembers(db);
+      const state = new DashboardAccessState();
+      await state.load(db);
+      return state;
+    };
+
+    await store.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com", "kim@example.com"],
+    });
+    let state = await restart();
+    expect(state.isCloudEmailAllowed("kim@example.com")).toBe(true);
+    expect(
+      await roleOfAccount(memberContext(db), {
+        platform: "rome-cloud-email",
+        accountId: "kim@example.com",
+      }),
+    ).toBe("member");
+
+    await store.save({ cloudEmailAccess: ["lin@example.com", "kim@example.com"] });
+    state = await restart();
+    expect(state.isCloudEmailAllowed("ada@example.com")).toBe(false);
+    expect(
+      await roleOfAccount(memberContext(db), {
+        platform: "rome-cloud-email",
+        accountId: "ada@example.com",
+      }),
+    ).toBeNull();
+    expect([...state.cloudEmails()].sort()).toEqual(["kim@example.com", "lin@example.com"]);
+    expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
+
+    // An older build after a rollback reads the record's list: the members
+    // now, with the removed one gone and the invited one there.
+    expect(
+      normalizeDashboardAccessConfig(
+        await new SettingsRepository(db).get(DASHBOARD_ACCESS_SETTING_KEY),
+      ).cloudEmailAccess,
+    ).toEqual(["kim@example.com", "lin@example.com"]);
+  });
+
+  it("reads the list again when an older build saved it after a rollback", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    const { revision } = await store.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+    });
+
+    // Rolled back, the older build saves the list: it drops Ada, adds Kim and
+    // raises the revision, and knows nothing of the members.
+    db.update(settings)
+      .set({
+        value: { cloudEmailAccess: ["kim@example.com", "lin@example.com"], revision: revision + 1 },
+      })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+      .run();
+    await backfillMembers(db);
+
+    expect(await store.read()).toEqual({
+      emails: ["kim@example.com", "lin@example.com"],
+      revision: revision + 1,
+    });
+    expect(store.membersAreSource()).toBe(true);
+
+    // A later startup with no older-build save since leaves a save alone.
+    await store.save({ cloudEmailAccess: ["lin@example.com"] });
+    await backfillMembers(db);
+    expect((await store.read()).emails).toEqual(["lin@example.com"]);
+  });
+
+  it("reads no list for a raise at the next startup", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    // Rome Cloud holds revision 10 after a restore of this database.
+    expect(await store.raisePast(10)).toEqual({
+      emails: ["ada@example.com", "lin@example.com"],
+      revision: 11,
+    });
+    const before = snapshot(db);
+    await backfillMembers(db);
+
+    expect(snapshot(db)).toEqual(before);
+    expect(await new SettingsRepository(db).get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+      revision: 11,
+      visitorAccounts: {},
+    });
+  });
+
+  it("does not make the guardian's old email a member after a raise, a rebind and a restart", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    // The older build's list holds the guardian's email.
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+    await store.raisePast(10);
+
+    db.update(guardianAuth).set({ accountId: "acct-new", email: "new@example.com" }).run();
+    const ctx = memberContext(db);
+    await guardianSeatRebound(ctx, {
+      previous: seatAccounts({ email: "owner@example.com" }),
+      current: seatAccounts({ email: "new@example.com" }),
+    });
+    await backfillMembers(db);
+
+    const owner = { platform: "rome-cloud-email", accountId: "owner@example.com" };
+    expect(await roleOfAccount(ctx, owner)).toBeNull();
+    expect(
+      await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "new@example.com" }),
+    ).toBe("guardian");
+  });
+
+  it("still reads an older build's unread save after a raise", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    await backfillMembers(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    // An older build saved the list after a rollback, and the startup after
+    // it failed to read it.
+    db.update(settings)
+      .set({ value: { cloudEmailAccess: ["kim@example.com"], revision: 4 } })
+      .where(eq(settings.key, DASHBOARD_ACCESS_SETTING_KEY))
+      .run();
+    await store.raisePast(10);
+    await backfillMembers(db);
+
+    expect(await store.read()).toEqual({ emails: ["kim@example.com"], revision: 11 });
+  });
+
+  it("keeps a member removed by a save made before its first run", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    const store = new DashboardAccessStore(new SettingsRepository(db), db);
+
+    await store.save({ cloudEmailAccess: ["lin@example.com"] });
     await backfillMembers(db);
 
     const ctx = memberContext(db);
