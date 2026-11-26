@@ -1,5 +1,5 @@
 import { app, BrowserWindow, globalShortcut, net, screen, shell } from "electron";
-import { fetchAppIdentity } from "../app-shims/identity";
+import { type AppIdentity, fetchAppIdentity } from "../app-shims/identity";
 import type { SettingsAccess } from "../app-shims/store";
 import { isQuitting } from "../lifecycle";
 import { createLogger } from "../logger";
@@ -11,6 +11,7 @@ import {
   SHARE_PANEL_LIMITS,
   SHARE_SHORTCUT_ACCELERATOR,
   SHARE_SHORTCUT_KEY,
+  SHARE_SHORTCUT_LABEL,
   shareUrl,
   type ShareShortcutApp,
 } from "./state";
@@ -36,6 +37,19 @@ export interface ShareShortcut {
  * that text. Which app is the user's choice, from the app's menu in Rome; any
  * app that declares `web.shareTarget` can be the one.
  */
+/** The saved form of an app's share target, or null when the app takes no text. */
+function toRecord(appId: string, identity: AppIdentity): ShareShortcutApp | null {
+  if (!identity.shareTarget) return null;
+  return {
+    appId,
+    name: identity.name,
+    url: identity.shareTarget.url,
+    param: identity.shareTarget.param,
+    width: identity.shareTarget.width,
+    height: identity.shareTarget.height,
+  };
+}
+
 export function setupShareShortcut(
   settings: SettingsAccess,
   /** Resolves once the Rome is reachable and its session is in place. */
@@ -60,11 +74,49 @@ export function setupShareShortcut(
     if (wasFocused && !otherVisible) app.hide();
   };
 
+  const clear = (): void => {
+    unregister();
+    settings.write(SHARE_SHORTCUT_KEY, "");
+    if (panel && !panel.isDestroyed()) panel.destroy();
+    changed?.();
+  };
+
+  // The saved app is a copy of its share target when it was chosen. An update
+  // can move or resize the page, or drop it, so the copy is read again once
+  // the Rome is reachable and whenever a new panel is made. A failed read keeps
+  // the copy.
+  const refresh = async (): Promise<void> => {
+    const saved = current();
+    if (!saved) return;
+    try {
+      await whenReady();
+      const identity = await fetchAppIdentity(
+        (url) => net.fetch(url),
+        new URL(saved.url).origin,
+        saved.appId,
+      );
+      // The user chose another app while this was reading.
+      if (current()?.appId !== saved.appId) return;
+      const record = toRecord(saved.appId, identity);
+      if (!record) {
+        log.info(`${identity.name} no longer takes shared text, so ${SHARE_SHORTCUT_LABEL} is off`);
+        clear();
+        return;
+      }
+      if (JSON.stringify(record) === JSON.stringify(saved)) return;
+      settings.write(SHARE_SHORTCUT_KEY, JSON.stringify(record));
+      changed?.();
+    } catch (err) {
+      log.warn(`Could not refresh ${saved.name}'s share target (${String(err)})`);
+    }
+  };
+
   const ensurePanel = (target: ShareShortcutApp): BrowserWindow => {
     if (panel && !panel.isDestroyed()) {
       panel.setTitle(target.name);
       return panel;
     }
+    void refresh();
     const created = new BrowserWindow({
       ...panelSize(target, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
       minWidth: SHARE_PANEL_LIMITS.width.min,
@@ -187,6 +239,7 @@ export function setupShareShortcut(
     } catch (err) {
       log.warn(String(err));
     }
+    void refresh();
   }
   app.on("will-quit", unregister);
 
@@ -194,15 +247,8 @@ export function setupShareShortcut(
     current,
     use: async (origin, appId) => {
       const identity = await fetchAppIdentity((url) => net.fetch(url), origin, appId);
-      if (!identity.shareTarget) throw new Error(`${identity.name} doesn't take shared text.`);
-      const record: ShareShortcutApp = {
-        appId,
-        name: identity.name,
-        url: identity.shareTarget.url,
-        param: identity.shareTarget.param,
-        width: identity.shareTarget.width,
-        height: identity.shareTarget.height,
-      };
+      const record = toRecord(appId, identity);
+      if (!record) throw new Error(`${identity.name} doesn't take shared text.`);
       register();
       settings.write(SHARE_SHORTCUT_KEY, JSON.stringify(record));
       // A panel still showing the previous app would answer the next press.
@@ -215,12 +261,7 @@ export function setupShareShortcut(
       const target = current();
       if (target) show(target, null);
     },
-    clear: () => {
-      unregister();
-      settings.write(SHARE_SHORTCUT_KEY, "");
-      if (panel && !panel.isDestroyed()) panel.destroy();
-      changed?.();
-    },
+    clear,
     onChange: (callback) => {
       changed = callback;
     },

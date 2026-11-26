@@ -66,11 +66,13 @@ rs.mock("electron", () => ({
   shell: { openExternal: rs.fn() },
 }));
 rs.mock("./selection", () => ({ readSelectedText: rs.fn() }));
+rs.mock("../app-shims/identity", () => ({ fetchAppIdentity: rs.fn() }));
 rs.mock("../lifecycle", () => ({ isQuitting: () => false }));
 rs.mock("../logger", () => ({
   createLogger: () => ({ info: rs.fn(), warn: rs.fn() }),
 }));
 
+import { fetchAppIdentity } from "../app-shims/identity";
 import { readSelectedText } from "./selection";
 import { setupShareShortcut } from "./index";
 import { SHARE_SHORTCUT_ACCELERATOR, SHARE_SHORTCUT_KEY } from "./state";
@@ -180,5 +182,58 @@ describe("setupShareShortcut", () => {
     await flush();
     expect(readSelectedText).toHaveBeenCalledOnce();
     expect(electron.windows[0].loads).toHaveLength(1);
+  });
+});
+
+describe("refreshing the saved app", () => {
+  function store() {
+    let value: string | null = JSON.stringify(TARGET);
+    return {
+      read: (key: string) => (key === SHARE_SHORTCUT_KEY ? value : null),
+      write: (_key: string, next: string) => {
+        value = next;
+      },
+      saved: () => (value ? JSON.parse(value) : null),
+    };
+  }
+  const identity = (shareTarget: unknown) =>
+    ({ name: "Clear Translate", url: TARGET.url, icon: null, shareTarget }) as never;
+
+  it("picks up a new page and size the app moved its share target to", async () => {
+    const settings = store();
+    rs.mocked(fetchAppIdentity).mockResolvedValue(
+      identity({ url: `${TARGET.url}/quick`, param: "text", width: 380, height: 460 }),
+    );
+    setupShareShortcut(settings, async () => {});
+    await flush();
+    expect(fetchAppIdentity).toHaveBeenCalledWith(
+      expect.any(Function),
+      "https://ray.romeos.cc",
+      TARGET.appId,
+    );
+    expect(settings.saved()).toEqual({
+      ...TARGET,
+      url: `${TARGET.url}/quick`,
+      width: 380,
+      height: 460,
+    });
+  });
+
+  it("turns the key off when the app no longer takes shared text", async () => {
+    const settings = store();
+    rs.mocked(fetchAppIdentity).mockResolvedValue(identity(null));
+    setupShareShortcut(settings, async () => {});
+    await flush();
+    expect(settings.saved()).toBeNull();
+    expect(electron.shortcuts.has(SHARE_SHORTCUT_ACCELERATOR)).toBe(false);
+  });
+
+  it("keeps the saved app when the Rome can't be read", async () => {
+    const settings = store();
+    rs.mocked(fetchAppIdentity).mockRejectedValue(new Error("offline"));
+    setupShareShortcut(settings, async () => {});
+    await flush();
+    expect(settings.saved()).toEqual(TARGET);
+    expect(electron.shortcuts.has(SHARE_SHORTCUT_ACCELERATOR)).toBe(true);
   });
 });
