@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { release } from "os";
 import {
   app,
@@ -122,6 +123,15 @@ async function bootstrap() {
             await controller.signOut();
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
+          computerUseHelperPath:
+            process.platform === "darwin"
+              ? join(
+                  app.isPackaged
+                    ? process.resourcesPath
+                    : join(__dirname, "../../../rome-node-core-darwin-arm64/dist"),
+                  "native/Rome Computer Use.app",
+                )
+              : undefined,
           audit,
           // Rome Cloud also sends each push to the desktop apps of the person it is for.
           onNotification: (notification) =>

@@ -156,8 +156,9 @@ export function createExecutor(
   send: (message: OutboundEnvelope) => boolean,
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
+  computerUseHelperPath?: string,
 ) {
-  const computer = new ComputerUseHost();
+  const computer = new ComputerUseHost({ bundledAppPath: computerUseHelperPath });
   const children = new Set<ChildProcess>();
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;

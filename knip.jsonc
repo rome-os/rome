@@ -28,7 +28,7 @@
 
   // Host tools the runtime shells out to, installed in the container image or
   // on the operator's machine rather than as npm packages.
-  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "gofmt", "flock", "mkfifo"],
+  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "gofmt", "flock", "mkfifo", "swift"],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
@@ -154,6 +154,7 @@
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {
+      "ignoreDependencies": ["@rome-os/node-core-darwin-arm64"],
       "entry": [
         "src/**/*.test.ts",
         "src/index.ts",

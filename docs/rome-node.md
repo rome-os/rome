@@ -1043,10 +1043,19 @@ replacement connection.
 Full Rome Node hosts register the `computer.*` actions for window control.
 A limited host refuses remote actions with `computer_use_off`.
 
-On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
-`~/Applications`, in that order. `ROME_NODE_COMPUTER_USE_HELPER` overrides the
-bundle path. The host verifies the signature at launch before asking for local
-session approval. The helper may also need Accessibility and Screen Recording
+Rome Desktop bundles `Rome Computer Use.app` in its macOS arm64 build. On
+macOS arm64, npm installs the helper through `@rome-os/node-core-darwin-arm64`,
+an optional dependency of `@rome-os/node-core`. The host never downloads the
+helper at runtime.
+
+On macOS, the host checks `ROME_NODE_COMPUTER_USE_HELPER` first when set. A
+missing override returns `computer_use_helper_missing`. Otherwise, the host
+checks the Desktop resource, the optional platform package, `/Applications`,
+and `~/Applications`, in that order. A host running under Rosetta can use a
+helper installed in either Applications directory.
+
+The host verifies the signature at launch before asking for local session
+approval. The helper may also need Accessibility and Screen Recording
 permissions in System Settings → Privacy & Security.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,

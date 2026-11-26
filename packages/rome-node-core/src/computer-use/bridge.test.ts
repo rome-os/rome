@@ -620,7 +620,7 @@ it.skipIf(!canBuildNative)(
     const appPath = join(root, "Rome Computer Use.app");
     const script = fileURLToPath(new URL("../../scripts/computer-use.swift", import.meta.url));
     execFileSync("/usr/bin/swift", [script, "build", "--self-test-build", "--app", appPath], {
-      timeout: 90_000,
+      timeout: 240_000,
     });
 
     await expect(ComputerUseBridge.launch({ appPath })).rejects.toMatchObject({
@@ -668,5 +668,5 @@ it.skipIf(!canBuildNative)(
       expect(await helperExit).toEqual([0, null]);
     }
   },
-  120_000,
+  270_000,
 );

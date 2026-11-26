@@ -54,6 +54,7 @@ type Bridge = Pick<
 >;
 
 interface HostDeps {
+  bundledAppPath?: string;
   discover: typeof discoverHelper;
   launch: (options: Parameters<typeof ComputerUseBridge.launch>[0]) => Promise<Bridge>;
   sessionTtlMs: number;
@@ -315,9 +316,11 @@ export class ComputerUseHost {
   }
 
   private findHelper(): Promise<string> {
-    this.discovering ??= this.deps.discover().finally(() => {
-      this.discovering = undefined;
-    });
+    this.discovering ??= this.deps
+      .discover({ bundledAppPath: this.deps.bundledAppPath })
+      .finally(() => {
+        this.discovering = undefined;
+      });
     return this.discovering;
   }
 
