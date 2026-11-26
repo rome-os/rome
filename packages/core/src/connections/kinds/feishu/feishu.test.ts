@@ -219,7 +219,9 @@ function pressedWith(openId: string, by: SettingsActor["kind"] = "guardian") {
     presser: { platform: string; id: string },
     answer: (by: SettingsActor["kind"]) => Promise<void>,
   ) => {
-    if (presser.platform === "feishu" && presser.id === openId) await answer(by);
+    if (presser.platform !== "feishu" || presser.id !== openId) return false;
+    await answer(by);
+    return true;
   };
 }
 
@@ -435,7 +437,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0].addressing).toBe("ambient");
   });
 
-  it("sends nothing to someone who is not let in and asks for the settings card", async () => {
+  it("sends no card to someone who is not let in and asks for one, and hands the message on", async () => {
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
       {
@@ -447,7 +449,10 @@ describe("FeishuAdapter", () => {
       },
       () => channel as unknown as LarkChannel,
     );
-    adapter.onInbound(async () => {});
+    const heard: unknown[] = [];
+    adapter.onInbound(async (message) => {
+      heard.push(message);
+    });
     await adapter.start();
     await channel.emit({
       chatType: "group",
@@ -456,6 +461,7 @@ describe("FeishuAdapter", () => {
       mentions: [{ key: "@_user_1", name: "Rome" }],
     });
     expect(channel.sent).toEqual([]);
+    expect(heard).toHaveLength(1);
   });
 
   it("sends a group settings card to someone let in who asks for it", async () => {
