@@ -15,9 +15,22 @@ describe("AppManifestSchema web.shareTarget", () => {
     expect(AppManifestSchema.parse(withTarget({})).web?.shareTarget).toEqual({});
   });
 
+  it("accepts nested routes and the root", () => {
+    expect(AppManifestSchema.parse(withTarget({ path: "/" })).web?.shareTarget?.path).toBe("/");
+    expect(
+      AppManifestSchema.parse(withTarget({ path: "/look-up/word_1" })).web?.shareTarget,
+    ).toEqual({ path: "/look-up/word_1" });
+  });
+
   it("rejects a path that is not an app route or carries its own query", () => {
     expect(() => AppManifestSchema.parse(withTarget({ path: "quick" }))).toThrow(/app route/);
     expect(() => AppManifestSchema.parse(withTarget({ path: "/quick?x=1" }))).toThrow(/app route/);
+  });
+
+  it("rejects a path that would climb out of the app's route", () => {
+    for (const path of ["/../other-app/share", "/%2e%2e/%2e%2e/settings", "/a/../../x", "//evil"]) {
+      expect(() => AppManifestSchema.parse(withTarget({ path }))).toThrow(/app route/);
+    }
   });
 
   it("rejects unknown share target fields", () => {

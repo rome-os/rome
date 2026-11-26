@@ -61,7 +61,9 @@ const WebDeclarationSchema = z
       .object({
         path: z
           .string()
-          .regex(/^\/[^?#]*$/, "must be an app route starting with / and without ? or #")
+          // Plain segments only: a dot segment, even percent-encoded, would
+          // resolve the target out of the app's own route.
+          .regex(/^(\/[A-Za-z0-9_-]+)*\/?$/, "must be an app route of plain /segments")
           .optional(),
       })
       .strict()

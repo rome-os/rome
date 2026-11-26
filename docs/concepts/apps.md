@@ -379,7 +379,7 @@ Surfaces that send text:
 
 **Contracts:**
 
-- `path` starts with `/` and carries no query or fragment. Rome adds `text` itself.
+- `path` is plain `/segments` of letters, digits, `-` and `_`, with no dot segments, query or fragment, so the target stays inside the app's route. Rome adds `text` itself.
 - The target is always the app's full-screen route, on the same Rome.
 - The installed-apps list marks such an app with `acceptsSharedText`, so surfaces offer only apps that take text.
 
