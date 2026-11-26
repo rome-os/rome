@@ -74,7 +74,8 @@ export async function readerOwner(
 /**
  * An action may write only into a chat its caller may open, as the dashboard's
  * own routes allow: another person's Concierge or task chat is not found. A
- * send no person's or chat's turn made is Rome's own work, and goes through.
+ * send no person's or chat's turn made is Rome's own work, or an app's, and goes
+ * through.
  */
 export async function refuseAnotherOwnersChat(
   webchatRepo: WebChatRepository,

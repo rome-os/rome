@@ -89,6 +89,14 @@ export async function getGuardianAuthState(db: DrizzleDb): Promise<GuardianAuthS
   };
 }
 
+/** The guardian's seat's email, normalized, or null when there is no seat or
+ *  the seat has no email. Only this email is the guardian's sign-in: an older
+ *  seat email the guardian's person still holds after a failed rebind is not. */
+export async function guardianSeatEmail(db: DrizzleDb): Promise<string | null> {
+  const [seat] = await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1);
+  return seatAccounts(seat ?? {})[0]?.accountId ?? null;
+}
+
 // Explicit cloud-login binding. Unlike `recordResolvedAccount`
 // (observe-only, first-resolution-wins), this stamps the account a guardian
 // *just authenticated as* through the cloud-login round trip, so it overwrites

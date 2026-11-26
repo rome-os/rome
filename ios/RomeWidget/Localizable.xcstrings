@@ -70,6 +70,16 @@
           }
         }
       }
+    },
+    "Voice conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音对话"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

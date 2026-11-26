@@ -1014,9 +1014,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
     );
   }
 
-  override async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
+  override async getUserMessageActors(
+    sessionId: string,
+    ids?: readonly string[],
+  ): Promise<Map<string, SessionActor>> {
+    const among = ids
+      ? sql`AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+      : sql``;
     const rows = this.db.all<LineRow>(sql`
-      SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user'
+      SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user' ${among}
     `);
     return new Map(
       rows.flatMap((row) => {

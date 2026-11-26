@@ -23,6 +23,7 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { attachVoiceConversationServer } from "../voice-conversation/conversation-server.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { voiceConversationRoutes } from "./routes/voice-conversation.js";
+import { readSpeakingPick } from "../voice-output/speaking-settings.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
@@ -434,6 +435,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             dashboardAccess: deps.dashboardAccessState,
             listening: deps.voiceInput ?? NO_VOICE_INPUT,
             speaker: deps.speaker,
+            speaking: () => readSpeakingPick(deps.settingsRepo),
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
             send: (chatId, text, inputId, signal) =>
               webchatRuntime.sendSpoken(chatId, text, signal, inputId),
