@@ -20,9 +20,17 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-it("verifies the helper and passes focused setup arguments to LaunchServices", async () => {
+function optionValue(args: string[], flag: string): string {
+  const index = args.indexOf(flag);
+  if (index === -1 || index + 1 >= args.length) throw new Error(`missing ${flag}`);
+  return args[index + 1]!;
+}
+
+it("verifies the helper and waits for readiness through LaunchServices", async () => {
   const verifyBundle = rs.fn();
-  const launcher = rs.fn();
+  const launcher = rs.fn(async (args: string[]) => {
+    await writeFile(optionValue(args, "--stdout"), "ready\n");
+  });
   await launchPermissionSetup({
     appPath,
     pane: "screen-recording",
@@ -32,14 +40,77 @@ it("verifies the helper and passes focused setup arguments to LaunchServices", a
   });
   expect(verifyBundle).toHaveBeenCalledWith(appPath, expect.any(AbortSignal));
   expect(launcher).toHaveBeenCalledWith(
-    ["-n", "-a", appPath, "--args", "--setup-permissions", "screen-recording", "--locale", "zh-TW"],
+    [
+      "-n",
+      "--stdout",
+      expect.stringMatching(/stdout\.txt$/),
+      "--stderr",
+      expect.stringMatching(/stderr\.txt$/),
+      "-a",
+      appPath,
+      "--args",
+      "--setup-permissions",
+      "screen-recording",
+      "--locale",
+      "zh-TW",
+    ],
     expect.any(AbortSignal),
   );
   await launchPermissionSetup({ appPath, verifyBundle, launcher });
   expect(launcher).toHaveBeenLastCalledWith(
-    ["-n", "-a", appPath, "--args", "--setup-permissions"],
+    [
+      "-n",
+      "--stdout",
+      expect.stringMatching(/stdout\.txt$/),
+      "--stderr",
+      expect.stringMatching(/stderr\.txt$/),
+      "-a",
+      appPath,
+      "--args",
+      "--setup-permissions",
+    ],
     expect.any(AbortSignal),
   );
+});
+
+it("surfaces helper-side startup failures and timeouts to callers", async () => {
+  const verifyBundle = rs.fn();
+  await expect(
+    launchPermissionSetup({
+      appPath,
+      verifyBundle,
+      launcher: async (args) => {
+        await writeFile(optionValue(args, "--stderr"), "invalid_request\n");
+      },
+    }),
+  ).rejects.toMatchObject({ code: "invalid_request" });
+  await expect(
+    launchPermissionSetup({
+      appPath,
+      verifyBundle,
+      launcher: async (args) => {
+        await writeFile(optionValue(args, "--stderr"), "permission_setup_unavailable\n");
+      },
+    }),
+  ).rejects.toMatchObject({ code: "internal_error" });
+  await expect(
+    launchPermissionSetup({
+      appPath,
+      verifyBundle,
+      startupTimeoutMs: 60,
+      launcher: async () => {},
+    }),
+  ).rejects.toMatchObject({ code: "startup_timeout" });
+  await expect(
+    launchPermissionSetup({
+      appPath,
+      verifyBundle,
+      launcher: async (args) => {
+        await writeFile(optionValue(args, "--stderr"), "AppKit diagnostic warning\n");
+        await writeFile(optionValue(args, "--stdout"), "ready\n");
+      },
+    }),
+  ).resolves.toBeUndefined();
 });
 
 it("never launches an invalid bundle or when verification is aborted", async () => {

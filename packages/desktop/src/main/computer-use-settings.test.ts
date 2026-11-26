@@ -53,20 +53,31 @@ it("opens the same native guide for full and focused setup", async () => {
 });
 
 it("opens the macOS privacy pane when the helper is missing or fails to launch", async () => {
-  const { open } = createComputerUseSettings(helperPath, () => false);
+  const { setup, open } = createComputerUseSettings(helperPath, () => false);
   rs.mocked(existsSync).mockReturnValue(false);
+  await setup();
   await open("accessibility");
   expect(launchPermissionSetup).not.toHaveBeenCalled();
   rs.mocked(existsSync).mockReturnValue(true);
+  rs.mocked(launchPermissionSetup).mockRejectedValueOnce(new Error("signature failed"));
+  await setup();
   rs.mocked(launchPermissionSetup).mockRejectedValueOnce(new Error("LaunchServices failed"));
   await open("screenRecording");
-  expect(launchPermissionSetup).toHaveBeenCalledTimes(1);
+  expect(launchPermissionSetup).toHaveBeenCalledTimes(2);
   expect(shell.openExternal).toHaveBeenNthCalledWith(
     1,
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   );
   expect(shell.openExternal).toHaveBeenNthCalledWith(
     2,
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  );
+  expect(shell.openExternal).toHaveBeenNthCalledWith(
+    3,
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  );
+  expect(shell.openExternal).toHaveBeenNthCalledWith(
+    4,
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   );
 });

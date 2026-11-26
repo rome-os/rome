@@ -60,6 +60,7 @@ it.each([
   ["computer_use_unsupported_platform", "available on macOS"],
   ["computer_use_helper_missing", "Install the latest Rome Node"],
   ["invalid_helper_bundle", "Install the latest signed helper"],
+  ["invalid_request", "does not support guided permission setup"],
 ])("prints guidance for %s without opening the guide", (code, message) => {
   const result = run(["computer-use", "setup"], code);
   expect(result.status).toBe(1);

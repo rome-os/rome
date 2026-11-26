@@ -20,18 +20,21 @@ export function createComputerUseSettings(helperPath: string, enabled: () => boo
   // report Desktop's grants instead, so the status only checks the bundled executable.
   const helperPresent = () => existsSync(join(helperPath, "Contents", "MacOS", "RomeComputerUse"));
   const status = () => ({ enabled: enabled(), helperPresent: helperPresent() });
-  const setup = () => launchPermissionSetup({ appPath: helperPath });
-  const open = async (pane: ComputerUsePane) => {
+  const openGuided = async (pane?: ComputerUsePane) => {
     if (helperPresent()) {
       try {
-        await launchPermissionSetup({ appPath: helperPath, pane: panes[pane].setup });
+        await launchPermissionSetup(
+          pane ? { appPath: helperPath, pane: panes[pane].setup } : { appPath: helperPath },
+        );
         return;
       } catch {
         // The privacy pane is still useful when the helper cannot launch.
       }
     }
-    await shell.openExternal(panes[pane].url);
+    await shell.openExternal(panes[pane ?? "accessibility"].url);
   };
+  const setup = () => openGuided();
+  const open = (pane: ComputerUsePane) => openGuided(pane);
   const revealHelper = () => {
     if (helperPresent()) shell.showItemInFolder(helperPath);
   };

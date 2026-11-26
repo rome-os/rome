@@ -857,6 +857,9 @@ final class SelfTest {
             let request = try PermissionSetupRequest([mode] + args, preferred: ["ja-JP"])
             try expect(request.step == step && request.locale == locale, "parse permission setup arguments")
         }
+        let defaultRequest = try PermissionSetupRequest([], preferred: ["ja-JP"])
+        try expect(defaultRequest.step == nil && defaultRequest.locale == .ja,
+                   "empty arguments open the default permission guide")
         for args in [
             ["unknown"], ["--bad"], [mode], ["--locale"], ["--locale", ""], ["--locale", "--bad"],
             ["all", "accessibility"], ["screen-recording", "screen-recording"], ["--locale", "en", "--locale", "ja"],

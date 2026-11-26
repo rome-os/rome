@@ -120,7 +120,7 @@ do {
     }
     throw Failure("desktop_disabled")
     #else
-    let setup = try arguments.first == "--setup-permissions"
+    let setup = try (arguments.isEmpty || arguments.first == "--setup-permissions")
         ? PermissionSetupRequest(arguments, preferred: Locale.preferredLanguages) : nil
     if arguments == ["--check-permissions"] { alarm(2) }
     guard signedApp() else { throw Failure("desktop_disabled") }

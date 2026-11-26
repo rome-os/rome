@@ -162,6 +162,10 @@ async function main(): Promise<void> {
             throw new Error(
               "Could not verify Rome Computer Use.app. Install the latest signed helper or check ROME_NODE_COMPUTER_USE_HELPER.",
             );
+          case "invalid_request":
+            throw new Error(
+              "This Rome Computer Use.app does not support guided permission setup. Install the latest Rome Node or Rome Desktop.",
+            );
           default:
             throw new Error(
               "Could not open the permission guide. Run setup from a signed-in macOS desktop session.",

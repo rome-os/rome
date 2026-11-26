@@ -22,6 +22,7 @@ func runPermissionSetup(_ request: PermissionSetupRequest) throws {
             notifications.postNotificationName(setupRequestNotification, object: bundleIdentifier,
                                                userInfo: ["pane": request.step?.rawValue ?? "all"],
                                                deliverImmediately: true)
+            try? FileHandle.standardOutput.write(contentsOf: Data("ready\n".utf8))
             return
         }
         throw Failure("permission_setup_unavailable")
@@ -39,6 +40,7 @@ func runPermissionSetup(_ request: PermissionSetupRequest) throws {
     }
     defer { notifications.removeObserver(observer) }
     flow.show(request.step)
+    try? FileHandle.standardOutput.write(contentsOf: Data("ready\n".utf8))
     withExtendedLifetime(flow) { app.run() }
 }
 
@@ -378,8 +380,9 @@ private final class PermissionFlow: NSObject {
         }
         dock()
         let now = ProcessInfo.processInfo.systemUptime
-        guard state.step == .screenRecording || grants.contains(.accessibility),
-              !CGPreflightScreenCaptureAccess(), !probing, now >= nextProbe else { return }
+        guard state.step != nil,
+              state.step == .screenRecording || grants.contains(.accessibility),
+              !CGPreflightScreenCaptureAccess(), !freshScreenGrant, !probing, now >= nextProbe else { return }
         probing = true
         nextProbe = now + 2.5
         DispatchQueue.global(qos: .utility).async { [weak self] in

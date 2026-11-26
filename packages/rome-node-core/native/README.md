@@ -495,9 +495,11 @@ open -n -a '/path/to/Rome Computer Use.app' --args --setup-permissions
 ```
 
 Pass `accessibility` or `screen-recording` to start at a specific pane.
-The default, `all`, starts at the first missing permission. Add
-`--locale <tag>` to select the guide language. The guide follows the System
-Settings window and checks both permissions as the user grants them.
+The default, `all`, starts at the first missing permission. Launching the signed
+app with no arguments (such as from Finder or macOS "Quit & Reopen") also opens
+the default guide. Add `--locale <tag>` to select the guide language. The guide
+writes `ready` to stdout once it is running or has focused an existing panel,
+follows the System Settings window, and checks both permissions until granted.
 
 For device status, the host verifies the release signature and uses
 LaunchServices to run `--check-permissions` in a hidden, short-lived instance.

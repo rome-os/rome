@@ -23,6 +23,11 @@ struct PermissionSetupRequest {
     let locale: HelperLocale
 
     init(_ arguments: [String], preferred: [String]) throws {
+        if arguments.isEmpty {
+            step = nil
+            locale = resolveLocale(requested: nil, preferred: preferred)
+            return
+        }
         var args = arguments.makeIterator()
         guard args.next() == "--setup-permissions" else { throw Failure("invalid_request") }
         var pane: String?
