@@ -3,7 +3,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { actionError, isRecord, type ActionResponse, type BinaryActionResult } from "../actions.js";
 import { isUuid } from "../frame.js";
 import { ComputerUseBridge } from "./bridge.js";
-import { discoverHelper } from "./discovery.js";
+import { canAutoInstallHelper, discoverHelper } from "./discovery.js";
+import { installHelper } from "./install.js";
+import { untilAbort } from "./launch.js";
 import {
   ComputerUseError,
   JSON_LIMIT,
@@ -32,8 +34,10 @@ function errorCode(cause: unknown): ComputerUseError["code"] {
 }
 
 const errorMessages: Partial<Record<ComputerUseError["code"], string>> = {
-  computer_use_unsupported_platform: "The Computer Use Helper requires macOS.",
+  computer_use_unsupported_platform: "The Computer Use Helper requires macOS on Apple silicon.",
   computer_use_helper_missing: "The Computer Use Helper is missing from this Mac.",
+  computer_use_helper_install_failed:
+    "Could not download, verify, or install the official Computer Use Helper in ~/Applications.",
   action_outcome_unknown:
     "The Helper did not confirm the input outcome. Do not retry with a new action ID.",
 };
@@ -55,8 +59,16 @@ type Bridge = Pick<
 
 interface HostDeps {
   discover: typeof discoverHelper;
+  canAutoInstall: () => boolean;
+  install: (signal: AbortSignal) => Promise<string>;
   launch: (options: Parameters<typeof ComputerUseBridge.launch>[0]) => Promise<Bridge>;
   sessionTtlMs: number;
+}
+
+interface Installation {
+  controller: AbortController;
+  promise: Promise<string>;
+  waiters: number;
 }
 
 interface Binding {
@@ -105,10 +117,13 @@ export class ComputerUseHost {
   private readonly windows = new Map<number, Session>();
   private readonly deps: HostDeps;
   private discovering?: Promise<string>;
+  private installation?: Installation;
 
   constructor(deps: Partial<HostDeps> = {}) {
     this.deps = {
       discover: discoverHelper,
+      canAutoInstall: canAutoInstallHelper,
+      install: installHelper,
       launch: (options) => ComputerUseBridge.launch(options),
       sessionTtlMs: SESSION_TTL_MS,
       ...deps,
@@ -214,20 +229,25 @@ export class ComputerUseHost {
 
   async info(peer: string) {
     if (isUuid(peer)) peer = peer.toLowerCase();
-    const bridge = this.sessions.get(peer)?.bridge;
-    const installed =
-      (bridge && !bridge.closed) ||
-      (await this.findHelper().then(
-        () => true,
-        () => false,
-      ));
+    const current = this.sessions.get(peer);
+    const available =
+      !current?.stop &&
+      (!current?.bridge || current.bridge.closed) &&
+      (this.deps.canAutoInstall() ||
+        (await this.findHelper().then(
+          () => true,
+          () => false,
+        )));
     const session = this.sessions.get(peer);
     const stopped = Boolean(session?.stop);
     const live = session?.bridge && !session.bridge.closed;
-    const state = stopped ? "off" : live ? "on" : installed ? "needs_permission" : "off";
+    const state = stopped ? "off" : live ? "on" : available ? "needs_permission" : "off";
     const operations = Object.entries<Operation>(this.operations);
-    const advertised =
-      installed || live ? operations.filter(([, operation]) => !stopped || operation.urgent) : [];
+    const advertised = stopped
+      ? operations.filter(([, operation]) => operation.urgent)
+      : state === "off"
+        ? []
+        : operations;
     return {
       capability: {
         id: "computer_use",
@@ -275,7 +295,8 @@ export class ComputerUseHost {
     const run = async (refusal?: ActionResponse) => {
       try {
         if (stopping) return await stopping;
-        const appPath = session?.bridge ? undefined : await this.findHelper();
+        const appPath =
+          session?.bridge || this.deps.canAutoInstall() ? undefined : await this.findHelper();
         if (session) this.check(session);
         if (refusal) return { response: refusal, body: empty };
         if (body?.byteLength)
@@ -321,6 +342,39 @@ export class ComputerUseHost {
     return this.discovering;
   }
 
+  private async findOrInstallHelper(signal: AbortSignal): Promise<string> {
+    if (signal.aborted) throw new ComputerUseError("session_stopped");
+    let flight = this.installation;
+    if (!flight || flight.controller.signal.aborted) {
+      const controller = new AbortController();
+      const promise = this.findHelper().catch(async (cause) => {
+        controller.signal.throwIfAborted();
+        if (errorCode(cause) !== "computer_use_helper_missing" || !this.deps.canAutoInstall())
+          throw cause;
+        try {
+          return await this.deps.install(controller.signal);
+        } catch (cause) {
+          throw new ComputerUseError("computer_use_helper_install_failed", { cause });
+        }
+      });
+      const started = { controller, promise, waiters: 0 };
+      this.installation = flight = started;
+      const clear = () => {
+        if (this.installation === started) this.installation = undefined;
+      };
+      void promise.then(clear, clear);
+    }
+    flight.waiters++;
+    try {
+      return await untilAbort(() => flight.promise, signal);
+    } catch (cause) {
+      if (signal.aborted) throw new ComputerUseError("session_stopped", { cause });
+      throw cause;
+    } finally {
+      if (--flight.waiters === 0 && this.installation === flight) flight.controller.abort();
+    }
+  }
+
   private requireSession(session: Session | undefined): Session {
     if (!session) throw new ComputerUseError("busy");
     return session;
@@ -350,10 +404,12 @@ export class ComputerUseHost {
   private async helper(session: Session, appPath: string | undefined): Promise<Bridge> {
     this.check(session);
     if (session.bridge) return session.bridge;
-    if (!appPath) throw new ComputerUseError("computer_use_helper_missing");
+    const signal = session.launch.signal;
+    const resolved = appPath ?? (await this.findOrInstallHelper(signal));
+    this.check(session);
     const bridge = await this.deps.launch({
-      appPath,
-      signal: session.launch.signal,
+      appPath: resolved,
+      signal,
       startupTimeoutMs: 8000,
       consentTimeoutMs: 35_000,
       consentMode: "session_only",

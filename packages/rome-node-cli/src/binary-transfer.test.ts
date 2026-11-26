@@ -270,9 +270,10 @@ const discovery = new URL("discovery.js", ${JSON.stringify(bridgeModule)}).href;
 registerHooks({ load(url, context, next) {
   if (url !== discovery) return next(url, context);
   return { format: "module", shortCircuit: true, source: \`
-    import { discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
+    import { canAutoInstallHelper, discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
+    export { canAutoInstallHelper };
     export function discoverHelper() {
-      return discover({ platform: "darwin" });
+      return discover({ platform: "darwin", arch: "arm64" });
     }
   \` };
 }});

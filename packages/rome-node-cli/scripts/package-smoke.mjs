@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,6 +13,22 @@ const { createNodeClient, createNodeConfig, stopDaemon } = await import(
 );
 const { configureCaller } = await import(
   pathToFileURL(require.resolve("@rome-os/node-core/auth")).href
+);
+const hostUrl = pathToFileURL(require.resolve("@rome-os/node-core/host"));
+const { installHelper } = await import(new URL("./computer-use/install.js", hostUrl).href);
+const { version } = JSON.parse(await readFile(new URL("../package.json", hostUrl), "utf8"));
+const stopDownload = new Error("The packed installer resolved its release URL.");
+await assert.rejects(
+  installHelper(new AbortController().signal, {
+    fetch: async (url) => {
+      assert.equal(
+        url.href,
+        `https://github.com/rome-os/rome/releases/download/node-core-v${version}/Rome-Computer-Use-darwin-arm64.zip.sha256`,
+      );
+      throw stopDownload;
+    },
+  }),
+  (error) => error === stopDownload,
 );
 const directory = await mkdtemp(join(tmpdir(), "rome-node-package-"));
 const config = createNodeConfig({ directory });

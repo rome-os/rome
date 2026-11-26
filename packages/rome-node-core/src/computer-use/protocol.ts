@@ -52,6 +52,7 @@ type ErrorCode =
   | WireErrorCode
   | "computer_use_unsupported_platform"
   | "computer_use_helper_missing"
+  | "computer_use_helper_install_failed"
   | "invalid_helper_bundle"
   | "socket_path_limit"
   | "unsafe_state_directory"

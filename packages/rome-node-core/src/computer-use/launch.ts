@@ -22,7 +22,7 @@ import { promisify } from "node:util";
 import { ComputerUseError } from "./protocol.js";
 
 export const APP_NAME = "Rome Computer Use.app";
-const EXECUTABLE = "Contents/MacOS/RomeComputerUse";
+export const EXECUTABLE = "Contents/MacOS/RomeComputerUse";
 export const RELEASE_SIGNING_REQUIREMENT =
   'anchor apple generic and identifier "com.rome.computer-use" and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "4YWXB26F39"';
 const SOCKET_NAME = "helper.sock";

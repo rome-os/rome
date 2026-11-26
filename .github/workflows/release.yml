@@ -1,7 +1,7 @@
 name: Release
 
-# Drives releases for Rome's public npm packages (and the Rome Node Docker
-# image) via release-please.
+# Drives releases for Rome's public npm packages, Rome Node Docker image,
+# and macOS Computer Use Helper via release-please.
 #
 # Flow:
 #   1. PRs land on main with Conventional Commits messages (feat:, fix:, etc.).
@@ -12,6 +12,7 @@ name: Release
 #      and push the matching tarball(s) to npm and, when @rome-os/node
 #      (packages/rome-node-cli) releases, publish the multi-platform
 #      ghcr.io/rome-os/rome-node image (version, latest, and commit SHA).
+#      When @rome-os/node-core releases, attach the Helper to its release.
 #
 # Bump rules: configured in release-please-config.json. Pre-1.0 we keep
 # breaking → minor and feat/fix → patch (bump-minor-pre-major +
@@ -44,7 +45,7 @@ on:
           - packages/rome-node-cli
           - packages/rome-node-core
       dry_run:
-        description: Dry run (validate + pack, no actual upload).
+        description: Dry run (validate packages and the signed Helper without publishing).
         required: false
         type: boolean
         default: false
@@ -92,13 +93,29 @@ jobs:
       github.event_name == 'push' &&
       needs.release-please.outputs.releases_created == 'true' &&
       contains(fromJSON(needs.release-please.outputs.paths_released || '[]'), 'packages/rome-node-cli')
+    # Both publishers live in the reusable workflow. Each job narrows its own token.
     permissions:
-      contents: read
+      contents: write
       packages: write
     uses: ./.github/workflows/rome-node.yml
     with:
       publish_image: true
       tag_release: true
+
+  publish-macos-helper:
+    name: Publish macOS Computer Use Helper
+    needs: release-please
+    if: >-
+      github.event_name == 'push' &&
+      needs.release-please.outputs.releases_created == 'true' &&
+      contains(fromJSON(needs.release-please.outputs.paths_released || '[]'), 'packages/rome-node-core')
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/rome-node.yml
+    with:
+      publish_macos_helper: true
+    secrets: inherit
 
   publish-manual:
     name: Publish manual package
@@ -114,9 +131,23 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       (inputs.package == 'all' || inputs.package == 'packages/rome-node-cli')
     permissions:
-      contents: read
+      contents: write
       packages: write
     uses: ./.github/workflows/rome-node.yml
     with:
       publish_image: ${{ !inputs.dry_run }}
       tag_release: ${{ !inputs.dry_run }}
+
+  publish-macos-helper-manual:
+    name: Publish manual macOS Computer Use Helper
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.package == 'all' || inputs.package == 'packages/rome-node-core')
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/rome-node.yml
+    with:
+      publish_macos_helper: true
+      dry_run: ${{ inputs.dry_run }}
+    secrets: inherit

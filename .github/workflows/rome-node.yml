@@ -2,9 +2,8 @@ name: Rome Node package
 
 # The unit suites of the packages run in ci.yml. This workflow checks the
 # standalone npm archives, the Web UI bundle budget, native helper, and Docker image.
-# release.yml calls it via workflow_call whenever @rome-os/node releases to
-# publish the multi-platform image (version, latest, and commit SHA). A manual
-# run on main can also publish on demand.
+# release.yml calls it to publish the Node image and the signed Computer Use
+# Helper when their respective npm packages release.
 on:
   pull_request:
     paths:
@@ -57,12 +56,32 @@ on:
         required: false
         type: boolean
         default: false
+      publish_macos_helper:
+        description: Build the signed Computer Use Helper for the Node Core release
+        type: boolean
+        default: false
+      dry_run:
+        description: Build and verify the signed Helper without uploading release assets
+        type: boolean
+        default: false
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APP_STORE_CONNECT_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: false
+      APP_STORE_CONNECT_P8_CONTENT:
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   macos-native:
+    if: ${{ !inputs.publish_macos_helper }}
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -82,8 +101,15 @@ jobs:
           fi
           printf '%s\n' "$output"
           [[ "$output" == "A compile-only helper cannot be released or installed." ]]
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node-core...
+      - run: pnpm --filter @rome-os/node-core test src/computer-use/install.test.ts
 
   package:
+    if: ${{ !inputs.publish_macos_helper }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -110,6 +136,7 @@ jobs:
           node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" --help
 
   image:
+    if: ${{ !inputs.publish_macos_helper }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -308,3 +335,132 @@ jobs:
               printf -- '- `%s`\n' "$tag"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-macos-helper:
+    if: >-
+      github.repository == 'rome-os/rome' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.publish_macos_helper
+    runs-on: macos-15
+    timeout-minutes: 35
+    concurrency:
+      group: rome-node-macos-helper-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      ARCHIVE: Rome-Computer-Use-darwin-arm64.zip
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Select the Node Core release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == arm64 ]]
+          version=$(jq -er '.version | strings' packages/rome-node-core/package.json)
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$'
+          [[ "$version" =~ $semver ]]
+          tag="node-core-v${version}"
+          if [[ "$DRY_RUN" != true ]]; then
+            gh release view "$tag" --json tagName,isDraft,isImmutable | jq -e --arg tag "$tag" \
+              '.tagName == $tag and .isDraft == false and .isImmutable == false' >/dev/null
+            git fetch --no-tags origin "refs/tags/$tag"
+            git switch --detach FETCH_HEAD
+            [[ "$(jq -er '.version' packages/rome-node-core/package.json)" == "$version" ]]
+          fi
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Import the Rome Developer ID signing identity
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${CSC_LINK:?Missing CSC_LINK}" "${CSC_KEY_PASSWORD:?Missing CSC_KEY_PASSWORD}"
+          umask 077
+          keychain="$RUNNER_TEMP/rome-computer-use.keychain-db"
+          cert="$RUNNER_TEMP/rome-computer-use.p12"
+          case "$CSC_LINK" in
+            file://*) cert="${CSC_LINK#file://}" ;;
+            /*) cert="$CSC_LINK" ;;
+            *) printf '%s' "$CSC_LINK" | base64 --decode > "$cert" ;;
+          esac
+          keychain_password=$(openssl rand -hex 32)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" "$(security default-keychain -d user | xargs)"
+          security import "$cert" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          signing_identity=$(security find-identity -v -p codesigning "$keychain" | awk '
+            /"Developer ID Application: .+ \(4YWXB26F39\)"$/ { identity = $2; count++ }
+            END { if (count == 1) print identity }
+          ')
+          if ! [[ "$signing_identity" =~ ^[0-9A-F]{40}$ ]]; then
+            echo "::error::Expected one valid Rome Developer ID Application signing identity."
+            exit 1
+          fi
+          echo "SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+
+      - name: Sign, notarize, and package the Helper
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_P8_CONTENT: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
+        run: |
+          set -euo pipefail
+          : "${APP_STORE_CONNECT_KEY_ID:?Missing App Store Connect key ID}"
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing App Store Connect issuer ID}"
+          : "${APP_STORE_CONNECT_P8_CONTENT:?Missing App Store Connect private key}"
+          umask 077
+          key_path="$RUNNER_TEMP/rome-computer-use.p8"
+          printf '%s' "$APP_STORE_CONNECT_P8_CONTENT" | perl -pe 's/\\n/\n/g' > "$key_path"
+          chmod 600 "$key_path"
+
+          script=packages/rome-node-core/scripts/computer-use.swift
+          app="$RUNNER_TEMP/rome-computer-use/Rome Computer Use.app"
+          notary_zip="$RUNNER_TEMP/rome-computer-use-notary.zip"
+          dist="$RUNNER_TEMP/rome-computer-use-dist"
+          mkdir "$dist"
+          swift "$script" build --identity "$SIGNING_IDENTITY" --app "$app"
+          /usr/bin/ditto -c -k --keepParent "$app" "$notary_zip"
+          xcrun notarytool submit "$notary_zip" --key "$key_path" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --wait --timeout 20m
+          xcrun stapler staple "$app"
+          swift "$script" verify --release --app "$app"
+          spctl --assess --type execute --verbose "$app"
+          /usr/bin/ditto -c -k --keepParent "$app" "$dist/$ARCHIVE"
+          /usr/bin/ditto -x -k "$dist/$ARCHIVE" "$RUNNER_TEMP/rome-computer-use-verify"
+          swift "$script" verify --release --app "$RUNNER_TEMP/rome-computer-use-verify/Rome Computer Use.app"
+          cd "$dist"
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - name: Delete the temporary keychain and credentials
+        if: always()
+        run: |
+          status=0
+          keychain="$RUNNER_TEMP/rome-computer-use.keychain-db"
+          if [[ -f "$keychain" ]]; then security delete-keychain "$keychain" || status=1; fi
+          for file in "$RUNNER_TEMP/rome-computer-use.p12" "$RUNNER_TEMP/rome-computer-use.p8"; do
+            if [[ -f "$file" ]]; then unlink "$file" || status=1; fi
+          done
+          exit "$status"
+
+      - name: Publish the versioned Helper assets
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          assets=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+          if grep -Fxq -e "$ARCHIVE" -e "$ARCHIVE.sha256" <<< "$assets"; then
+            echo "::error::A Helper asset already exists on $RELEASE_TAG. Cut a new version to publish again."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/rome-computer-use-dist"
+          gh release upload "$RELEASE_TAG" "$ARCHIVE" "$ARCHIVE.sha256" --repo "$GITHUB_REPOSITORY"

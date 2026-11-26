@@ -14,9 +14,19 @@ import * as discovery from "./discovery.js" with { rstest: "importActual" };
 import { ComputerUseHost } from "./host.js";
 import { ComputerUseError, PNG_LIMIT, type Results } from "./protocol.js";
 
-const mock = rs.hoisted(() => ({ launch: rs.fn(), discover: rs.fn() }));
+const mock = rs.hoisted(() => ({
+  launch: rs.fn(),
+  discover: rs.fn(),
+  canAutoInstall: rs.fn(),
+  install: rs.fn(),
+}));
 rs.mock("./bridge.js", () => ({ ComputerUseBridge: { launch: mock.launch } }));
-rs.mock("./discovery.js", () => ({ ...discovery, discoverHelper: mock.discover }));
+rs.mock("./discovery.js", () => ({
+  ...discovery,
+  discoverHelper: mock.discover,
+  canAutoInstallHelper: mock.canAutoInstall,
+}));
+rs.mock("./install.js", () => ({ installHelper: mock.install }));
 
 const peer = randomUUID();
 const other = randomUUID();
@@ -49,6 +59,8 @@ beforeEach(() => {
   mock.discover.mockReset();
   mock.discover.mockResolvedValue("/fake/Rome Computer Use.app");
   mock.launch.mockReset();
+  mock.canAutoInstall.mockReset().mockReturnValue(false);
+  mock.install.mockReset();
 });
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -164,6 +176,7 @@ it("discovers paths without signature verification and stops at an invalid expli
   await mkdir(preferred, { recursive: true });
   const env = {
     platform: "darwin" as const,
+    arch: "arm64" as const,
     applications: [join(root, "preferred"), root],
     envPath: app,
   };
@@ -190,11 +203,19 @@ it("discovers paths without signature verification and stops at an invalid expli
 });
 
 it.each([
-  "computer_use_unsupported_platform",
-  "computer_use_helper_missing",
-  "invalid_helper_bundle",
-] as const)("advertises off and returns %s without launching", async (code) => {
-  mock.discover.mockRejectedValue(new ComputerUseError(code));
+  { platform: "darwin", arch: "x64", code: "computer_use_unsupported_platform" },
+  { platform: "linux", arch: "arm64", code: "computer_use_unsupported_platform" },
+  {
+    platform: "darwin",
+    arch: "arm64",
+    envPath: "/missing.app",
+    code: "computer_use_helper_missing",
+  },
+  { platform: "darwin", arch: "arm64", envPath: "./invalid.app", code: "invalid_helper_bundle" },
+] as const)("advertises off on $platform/$arch with $code", async ({ code, ...options }) => {
+  const paths = { ...options, applications: [] };
+  mock.discover.mockImplementation(() => discovery.discoverHelper(paths));
+  mock.canAutoInstall.mockImplementation(() => discovery.canAutoInstallHelper(paths));
   const f = executor();
   const info = await f.json("system.info");
   expect(info).toMatchObject({
@@ -219,6 +240,140 @@ it.each([
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(await f.json("computer.windows")).toMatchObject(error(code));
   expect(mock.launch).not.toHaveBeenCalled();
+  expect(mock.install).not.toHaveBeenCalled();
+  expect(await f.json("system.info")).toMatchObject({
+    result: {
+      actions: ["system.info", "exec", "fs.list", "computer.cancel"],
+      capabilities: [{ state: "off" }],
+    },
+  });
+});
+
+function missingOnAppleSilicon() {
+  const options = { platform: "darwin", arch: "arm64", applications: [] } as const;
+  expect(discovery.canAutoInstallHelper(options)).toBe(true);
+  expect(discovery.canAutoInstallHelper({ ...options, envPath: "" })).toBe(false);
+  mock.canAutoInstall.mockReturnValue(true);
+  mock.discover.mockRejectedValue(new ComputerUseError("computer_use_helper_missing"));
+}
+
+it.each([
+  "computer.windows",
+  "computer.bind",
+])("installs on first %s and discovers the installed app for another peer", async (action) => {
+  missingOnAppleSilicon();
+  const appPath = "/fake/Rome Computer Use.app";
+  mock.install.mockImplementation(async () => {
+    mock.discover.mockResolvedValue(appPath);
+    return appPath;
+  });
+  mock.launch.mockImplementation(async () => fakeHelper());
+  const f = executor();
+  expect(await f.json("system.info")).toMatchObject({
+    result: {
+      actions: expect.arrayContaining(["computer.windows", "computer.bind", "computer.cancel"]),
+      capabilities: [{ state: "needs_permission" }],
+    },
+  });
+  expect(await f.json("computer.cancel", {}, other)).toMatchObject({ result: confirmed });
+  expect(mock.install).not.toHaveBeenCalled();
+  expect(mock.launch).not.toHaveBeenCalled();
+  expect(await f.json(action, action === "computer.bind" ? { window: 1 } : {})).toMatchObject({
+    ok: true,
+  });
+  expect(await f.json("system.info")).toMatchObject({
+    result: { capabilities: [{ state: "on" }] },
+  });
+  expect(await f.json("computer.windows", {}, randomUUID())).toMatchObject({ ok: true });
+  expect(mock.install).toHaveBeenCalledTimes(1);
+  expect(mock.discover).toHaveBeenCalledTimes(2);
+  expect(mock.launch).toHaveBeenCalledTimes(2);
+  expect(mock.launch).toHaveBeenLastCalledWith(expect.objectContaining({ appPath }));
+});
+
+it("shares a download and lets either peer cancel without stopping the other", async () => {
+  missingOnAppleSilicon();
+  const f = executor();
+  let resolve!: (app: string) => void;
+  const promise = new Promise<string>((done) => {
+    resolve = done;
+  });
+  mock.install.mockReturnValue(promise);
+  mock.launch.mockResolvedValue(fakeHelper());
+  const first = f.json("computer.windows");
+  const second = f.json("computer.bind", { window: 1 }, other);
+  await expect.poll(() => mock.install.mock.calls.length).toBe(1);
+  const signal = mock.install.mock.calls[0]![0] as AbortSignal;
+  expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await first).toMatchObject(error("session_stopped"));
+  expect(signal.aborted).toBe(false);
+  expect(mock.launch).not.toHaveBeenCalled();
+  resolve("/fake/Rome Computer Use.app");
+  expect(await second).toMatchObject({ ok: true });
+  expect(mock.install).toHaveBeenCalledTimes(1);
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  "cancel",
+  "disconnect",
+])("aborts the download when the only waiter leaves by %s", async (how) => {
+  missingOnAppleSilicon();
+  mock.install.mockImplementation(
+    (signal: AbortSignal) =>
+      new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  );
+  const host = new ComputerUseHost();
+  cleanups.push(() => host.disconnect());
+  const request = host.prepare("computer.windows", peer, {})!;
+  const opening = request.run();
+  await expect.poll(() => mock.install.mock.calls.length).toBe(1);
+  const signal = mock.install.mock.calls[0]![0] as AbortSignal;
+  if (how === "disconnect") host.disconnect();
+  else {
+    const cancel = host.prepare("computer.cancel", peer, {})!;
+    expect((await cancel.run()).response).toMatchObject({ result: confirmed });
+    cancel.release();
+  }
+  expect((await opening).response).toMatchObject(error("session_stopped"));
+  request.release();
+  expect(signal.aborted).toBe(true);
+  expect(mock.launch).not.toHaveBeenCalled();
+  mock.install.mockResolvedValueOnce("/fake/Rome Computer Use.app");
+  mock.launch.mockResolvedValue(fakeHelper());
+  const retry = host.prepare("computer.windows", other, {})!;
+  expect((await retry.run()).response).toMatchObject({ ok: true });
+  retry.release();
+});
+
+it("returns an install error and lets a later request retry", async () => {
+  missingOnAppleSilicon();
+  mock.install.mockRejectedValueOnce(new Error("Internal download detail"));
+  const f = executor();
+  expect(await f.json("computer.windows")).toMatchObject({
+    ok: false,
+    error: {
+      code: "computer_use_helper_install_failed",
+      message: expect.stringContaining("official Computer Use Helper"),
+    },
+  });
+  expect(mock.launch).not.toHaveBeenCalled();
+  mock.install.mockResolvedValueOnce("/fake/Rome Computer Use.app");
+  mock.launch.mockResolvedValue(fakeHelper());
+  expect(await f.json("computer.windows")).toMatchObject({ ok: true });
+  expect(mock.install).toHaveBeenCalledTimes(2);
+});
+
+it("does not install for an unaudited or invalid request", async () => {
+  missingOnAppleSilicon();
+  const refused = executor({ ...noAudit, start: async () => null });
+  expect(await refused.json("computer.windows")).toMatchObject(error("audit_unavailable"));
+  expect(await executor().json("computer.bind", { window: "invalid" })).toMatchObject(
+    error("invalid_request"),
+  );
+  expect(mock.install).not.toHaveBeenCalled();
 });
 
 it("refuses helper launch while the host cannot record the request", async () => {

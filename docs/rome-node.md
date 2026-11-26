@@ -1043,21 +1043,38 @@ replacement connection.
 Full Rome Node hosts register the `computer.*` actions for window control.
 A limited host refuses remote actions with `computer_use_off`.
 
-On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
-`~/Applications`, in that order. `ROME_NODE_COMPUTER_USE_HELPER` overrides the
-bundle path. The host verifies the signature at launch before asking for local
-session approval. The helper may also need Accessibility and Screen Recording
+On Apple silicon Macs running arm64 Node.js, the host looks for
+`Rome Computer Use.app` in `/Applications` and `~/Applications`, in that order.
+If neither location has the Helper, the first `computer.windows` or
+`computer.bind` request downloads it and installs it into
+`~/Applications/Rome Computer Use.app`. Setting `ROME_NODE_COMPUTER_USE_HELPER`
+makes the host use only that path. If the bundle is missing at that path, the
+request returns `computer_use_helper_missing`.
+
+The [release workflow](../.github/workflows/release.yml) attaches
+`Rome-Computer-Use-darwin-arm64.zip` and its `.sha256` file to each
+`node-core-v<version>` GitHub Release. It signs the Helper with Rome's Developer
+ID Application certificate, notarizes it with Apple, and staples the ticket before
+packaging. The host downloads from the release matching its installed
+`@rome-os/node-core` version. It checks the SHA-256 digest before extracting the
+archive and verifies the Rome signature and notarization ticket before installing
+the Helper. Ticket verification requires the Apple command-line developer tools
+that provide `xcrun stapler`. The workflow refuses to replace either asset on an
+existing release.
+
+The host verifies the Helper's signature at launch before asking for local
+session approval. The Helper may also need Accessibility and Screen Recording
 permissions in System Settings → Privacy & Security.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,
 `prefix: "computer"`, and `personal: true`. The shared-chat audience guard
 refuses access to its observations, including AX content and screenshots.
-The capability reports `needs_permission` when a helper bundle is present and
-the peer has yet to establish an approved session. It reports `on` while that
-peer has a live approved helper bridge. It reports `off` on other platforms,
-when discovery fails, or after the peer stops its session. Request errors such
-as `computer_use_unsupported_platform`, `computer_use_helper_missing`,
-`invalid_helper_bundle`, and `session_stopped` give the reason.
+The capability reports `needs_permission` when the Helper is present or can be
+installed on first use and the peer has yet to establish an approved session.
+It reports `on` while that peer has a live approved Helper bridge. It reports
+`off` when the Helper is unavailable or after the peer stops its session.
+`system.info` reads local state only. Download, verification, and installation
+failures return `computer_use_helper_install_failed`.
 
 The flat `actions` list advertises the operations a peer can request.
 `system.info.usage` maps each advertised `computer.*` action to its argument
@@ -1123,7 +1140,9 @@ before their package releases. Building an archive does not publish it.
 
 The main CI runs the unit suites of both packages on Linux. The
 [package workflow](../.github/workflows/rome-node.yml) packs both packages, installs
-the archives with npm, and starts a daemon from the installed core package. CI does
-not run on macOS or Windows, so behavior specific to those platforms is unverified.
-Browser authorization and two-computer acceptance also require real environments.
+the archives with npm, and starts a daemon from the installed core package.
+Its macOS job tests the native Helper and exercises archive extraction and
+publication without signing credentials. The release job checks signing,
+notarization, and Gatekeeper. Browser authorization and two-computer acceptance
+require real environments.
 Platform simulations and type checks do not establish those results.
