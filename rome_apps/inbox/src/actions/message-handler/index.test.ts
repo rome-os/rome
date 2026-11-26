@@ -19,7 +19,7 @@ import {
 
 const STRANGER_PERSON_ID = "__STRANGER__";
 
-type WakeSender = { person: { id: string; bondLevel: string } | null };
+type WakeSender = { person: { id: string } | null };
 
 const actionConfig: ActionConfig = {
   name: "inbox:message_handler",
@@ -172,7 +172,6 @@ describe("buildMessageContext", () => {
       threadId: "thread-123",
       channelUserId: "user-456",
       displayName: "Alice",
-      bondLevel: "inner-circle",
       person: {
         id: "alice",
         displayName: "Alice",
@@ -210,7 +209,6 @@ describe("buildMessageContext", () => {
       threadType: "group",
       channelUserId: "user-456",
       displayName: "Alice",
-      bondLevel: "guardian",
       person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
@@ -232,7 +230,6 @@ describe("buildMessageContext", () => {
       threadType: "group" as const,
       channelUserId: "user-456",
       displayName: "Guardian",
-      bondLevel: "guardian",
       person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
@@ -257,7 +254,6 @@ describe("buildMessageContext", () => {
       threadId: "session-1",
       channelUserId: "guardian",
       displayName: "Guardian",
-      bondLevel: "guardian",
       person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
@@ -278,7 +274,6 @@ describe("buildMessageContext", () => {
       threadId: "session-1",
       channelUserId: "guardian",
       displayName: "Guardian",
-      bondLevel: "guardian",
       selectedProjectName: "alpha",
       selectedProjectPath: "/home/rome/.rome/default/projects/alpha",
       person: null,
@@ -398,7 +393,7 @@ describe("a message that wakes the agent", () => {
 
     expect(result).toEqual({
       status: "ok",
-      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+      data: { action: "ignored_by_reply_settings" },
     });
     expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
     expect(findByNameFuzzy).not.toHaveBeenCalled();
@@ -975,7 +970,7 @@ describe("a message the host recorded", () => {
 
     expect(result).toEqual({
       status: "ok",
-      data: { action: "ignored_by_reply_settings", bondLevel: "inner-circle" },
+      data: { action: "ignored_by_reply_settings" },
     });
     expect(agentRunner.calls).toEqual([]);
     expect(conversations.addMessage).not.toHaveBeenCalled();
