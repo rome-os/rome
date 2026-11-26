@@ -46,22 +46,30 @@ description: |
   /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads and /threads/{id}
   (all under /gmail/v1/users/me), without custom headers/body. It never modifies,
   deletes or labels mail. Attachment downloads are not supported through this
-  connection. Read replies include connectionId. Send via core:gmail_send
-  with that connectionId and the profile's emailAddress as From: every exact
-  message requires the guardian's approval card. No managed Google connection
-  means the existing Composio Gmail path remains available; a broken grant never
-  silently switches to Composio. Other Google services stay on Composio.
+  connection. Read replies include connectionId: send only via core:gmail_send
+  with that connectionId and the profile's emailAddress as From, and every exact
+  message requires the guardian's approval card. With no Rome-managed Google
+  connection, Gmail calls go to the Composio Gmail connection, and sending
+  through it uses its Composio Gmail tools (connector:connector_tool_execute).
+  A gmail_connection_broken read or send, or a gmail_send_not_granted send,
+  never switches to Composio: ask the guardian to reconnect Google. After a
+  gmail_connection_changed send, read the profile again and follow what it
+  answers. Other Google services stay on Composio.
 
-  With a Rome-managed Microsoft connection, Outlook is restricted to GETs for
+  With a Rome-managed Microsoft connection, Outlook mail is restricted to GETs for
   /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders,
   /v1.0/me/mailFolders/{id} and /v1.0/me/mailFolders/{id}/messages, without custom
   headers/body. It never modifies, moves, deletes or flags mail, and attachments
-  are not supported. Read replies include connectionId. Send via
-  core:outlook_send with that connectionId and /v1.0/me's address as From:
-  every exact message requires the guardian's approval card. No managed
-  Microsoft connection means the existing Composio Outlook path remains
-  available; a broken grant never silently switches to Composio. Calendar,
-  contacts and other Graph paths stay on Composio.
+  are not supported. Read replies include connectionId: send only via
+  core:outlook_send with that connectionId and /v1.0/me's address as From, and
+  every exact message requires the guardian's approval card. With no
+  Rome-managed Microsoft connection, Outlook calls go to the Composio Outlook
+  connection, and sending through it uses its Composio Outlook tools
+  (connector:connector_tool_execute). An outlook_connection_broken read or
+  send, or an outlook_send_not_granted send, never switches to Composio: ask
+  the guardian to reconnect Microsoft. After an outlook_connection_changed send,
+  read /v1.0/me again and follow what it answers. Calendar, contacts and other
+  Graph paths stay on Composio.
 
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never

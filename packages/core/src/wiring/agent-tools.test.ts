@@ -29,7 +29,7 @@ describe("core's agent tools", () => {
   it("registers every tool it lists as an action an agent can call, owned by core", () => {
     const registry = new ActionRegistryImpl();
 
-    registerAgentTools(registry, async () => "guardian", {} as AgentToolDeps);
+    registerAgentTools(registry, {} as AgentToolDeps);
 
     expect(registry.list().sort()).toEqual([...NAMES].sort());
     for (const name of NAMES) {
