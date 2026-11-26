@@ -26,9 +26,20 @@ function shipsHelper({ arch, appOutDir, electronPlatformName, outDir, packager }
 function checkHelper() {
   const flags =
     process.env.ROME_DESKTOP_ALLOW_UNSIGNED_COMPUTER_USE === "1" ? ["--self-test-build"] : [];
-  execFileSync("/usr/bin/swift", [verifier, "verify", "--app", helper, ...flags], {
-    stdio: "inherit",
-  });
+  try {
+    execFileSync("/usr/bin/swift", [verifier, "verify", "--app", helper, ...flags], {
+      stdio: "inherit",
+    });
+  } catch (cause) {
+    throw new Error(
+      [
+        "Build the signed helper from the repository root with this command.",
+        "  swift packages/rome-node-core/scripts/computer-use.swift build --app 'packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app' --identity '<identity>'",
+        "For local unsigned packaging, replace the --identity option and its value with --self-test-build. Set ROME_DESKTOP_ALLOW_UNSIGNED_COMPUTER_USE=1 when packaging.",
+      ].join("\n"),
+      { cause },
+    );
+  }
 }
 
 export function beforePack(context) {

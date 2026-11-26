@@ -108,7 +108,8 @@ jobs:
         run: |
           npm run prepublishOnly
           # npm pack preserves the executable mode of the Mach-O inside the bundle.
-          filename="$(npm pack --json --pack-destination "$RUNNER_TEMP" | jq -er '.[0].filename')"
+          # The prepack verifier's stdout would corrupt the JSON.
+          filename="$(npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP" | jq -er '.[0].filename')"
           archive="$RUNNER_TEMP/$filename"
           unpack="$(mktemp -d)"
           tar -xzf "$archive" -C "$unpack"
