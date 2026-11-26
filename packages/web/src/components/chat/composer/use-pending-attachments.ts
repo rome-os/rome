@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
 import { randomUUID } from "@/lib/random-uuid";
 import type { PendingUpload } from "@/lib/chat-types";
 
@@ -27,8 +27,8 @@ export interface PendingAttachments {
   add: (files: File[]) => void;
   /** Removes one attachment. Ignored while an upload is in flight. */
   remove: (id: string) => void;
-  /** Replaces the whole tray, as a send's clear and its restore on failure do. */
-  set: (uploads: PendingUpload[]) => void;
+  /** Replaces the whole tray, or derives the next tray from the current one. */
+  set: Dispatch<SetStateAction<PendingUpload[]>>;
   /** Removes the attachments that went out, keeping any added since. */
   removeSent: (sent: PendingUpload[]) => void;
   /**

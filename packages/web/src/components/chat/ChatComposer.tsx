@@ -415,6 +415,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }),
     [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill, selectedPersonId],
   );
+  const newChatDraftRef = useRef(newChatDraft);
+  newChatDraftRef.current = newChatDraft;
   const { keep: keepChatDraft } = draft;
   const keepDraft = useCallback(
     (text: string, stop?: DictationStop) => {
@@ -754,11 +756,14 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       clearNewChatDraft();
       skipNextDraftSaveRef.current = clearsOptimistically && (inputText !== "" || skill !== null);
     }
+    // The draft's change count once this send cleared it: a failed send
+    // puts its reply back only if the guardian changed nothing since.
+    let clearedAt: number | undefined;
     if (clearsOptimistically) {
       setInputText("");
       setPendingUploads([]);
       setDraftSkill(null);
-      replyDraft?.clear();
+      clearedAt = replyDraft?.clear();
     }
     setHint((current) => pickComposerHint(hints, current));
     try {
@@ -783,22 +788,18 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       if (persistNewChatDraft && (!textareaRef.current || (clearsOptimistically && newer))) return;
       // A failed turn in an adopted session belongs there, not in New chat.
       if (persistNewChatDraft && !sessionCreatedRef.current) {
+        const currentDraft = newChatDraftRef.current(rawText);
         saveNewChatDraft(
           {
-            version: 1,
-            text: rawText,
-            projectPath: draftProjectName,
-            agentMention: draftAgentMention,
-            skill,
-            personaId: selectedPersonId,
-            ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
+            ...currentDraft,
+            skill: currentDraft.skill ?? skill,
           },
           authEpoch,
         );
       }
-      if (clearsOptimistically) {
-        // Text typed while the send was pending survives a failure; only an
-        // empty field takes the failed text back.
+      if (clearsOptimistically && textareaRef.current?.value === "" && !voiceActiveRef.current) {
+        // Text typed or dictated while the send was pending survives a failure;
+        // only an empty field takes the failed text and its context back.
         setInputText((current) =>
           current === "" && !voiceActiveRef.current
             ? persistNewChatDraft
@@ -806,9 +807,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
               : text
             : current,
         );
-        setPendingUploads(uploads);
-        setDraftSkill(skill);
-        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
+        // Keep anything the guardian added since the send.
+        setPendingUploads((current) => (current.length === 0 ? uploads : current));
+        setDraftSkill((current) => (current === null ? skill : current));
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo, clearedAt);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.

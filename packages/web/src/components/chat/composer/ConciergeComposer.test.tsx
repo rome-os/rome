@@ -330,6 +330,27 @@ describe("ConciergeComposer reply", () => {
     );
   });
 
+  it("does not put the reply back when newer text replaced the failed message", async () => {
+    let rejectSend!: (error: Error) => void;
+    const { onSend } = renderComposer({}, reply);
+    onSend.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    await screen.findByRole("button", { name: "Cancel reply" });
+
+    const box = screen.getByPlaceholderText("Message") as HTMLTextAreaElement;
+    await userEvent.type(box, "why there?{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await userEvent.type(box, "newer text");
+    await act(async () => rejectSend(new Error("offline")));
+
+    expect(box.value).toBe("newer text");
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
   it("drops the reply on Escape, and from the chip's ×", async () => {
     renderComposer({}, reply);
     await screen.findByRole("button", { name: "Cancel reply" });

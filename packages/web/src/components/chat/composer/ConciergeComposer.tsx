@@ -317,14 +317,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       } catch {
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
-          // Text typed or dictated while the send was pending is newer than
-          // what failed. Dictated words are not in the field until listening ends.
-          setInputText((current) => (current === "" && !voiceActiveRef.current ? text : current));
           sendEnded(text, false);
-          setPendingUploads(uploads);
-          setFolder(pickedFolder);
-          setDraftSkill(skill);
-          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
+          if (textareaRef.current?.value === "" && !voiceActiveRef.current) {
+            // Text typed or dictated while the send was pending survives a
+            // failure; only an empty field takes the failed text and its
+            // context back. Dictated words are not in the field until listening
+            // ends.
+            setInputText((current) => (current === "" && !voiceActiveRef.current ? text : current));
+            // Keep anything the guardian added since the send.
+            setPendingUploads((current) => (current.length === 0 ? uploads : current));
+            setFolder((current) => (current === null ? pickedFolder : current));
+            setDraftSkill((current) => (current === null ? skill : current));
+            if (replyTo) replyDraft?.restore(replyTo, clearedAt);
+          }
         }
       }
     }, [
