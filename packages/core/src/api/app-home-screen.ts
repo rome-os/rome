@@ -66,6 +66,7 @@ export function buildAppWebManifest(appId: string, app: WebApp): Record<string, 
   const route = `/full/apps/${appIdToPathSegment(appId)}`;
   const iconUrl = homeScreenIconUrl(appId, app);
   const shareRoute = appShareTargetRoute(appId, app);
+  const target = app.manifest.web?.shareTarget;
   const size = `${HOME_SCREEN_ICON_SIZE}x${HOME_SCREEN_ICON_SIZE}`;
   const icon = iconUrl
     ? { src: iconUrl, sizes: size, type: "image/png" }
@@ -87,6 +88,11 @@ export function buildAppWebManifest(appId: string, app: WebApp): Record<string, 
     // the share sheet, and the Mac app's share shortcut opens this page.
     ...(shareRoute
       ? { share_target: { action: shareRoute, method: "GET", params: { text: "text" } } }
+      : {}),
+    // Rome's own member, beside the standard one browsers read: the window
+    // size the share page is designed for.
+    ...(shareRoute && (target?.width || target?.height)
+      ? { rome_share_panel: { width: target.width, height: target.height } }
       : {}),
   };
 }

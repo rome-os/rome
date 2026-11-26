@@ -32,7 +32,9 @@ describe("home-screen routes", () => {
       ttt: webApp("ttt", "Sevenfold Tic-Tac-Toe", join(root, "icon.svg")),
       "@acme/radar": webApp("@acme/radar", "Radar", join(root, "icon.svg")),
       plain: webApp("plain", "Plain"),
-      translate: webApp("translate", "Translate", undefined, { shareTarget: { path: "/quick" } }),
+      translate: webApp("translate", "Translate", undefined, {
+        shareTarget: { path: "/quick", width: 380, height: 460 },
+      }),
       "@acme/notes": webApp("@acme/notes", "Notes", undefined, { shareTarget: {} }),
       headless: { appId: "headless", displayName: "Headless", manifest: {}, web: null },
     };
@@ -81,6 +83,13 @@ describe("home-screen routes", () => {
         method: "GET",
         params: { text: "text" },
       });
+    });
+
+    it("publishes the panel size the share page is designed for", async () => {
+      const res = await app.request("/app-manifest/translate.webmanifest");
+      expect(await res.json()).toMatchObject({ rome_share_panel: { width: 380, height: 460 } });
+      const plain = await app.request("/app-manifest/%40acme%2Fnotes.webmanifest");
+      expect(await plain.json()).not.toHaveProperty("rome_share_panel");
     });
 
     it("sends shared text to the app's own page when the target has no path", async () => {
