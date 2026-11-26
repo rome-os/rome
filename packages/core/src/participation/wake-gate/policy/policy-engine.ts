@@ -9,11 +9,6 @@ export type { PolicyContext } from "@rome-os/app-runtime";
 type MatchedScope = "sender_specific" | "thread" | "channel" | "global" | "default";
 
 const DEFAULT_ALLOW: PolicyRule = { action: "allow" };
-const DEFAULT_SENTINEL_REVIEW: PolicyRule = { action: "sentinel_review" };
-
-/** The bond levels {@link PolicyEngine.evaluate} allowed with no policy, as it
- *  did before entry decided who may start something. */
-const DEFAULT_TRUSTED_LEVELS: readonly string[] = ["guardian"];
 
 function recordPolicyDecision(
   context: { channel: string },
@@ -138,19 +133,15 @@ export class PolicyEngine {
     private connectionKindOf: ConnectionKindOfChannel,
   ) {}
 
-  /** {@link matchingPolicy} on the stored policies. With none, it answers as
-   *  it always has for an app that calls it: allow for the guardian, and
-   *  sentinel review for anyone else. */
+  /** {@link matchingPolicy} on the stored policies. With none, the message is
+   *  allowed: whoever sent it was let in on the way in. */
   async evaluate(context: PolicyContext): Promise<PolicyRule> {
     const matched = matchingPolicy(
       { policies: await this.policiesRepo.findAll(), connectionKindOf: this.connectionKindOf },
       context,
     );
     if (matched) return matched;
-    const rule = DEFAULT_TRUSTED_LEVELS.includes(context.bondLevel)
-      ? DEFAULT_ALLOW
-      : DEFAULT_SENTINEL_REVIEW;
-    recordPolicyDecision(context, rule, "default");
-    return rule;
+    recordPolicyDecision(context, DEFAULT_ALLOW, "default");
+    return DEFAULT_ALLOW;
   }
 }

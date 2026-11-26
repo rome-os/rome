@@ -176,9 +176,17 @@ There is no PR-time "did you add a changeset?" check. The merge commit is the so
 
 1. Your PR's squash commit lands on `main`.
 2. The `Release` workflow runs release-please. If there are any unreleased Conventional commits attributed to a releasable package, it opens (or updates) a single release PR titled `chore: release …` that bumps `version` in each affected `package.json` and appends to that package's `CHANGELOG.md`. Multiple commits accumulate into the same PR until it merges.
-3. Merging the release PR triggers the workflow again. release-please now creates a GitHub release + git tag for each package whose version moved and emits `paths_released`. The follow-up `publish` job matrixes over those paths, runs `pnpm build` in each, and pushes the tarball to npm.
+3. Merging the release PR triggers the workflow again. release-please creates a GitHub release and tag for each package whose version moved and emits `paths_released`. The publish jobs build and upload those packages to npm.
 
 The publish step is the merge of the release PR, not your original PR — so contributors do not have to worry about "every small fix becomes its own release". Multiple commits ship together.
+
+### Rome Node packages publish in dependency order
+
+Release-please keeps `@rome-os/node-core-darwin-arm64` and
+`@rome-os/node-core` at the same version. The macOS arm64 job signs and
+notarizes the standalone helper, checks the packed bundle, then publishes the
+platform package. It uses `npm pack` to preserve the helper binary's executable
+mode. The Node job publishes Core before the CLI. Other SDKs publish in parallel.
 
 ### Every published package declares `repository`
 
@@ -210,6 +218,10 @@ choose `all` or one package path. `all` expands to every package in
 dry run or a single-package retry. The manual path calls the same reusable
 `sdk-publish.yml` implementation as automatic release publishes, but keeps the
 OIDC caller identity anchored on `release.yml`.
+
+For a Rome Node retry, select the earliest package that failed. A Core-only
+publish checks that npm already has the matching helper version. A CLI-only
+publish checks that npm already has the referenced Core version.
 
 The `all` list in `sdk-publish.yml` is maintained by hand, so it and
 `release-please-config.json` have to stay in step. A package in `all` without a

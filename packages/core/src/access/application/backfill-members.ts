@@ -8,7 +8,7 @@
 // `settings` key records the revision this build last wrote or read. They are
 // read again only when an older build, after a rollback, saved them past it.
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import {
   guardianAuth,
@@ -41,7 +41,7 @@ const log = createLogger("members-backfill");
 
 // The platform an earlier build stored Rome Cloud ids under. A Rome Cloud
 // sign-in is now known by its email, so no account is kept on it.
-const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
+export const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
 
 /**
  * Brings the members in line with the guardian's seat and, on its first run,
@@ -51,7 +51,7 @@ const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
  * away, from any person, and each `email` account of a member, which only an
  * invitation gave, becomes the same address on `rome-cloud-email`. The
  * guardian gets the seat's email as a sign-in's and every account People
- * links to its guardian person, as an agent's own account excepted, and loses
+ * links to its guardian person, an agent's own account included, and loses
  * the seat's address as an `email` account unless People links it too, as an
  * email connection's address. It takes no other email away: Identity cannot
  * tell an earlier seat's email from the same address carried from People, so
@@ -101,7 +101,7 @@ function backfillWithinTx(tx: DrizzleTx): void {
       ? tx
           .select({ platform: links.platform, accountId: links.accountId })
           .from(links)
-          .where(and(eq(links.personId, peopleGuardian.id), eq(links.delegate, false)))
+          .where(eq(links.personId, peopleGuardian.id))
           .orderBy(links.platform, links.accountId)
           .all()
           .filter((link) => link.platform !== ROME_CLOUD_ID_PLATFORM)
