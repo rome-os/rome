@@ -66,6 +66,7 @@ import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attrib
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
+import type { TeamActor } from "./access/team.js";
 import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./instance/runtime.js";
@@ -774,7 +775,7 @@ async function main() {
   });
   // What people say or press on a connection passes this before it starts
   // anything (docs/domains/participation.md#entry).
-  const entrance = entranceOf<SessionActor>({
+  const entrance = entranceOf<TeamActor>({
     enter: accountEntry({
       db,
       actsForGuardian: async (account) => {
