@@ -5,8 +5,7 @@ import type { MessageAddressing, MessageReplyReference } from "@rome-os/app-runt
  *
  * Event-only action (no inputSchema). Triggered by ChannelMessageHook when a
  * message from someone let in arrives on any connected channel. Where the wake
- * gate lets it wake the agent, the agent answers, and the envoy validates the
- * reply before it is sent.
+ * gate lets it wake the agent, the agent answers in the same chat.
  *
  * @example
  * // Triggered internally by ChannelMessageHook — not called directly.
@@ -99,7 +98,7 @@ export interface MessageHandlerInput {
 
 export interface MessageHandlerOutput {
   /** What action was taken on the message. */
-  action: "blocked" | "sent" | "no_response" | "pending_approval" | "rejected_by_envoy";
+  action: "blocked" | "sent" | "no_response";
   /** Agent response text, if one was generated. */
   response?: string;
   /** Reason for the action taken (e.g. block or rejection reason). */

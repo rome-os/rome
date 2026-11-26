@@ -13,7 +13,6 @@ import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
-  recipientLabel,
   createAction as createMessageHandlerAction,
   sendAnswer,
 } from "./index.js";
@@ -48,8 +47,8 @@ function createMockAgentRunner(
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
-  // Catalog of agents the runner pretends to know. Defaults to main and envoy so existing tests don't need to opt in.
-  const known = new Set(options.knownAgents ?? ["main", "envoy"]);
+  // Catalog of agents the runner pretends to know.
+  const known = new Set(options.knownAgents ?? ["main"]);
   const actionCapable = options.actionCapableAgents ?? {};
 
   return {
@@ -67,11 +66,6 @@ function createMockAgentRunner(
       return (actionCapable[agentName] ?? []).includes(actionName);
     },
   };
-}
-
-function envoyAnswer(verdict: string, reason: string): AgentMessage {
-  const structuredOutput = { verdict, reason };
-  return { type: "result", content: JSON.stringify(structuredOutput), structuredOutput };
 }
 
 function createAction(
@@ -104,7 +98,6 @@ function createMessageHandlerDeps(
     actionCapableAgents: overrides.actionCapableAgents,
   });
   const sentMessages: Record<string, unknown>[] = [];
-  const approvals: Record<string, unknown>[] = [];
   const wake: {
     answer: "wake" | "quiet" | "block";
     asked: { message: unknown; sender: WakeSender }[];
@@ -124,9 +117,6 @@ function createMessageHandlerDeps(
 
   const deps = {
     agentRunner,
-    // Answers as Core's guardedSend does, which an app test cannot import.
-    sendGate: ({ recipient }: { recipient: { bondLevel: string } | null }) =>
-      recipient?.bondLevel === "guardian" ? "send" : "check",
     personMappingRepo: {
       findByChannelUser: rs.fn(async () => null),
       findByName: rs.fn(async () => []),
@@ -135,12 +125,6 @@ function createMessageHandlerDeps(
       create: rs.fn(async () => "person-1"),
       addChannelMapping: rs.fn(async () => undefined),
       ...overrides.personMappingRepo,
-    },
-    approvalsRepo: {
-      create: rs.fn(async (approval: Record<string, unknown>) => {
-        approvals.push(approval);
-        return "approval-1";
-      }),
     },
     // Answers `wake.answer`.
     wakeGateFor: rs.fn(async () => (message: unknown, sender: WakeSender) => {
@@ -169,7 +153,7 @@ function createMessageHandlerDeps(
     strangerPersonId: STRANGER_PERSON_ID,
   } as unknown as Parameters<typeof createAction>[1];
 
-  return { deps, agentRunner, sentMessages, approvals, conversations, wake };
+  return { deps, agentRunner, sentMessages, conversations, wake };
 }
 
 describe("buildMessageContext", () => {
@@ -308,24 +292,6 @@ describe("buildMessageContext", () => {
   });
 });
 
-// Pins the inbox's label to the form core's `whoSaid`
-// (packages/core/src/chats/sender-labels.ts) gives a message the agent reads:
-// "<shown name> [<person>, <bond level in words>]", or "[not linked]".
-// Apps cannot import core, so the format is asserted literally.
-describe("recipientLabel", () => {
-  it("labels a linked sender with their person and bond level in words, as core does", () => {
-    expect(
-      recipientLabel({ shownName: "Ada", person: "Ada Lovelace", bondLevel: "inner-circle" }),
-    ).toBe("Ada [Ada Lovelace, inner circle]");
-  });
-
-  it("labels a sender with no linked person as not linked, as core does", () => {
-    expect(recipientLabel({ shownName: "Ada", person: null, bondLevel: "other" })).toBe(
-      "Ada [not linked]",
-    );
-  });
-});
-
 describe("appendAttachmentPathsToPrompt", () => {
   it("adds saved attachment paths to text prompts", () => {
     const result = appendAttachmentPathsToPrompt("Please inspect this", [
@@ -356,7 +322,7 @@ describe("a message that wakes the agent", () => {
     rs.clearAllMocks();
   });
 
-  it("answers the guardian, unchecked", async () => {
+  it("answers the guardian", async () => {
     const guardian: PersonRecord = {
       id: "alice",
       displayName: "Alice",
@@ -410,7 +376,7 @@ describe("a message that wakes the agent", () => {
     const findByNameFuzzy = rs.fn(async () => guardian);
     const addChannelMapping = rs.fn(async () => undefined);
 
-    const { deps, agentRunner, sentMessages, approvals, wake } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => null),
         findByNameFuzzy,
@@ -437,7 +403,6 @@ describe("a message that wakes the agent", () => {
     expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
     expect(findByNameFuzzy).not.toHaveBeenCalled();
     expect(addChannelMapping).not.toHaveBeenCalled();
-    expect(approvals).toEqual([]);
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toEqual([]);
   });
@@ -523,7 +488,7 @@ describe("a message that wakes the agent", () => {
     expect(sentMessages).toEqual([]);
   });
 
-  it("answers anyone else, checked", async () => {
+  it("answers anyone else the same way, with no other agent", async () => {
     const mappedPerson: PersonRecord = {
       id: "casey",
       displayName: "Casey",
@@ -536,10 +501,7 @@ describe("a message that wakes the agent", () => {
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => mappedPerson),
       },
-      agentResponses: [
-        [{ type: "result", content: "Sure." }],
-        [envoyAnswer("approve", "Fine to send.")],
-      ],
+      agentResponses: [[{ type: "result", content: "Sure." }]],
     });
     const action = createAction(actionConfig, deps);
 
@@ -554,7 +516,7 @@ describe("a message that wakes the agent", () => {
     });
 
     expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
-    expect(agentRunner.calls).toHaveLength(2);
+    expect(agentRunner.calls).toHaveLength(1);
     expect(sentMessages).toEqual([
       {
         channel: "telegram",
@@ -566,89 +528,6 @@ describe("a message that wakes the agent", () => {
         knownToProvider: true,
       },
     ]);
-  });
-
-  it("tells the envoy the reply goes to the sender, not the guardian", async () => {
-    const priya: PersonRecord = {
-      id: "priya",
-      displayName: "Priya Lindqvist-Mbeki",
-      bondLevel: "acquaintance",
-      channelMappings: [{ channel: "discord", channelUserId: "priya-dc" }],
-      profilePath: null,
-    };
-    const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => priya) },
-      agentResponses: [
-        [{ type: "result", content: "You committed to the launch plan." }],
-        [{ type: "result", content: "APPROVE" }],
-      ],
-    });
-
-    await createAction(actionConfig, deps).execute({
-      channel: "discord",
-      channelUserId: "priya-dc",
-      threadId: "thread-1",
-      threadType: "group",
-      displayName: "Priya",
-      text: "What did I commit to?",
-      messageId: "msg-1",
-    });
-
-    const envoyPrompt = agentRunner.calls[1]?.prompt ?? "";
-    expect(envoyPrompt).toContain("from Priya [Priya Lindqvist-Mbeki, acquaintance]:");
-    expect(envoyPrompt).toContain("in the same group chat the message was sent in");
-    expect(envoyPrompt).toContain("The sender is not the guardian");
-  });
-});
-
-describe("envoy verdict", () => {
-  const casey: PersonRecord = {
-    id: "casey",
-    displayName: "Casey",
-    bondLevel: "other",
-    channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
-    profilePath: null,
-  };
-
-  async function replyWithEnvoyAnswer(answer: AgentMessage) {
-    const { deps, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => casey) },
-      agentResponses: [[{ type: "result", content: "Sure." }], [answer]],
-    });
-    const result = await createAction(actionConfig, deps).execute({
-      channel: "telegram",
-      channelUserId: "casey-tg",
-      threadId: "thread-1",
-      threadType: "private",
-      displayName: "Casey",
-      text: "Can you answer?",
-      messageId: "msg-1",
-    });
-    return { action: (result.data as { action: string }).action, sentMessages };
-  }
-
-  it.each([
-    ["approve", "sent", 1],
-    ["require_approval", "pending_approval", 0],
-    ["reject", "rejected_by_envoy", 0],
-  ])("acts on the verdict %s", async (verdict, action, sent) => {
-    const outcome = await replyWithEnvoyAnswer(envoyAnswer(verdict, "Because."));
-    expect(outcome.action).toBe(action);
-    expect(outcome.sentMessages).toHaveLength(sent);
-  });
-
-  it("sends an approved reply whose reason names another verdict", async () => {
-    const outcome = await replyWithEnvoyAnswer(
-      envoyAnswer("approve", "No need to REJECT or REQUIRE_APPROVAL; it answers the question."),
-    );
-    expect(outcome.action).toBe("sent");
-    expect(outcome.sentMessages).toHaveLength(1);
-  });
-
-  it("holds the reply when the envoy answers without a verdict", async () => {
-    const outcome = await replyWithEnvoyAnswer({ type: "result", content: "APPROVE" });
-    expect(outcome.action).toBe("pending_approval");
-    expect(outcome.sentMessages).toEqual([]);
   });
 });
 
@@ -673,10 +552,9 @@ describe("per-channel agent routing", () => {
   };
 
   it("routes to the app-declared agent when channel binds one and it is in the catalog", async () => {
-    const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "envoy", "pm-assistant"],
-      // Guardian path skips envoy → only one agent run is performed.
+      knownAgents: ["main", "pm-assistant"],
       agentResponses: [[{ type: "result", content: "On it." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -696,14 +574,12 @@ describe("per-channel agent routing", () => {
     expect(agentRunner.calls).toHaveLength(1);
     expect(agentRunner.calls[0].agentName).toBe("pm-assistant");
     expect(sentMessages).toHaveLength(1);
-    // requestedBy reflects the actual routed agent so approvals UI can scope by source.
-    expect(approvals[0]).toMatchObject({ requestedBy: "pm-assistant" });
   });
 
   it("uses the parent-derived routing for a native thread session", async () => {
     const { deps, conversations } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "envoy", "parent-agent"],
+      knownAgents: ["main", "parent-agent"],
       agentResponses: [[{ type: "result", content: "Child reply" }]],
     });
     const action = createAction(actionConfig, deps);
@@ -767,9 +643,9 @@ describe("per-channel agent routing", () => {
   });
 
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
-    const { deps, agentRunner, approvals } = createMessageHandlerDeps({
+    const { deps, agentRunner } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "envoy"], // pm-assistant intentionally absent
+      knownAgents: ["main"], // pm-assistant intentionally absent
       agentResponses: [[{ type: "result", content: "Hi from main." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -786,7 +662,6 @@ describe("per-channel agent routing", () => {
     });
 
     expect(agentRunner.calls[0].agentName).toBe("main");
-    expect(approvals[0]).toMatchObject({ requestedBy: "main" });
   });
 
   it("honors the routed agent when the catalog check itself fails (transient RPC error)", async () => {
@@ -878,7 +753,7 @@ describe("account agent", () => {
     });
 
   it("answers with the account's agent, in groups and private chats", async () => {
-    const { deps, agentRunner, approvals } = guardianDeps(["main", "envoy", "sales:agent"]);
+    const { deps, agentRunner } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "sales:agent" }));
@@ -892,11 +767,10 @@ describe("account agent", () => {
     );
 
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sales:agent", "sales:agent"]);
-    expect(approvals[0]).toMatchObject({ requestedBy: "sales:agent" });
   });
 
   it("answers with main when main is linked", async () => {
-    const { deps, agentRunner } = guardianDeps(["main", "envoy"]);
+    const { deps, agentRunner } = guardianDeps(["main"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "core:main" }));
@@ -908,7 +782,6 @@ describe("account agent", () => {
     for (const accountAgentName of ["sales:agent", "core:main"]) {
       const { deps, agentRunner, conversations } = guardianDeps([
         "main",
-        "envoy",
         "sales:agent",
         "pm:assistant",
       ]);
@@ -925,7 +798,7 @@ describe("account agent", () => {
   });
 
   it("answers with the account's agent when the stored agent is not loaded", async () => {
-    const { deps, agentRunner, conversations } = guardianDeps(["main", "envoy", "sales:agent"]);
+    const { deps, agentRunner, conversations } = guardianDeps(["main", "sales:agent"]);
     conversations.ensureChannelChat.mockImplementation(async () => ({
       id: "channel:feishu-2:group-1",
       agentName: "pm:assistant",
@@ -938,7 +811,7 @@ describe("account agent", () => {
   });
 
   it("answers with main in a group pinned to main on an account linked elsewhere", async () => {
-    const { deps, agentRunner } = guardianDeps(["main", "envoy", "sales:agent"]);
+    const { deps, agentRunner } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(
@@ -951,7 +824,6 @@ describe("account agent", () => {
   it("answers a private chat with the account's agent over its stored agent", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",
-      "envoy",
       "sales:agent",
       "pm:assistant",
     ]);
@@ -969,7 +841,7 @@ describe("account agent", () => {
   });
 
   it("stores a group's choice on a linked account's conversation", async () => {
-    const { deps, conversations } = guardianDeps(["main", "envoy", "sales:agent", "pm:assistant"]);
+    const { deps, conversations } = guardianDeps(["main", "sales:agent", "pm:assistant"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(
@@ -982,7 +854,7 @@ describe("account agent", () => {
   });
 
   it("never stores the account's agent on the conversation", async () => {
-    const { deps, conversations } = guardianDeps(["main", "envoy", "sales:agent"]);
+    const { deps, conversations } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "sales:agent" }));
@@ -993,7 +865,7 @@ describe("account agent", () => {
   });
 
   it("stays silent, storing nothing, when the account's agent is not loaded", async () => {
-    const { deps, agentRunner, conversations } = guardianDeps(["main", "envoy"]);
+    const { deps, agentRunner, conversations } = guardianDeps(["main"]);
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute(inbound({ accountAgentName: "sales:agent" }));
