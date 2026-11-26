@@ -131,3 +131,50 @@ describe("who can change the notifications setting", () => {
     expect(device.setEnabled).not.toHaveBeenCalled();
   });
 });
+
+describe("who can put an app on the Desktop", () => {
+  const addToDesktop = rs.fn(async () => ({ path: "/Users/me/Desktop/Recipes.app" }));
+  (ipcMain.handle as unknown as { mockClear(): void }).mockClear();
+  registerIpcHandlers(
+    {
+      runtime: { isReady: () => true, getDashboardUrl: () => ORIGIN },
+      activeTarget: () => ({ kind: "remote", instance: { id: "i", name: "n", origin: ORIGIN } }),
+    } as never,
+    {
+      openSettingsWindow: rs.fn(),
+      openAuditWindow: rs.fn(),
+      cloudAccount: {} as never,
+      device: {
+        status: () => status,
+        start: rs.fn(async () => undefined),
+        stop: rs.fn(async () => undefined),
+        setEnabled: rs.fn(async () => undefined),
+      },
+      apps: { addToDesktop },
+    },
+  );
+  const handler = (
+    ipcMain.handle as unknown as { mock: { calls: [string, Handler][] } }
+  ).mock.calls.find(([channel]) => channel === "apps:addToDesktop")![1];
+
+  it("is the open Rome's dashboard, for an app of that Rome", async () => {
+    await handler(from(`${ORIGIN}/apps`), "recipes");
+    expect(addToDesktop).toHaveBeenCalledWith(ORIGIN, "recipes");
+  });
+
+  it("is no other page, and takes only an app id", () => {
+    addToDesktop.mockClear();
+    for (const event of [
+      from(`${ORIGIN}/apps`, {}),
+      from("https://evil.example/"),
+      from("file:///Rome.app/settings.html"),
+      { senderFrame: null },
+    ]) {
+      expect(() => handler(event, "recipes")).toThrow(
+        "apps:addToDesktop is not available to this page",
+      );
+    }
+    expect(() => handler(from(`${ORIGIN}/apps`), "../x")).toThrow();
+    expect(addToDesktop).not.toHaveBeenCalled();
+  });
+});

@@ -63,6 +63,18 @@ function host(overrides: Partial<DeviceHostOptions> = {}) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("DeviceHost", () => {
+  it("passes the bundled helper path only to the full host", async () => {
+    const computerUseHelperPath = "/resources/native/Rome Computer Use.app";
+    const { subject, gateway, limited, options } = host({ computerUseHelperPath });
+    await subject.start();
+    expect(gateway.calls[0].computerUseHelperPath).toBe(computerUseHelperPath);
+    await subject.stop();
+    options.enabled = () => false;
+    await subject.start();
+    expect(limited.calls[0]).not.toHaveProperty("computerUseHelperPath");
+    await subject.stop();
+  });
+
   it("stays off without a Rome Cloud sign-in", async () => {
     const { subject, gateway, options } = host({ credential: async () => null });
     subject.start();
