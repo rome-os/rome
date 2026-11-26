@@ -17,6 +17,7 @@ import {
   type Access,
   accessWithinTx,
   createAccess,
+  type Member,
   type Role,
   type SyncAccess,
 } from "../access.js";
@@ -65,14 +66,43 @@ export function seatAccounts(seat: { email?: string | null }): Account[] {
   return email ? [{ platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: email }] : [];
 }
 
+/** A member with the name other parts show for them. */
+export interface NamedMember extends Member {
+  /** Their name, or their Rome Cloud email when Identity has no name. Null
+   *  when they have neither. */
+  name: string | null;
+}
+
 /** The role of the person `account` belongs to, or null when it belongs to
  *  nobody or its person has no role. The one question other parts ask. */
-export async function roleOfAccount(
+export async function roleOfAccount(ctx: MemberContext, account: Account): Promise<Role | null> {
+  return (await memberBehind(ctx, account))?.role ?? null;
+}
+
+/** The member `account` belongs to, with their name, or null when it belongs
+ *  to nobody or its person has no role. {@link roleOfAccount} with who they are. */
+export async function memberOfAccount(
+  ctx: MemberContext,
+  account: Account,
+): Promise<NamedMember | null> {
+  const found = await memberBehind(ctx, account);
+  if (!found) return null;
+  const { person, role } = found;
+  const signIn = person.name
+    ? undefined
+    : (await ctx.identity.accountsOf(person.id)).find(
+        (each) => each.platform === ROME_CLOUD_EMAIL_PLATFORM,
+      );
+  return { personId: person.id, role, name: person.name ?? signIn?.accountId ?? null };
+}
+
+async function memberBehind(
   { identity, access }: MemberContext,
   account: Account,
-): Promise<Role | null> {
+): Promise<{ person: Person; role: Role } | null> {
   const person = await identity.personOf(account);
-  return person ? access.roleOf(person.id) : null;
+  const role = person && (await access.roleOf(person.id));
+  return person && role ? { person, role } : null;
 }
 
 /** Every person with a role, the guardian first, with their accounts. */

@@ -9,10 +9,10 @@ import type {
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
+import type { NamedMember } from "../access/application/members.js";
 import { SenderLabels } from "../chats/sender-labels.js";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
 import { markArrival } from "../participation/entrance.js";
-import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
@@ -829,28 +829,16 @@ describe("messagesSaid", () => {
   });
 
   describe("who said it", () => {
-    const at = new Date("2026-11-16T00:00:00Z");
-    const ALICE: Person = {
-      id: "p-alice",
-      displayName: "Alice Liddell",
-      bondLevel: "inner-circle",
-      profilePath: null,
-      createdAt: at,
-      links: [
-        { platform: "telegram", id: "alice-tg" },
-        { platform: "telegram", id: "alice-tg-2" },
-        { platform: "telegram", id: "alice-bot", delegate: true },
-      ],
-    };
-    /** People, answering Alice for her accounts and nobody for any other,
-     *  and counting each question. */
+    const ALICE: NamedMember = { personId: "p-alice", name: "Alice Liddell", role: "member" };
+    /** Alice's accounts: two of her own, and her agent's, which is hers too. */
+    const ALICE_ACCOUNTS = ["alice-tg", "alice-tg-2", "alice-bot"];
+    /** Identity and Access, answering Alice for her accounts and nobody for
+     *  any other, and counting each question. */
     function people() {
       const asked: string[] = [];
-      const labels = new SenderLabels({
-        byAccount: async (account) => {
-          asked.push(account.id);
-          return ALICE.links.some((link) => link.id === account.id) ? ALICE : null;
-        },
+      const labels = new SenderLabels(async (account) => {
+        asked.push(account.id);
+        return ALICE_ACCOUNTS.includes(account.id) ? ALICE : null;
       });
       return { labels, asked };
     }
@@ -870,18 +858,18 @@ describe("messagesSaid", () => {
       return heard;
     }
 
-    it("names the person and bond level behind a linked account, apart from the shown name", async () => {
+    it("names the person and role behind an account, apart from the shown name", async () => {
       const [event] = await hear(people().labels, { senderDisplayName: "Ally" });
 
       expect(event?.message.senderDisplayName).toBe("Ally");
       expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "inner-circle" },
+        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "other" },
         delegate: false,
-        label: "Alice Liddell, inner circle",
+        label: "Alice Liddell, member",
       });
     });
 
-    it("names nobody for an account linked to no one, whatever name it shows", async () => {
+    it("names nobody for an account nobody holds, whatever name it shows", async () => {
       const [event] = await hear(people().labels, {
         senderId: "mallory-tg",
         senderDisplayName: "Alice Liddell",
@@ -900,17 +888,17 @@ describe("messagesSaid", () => {
       expect(heard.map((event) => event.sender?.person?.id)).toEqual(["p-alice", "p-alice"]);
     });
 
-    it("says a message from a delegate link comes from the person's agent", async () => {
+    it("names the person for their agent's account, as for any account of theirs", async () => {
       const [event] = await hear(people().labels, { senderId: "alice-bot" });
 
       expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "inner-circle" },
-        delegate: true,
-        label: "agent acting for Alice Liddell, inner circle",
+        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "other" },
+        delegate: false,
+        label: "Alice Liddell, member",
       });
     });
 
-    it("asks People once for a message every hook hears", async () => {
+    it("asks once for a message every hook hears", async () => {
       const { labels, asked } = people();
       const port = build({ labels });
       const heard: SaidInboundEvent[] = [];
@@ -924,8 +912,8 @@ describe("messagesSaid", () => {
       await settled();
 
       expect(heard.map((event) => event.sender?.label)).toEqual([
-        "Alice Liddell, inner circle",
-        "Alice Liddell, inner circle",
+        "Alice Liddell, member",
+        "Alice Liddell, member",
       ]);
       expect(asked).toEqual(["alice-tg"]);
     });
@@ -937,7 +925,7 @@ describe("messagesSaid", () => {
       expect(event && "sender" in event).toBe(false);
     });
 
-    it("hands the message over without a sender when People cannot be asked", async () => {
+    it("hands the message over without a sender when nobody can be asked", async () => {
       const [event] = await hear({
         sender: async () => {
           throw new Error("database is locked");

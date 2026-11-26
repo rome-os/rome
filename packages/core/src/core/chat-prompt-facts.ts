@@ -199,7 +199,7 @@ function earlierMessages(page: readonly ChannelMessage[], before: Date): Channel
 /** A platform's message as the line a turn's context shows, under `id`: a
  *  negative one, which no message Rome records has. The sender's
  *  account is the platform's id for them on the platform of Rome's account,
- *  as Chats records it, so People names them as it names a stored message. */
+ *  as Chats records it, so the sender is named as on a stored message. */
 function lineOf(message: ChannelMessage, id: number): ContextLine {
   const fromRome = message.direction === "outbound";
   const platform = message.account?.platform;
