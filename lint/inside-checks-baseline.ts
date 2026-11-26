@@ -17,7 +17,6 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/apps/actions/personal-data.ts": 5,
   "packages/core/src/apps/actions/who-may-ask.ts": 4,
   "packages/core/src/concierge/events.ts": 1,
-  "packages/core/src/concierge/service.ts": 1,
   "packages/core/src/concierge/tools.ts": 4,
   "packages/core/src/connections/device/actions.ts": 8,
   "packages/core/src/core/agent-session-bridge.ts": 6,
