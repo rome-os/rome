@@ -12,7 +12,7 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 Whether what someone says or presses on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names, when the connection hands it in. A message, a command and a press all pass the one place that asks, before any agent or app sees them.
 
-- The guardian, a member, and an agent acting for the guardian ([delegate link](people.md#delegate-link)) are let in, as they are at that moment.
+- The guardian and a member are let in by any account of theirs, as they are at that moment. The account of an agent in the guardian's own Rome Cloud account is one of the guardian's ([delegate link](people.md#delegate-link)).
 - Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a member whose sign-in Rome cannot find, a sender whose address the connection could not verify, and everyone when no answer can be had.
 - The answer is asked before anything hears the message, and stays with it. The message of someone not let in is recorded in its chat and wakes no agent, and no app hears it. An agent woken later may read it.
 - A [command](connections.md#command) and `/stop` pass the same entry. Anyone let in uses every command, and stops any turn. Anyone else's does nothing, and a refusal shows only to them. A press on a card passes the same entry, and a Feishu group's settings card is sent only when someone let in asks for it. A press or an ask for a card by anyone else gets no answer at all.

@@ -1,0 +1,95 @@
+name: Build computer-use helper
+description: Build the arm64 helper and require a stable release identity when signing.
+inputs:
+  sign:
+    description: Use Developer ID signing. False creates an explicit CI-only helper.
+    default: "true"
+  notarize:
+    description: Notarize and staple the standalone helper.
+    default: "true"
+  certificate:
+    description: Base64 PKCS12 or runner-local certificate path.
+  certificate-password:
+    description: PKCS12 password.
+  api-key-id:
+    description: App Store Connect API key id.
+  api-issuer:
+    description: App Store Connect issuer.
+  api-key:
+    description: App Store Connect private key.
+runs:
+  using: composite
+  steps:
+    - name: Require Apple Silicon
+      shell: bash
+      run: |
+        test "$(uname -s)" = Darwin
+        test "$(uname -m)" = arm64
+    - name: Build explicit unsigned CI helper
+      if: inputs.sign == 'false'
+      shell: bash
+      run: swift packages/rome-node-core/scripts/computer-use.swift build --app "packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app" --self-test-build
+    - name: Build and sign release helper
+      if: inputs.sign == 'true'
+      shell: bash
+      env:
+        CSC_LINK: ${{ inputs.certificate }}
+        CSC_KEY_PASSWORD: ${{ inputs.certificate-password }}
+        APP_STORE_CONNECT_KEY_ID: ${{ inputs.api-key-id }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ inputs.api-issuer }}
+        APP_STORE_CONNECT_P8_CONTENT: ${{ inputs.api-key }}
+        NOTARIZE: ${{ inputs.notarize }}
+      run: |
+        set -euo pipefail
+        test -n "$CSC_LINK" && test -n "$CSC_KEY_PASSWORD" || {
+          echo "::error::Computer-use release builds require the Developer ID certificate and password."
+          exit 1
+        }
+        umask 077
+        signing_keychain="$RUNNER_TEMP/computer-use-signing.keychain-db"
+        signing_password="$(openssl rand -hex 32)"
+        certificate_path="$RUNNER_TEMP/computer-use-signing.p12"
+        case "$CSC_LINK" in
+          file://*) certificate_path="${CSC_LINK#file://}" ;;
+          /*) certificate_path="$CSC_LINK" ;;
+          *) printf '%s' "$CSC_LINK" | base64 --decode > "$certificate_path" ;;
+        esac
+        previous_keychains=()
+        while IFS= read -r entry; do
+          keychain_path="${entry#*\"}"
+          keychain_path="${keychain_path%\"*}"
+          previous_keychains+=("$keychain_path")
+        done < <(security list-keychains -d user)
+        security create-keychain -p "$signing_password" "$signing_keychain"
+        trap 'security list-keychains -d user -s "${previous_keychains[@]}"; security delete-keychain "$signing_keychain"' EXIT
+        security set-keychain-settings -lut 21600 "$signing_keychain"
+        security unlock-keychain -p "$signing_password" "$signing_keychain"
+        security import "$certificate_path" -k "$signing_keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$signing_keychain"
+        security list-keychains -d user -s "$signing_keychain" "${previous_keychains[@]}"
+        signing_identity="$(security find-identity -v -p codesigning "$signing_keychain" | awk '/"Developer ID Application: / { print $2; exit }')"
+        test -n "$signing_identity" || {
+          echo "::error::The certificate must be a Developer ID Application identity."
+          exit 1
+        }
+        helper="packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"
+        script=packages/rome-node-core/scripts/computer-use.swift
+        swift "$script" build --app "$helper" --identity "$signing_identity"
+        codesign --verify --strict --verbose=2 "$helper"
+        if [ "$NOTARIZE" = true ]; then
+          test -n "$APP_STORE_CONNECT_KEY_ID" && test -n "$APP_STORE_CONNECT_ISSUER_ID" && test -n "$APP_STORE_CONNECT_P8_CONTENT" || {
+            echo "::error::Standalone helper publication requires the App Store Connect notarization key."
+            exit 1
+          }
+          api_key_path="$RUNNER_TEMP/computer-use-notary.p8"
+          printf '%s' "$APP_STORE_CONNECT_P8_CONTENT" | perl -pe 's/\\n/\n/g' > "$api_key_path"
+          chmod 600 "$api_key_path"
+          archive="$RUNNER_TEMP/computer-use-notary.zip"
+          receipt="$RUNNER_TEMP/computer-use-notary.json"
+          ditto -c -k --keepParent "$helper" "$archive"
+          xcrun notarytool submit "$archive" --key "$api_key_path" --key-id "$APP_STORE_CONNECT_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID" --wait --timeout 20m --output-format json > "$receipt"
+          jq -e '.status == "Accepted"' "$receipt"
+          xcrun stapler staple "$helper"
+          spctl --assess --type execute --verbose=2 "$helper"
+          swift "$script" verify --release --app "$helper"
+        fi

@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it } from "@rstest/core";
 
-import { isElectronShell } from "./electron-shell";
+import { desktopApps, isElectronShell } from "./electron-shell";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "rome");
@@ -37,5 +37,19 @@ describe("isElectronShell", () => {
     } finally {
       globalThis.window = win;
     }
+  });
+});
+
+describe("desktopApps", () => {
+  it("is null in a browser and in a Mac app without it", () => {
+    expect(desktopApps()).toBeNull();
+    window.rome = { device: {} };
+    expect(desktopApps()).toBeNull();
+  });
+
+  it("is the Mac app's bridge when it can add apps to the Desktop", () => {
+    const apps = { addToDesktop: async () => ({ path: "/Users/me/Desktop/A.app" }) };
+    window.rome = { apps };
+    expect(desktopApps()).toBe(apps);
   });
 });

@@ -20,6 +20,7 @@ const allowedWorkspaceGlobs = [
   "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
+  "packages/rome-node-core-darwin-arm64",
   "packages/rome-node-ui",
   "packages/ui",
   "packages/web",
@@ -141,6 +142,7 @@ function isAllowedWorkspacePackage(packagePath) {
     packagePath === "packages/signer" ||
     packagePath === "packages/rome-node-cli" ||
     packagePath === "packages/rome-node-core" ||
+    packagePath === "packages/rome-node-core-darwin-arm64" ||
     packagePath === "packages/rome-node-ui" ||
     packagePath === "packages/ui" ||
     packagePath === "packages/web" ||
@@ -165,6 +167,7 @@ async function assertImportBoundary() {
     "packages/signer",
     "packages/rome-node-cli",
     "packages/rome-node-core",
+    "packages/rome-node-core-darwin-arm64",
     "packages/rome-node-ui",
     "packages/ui",
     "packages/web",
