@@ -194,9 +194,9 @@ describe("EmailAdapter.ingestInbound", () => {
       received.push(channelMessageOf(m, "email"));
     });
 
-    // A spoofed From for a mapped non-guardian contact (e.g. inner-circle).
+    // A spoofed From for a mapped non-guardian contact (e.g. a member).
     // Without the namespace the raw address would resolve to that person and
-    // be let in.
+    // pass the boundary check.
     const event = buildEvent({
       from: [{ email: "contact@elsewhere.com" }],
       authentication: { authenticated: false, spam: false, blocked: false },
