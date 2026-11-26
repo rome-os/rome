@@ -49,7 +49,6 @@ import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
-import { partsText } from "../chats/storage/message.js";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
