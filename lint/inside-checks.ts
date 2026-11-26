@@ -26,7 +26,7 @@ const ROOTS = ["packages/core/src", "packages/rome-node-cli/src"];
 /** Where Access answers who the guardian is. */
 const ACCESS = "packages/core/src/access/";
 
-/** Lines that stay in a file, as hitsIn reads them, and why. */
+/** Lines that stay in a file, as hitsIn reads them (types left out, spaces collapsed), and why. */
 interface Allowed {
   why: string;
   lines: readonly string[];
@@ -82,7 +82,7 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
   },
   "packages/core/src/instance/instance-identity.ts": {
     lines: [
-      "async function audienceMatches(socket: string): Promise<boolean> {",
+      "async function audienceMatches(socket: ): {",
       "if (socket && !(await audienceMatches(socket))) {",
     ],
     why: "the audience the signing service is set up for",
@@ -266,7 +266,9 @@ export function hitsIn(text: string): Hit[] {
       starts.add(kept.slice(0, index).split("\n").length);
     }
   }
-  return [...starts].sort((a, b) => a - b).map((line) => ({ line, text: lines[line - 1]!.trim() }));
+  return [...starts]
+    .sort((a, b) => a - b)
+    .map((line) => ({ line, text: lines[line - 1]!.replace(/\s+/g, " ").trim() }));
 }
 
 /** What fails, given the text of each file's hits. */
