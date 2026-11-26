@@ -41,7 +41,7 @@ const log = createLogger("members-backfill");
 
 // The platform an earlier build stored Rome Cloud ids under. A Rome Cloud
 // sign-in is now known by its email, so no account is kept on it.
-const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
+export const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
 
 /**
  * Brings the members in line with the guardian's seat and, on its first run,
