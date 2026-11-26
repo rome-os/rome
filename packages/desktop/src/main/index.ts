@@ -174,7 +174,13 @@ async function bootstrap() {
         : `Opening Rome Cloud${active.instance ? ` (${active.instance.origin})` : ""}`,
     );
 
-    const appShims = setupAppShims(desktopSettings);
+    // Apps on the Desktop load their page only once this Rome is reachable
+    // and its session restored (see the status handler below).
+    let markRuntimeReady = (): void => undefined;
+    const runtimeReady = new Promise<void>((resolve) => {
+      markRuntimeReady = resolve;
+    });
+    const appShims = setupAppShims(desktopSettings, () => runtimeReady);
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
       openAuditWindow: () => createAuditWindow(),
@@ -188,9 +194,8 @@ async function bootstrap() {
     );
     // An app on the Desktop that finds Rome closed launches it with this
     // argument, and only wants its own window.
-    mainWindow = await createMainWindow(runtime, {
-      show: !process.argv.includes(APP_SHIM_LAUNCH_ARG),
-    });
+    const launchedByAppShim = process.argv.includes(APP_SHIM_LAUNCH_ARG);
+    mainWindow = await createMainWindow(runtime, { show: !launchedByAppShim });
     log.info("Main window created");
 
     setupProtocolHandler({
@@ -228,6 +233,20 @@ async function bootstrap() {
         }
       }
 
+      if (status.phase === "ready") markRuntimeReady();
+      // Launched hidden for an app on the Desktop, Rome still shows itself
+      // when it needs the user (sign-in, choosing a Rome) or can't connect.
+      if (
+        launchedByAppShim &&
+        (status.phase === "waiting_for_user" || status.phase === "failed") &&
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        !mainWindow.isVisible()
+      ) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+
       if (status.phase === "ready" && mainWindow && !mainWindow.isDestroyed()) {
         const currentUrl = mainWindow.webContents.getURL();
         if (shouldNavigateToDashboard(currentUrl, runtime.getDashboardUrl())) {
@@ -235,6 +254,9 @@ async function bootstrap() {
         }
       }
     });
+
+    // A dev URL is ready from the start and never reports it.
+    if (runtime.isReady()) markRuntimeReady();
 
     setupApplicationMenu(
       () => {

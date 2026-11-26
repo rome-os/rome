@@ -19,11 +19,26 @@ const manifestSchema = z.object({
   icons: z.array(z.object({ src: z.string().min(1) })).optional(),
 });
 
-/** An app id as the dashboard has it: a slug, or a scoped Store id such as `@handle/slug`. */
-const APP_ID = /^(@[a-z0-9][a-z0-9-]{0,63}\/)?[a-z][a-z0-9-]{0,63}$/;
+/** An unscoped app id, as core's APP_ID_PATTERN (apps/packaging/app-id.ts). */
+const APP_ID = /^[a-z][a-z0-9-]{0,63}$/;
+// Core's listing grammar (apps/packaging/listing-id.ts) for scoped Store ids.
+const LISTING_HANDLE = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/;
+const LISTING_SLUG = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$/;
+
+/** A slug, or a scoped Store id such as `@handle/slug`. Core validates the id again. */
+function isAppId(value: string): boolean {
+  if (!value.startsWith("@")) return APP_ID.test(value);
+  const slash = value.indexOf("/");
+  if (slash < 0) return false;
+  const handle = value.slice(1, slash);
+  const slug = value.slice(slash + 1);
+  return LISTING_HANDLE.test(handle) && LISTING_SLUG.test(slug) && handle !== slug;
+}
 
 export function requireAppId(value: unknown): string {
-  return z.string().regex(APP_ID).parse(value);
+  const id = z.string().parse(value);
+  if (!isAppId(id)) throw new Error(`Not an app id: ${JSON.stringify(id).slice(0, 80)}`);
+  return id;
 }
 
 function sameOrigin(raw: string, origin: string): URL {

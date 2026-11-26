@@ -80,13 +80,20 @@ describe("a shim connecting", () => {
     Object.defineProperty(process, "platform", { value: platform });
   });
   const values = new Map([[APP_SHIMS_KEY, JSON.stringify([record])]]);
-  setupAppShims({ read: (k) => values.get(k) ?? null, write: (k, v) => void values.set(k, v) });
+  let markReady = (): void => undefined;
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  setupAppShims(
+    { read: (k) => values.get(k) ?? null, write: (k, v) => void values.set(k, v) },
+    () => ready,
+  );
   const connect = (s: ReturnType<typeof shim>) =>
     electron.appEvents.get("app-shim-connected")?.({}, s);
   // Read from the bundle when it can be, else the packaged app's id.
   const bundleId = "com.rome.desktop.app.0123456789ab";
 
-  it("opens the app's page in a window of the shim when it is the bundle Rome made", () => {
+  it("opens the app's page in a window of the shim when it is the bundle Rome made, once Rome is ready", async () => {
     const s = shim(bundleId, (requirement) => requirement === `cdhash H"${CDHASH}"`);
     connect(s);
     expect(s.quit).not.toHaveBeenCalled();
@@ -94,6 +101,12 @@ describe("a shim connecting", () => {
     const window = electron.windows.at(-1)!;
     expect(window.options.appShim).toBe(s);
     expect(window.options.webPreferences).not.toHaveProperty("preload");
+    // Not before the Rome is reachable and its session restored.
+    await Promise.resolve();
+    expect(window.url).toBeUndefined();
+    markReady();
+    await ready;
+    await Promise.resolve();
     expect(window.url).toBe(record.url);
   });
 

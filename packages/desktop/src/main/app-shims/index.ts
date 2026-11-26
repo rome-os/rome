@@ -18,11 +18,14 @@ import {
   cdhashRequirement,
   execFileAsync,
   type ExecFile,
+  ownedShimPaths,
+  plistBundleId,
   pngsToIcns,
   SHIM_ENTITLEMENTS,
   shimAppName,
   shimBundleFiles,
   shimBundleId,
+  shimDestination,
   shimInfoPlist,
   shimServerName,
   signShimBundle,
@@ -41,10 +44,7 @@ function hostBundlePath(): string {
 
 function hostBundleId(): string {
   try {
-    const plist = readFileSync(join(hostBundlePath(), "Contents", "Info.plist"), "utf8");
-    const id = /<key>CFBundleIdentifier<\/key>\s*<string>([A-Za-z0-9.-]+)<\/string>/.exec(
-      plist,
-    )?.[1];
+    const id = plistBundleId(readPlist(hostBundlePath()));
     if (id) return id;
   } catch {
     // Read below from what a build of this app is.
@@ -79,11 +79,11 @@ function iconImages(png: Buffer): Array<{ size: number; png: Buffer }> {
   }));
 }
 
-/** `<name>.app` on the Desktop, or `<name> 2.app`… when that one is someone else's. */
-function desktopPath(desktop: string, name: string, ours: Set<string>): string {
-  for (let n = 1; ; n += 1) {
-    const candidate = join(desktop, `${n === 1 ? name : `${name} ${n}`}.app`);
-    if (!existsSync(candidate) || ours.has(candidate)) return candidate;
+function readPlist(bundlePath: string): string | null {
+  try {
+    return readFileSync(join(bundlePath, "Contents", "Info.plist"), "utf8");
+  } catch {
+    return null;
   }
 }
 
@@ -106,7 +106,12 @@ export interface AppShims {
  * the Desktop is a shim bundle (see ./bundle.ts); when it opens, it connects
  * here and gets one window showing the app's full-screen page.
  */
-export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFileAsync): AppShims {
+export function setupAppShims(
+  settings: SettingsAccess,
+  /** Resolves once the Rome is reachable and its session is in place. */
+  whenReady: () => Promise<void>,
+  exec: ExecFile = execFileAsync,
+): AppShims {
   const hostId = hostBundleId();
   const open = new Map<string, { shim: AppShimHost; window: BrowserWindow | null }>();
 
@@ -136,9 +141,15 @@ export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFil
     window.on("closed", () => {
       if (shim.isConnected()) shim.quit();
     });
-    window.loadURL(record.url).catch((err: unknown) => {
-      log.warn(`${record.name} did not load: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    // A shim that launched Rome waits for Rome to connect and restore the
+    // session, so the page does not land on a sign-in it can't complete.
+    void whenReady()
+      .then(() => (window.isDestroyed() ? undefined : window.loadURL(record.url)))
+      .catch((err: unknown) => {
+        log.warn(
+          `${record.name} did not load: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     return window;
   };
 
@@ -232,8 +243,8 @@ export function setupAppShims(settings: SettingsAccess, exec: ExecFile = execFil
     const name = shimAppName(identity.name, existsSync, join(homedir(), "Applications"));
     // Adding the same app again replaces the copy Rome put there.
     const previous = records.filter((r) => r.appId === appId && r.url === identity.url);
-    const ours = new Set(previous.map((r) => r.bundlePath));
-    const destination = desktopPath(app.getPath("desktop"), name, ours);
+    const ours = ownedShimPaths(previous, hostId, readPlist);
+    const destination = shimDestination(app.getPath("desktop"), name, ours, existsSync);
 
     // A replaced copy keeps its bundle id, which macOS has already registered
     // for that path and a Dock pin points at.

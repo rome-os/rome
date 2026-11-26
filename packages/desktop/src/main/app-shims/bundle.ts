@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import { join } from "path";
 import { promisify } from "util";
 
 /**
@@ -26,6 +27,46 @@ export interface ShimPlistInput {
 /** The shim's bundle id: this app's id plus the install's own suffix. */
 export function shimBundleId(hostBundleId: string, installId: string): string {
   return `${hostBundleId}.app.${installId}`;
+}
+
+/** The bundle id in an Info.plist Rome wrote, or null for anything else (a missing or binary plist). */
+export function plistBundleId(plist: string | null): string | null {
+  if (!plist) return null;
+  return (
+    /<key>CFBundleIdentifier<\/key>\s*<string>([A-Za-z0-9.-]+)<\/string>/.exec(plist)?.[1] ?? null
+  );
+}
+
+/**
+ * The saved bundle paths that still hold the bundle Rome made there: its
+ * Info.plist names that record's bundle id. A path the user has since given
+ * to something else is not Rome's to replace.
+ */
+export function ownedShimPaths(
+  records: Array<{ installId: string; bundlePath: string }>,
+  hostBundleId: string,
+  readPlist: (bundlePath: string) => string | null,
+): Set<string> {
+  return new Set(
+    records
+      .filter(
+        (r) => plistBundleId(readPlist(r.bundlePath)) === shimBundleId(hostBundleId, r.installId),
+      )
+      .map((r) => r.bundlePath),
+  );
+}
+
+/** `<name>.app` in `dir`, or `<name> 2.app`… when that one is not Rome's to replace. */
+export function shimDestination(
+  dir: string,
+  name: string,
+  ours: Set<string>,
+  exists: (path: string) => boolean,
+): string {
+  for (let n = 1; ; n += 1) {
+    const candidate = join(dir, `${n === 1 ? name : `${name} ${n}`}.app`);
+    if (!exists(candidate) || ours.has(candidate)) return candidate;
+  }
 }
 
 /** The app server name shims connect to; one per host bundle id, so a dev build never answers a release's shims. */

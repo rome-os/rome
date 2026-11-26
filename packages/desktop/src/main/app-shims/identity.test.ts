@@ -73,7 +73,10 @@ describe("requireAppId", () => {
   it("takes a slug or a scoped Store id, and nothing that could leave its path segment", () => {
     expect(requireAppId("recipes")).toBe("recipes");
     expect(requireAppId("@me/recipes")).toBe("@me/recipes");
-    for (const bad of ["../x", "a/b", "", "Recipes", 3, null]) {
+    // Core's listing grammar: a slug may start with a digit and hold `_`.
+    expect(requireAppId("@alice/2048")).toBe("@alice/2048");
+    expect(requireAppId("@alice/my_app")).toBe("@alice/my_app");
+    for (const bad of ["../x", "a/b", "", "Recipes", "@ab/ab", "@a/x", "@me/", 3, null]) {
       expect(() => requireAppId(bad)).toThrow();
     }
   });

@@ -2,11 +2,14 @@ import { describe, expect, it, rs } from "@rstest/core";
 import {
   APP_SHIM_LAUNCH_ARG,
   cdhashRequirement,
+  ownedShimPaths,
   parseCdhash,
+  plistBundleId,
   pngsToIcns,
   shimAppName,
   shimBundleFiles,
   shimBundleId,
+  shimDestination,
   shimInfoPlist,
   shimServerName,
   signShimBundle,
@@ -155,5 +158,60 @@ describe("signShimBundle", () => {
     expect(parseCdhash("CDHash=abc")).toBeNull();
     expect(cdhashRequirement(CDHASH)).toBe(`cdhash H"${CDHASH}"`);
     expect(() => cdhashRequirement('" or anchor apple')).toThrow();
+  });
+});
+
+describe("replacing a bundle Rome put on the Desktop", () => {
+  const host = "com.rome.desktop";
+  const plistFor = (installId: string) =>
+    shimInfoPlist({
+      bundleId: shimBundleId(host, installId),
+      name: "Recipes",
+      appId: "recipes",
+      host: { path: "/Applications/Rome.app", bundleId: host, serverName: shimServerName(host) },
+    });
+  const records = [
+    { installId: "aaaaaaaaaaaa", bundlePath: "/Users/me/Desktop/Recipes.app" },
+    { installId: "bbbbbbbbbbbb", bundlePath: "/Users/me/Desktop/Recipes 2.app" },
+    { installId: "cccccccccccc", bundlePath: "/Users/me/Desktop/Recipes 3.app" },
+  ];
+  // Recipes.app is still Rome's. Recipes 2.app was trashed and the user put
+  // their own Recipes 2.app there (a binary plist). Recipes 3.app is gone.
+  const disk: Record<string, string> = {
+    "/Users/me/Desktop/Recipes.app": plistFor("aaaaaaaaaaaa"),
+    "/Users/me/Desktop/Recipes 2.app": "bplist00…",
+  };
+  const readPlist = (path: string) => disk[path] ?? null;
+
+  it("reads the bundle id only from a plist Rome wrote", () => {
+    expect(plistBundleId(plistFor("aaaaaaaaaaaa"))).toBe("com.rome.desktop.app.aaaaaaaaaaaa");
+    expect(plistBundleId("bplist00…")).toBeNull();
+    expect(plistBundleId(null)).toBeNull();
+  });
+
+  it("owns only the paths that still hold the bundle Rome made there", () => {
+    expect([...ownedShimPaths(records, host, readPlist)]).toEqual([
+      "/Users/me/Desktop/Recipes.app",
+    ]);
+  });
+
+  it("never takes a reused path: the new bundle gets the next free name", () => {
+    const exists = (path: string) => path in disk;
+    expect(shimDestination("/Users/me/Desktop", "Recipes", new Set(), exists)).toBe(
+      "/Users/me/Desktop/Recipes 3.app",
+    );
+    // A user's own bundle at a path Rome once used is not Rome's to replace.
+    const ours = ownedShimPaths(records.slice(1), host, readPlist);
+    expect(shimDestination("/Users/me/Desktop", "Recipes 2", ours, exists)).toBe(
+      "/Users/me/Desktop/Recipes 2 2.app",
+    );
+    expect(
+      shimDestination(
+        "/Users/me/Desktop",
+        "Recipes",
+        ownedShimPaths(records, host, readPlist),
+        exists,
+      ),
+    ).toBe("/Users/me/Desktop/Recipes.app");
   });
 });
