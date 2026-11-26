@@ -17,6 +17,11 @@ export interface JournalEntry {
 
 export interface ReplayStore {
   rootExecutionId: string;
+  /** The execution whose journal this run reads and writes, and that its
+   *  approval cards replay. It is `rootExecutionId`, except for a nested call
+   *  that another worker runs as a root: that call keeps its own journal, so
+   *  its rows never enter its tree root's replay order. */
+  journalId: string;
   rootActionName: string;
   rootArgs: Record<string, unknown>;
   journal: JournalEntry[];
@@ -43,9 +48,10 @@ export interface ReplayStore {
 
 export const replayContext = new AsyncLocalStorage<ReplayStore>();
 
-/** Set while a call executes for real during a replay. Its own nested calls
- *  run without journal rows, so they never enter the replay order. */
-export const freshCallContext = new AsyncLocalStorage<true>();
+/** The run whose call is executing for real during a replay. That call's own
+ *  nested calls run without journal rows, so they never enter the run's
+ *  replay order. It names the run so the marker can never reach another one. */
+export const freshCallContext = new AsyncLocalStorage<ReplayStore>();
 
 /** Deterministic JSON serialization with sorted keys for stable hashing. */
 function stableStringify(value: unknown): string {

@@ -226,6 +226,10 @@ export interface ActionRunContext {
   /** On an approval replay, the journal sequence of the pending entry the
    *  approved card owns. Only that entry executes under the replay. */
   approvedSequence?: number;
+  /** Set by the engine on a call that executes for real during an approval
+   *  replay, so a worker that runs it also keeps its nested calls out of the
+   *  journal (see `freshCallContext`). */
+  freshCall?: boolean;
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
   agentName?: string;
@@ -767,9 +771,13 @@ export class ActionEngine {
         ? context.replayRootExecutionId
         : (context?.executionId ?? uuid());
     const rootExecutionId = context?.rootExecutionId ?? executionId;
+    // A nested call that another worker runs as a root keeps its own journal.
+    // Its rows numbered from 0 would otherwise collide with its tree root's.
+    const journalId = parentId && rootExecutionId !== executionId ? executionId : rootExecutionId;
 
     const replayStore: ReplayStore = {
       rootExecutionId,
+      journalId,
       rootActionName: action.config.name,
       rootArgs: args,
       journal: [],
@@ -830,7 +838,7 @@ export class ActionEngine {
       );
       const newApprovalEntries = replayStore.journal.slice(preloadedEntryCount);
       if (newApprovalEntries.length > 0) {
-        await this.persistNewEntries(replayStore.rootExecutionId, newApprovalEntries);
+        await this.persistNewEntries(replayStore.journalId, newApprovalEntries);
       }
       await this.upsertExecutionRecord({
         executionId,
@@ -859,7 +867,7 @@ export class ActionEngine {
       ...buildRomeSpanAttrs(context),
       ...summonAttrs,
     };
-    const result = await this.withTrace(action.config.name, spanAttrs, () =>
+    const runBody = () =>
       replayContext.run(replayStore, () =>
         this.executeInvocation(
           {
@@ -878,7 +886,11 @@ export class ActionEngine {
           actionEventObserver,
           onRootAccepted,
         ),
-      ),
+      );
+    // A worker running a call that executes during a replay keeps its nested
+    // calls out of the journal, as the in-process path does.
+    const result = await this.withTrace(action.config.name, spanAttrs, () =>
+      context?.freshCall ? freshCallContext.run(replayStore, runBody) : runBody(),
     );
 
     if (approvedRootResume) {
@@ -886,18 +898,13 @@ export class ActionEngine {
       if (entry && entry.status === "pending_approval") {
         entry.result = result;
         entry.status = "completed";
-        await this.updateJournalEntry(
-          replayStore.rootExecutionId,
-          entry.sequence,
-          result,
-          "completed",
-        );
+        await this.updateJournalEntry(replayStore.journalId, entry.sequence, result, "completed");
       }
     }
 
     const newEntries = replayStore.journal.slice(preloadedEntryCount);
     if (newEntries.length > 0) {
-      await this.persistNewEntries(replayStore.rootExecutionId, newEntries);
+      await this.persistNewEntries(replayStore.journalId, newEntries);
     }
 
     // A nested call in this turn requested approval: surface it on the root
@@ -925,7 +932,7 @@ export class ActionEngine {
     }
     const argsHash = hashArgs(args);
     const run = { action, args, store, context, observer, actionEventObserver };
-    if (freshCallContext.getStore()) return this.runUnjournaledCall(run);
+    if (freshCallContext.getStore() === store) return this.runUnjournaledCall(run);
 
     if (store.mode === "replay") {
       const entry = store.journal[store.replayIndex];
@@ -1021,7 +1028,7 @@ export class ActionEngine {
       run.action,
       run.args,
       run.store,
-      run.context,
+      { ...run.context, freshCall: true },
       run.observer,
       run.actionEventObserver,
       false,
@@ -1043,7 +1050,7 @@ export class ActionEngine {
       return true;
     }
     const card = await this.approvalsRepo.findCardForEntry(
-      store.rootExecutionId,
+      store.journalId,
       entry.sequence,
       entry.actionName,
     );
@@ -1054,7 +1061,7 @@ export class ActionEngine {
    *  call waits on the entry's own card, or is refused when no live card is left. */
   private async parkOnEntryCard(entry: JournalEntry, store: ReplayStore): Promise<ActionResult> {
     const card = await this.approvalsRepo.findCardForEntry(
-      store.rootExecutionId,
+      store.journalId,
       entry.sequence,
       entry.actionName,
       true,
@@ -1102,12 +1109,12 @@ export class ActionEngine {
   }
 
   private async executeIntoEntry(run: NestedRun, entry: JournalEntry): Promise<ActionResult> {
-    const result = await freshCallContext.run(true, () =>
+    const result = await freshCallContext.run(run.store, () =>
       this.executeNestedInvocation(
         run.action,
         run.args,
         run.store,
-        run.context,
+        { ...run.context, freshCall: true },
         run.observer,
         run.actionEventObserver,
         false,
@@ -1115,7 +1122,7 @@ export class ActionEngine {
     );
     entry.result = result;
     entry.status = "completed";
-    await this.updateJournalEntry(run.store.rootExecutionId, entry.sequence, result, "completed");
+    await this.updateJournalEntry(run.store.journalId, entry.sequence, result, "completed");
     return result;
   }
 
@@ -2329,12 +2336,7 @@ export class ActionEngine {
     if (entry) {
       entry.result = null;
       entry.status = "pending_approval";
-      await this.updateJournalEntry(
-        store.rootExecutionId,
-        entry.sequence,
-        null,
-        "pending_approval",
-      );
+      await this.updateJournalEntry(store.journalId, entry.sequence, null, "pending_approval");
       seq = entry.sequence;
     } else {
       seq = store.nextSequence++;
@@ -2405,7 +2407,8 @@ export class ActionEngine {
         journalSequence,
         rootActionName: store.rootActionName,
         rootArgs: store.rootArgs,
-        rootExecutionId: store.rootExecutionId,
+        // The run this card replays, and whose journal it reads.
+        rootExecutionId: store.journalId,
         replayJournal: store.journal,
         channelContext: context?.channelContext,
         sharedContext: context?.sharedContext,
