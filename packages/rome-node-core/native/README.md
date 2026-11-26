@@ -13,14 +13,17 @@ socket interoperability test.
 script=packages/rome-node-core/scripts/computer-use.swift
 swift "$script" build --self-test-build
 swift "$script" test
+swift "$script" verify --self-test-build
 swift "$script" verify --release
 ```
 
 The last command must fail for the compile-only bundle. That build accepts
 `--self-test` and runs test sockets with desktop access disabled, simulated
-consent, and an in-memory substitute for the Keychain calls. The release gate requires a production
-bundle with a valid Developer ID Application signature and a stapled
-notarization ticket.
+consent, and an in-memory substitute for the Keychain calls.
+
+`verify` requires a valid Apple signature. `verify --self-test-build` checks
+the bundle structure without requiring a signature. `verify --release`
+requires a Developer ID Application signature and a stapled notarization ticket.
 
 Build a production bundle with `build --identity 'Apple signing identity'`.
 For controller keys, also pass `--provisioning-profile PATH` with a macOS
@@ -39,6 +42,10 @@ select an output named `Rome Computer Use.app`. Use
 Build and install take the same lock in the output directory and publish the
 validated app in one rename. Use a stable signing identity and installation
 path so macOS can retain permissions across upgrades.
+
+For a local unsigned Desktop package, build with `--self-test-build` and
+`--app 'packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app'`.
+Set `ROME_DESKTOP_ALLOW_UNSIGNED_COMPUTER_USE=1` when packaging.
 
 The build resolves `packages/desktop/build/icon.icns` relative to the build
 script. For a standalone checkout, pass `build --icon PATH` with the Rome
