@@ -164,7 +164,7 @@ export type DeviceRunOutcome =
 /**
  * Runs one operation on one of the guardian's devices for `turn`, as
  * `core:device_run` and `system:run_on_device` both do: the live route picks
- * the device, then the rules for personal data and for a change to the device.
+ * the device, then the rule for personal data.
  */
 export async function runOnDevice(
   deps: Pick<DeviceActionDeps, "connections" | "run"> & { now?: () => number },
