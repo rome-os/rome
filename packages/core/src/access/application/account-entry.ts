@@ -16,9 +16,6 @@ const UNVERIFIED_EMAIL = "unauthenticated:";
 
 export interface AccountEntryDeps {
   db: DrizzleDb;
-  /** Whether `account` is linked as an agent acting for the guardian
-   *  (docs/domains/people.md#delegate-link). Identity holds no agents yet. */
-  actsForGuardian(account: { platform: string; id: string }): Promise<boolean>;
 }
 
 /** Who an account lets in, or whether Rome knows it at all. */
@@ -31,8 +28,8 @@ const REFUSED: AccountEntry = { kind: "refused" };
 
 /**
  * Answers who `account` lets in, as the actor of the work it starts: the
- * guardian or a member at the moment of the call, and the guardian for an agent
- * acting for them. An account nobody holds is unknown. A person with no role, an
+ * guardian or a member at the moment of the call. An account nobody holds is
+ * unknown. A person with no role, an
  * account not named or verified and, logged, a member whose sign-in cannot be
  * found and an answer that cannot be had are refused.
  */
@@ -69,7 +66,6 @@ export function accountEntry(deps: AccountEntryDeps) {
       const role = person ? await members.access.roleOf(person.id) : null;
       if (role === "guardian") return await guardian();
       if (person && role === "member") return await member(person.id);
-      if (await deps.actsForGuardian(account)) return await guardian();
       return person ? REFUSED : { kind: "unknown" };
     } catch (err) {
       log.warn("could not tell who an account is", {

@@ -169,6 +169,7 @@ import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -377,7 +378,6 @@ import {
   getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
-import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import { enteredChannels } from "./app-host/entered-channels.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
@@ -532,7 +532,9 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new DrizzlePeopleRepository(db);
+  // Each link People writes for the guardian reaches Identity in the same
+  // transaction (docs/domains/access.md#steps-rome-takes-today).
+  const peopleRepo = new DrizzlePeopleRepository(db, (change) => peopleLinkChanged(db, change));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -775,13 +777,7 @@ async function main() {
   // What people say on a connection passes this before it starts anything
   // (docs/domains/participation.md#entry).
   const entrance = entranceOf({
-    enter: accountEntry({
-      db,
-      actsForGuardian: async (account) => {
-        const person = await peopleRepo.byAccount(account);
-        return person?.bondLevel === "guardian" && whoIs(account, person).delegate;
-      },
-    }),
+    enter: accountEntry({ db }),
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
   // The platform a message's sender is on. A grant that recorded no account

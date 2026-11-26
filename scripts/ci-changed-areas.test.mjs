@@ -214,6 +214,7 @@ test("each shard's prefixes cover the workspace dependency closure of the packag
       const deps = {
         ...entry.pkg.dependencies,
         ...entry.pkg.devDependencies,
+        ...entry.pkg.optionalDependencies,
         ...entry.pkg.peerDependencies,
       };
       for (const dep of Object.keys(deps)) {

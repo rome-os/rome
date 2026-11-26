@@ -140,9 +140,15 @@ export class ComputerUseBridge {
     };
     const { socket, secret, cleanup } = await launchHelper(options);
     const bridge = new ComputerUseBridge(socket, cleanup, requestTimeout);
+    const abort =
+      options.signal &&
+      addAbortListener(options.signal, () => {
+        bridge.#disconnect(new ComputerUseError("request_aborted"));
+      });
     const nonce = randomBytes(32);
     const context = { secret, nonce, hostPid: process.pid };
     try {
+      if (options.signal?.aborted) throw new ComputerUseError("request_aborted");
       const { result } = await bridge.#request(
         "hello",
         {
@@ -208,6 +214,7 @@ export class ComputerUseBridge {
       bridge.#disconnect(connectionError(cause));
       throw cause;
     } finally {
+      abort?.[Symbol.dispose]();
       secret.fill(0);
     }
   }
