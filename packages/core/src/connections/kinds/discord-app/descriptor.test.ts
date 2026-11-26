@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { CredentialRejected } from "../../errors.js";
 import type { RuntimeKit, Talker } from "../../types.js";
 import { createDiscordAppDescriptor, makeDiscordAppSetup } from "./descriptor.js";
 import type { DiscordAppCloud } from "./worker.js";
@@ -18,6 +19,7 @@ function cloud(over: Partial<DiscordAppCloud> = {}): DiscordAppCloud {
     react: async () => {},
     unreact: async () => {},
     installUrl: async () => "https://discord.com/oauth2/authorize",
+    api: async () => ({ response: { status: 200, headers: {}, body: null } }),
     ...over,
   };
 }
@@ -88,6 +90,49 @@ describe("Rome's Discord bot connection", () => {
       { signal: new AbortController().signal },
     );
     expect(disconnect).toHaveBeenCalled();
+  });
+
+  it("acts for the discord CLI through the Worker, and reads a refused Rome as a refused grant", async () => {
+    const api = rs.fn(async () => ({
+      response: { status: 200, headers: {}, body: [{ id: "9", content: "hello" }] },
+    }));
+    const descriptor = createDiscordAppDescriptor({
+      cloud: cloud({ api }),
+      depositUrl: async () => null,
+      ...people,
+    });
+    const credential = {
+      material: { depositKey: "key-1", botId: "1", botUsername: "Rome" },
+      expiresAt: "never" as const,
+    };
+    const actor = descriptor.capabilities.actor!.build(credential, {} as RuntimeKit);
+    expect(actor.operations().map((operation) => operation.name)).toEqual(["discord.api.request"]);
+    const input = {
+      method: "GET",
+      path: "/channels/4/messages",
+      query: [],
+      headers: {},
+      body: null,
+      timeoutMs: 5000,
+    };
+    expect(await actor.invoke({ operation: "discord.api.request", input })).toEqual({
+      response: { status: 200, headers: {}, body: [{ id: "9", content: "hello" }] },
+    });
+    expect(api).toHaveBeenCalledWith(input);
+    await expect(actor.invoke({ operation: "other" })).rejects.toThrow("Unknown Discord operation");
+
+    const refused = createDiscordAppDescriptor({
+      cloud: cloud({
+        api: async () => {
+          throw new DiscordAppRefused("invalid_token", "refused", 401);
+        },
+      }),
+      depositUrl: async () => null,
+      ...people,
+    }).capabilities.actor!.build(credential, {} as RuntimeKit);
+    await expect(
+      refused.invoke({ operation: "discord.api.request", input }),
+    ).rejects.toBeInstanceOf(CredentialRejected);
   });
 
   it("acknowledges without waiting for the record, and keeps a key the Worker made anew on start", async () => {

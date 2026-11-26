@@ -6,8 +6,17 @@
 // Posting, reacting and typing are Discord's own REST calls, made through the
 // Worker's proxy (`/v1/discord/*`), which makes them as the bot in the servers
 // and direct messages bound to this Rome only. What a call does is decided
-// here, so a new Discord feature needs no change at the Worker.
+// here, so a new Discord feature needs no change at the Worker. The `discord`
+// CLI's calls go through the same proxy, as they are (`api`).
 
+import { DISCORD_BROKER_RESPONSE_LIMIT_BYTES } from "@rome/api-types/discord-broker";
+import {
+  filterConnectionApiResponseHeaders,
+  isProtectedConnectionApiRequestHeader,
+  type ConnectionApiRequest,
+  type ConnectionApiResult,
+} from "../../../apps/platform-requests.js";
+import { cloudBearer } from "../../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../../instance/rome-cloud-origin.js";
 import { romeCloudRequest } from "../../../instance/rome-cloud-request.js";
 
@@ -75,6 +84,9 @@ export interface DiscordAppCloud {
   unreact(input: { channelId: string; messageId: string; emoji: string }): Promise<void>;
   /** Discord's page where the guardian adds the bot to a server. */
   installUrl(): Promise<string>;
+  /** One Discord REST call, as the `discord` CLI asks it, through the Worker's
+   *  proxy. Discord's answer, or the proxy's refusal, comes back as it is. */
+  api(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
 }
 
 /** A server's icon on Discord's CDN, from its icon hash; null for none or for
@@ -249,6 +261,70 @@ export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch):
         throw refuse("invalid_response", undefined, 200);
       }
       return data.url;
+    },
+    async api(request) {
+      const token = await cloudBearer();
+      if (!token) throw refuse("not_enrolled", undefined, 0);
+      const url = new URL(`/v1/discord${request.path}`, DISCORD_WORKER_ORIGIN);
+      for (const [name, value] of request.query) url.searchParams.append(name, value);
+      const hasBody = request.body !== null && request.body !== undefined;
+      let response: Response;
+      let bytes: Uint8Array;
+      try {
+        response = await fetchImpl(url, {
+          method: request.method,
+          headers: {
+            ...Object.fromEntries(
+              Object.entries(request.headers).filter(
+                ([name]) => !isProtectedConnectionApiRequestHeader(name),
+              ),
+            ),
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-store",
+            ...(hasBody ? { "Content-Type": "application/json" } : {}),
+          },
+          cache: "no-store",
+          ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
+          signal: AbortSignal.timeout(request.timeoutMs),
+        });
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } catch (error) {
+        const timedOut = error instanceof Error && error.name === "TimeoutError";
+        return {
+          error: timedOut
+            ? { type: "timeout", message: "Discord did not answer in time." }
+            : { type: "network", message: "Rome could not reach Discord's service." },
+        };
+      }
+      if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
+        return {
+          error: {
+            type: "response_too_large",
+            message: "Discord response exceeded the 16 MiB broker limit.",
+          },
+        };
+      }
+      const text = new TextDecoder().decode(bytes);
+      let body: unknown = null;
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = text;
+        }
+      }
+      // The Worker refusing this Rome's token, not Discord refusing the bot.
+      const error = (body as { error?: unknown } | null)?.error;
+      if (response.status === 401 && typeof error === "string") {
+        throw refuse(error, undefined, 401);
+      }
+      return {
+        response: {
+          status: response.status,
+          headers: filterConnectionApiResponseHeaders(response.headers.entries()),
+          body,
+        },
+      };
     },
   };
 }

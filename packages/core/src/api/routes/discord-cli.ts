@@ -21,6 +21,7 @@ import {
   type DiscordBrokerRequest,
 } from "@rome/api-types/discord-broker";
 import { CredentialRejected } from "../../connections/errors.js";
+import { DISCORD_APP_KIND } from "../../connections/kinds/discord-app/descriptor.js";
 import { anotherAccountKey } from "../../connections/setup/manager.js";
 import type { Connection } from "../../connections/types.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
@@ -30,6 +31,13 @@ const log = createLogger("discord-cli-broker");
 type DiscordCliRouteDeps = Pick<ApiDeps, "connectionRegistry" | "setupManager"> & {
   channelRecords?: Pick<ChannelRecordsRepository, "byId">;
 };
+
+/** The bots the CLI can act as: one the guardian brought, and Rome's own. */
+const DISCORD_KINDS = ["discord", DISCORD_APP_KIND];
+
+function discordBots(deps: DiscordCliRouteDeps): Connection[] {
+  return DISCORD_KINDS.flatMap((kind) => deps.connectionRegistry?.find(kind) ?? []);
+}
 
 export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: string): Hono {
   if (!isLoopbackInternalApiHost(internalApiHost)) {
@@ -174,9 +182,9 @@ function discordBotFor(
   deps: DiscordCliRouteDeps,
   channel: string | undefined,
 ): { bot: Connection | undefined; candidates: Connection[] | null; includeNewAccount: boolean } {
-  const bots = deps.connectionRegistry?.find("discord") ?? [];
+  const bots = discordBots(deps);
   const record = channel ? deps.channelRecords?.byId(channel) : null;
-  if (record?.connectionKind === "discord") {
+  if (record?.connectionKind && DISCORD_KINDS.includes(record.connectionKind)) {
     const own = bots.find((bot) => bot.id === record.connectionId);
     // A failure then describes the channel's own bot, not every Discord bot.
     return { bot: own, candidates: own ? [own] : [], includeNewAccount: false };
@@ -257,7 +265,7 @@ function unavailableDiscordAuth(
   status: number;
   body: DiscordBrokerEnvelope;
 } {
-  const bots = candidates ?? deps.connectionRegistry?.find("discord") ?? [];
+  const bots = candidates ?? discordBots(deps);
   if (hasActiveDiscordSetup(deps, bots, includeNewAccount)) return notPaired();
   const rejected = bots.some((connection) => connection.state() === "broken");
   return rejected ? credentialRejected() : notAuthenticated();
@@ -272,7 +280,9 @@ function hasActiveDiscordSetup(
   if (!manager) return false;
   if (
     includeNewAccount &&
-    (manager.activeFor("discord", "bot") || manager.activeFor(anotherAccountKey("discord"), "bot"))
+    DISCORD_KINDS.some(
+      (kind) => manager.activeFor(kind, "bot") || manager.activeFor(anotherAccountKey(kind), "bot"),
+    )
   ) {
     return true;
   }

@@ -287,6 +287,45 @@ describe("Discord CLI loopback broker routes", () => {
       expect(invoked).toEqual([expected]);
     });
 
+    it("acts as Rome's own bot when it is the only one, and for its own channels", async () => {
+      const invoked: string[] = [];
+      const routes = discordCliRoutes(
+        {
+          connectionRegistry: {
+            find: (kind: string) =>
+              kind === "discord_app"
+                ? [bot("app-1", invoked)]
+                : kind === "discord"
+                  ? [bot("conn-1", invoked)]
+                  : [],
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+          channelRecords: {
+            byId: (id: string) =>
+              ({ "app-chat": { connectionKind: "discord_app", connectionId: "app-1" } })[
+                id
+              ] as never,
+          },
+        },
+        "127.0.0.1",
+      );
+      await routes.request("/_internal/discord/auth", {
+        headers: { "x-rome-channel": "app-chat" },
+      });
+      expect(invoked).toEqual(["app-1"]);
+
+      const onlyOwn: string[] = [];
+      const response = await discordCliRoutes(
+        {
+          connectionRegistry: {
+            find: (kind: string) => (kind === "discord_app" ? [bot("app-1", onlyOwn)] : []),
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+        },
+        "127.0.0.1",
+      ).request("/_internal/discord/auth");
+      expect(response.status).toBe(200);
+      expect(onlyOwn).toEqual(["app-1"]);
+    });
+
     it("never acts as another bot for a Discord channel whose bot is gone", async () => {
       const invoked: string[] = [];
       const response = await twoBots(invoked).request("/_internal/discord/auth", {
