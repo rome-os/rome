@@ -256,9 +256,6 @@ export async function buildConciergeTools(
     return { chatId: thread.threadId, turnId };
   };
 
-  // A reaction in a chat on a connection: one emoji on the guardian's
-  // message, sent to the platform. It cannot be taken back there, and no
-  // message status follows it.
   // The keys of this turn's messages in a chat on a connection, oldest first.
   // The model sees no message ids there, so a reply and a reaction name one
   // of these, never an id it guessed.
@@ -267,6 +264,9 @@ export async function buildConciergeTools(
       .filter((row) => row.role === "user")
       .map((row) => row.id);
 
+  // A reaction in a chat on a connection: one emoji on the turn's message,
+  // sent to the platform. It cannot be taken back there, and no message status
+  // follows it.
   const reactOnConnection = async (args: Record<string, unknown>) => {
     const { chatId, turnId } = currentTurn();
     const { emoji } = args;
