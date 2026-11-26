@@ -162,17 +162,6 @@ export function unknownActionError(actionName: string): string {
   );
 }
 
-/** The routine actions only the guardian's own message can call
- * (apps/actions/who-may-ask.ts). */
-const GUARDIAN_MESSAGE_ONLY = new Set([
-  "system:pause_routine",
-  "system:resume_routine",
-  "system:run_routine",
-  "system:stop_routine",
-  "system:stop_routine_run",
-  "system:change_routine",
-]);
-
 const LOCAL_TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -527,12 +516,6 @@ export async function checkRoutineAction(
     return { ok: false, error: unknownActionError(actionName) };
   }
   // A routine's fire acts through loopback, which these refuse on every fire.
-  if (GUARDIAN_MESSAGE_ONLY.has(actionName)) {
-    return {
-      ok: false,
-      error: `actionName "${actionName}" takes the guardian's own message, so a routine cannot run it`,
-    };
-  }
   // A routine fires its action outside the agent tool gate, so an explicit
   // target needs a principal that may call it: the app code that owns the call
   // (callerAppId), or an agent that holds the action. Unattributed calls, such
