@@ -8,7 +8,6 @@ import { actionExecutionContext } from "./context.js";
 /** The guardian's own message in one of their chats. */
 export const GUARDIAN_TURN: ToolTurn = {
   actor: { kind: "guardian", userId: "guardian", via: "cookie" },
-  audience: "private",
   channelContext: { channel: "webchat", threadId: "guardian-chat" },
 };
 

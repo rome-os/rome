@@ -685,9 +685,7 @@ async function main() {
           )?.bondLevel
         : undefined,
   });
-  const routinesRepo = new RoutinesRepository(db, (chatId) =>
-    chatAudience({ channel: "webchat", threadId: chatId }),
-  );
+  const routinesRepo = new RoutinesRepository(db);
   const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
   const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
   // Which device connection answers a live read for a turn: one choice for

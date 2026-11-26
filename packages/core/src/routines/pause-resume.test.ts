@@ -18,7 +18,7 @@ const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn(async
 beforeEach(() => {
   testDb = createTestDb();
   // Every routine's chat is the guardian's private chat.
-  routines = new RoutinesRepository(testDb.db, async () => "private");
+  routines = new RoutinesRepository(testDb.db);
   routineEngine.activate.mockClear();
   routineEngine.deactivate.mockClear();
   deps = {
@@ -102,11 +102,10 @@ describe("pausing and resuming a routine", () => {
 });
 
 describe("who may pause or resume a routine", () => {
-  it("pauses for a turn no one started, a member, and a shared chat", async () => {
+  it("pauses for a turn no one started and for a member", async () => {
     const turns: ToolTurn[] = [
-      { audience: "private" },
-      { actor: { kind: "visitor", accountId: "v", email: "v@example.test" }, audience: "private" },
-      { ...guardianAsked, audience: "shared" },
+      {},
+      { actor: { kind: "visitor", accountId: "v", email: "v@example.test" } },
     ];
     for (const turn of turns) {
       const id = await createRoutine(true);

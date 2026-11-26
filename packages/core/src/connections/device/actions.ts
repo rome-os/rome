@@ -145,12 +145,11 @@ export function registerDeviceActions(
 }
 
 /** What running one operation on a device needs of its turn. */
-export type DeviceRunTurn = LiveTurn & Pick<ToolTurn, "audience">;
+export type DeviceRunTurn = LiveTurn;
 
 /** The running turn as a device run reads it, from the action's store. */
 export function deviceRunTurnOf(store: ToolTurn | undefined): DeviceRunTurn {
   return {
-    audience: store?.audience,
     askingDeviceId: askingDeviceOf(store?.channelContext),
   };
 }
@@ -163,7 +162,7 @@ export type DeviceRunOutcome =
 /**
  * Runs one operation on one of the guardian's devices for `turn`, as
  * `core:device_run` and `system:run_on_device` both do: the live route picks
- * the device, then the rule for a change to the device.
+ * the device.
  */
 export async function runOnDevice(
   deps: Pick<DeviceActionDeps, "connections" | "run"> & { now?: () => number },
@@ -175,12 +174,11 @@ export async function runOnDevice(
     askingDeviceId: turn.askingDeviceId,
     deviceId: request.deviceId,
   });
-  return runOperation(deps, { audience: turn.audience }, request.operation, request.args, route);
+  return runOperation(deps, request.operation, request.args, route);
 }
 
 async function runOperation(
   deps: Pick<DeviceActionDeps, "run">,
-  { audience }: Pick<ToolTurn, "audience">,
   operation: string,
   args: Record<string, unknown>,
   route: ReturnType<ReturnType<typeof createLiveRoutes>["forOperation"]>,
