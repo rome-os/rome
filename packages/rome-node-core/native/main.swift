@@ -120,8 +120,14 @@ do {
     }
     throw Failure("desktop_disabled")
     #else
+    let setup = try (arguments.isEmpty || arguments.first == "--setup-permissions")
+        ? PermissionSetupRequest(arguments, preferred: Locale.preferredLanguages) : nil
     if arguments == ["--check-permissions"] { alarm(2) }
     guard signedApp() else { throw Failure("desktop_disabled") }
+    if let setup {
+        try MainActor.assumeIsolated { try runPermissionSetup(setup) }
+        exit(0)
+    }
     if arguments == ["--check-permissions"] {
         let output = try JSONSerialization.data(withJSONObject: [
             "accessibility": AXIsProcessTrusted(),

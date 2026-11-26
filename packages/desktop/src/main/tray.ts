@@ -136,6 +136,11 @@ export function setupTray(options: SetupTrayOptions): Tray {
         log.warn(`Could not open macOS privacy settings (${String(error)})`);
       });
     };
+    const setupPermissions = () => {
+      void computerUseSettings?.setup().catch((error) => {
+        log.warn(`Could not open the Computer Use permission guide (${String(error)})`);
+      });
+    };
     const template: Electron.MenuItemConstructorOptions[] = [
       {
         label: "Show Rome",
@@ -160,6 +165,9 @@ export function setupTray(options: SetupTrayOptions): Tray {
             {
               label: `Computer Use: ${computerUse.enabled ? "On" : "Off"}`,
               submenu: [
+                ...(computerUse.helperPresent
+                  ? [{ label: "Set Up Permissions…", click: setupPermissions }]
+                  : []),
                 {
                   label: `Bundled helper: ${computerUse.helperPresent ? "Installed" : "Missing"}`,
                   enabled: false,

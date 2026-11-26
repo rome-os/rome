@@ -93,7 +93,10 @@ describe("setupTray", () => {
       getStatus: () => status({ phase: "ready" }),
     }) as unknown as Runtime;
     const open = rs.fn(async () => undefined);
+    const setup = rs.fn(async () => undefined);
+    const revealHelper = rs.fn();
     let enabled = false;
+    let helperPresent = true;
     let currentDevice: DeviceStatus = { state: "off" };
     let notifyChange: () => void = () => {};
     setupTray({
@@ -109,23 +112,35 @@ describe("setupTray", () => {
         },
       },
       computerUseSettings: {
-        status: () => ({ enabled, helperPresent: true }),
+        status: () => ({ enabled, helperPresent }),
+        setup,
         open,
-        revealHelper: rs.fn(),
+        revealHelper,
       },
     });
     const item = menus.at(-1)?.find(({ label }) => label === "Computer Use: Off");
     const submenu = item?.submenu as Electron.MenuItemConstructorOptions[];
     expect(menus.at(-1)?.some(({ label }) => label?.startsWith("This Mac:"))).toBe(false);
-    expect(submenu[0]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
+    expect(submenu[0]?.label).toBe("Set Up Permissions…");
+    submenu[0]?.click?.({} as never, undefined, {} as never);
+    expect(setup).toHaveBeenCalledTimes(1);
+    expect(submenu[1]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
     submenu
       .find(({ label }) => label === "Screen Recording Settings…")
       ?.click?.({} as never, undefined, {} as never);
     expect(open).toHaveBeenCalledWith("screenRecording");
+    submenu
+      .find(({ label }) => label === "Show Rome Computer Use in Finder")
+      ?.click?.({} as never, undefined, {} as never);
+    expect(revealHelper).toHaveBeenCalledTimes(1);
 
     enabled = true;
+    helperPresent = false;
     notifyChange();
-    expect(menus.at(-1)?.map(({ label }) => label)).toContain("Computer Use: On");
+    const missing = menus.at(-1)?.find(({ label }) => label === "Computer Use: On");
+    expect(
+      (missing?.submenu as Electron.MenuItemConstructorOptions[]).map(({ label }) => label),
+    ).toEqual(["Bundled helper: Missing", "Accessibility Settings…", "Screen Recording Settings…"]);
 
     enabled = false;
     currentDevice = {
