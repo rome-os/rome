@@ -433,13 +433,13 @@ describe("an event on a widget", () => {
     expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/todos/delete"]);
   });
 
-  it("is not found to a caller who may not open its chat, checked by the route itself", async () => {
+  it("is any member's to fire, in a Concierge chat someone else owns", async () => {
     const { fire, forwarded } = setup(
       { m1: { chatId: "private", content: [mealWidget("w1", "meals", "water")] } },
       "visitor:someone",
     );
-    expect((await fire("m1", { name: "water" })).status).toBe(404);
-    expect(forwarded).toEqual([]);
+    expect((await fire("m1", { name: "water" })).status).toBe(200);
+    expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/meals/water"]);
   });
 
   it("is not found when the message holds no widget, or more than one part", async () => {
@@ -901,6 +901,12 @@ describe("an event on the share-location card core owns", () => {
   };
 
   it("answers the agent with the position the client read on Share", async () => {
+    const theirs = setup({ m: { chatId: "private", content: [locationCard] } }, "visitor:v");
+    expect((await theirs.fire("m", { name: "share-location", context: position })).status).toBe(
+      404,
+    );
+    expect(theirs.forwarded).toEqual([]);
+
     const { fire, forwarded } = setup({ m: { chatId: "c1", content: [locationCard] } });
     const res = await fire("m", { name: "share-location", context: position });
     expect(await res.json()).toMatchObject({ answered: true });
