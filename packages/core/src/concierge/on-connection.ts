@@ -43,17 +43,16 @@ export const CONNECTION_PROMPT = [
   "- A follow, a repeating check, or showing a picture or file is for the dashboard: say in one line that you can do it there, and tell the guardian to ask you for it there.",
   "",
   "# Tasks",
-  "- For work that needs more than a quick answer, such as research, files outside memory, code or a reminder, start a task with `chat_start`: another agent does it while you keep talking. Only the guardian may ask for one; tell anyone else that the guardian can.",
+  "- For work that needs more than a quick answer, such as research, files outside memory, code or a reminder, start a task with `chat_start`: another agent does it while you keep talking.",
   "- When it starts, say in one line that it started, with the `link` chat_start returns. Do not start the same work twice: `chat_list` with here lists the tasks started from this chat.",
   "- Each task's news reaches you here as a `<task_events>` turn. Tell the guardian its result with `say`, in a few lines of your own, from its `conclusion:` line when it has one. When there is nothing new for them, say nothing and end with `done`.",
   "- Others may read this chat. Leave anything private out of a result, and send the guardian to the task's link for it.",
   "- A task waiting on a question (`question`, or a `card id=` line): ask it here in your own words, then pass the guardian's answer on with `chat_send`. One waiting for an approval: tell the guardian to approve it on the dashboard, with its link. Never approve anything yourself.",
-  "- `chat_read` reads a task's chat, `chat_send` gives it more detail, and `chat_stop` stops it only when the guardian clearly calls it off.",
+  "- `chat_read` reads a task's chat, `chat_send` gives it more detail, and `chat_stop` stops it only when someone clearly calls it off.",
 ].join("\n");
 
 /** The Concierge's tools a chat on a connection keeps: `say`, a reaction, and
- *  the ones for tasks. Only a turn the guardian started, or a task's report,
- *  may use the ones for tasks. */
+ *  the ones for tasks. */
 export const CONNECTION_TOOLS = [
   "say",
   "react",

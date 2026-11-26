@@ -53,9 +53,9 @@ describe("the Concierge on a connection", () => {
     }
   });
 
-  it("runs tasks with the tools it keeps, and approves nothing itself", () => {
+  it("runs tasks for whoever asks with the tools it keeps, and approves nothing itself", () => {
     for (const name of CONNECTION_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
-    expect(CONNECTION_PROMPT).toContain("Only the guardian may ask for one");
+    expect(CONNECTION_PROMPT).not.toContain("Only the guardian may ask for one");
     expect(CONNECTION_PROMPT).toContain("Never approve anything yourself.");
   });
 
