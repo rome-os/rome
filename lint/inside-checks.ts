@@ -49,6 +49,10 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     ],
     why: "links an account to the guardian's person",
   },
+  "packages/core/src/people/app-person-mapping.ts": {
+    lines: ['if (bondLevel === "guardian") {'],
+    why: "an app asking for the guardian is answered from Access, and nobody is checked",
+  },
   "packages/core/src/personal-data/routes.ts": {
     lines: ['if (!reads && actor.kind !== "guardian") {'],
     why: "personal data comes from the guardian's phone",

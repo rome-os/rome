@@ -103,7 +103,7 @@ describe("Slack app members who did not sign in (R12)", () => {
 
     // The inbox reads a sender's bond from People by the account it spoke
     // from, and a sender no link names is "other".
-    const mapping = appPersonMapping(people);
+    const mapping = appPersonMapping(people, async () => null);
     const bondOf = async (message: ChannelMessage) =>
       (await mapping.findByChannelUser(message.channel, message.senderId))?.bondLevel ?? "other";
     const [guardian, member] = heard;

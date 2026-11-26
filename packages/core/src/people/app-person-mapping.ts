@@ -7,7 +7,9 @@
 // the one place they are translated, so the repository itself speaks People's
 // language. An app names an account either as the `Account` value or, as it
 // did before accounts, by the channel it heard it on. People names it by the
-// platform, so a channel an app passes is read as its platform here.
+// platform, so a channel an app passes is read as its platform here. The
+// guardian is answered from Access and Identity instead, so this path does
+// not read People's links (rome-os/rome#2721, D17).
 
 import type { PersonMappingRepository, PersonRecord } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
@@ -27,6 +29,28 @@ function toRecord(person: Person): PersonRecord {
   };
 }
 
+/** The guardian's person with every account of theirs, newest first, as
+ *  Access and Identity answer it. Declared here because people/ imports
+ *  neither; index.ts and the worker inject it. */
+export interface GuardianWithAccounts {
+  person: { id: string; name: string | null };
+  accounts: { platform: string; accountId: string }[];
+}
+
+/** The guardian as an app reads it. Identity holds no bond level and no
+ *  profile, so the record names the bond the lookup answers for, and the name
+ *  Identity holds, which the members' starting data copies from People. */
+function guardianRecord({ person, accounts }: GuardianWithAccounts): PersonRecord {
+  const held = accounts.map(({ platform, accountId }) => ({ platform, id: accountId }));
+  return {
+    id: person.id,
+    displayName: person.name ?? "Guardian",
+    bondLevel: "guardian",
+    channelMappings: held.map(({ platform, id }) => ({ channel: platform, channelUserId: id })),
+    accounts: held,
+  };
+}
+
 /** Only the guardian links an account to a person (docs/domains/people.md#link),
  *  so an app's request for one is refused rather than recorded. The SDK keeps
  *  the methods so apps built against it still compile. */
@@ -41,10 +65,12 @@ function refusePerson(): never {
   throw new Error("Apps cannot add persons. Rome no longer lets an app add a person.");
 }
 
-/** `platformOfChannel` reads a channel an app names as its platform. Absent,
+/** `guardian` answers who the guardian is and every account of theirs.
+ *  `platformOfChannel` reads a channel an app names as its platform. Absent,
  *  the platform of the connection kind a channel is named after. */
 export function appPersonMapping(
   people: PeopleRepository,
+  guardian: () => Promise<GuardianWithAccounts | null>,
   platformOfChannel: PlatformOfChannel = platformOf,
 ): PersonMappingRepository {
   const accountOn = (channel: string, channelUserId: string) => ({
@@ -64,6 +90,10 @@ export function appPersonMapping(
       return person && toRecord(person);
     },
     async findByBondLevel(bondLevel) {
+      if (bondLevel === "guardian") {
+        const found = await guardian();
+        return found ? [guardianRecord(found)] : [];
+      }
       return (await people.byBondLevel(bondLevel)).map(toRecord);
     },
     async findByAccount({ platform, id }) {

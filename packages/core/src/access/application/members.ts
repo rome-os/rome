@@ -86,6 +86,18 @@ export async function listMembers({ identity, access }: MemberContext): Promise<
   return listed;
 }
 
+/** The guardian's person with every account of theirs, the one given to
+ *  them last first, or null while Rome has no guardian. */
+export async function guardianWithAccounts({
+  identity,
+  access,
+}: MemberContext): Promise<{ person: Person; accounts: Account[] } | null> {
+  const guardian = (await access.members()).find((m) => m.role === "guardian");
+  const person = guardian && (await identity.person(guardian.personId));
+  if (!person) return null;
+  return { person, accounts: await identity.accountsOfNewestFirst(person.id) };
+}
+
 /** The email of every Rome Cloud sign-in account of every person with role
  *  member, sorted. The
  *  guardian's are not among them: the guardian's seat says who the guardian is. */
