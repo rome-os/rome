@@ -238,10 +238,7 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       profile,
       ...(workspace.installerUserId
         ? {
-            connectedBy: {
-              id: `${workspace.teamId}/${workspace.installerUserId}`,
-              stableId: true,
-            },
+            connectedBy: { id: `${workspace.teamId}/${workspace.installerUserId}` },
           }
         : {}),
       summary: {

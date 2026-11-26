@@ -146,7 +146,7 @@ describe("connecting Rome's Slack app (R1)", () => {
       depositKey: "key-1",
     });
     // The member who approved is the guardian there from their first message.
-    expect(grant.connectedBy).toEqual({ id: "T_A/U_GUARDIAN", stableId: true });
+    expect(grant.connectedBy).toEqual({ id: "T_A/U_GUARDIAN" });
     expect(slackAppAccountId(grant.profile ?? {})).toBe("T_A/U_BOT");
   });
 

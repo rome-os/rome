@@ -34,7 +34,7 @@ A participant's identity on a platform, as [Account](chats.md#account) in Chats 
 - An account is in one of three states. A **stranger** is one nobody has decided about. A **linked** account belongs to a person. A **dismissed** account is one the guardian decided belongs to nobody they track.
 - The dashboard offers no way to link, move, unlink, dismiss or restore an account. Links and dismissals already made stay.
 - Dismissing makes no person.
-- An account linked to the guardian is one of theirs. The guardian's signed-in accounts, such as their own Telegram, WhatsApp, LinkedIn, WeChat or email, are theirs the moment they connect them, with no further step.
+- An account linked to the guardian is one of theirs. Connecting an account links nothing in People: a connection signed in as the guardian's own account gives it to the guardian in Identity ([Access](access.md)).
 - Where the platform does not say which account is the guardian's, no account is linked to them.
 
 ## Link

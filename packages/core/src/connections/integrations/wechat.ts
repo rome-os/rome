@@ -289,7 +289,7 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
   const accountScheme = wechatAccountScheme();
   // The WeChat setup: QR show → scan-confirmed wait →
-  // single terminal write of credential + profile + guardian mapping.
+  // single terminal write of credential + profile.
   accountScheme.setup = makeWechatSetup({
     auth: deps.auth ?? new WechatAuthService(),
     makeQrDataUrl: deps.makeQrDataUrl ?? renderQrDataUrl,

@@ -195,32 +195,26 @@ export interface SetupCommitted {
 interface ConnectedBy {
   /** The platform's own id for the account, in the form the kind records it. */
   id: string;
-  /** True when this kind has only ever reported the account under this id.
-   *  Absent when an earlier version of the kind may have reported the same
-   *  account under another form of id, such as a WhatsApp id with a device
-   *  suffix. */
-  stableId?: boolean;
 }
 
-/** A connect whose grant reports who gave the access, before it is written. */
-interface ReportedConnect {
+/** A connect signed in as the account that gave Rome the access: the account
+ *  the connection reaches is the one that connected it, as for a signed-in
+ *  WhatsApp or Telegram account, and unlike a bot or an app. */
+export interface OwnAccountConnect {
   /** The platform of the connection's kind. */
   platform: string;
-  connectedBy: ConnectedBy;
+  /** The platform's own id for that account. */
+  accountId: string;
 }
 
 /**
- * A write outside Connections that joins a connect's transaction, so it and
- * the credential commit together or not at all.
+ * A write outside Connections that joins an own-account connect's
+ * transaction, so it and the credential commit together or not at all.
  *
  * `prepare` runs before the transaction opens and may read. The write it
  * returns runs inside the transaction and must be synchronous. A throw from
- * either fails the connect and leaves nothing written. `reachesAnotherAccount`
- * is true when a fix reached another account than the connection held, so
- * Connections ended that connection and made a new one.
+ * either fails the connect and leaves nothing written.
  */
 export interface ConnectParticipant {
-  prepare(
-    connect: ReportedConnect,
-  ): Promise<((tx: DrizzleTx, grant: { reachesAnotherAccount: boolean }) => void) | undefined>;
+  prepare(connect: OwnAccountConnect): Promise<((tx: DrizzleTx) => void) | undefined>;
 }

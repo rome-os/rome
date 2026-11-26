@@ -171,6 +171,7 @@ import { ConnectedAccountsRepository } from "./db/repositories/connected-account
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { peopleLinkChanged } from "./access/application/guardian-links.js";
+import { ownAccountConnected } from "./access/application/own-account-connect.js";
 import {
   guardianWithAccounts,
   logStepFailure,
@@ -324,7 +325,6 @@ import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { botsOfPeople } from "./people/bots-of-people.js";
-import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
@@ -849,12 +849,12 @@ async function main() {
   });
   const agentNameResolver = createAgentNames(listedAgents);
   // Grant setups: in-memory session store keyed per grant,
-  // sharing the registry (descriptor lookup + terminal write). People joins each
-  // connect to link the account that connected to the guardian. Drives the generic setup
+  // sharing the registry (descriptor lookup + terminal write). A connect signed
+  // in as the guardian's own account gives it to the guardian. Drives the generic setup
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    participant: linkGuardianOnConnect(peopleRepo),
+    participant: ownAccountConnected(),
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -2404,14 +2404,6 @@ async function main() {
           accountAgent: () => accountAgentOf(connectionId) ?? null,
         }),
       ),
-    // The account that connected is the guardian's own, so People links it.
-    onWhatsAppAccountConnected: (selfJid) => {
-      linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
-        log.error("failed to auto-map guardian on WhatsApp connect", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    },
     mailProvider,
     // Keep the system prompt's "our own inbox address" ref pointed at the
     // current email epoch (birth, relock/re-authorize, Disconnected rebuild).

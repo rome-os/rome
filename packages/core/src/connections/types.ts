@@ -266,7 +266,7 @@ export interface AuthScheme {
    * the generic setup surface (`POST
    * /api/connections/:id/grants/:name/setup`) drives it: a server-owned
    * coroutine that prompts/shows/redirects and returns a terminal grant
-   * (credential + profile + optional guardian mapping). Absent for grants with
+   * (credential + profile + an optional joined write). Absent for grants with
    * no dashboard setup (headless imports, OAuth redirect routes). Kept
    * `unknown`-free by importing the setup type lazily to avoid a cycle: see
    * `./setup/types.ts`.

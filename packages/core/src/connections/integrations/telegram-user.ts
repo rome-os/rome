@@ -314,7 +314,7 @@ export function makeTelegramUserSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile,
-        ...(account.userId ? { connectedBy: { id: account.userId, stableId: true } } : {}),
+        ...(account.userId ? { connectedBy: { id: account.userId } } : {}),
         summary: {
           title: "Telegram account connected",
           body: [

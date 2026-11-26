@@ -18,7 +18,6 @@ import {
 } from "../connections/kinds/slack-app/deposit.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
-import { applyGuardianMappingWithinTx, planGuardianMapping } from "../people/guardian-mapping.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { createTestDb, type TestDb } from "./db.js";
 import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
@@ -64,13 +63,10 @@ describe("Slack app members who did not sign in (R12)", () => {
   it("answers the member who signed in as the guardian, and another member as a visitor", async () => {
     const people = new DrizzlePeopleRepository(testDb.db);
     await people.createWithId("guardian", { displayName: "Ouou", bondLevel: "guardian" });
-    // The setup's mapping of the member who signed in, as the setup manager
-    // applies it.
-    const platform = platformOf(SLACK_APP_KIND);
-    const account = `${TEAM}/${INSTALLER}`;
-    const plan = await planGuardianMapping(people, platform, account, { addOnly: true });
-    testDb.db.transaction((tx) =>
-      applyGuardianMappingWithinTx(tx, people, platform, account, plan),
+    // The guardian's Slack account, linked to the guardian in People.
+    await people.linkStated(
+      { platform: platformOf(SLACK_APP_KIND), id: `${TEAM}/${INSTALLER}` },
+      "guardian",
     );
 
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
