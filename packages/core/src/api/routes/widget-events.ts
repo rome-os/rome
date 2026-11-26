@@ -31,8 +31,6 @@ interface CoreIo {
   origin: string;
   /** The props core stored with the widget, which a client cannot change. */
   props: Record<string, unknown>;
-  /** Who can read the widget's chat now, read when the event arrives. */
-  chatAudience(): Promise<"private" | "shared">;
   /** Starts a connection's setup, as the Connections page's Connect does. */
   startSetup(request: SetupStartRequest): Promise<SetupStartOutcome>;
   /** Whether the event came from this instance's own pages, which the setup
@@ -198,10 +196,6 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     [SHARE_LOCATION_EVENT]: async (context, io) => {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
-      // The chat may have become shared since the card was shown, as when
-      // visitors were let in: then the position reaches nobody, and the card
-      // is answered as declined.
-      if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
       // A share the client sent by itself is marked so only on a card core
       // marked for it; a client cannot mark any other.
       const auto = context.auto === true && typeof io.props.autoShareToken === "string";
@@ -268,9 +262,6 @@ export interface WidgetEventDeps {
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
   /** Whose share-location cards the caller answers. */
   callerOwner?: () => Promise<string | null>;
-  /** Who can read a dashboard chat now. Absent, every chat reads as shared,
-   *  so no location is accepted. */
-  chatAudience?: (chatId: string) => Promise<"private" | "shared">;
   /** Starts a connection's setup: the operation behind the Connections page's
    *  Connect. Absent, the connect card's Connect starts none and says so. */
   startSetup?: (request: SetupStartRequest) => Promise<SetupStartOutcome>;
@@ -358,7 +349,6 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const reply = await handle(context, {
         origin,
         props: widget.props,
-        chatAudience: async () => (await deps.chatAudience?.(message.chatId)) ?? "shared",
         startSetup: async (request) =>
           deps.startSetup
             ? deps.startSetup(request)

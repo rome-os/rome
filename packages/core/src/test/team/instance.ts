@@ -31,7 +31,6 @@ import { linkedin } from "../../connections/kinds/linkedin/index.js";
 import type { KindMount } from "../../connections/kind-mount.js";
 import { ConnectionRegistry, DrizzleConnectionsRepository } from "../../connections/index.js";
 import { SetupManager } from "../../connections/setup/manager.js";
-import { placeAudience } from "../../core/place-audience.js";
 import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
@@ -199,11 +198,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     connectionKinds: kinds,
     connectionRegistry,
     setupManager: new SetupManager({ registry: connectionRegistry }),
-    // The daemon's rule, in place of the test deps' "every chat is shared".
-    placeAudience: placeAudience({
-      dashboardChat: (chatId) => testDeps.webchatRepo.getSession(chatId),
-      visitorsAllowed: () => testDeps.dashboardAccessState.hasCloudEmailAccess(),
-    }),
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
   };

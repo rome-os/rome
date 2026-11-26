@@ -254,7 +254,6 @@ export function buildApp(
     widgetEventRoutes({
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
-      chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
       // The setup `POST /connections/:id/grants/:name/setup` starts, so the
       // connect card's Connect is the Connections page's.
       startSetup: (request) =>
