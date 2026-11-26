@@ -53,10 +53,6 @@ Someone with access to the signer's key volume on the host can read the secrets,
 
 `vault load` reads the command's stdout and stderr and replaces every exact copy of a loaded value with `[vault:NAME]`. It also catches a value split across two reads of the output. Masking is always on, and no option turns it off. It matches exact values only: an encoded or transformed copy, such as base64, prints as it is.
 
-## Shared conversations
-
-`vault load` refuses when the conversation is shared, because other people read the output. The agent tells the guardian to ask in a private chat. See [audience](domains/participation.md#audience).
-
 ## Instances without a signer
 
 The vault needs the signer. An instance that runs without one shows an error in Settings, and `vault_apply`, `vault_search` and `vault load` report that the vault is not available. Secrets are not migrated from `.env` files or from other credential files. A rebuilt instance starts with an empty vault, because the store sits in the signer's key volume.

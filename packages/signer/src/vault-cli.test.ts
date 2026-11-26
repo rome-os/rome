@@ -119,20 +119,9 @@ describe("vault load", () => {
     );
   });
 
-  it("refuses in a shared conversation, before any release", async () => {
-    const result = await run(["load", "FIRST_KEY", ...node("console.log('ran')")], {
-      ROME_SIGNER_SOCKET: "/nonexistent/signer.sock",
-      ROME_TURN_AUDIENCE: "shared",
-    });
-    expect(result.code).toBe(1);
-    expect(result.err).toContain("shared");
-    expect(result.out).toBe("");
-  });
-
   it("explains when the instance has no signer", async () => {
     const result = await run(["load", "FIRST_KEY", ...node("1")], {
       ROME_SIGNER_SOCKET: "/nonexistent/signer.sock",
-      ROME_TURN_AUDIENCE: "private",
     });
     expect(result.code).toBe(1);
     expect(result.err).toBe("vault: The vault is not available on this instance (no signer).\n");

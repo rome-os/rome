@@ -27,12 +27,6 @@ a secret's value prints as [vault:NAME].
 
 const NO_SIGNER = "The vault is not available on this instance (no signer).";
 
-/** Whether the environment says the turn is shared. Unset means a person runs the CLI. */
-function turnIsShared(env: NodeJS.ProcessEnv): boolean {
-  const audience = env.ROME_TURN_AUDIENCE;
-  return audience !== undefined && audience !== "private";
-}
-
 class VaultCliError extends Error {}
 
 function signerCall(
@@ -216,12 +210,6 @@ export async function runVault(
       ) {
         io.err(`Usage: vault load NAME[,NAME2] -- cmd args...\n`);
         return 2;
-      }
-      if (turnIsShared(env)) {
-        io.err(
-          "This chat is shared, so vault secrets cannot be loaded here. Ask the guardian to run it in a private chat with Rome.\n",
-        );
-        return 1;
       }
       return await load(socket, [...new Set(names)], rest.slice(separator + 1), env, io);
     }

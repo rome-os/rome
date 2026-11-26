@@ -88,7 +88,6 @@ Who can read what a turn says: *private* (only the guardian) or *shared* (anyone
 - A subagent, fork or task takes its starter's audience, never a more private one. A turn an action starts, such as a summon or the reply to a channel message, takes the audience Rome read for the chat that ran the action, and is shared when Rome read none. A routine's fire takes the audience of the chat it works for, and a routine of no chat is shared.
 - [Personal-data](../concepts/data.md#personal-data) actions run only in private turns. In a shared turn they are refused with a reason the agent can pass on. A routine that reads personal data is refused when it is made for a shared chat.
 - A shared turn reads only the chat it is in: its own chat, or, in a native thread, the chat the thread hangs off. An app's read of any other chat is refused. An agent's turn with no chat of its own, such as a summoned agent's, reads any chat when it is private, and no chat when it is shared. A private turn reads any chat, and so does an action outside any agent's turn. A routine's fire runs outside one, so a routine made for a shared chat still reads any chat, a known gap.
-- An agent's shell reads the audience too, and the `rome-node` CLI refuses a device's personal capability in a shared turn. That is a guardrail against a model mistake, not a boundary: the agent can unset it. A summoned agent's shell reads as shared even when its turns read as private, the safe side.
 
 ## Decided against
 
