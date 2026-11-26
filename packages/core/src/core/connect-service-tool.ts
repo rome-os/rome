@@ -17,6 +17,9 @@ const NOT_A_DEVICE =
   "It never adds, pairs or wakes a device: when a device is offline or a call to it answers " +
   "`target_unavailable`, show no card and ask the guardian to bring that device online.";
 
+const WINDOW_CONTROL =
+  "For macOS Window Control, use `rome-node device describe <id>` and follow the local permission and consent flow on the Mac. Show no connect card for it.";
+
 /**
  * The `kind` argument's description: each device kind with what its device
  * says it lets Rome do. It names no state or device, which change during a
@@ -63,9 +66,11 @@ export function connectServiceTools(input: {
       name: "connect_service",
       formerNames: ["connect_account"],
       endsTurn: widgetsShow,
-      description: input.devicesOnly
-        ? `Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that reads a device, when they ask to connect one, or when a reply or a device says \`not_connected\` or \`live_off\`. It answers at once that a kind already works, with no card, so call it instead of asking whether a device is connected. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. ${NOT_A_DEVICE}`
-        : `Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.${devices.length > 0 ? ` ${NOT_A_DEVICE}` : ""}`,
+      description: `${
+        input.devicesOnly
+          ? `Ask the guardian to connect a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it here, in this chat, before starting a task that reads a device, when they ask to connect one, or when a reply or a device says \`not_connected\` or \`live_off\`. It answers at once that a kind already works, with no card, so call it instead of asking whether a device is connected. Never show the card again for a kind whose card the guardian just answered. The card opens the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. ${NOT_A_DEVICE}`
+          : `Ask the guardian to connect an account of a kind Rome connects itself, such as GitHub, Slack or Shopify, or a capability of one of their devices, such as Apple Health on an iPhone, through a card in the chat. Call it when a task needs one of these and it is not connected, or a call reports it is not connected. The card opens the provider's authorization page, or the device's own flow; whether the guardian connected it or dismissed the card comes back as the next turn. Where no card shows, ask the guardian to connect it in Settings › Connections.${devices.length > 0 ? ` ${NOT_A_DEVICE}` : ""}`
+      } ${WINDOW_CONTROL}`,
       inputSchema: {
         type: "object",
         required: ["kind"],

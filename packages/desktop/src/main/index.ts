@@ -43,6 +43,7 @@ import { DEV_DASHBOARD_URL_ENV, DevUrlRuntime, resolveDevDashboardUrl } from "./
 import type { Runtime } from "./runtime/runtime";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
+import { registerComputerUseSettings } from "./computer-use-settings";
 import { adoptLoginShellPath } from "./cloud/login-path";
 import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
@@ -110,6 +111,18 @@ async function bootstrap() {
     if (audit.state.state === "unavailable")
       log.warn(`Audit log unavailable: ${audit.state.message}`);
     registerAuditHandlers(audit);
+    const computerUseHelperPath =
+      process.platform === "darwin"
+        ? join(
+            app.isPackaged
+              ? process.resourcesPath
+              : join(__dirname, "../../../rome-node-core-darwin-arm64/dist"),
+            "native/Rome Computer Use.app",
+          )
+        : undefined;
+    const computerUseSettings = computerUseHelperPath
+      ? registerComputerUseSettings(computerUseHelperPath, readDeviceEnabled)
+      : undefined;
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
     const deviceListeners = new Set<() => void>();
@@ -119,19 +132,11 @@ async function bootstrap() {
           deviceName: deviceName(),
           credential: () => cloudAccount.credential(),
           enabled: readDeviceEnabled,
-          onRevoked: async () => {
+          signOut: async () => {
             await controller.signOut();
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
-          computerUseHelperPath:
-            process.platform === "darwin"
-              ? join(
-                  app.isPackaged
-                    ? process.resourcesPath
-                    : join(__dirname, "../../../rome-node-core-darwin-arm64/dist"),
-                  "native/Rome Computer Use.app",
-                )
-              : undefined,
+          computerUseHelperPath,
           audit,
           // Rome Cloud also sends each push to the desktop apps of the person it is for.
           onNotification: (notification) =>
@@ -165,11 +170,7 @@ async function bootstrap() {
     const device = {
       status: (): DeviceStatus => deviceHost?.status() ?? { state: "off" },
       start: async () => {
-        await deviceHost?.start();
-      },
-      stop: async () => {
-        await deviceHost?.stop();
-        keepAwake.release();
+        if (!isQuitting()) await deviceHost?.start();
       },
       setEnabled: async (enabled: boolean) => {
         writeDeviceEnabled(enabled);
@@ -195,6 +196,11 @@ async function bootstrap() {
       openSettingsWindow: () => createSettingsWindow(),
       openAuditWindow: () => createAuditWindow(),
       cloudAccount,
+      signOut: async () => {
+        cloudAccount.cancelSignIn();
+        if (deviceHost) await deviceHost.signOut();
+        else await controller.signOut();
+      },
       device,
       apps: appShimsSupported() ? appShims : undefined,
     });
@@ -338,6 +344,7 @@ async function bootstrap() {
       },
       runtime,
       floatingPill,
+      computerUseSettings,
       device: {
         status: device.status,
         onChange: (listener) => deviceListeners.add(listener),
@@ -348,9 +355,13 @@ async function bootstrap() {
     // computer.
     setupLifecycle({
       onShutdown: async () => {
-        runtime.dispose?.();
-        await device.stop();
-        audit.close();
+        try {
+          await deviceHost?.stop();
+        } finally {
+          keepAwake.release();
+          audit.close();
+          runtime.dispose?.();
+        }
       },
     });
 

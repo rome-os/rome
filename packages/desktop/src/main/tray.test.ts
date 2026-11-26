@@ -1,13 +1,13 @@
 import { EventEmitter } from "events";
 import { describe, expect, it, rs } from "@rstest/core";
 
-const menus = rs.hoisted(() => [] as Array<Array<{ label?: string; enabled?: boolean }>>);
+const menus = rs.hoisted(() => [] as Electron.MenuItemConstructorOptions[][]);
 
 rs.mock("electron", () => ({
   app: { on: rs.fn() },
   BrowserWindow: class {},
   Menu: {
-    buildFromTemplate: (template: Array<{ label?: string; enabled?: boolean }>) => {
+    buildFromTemplate: (template: Electron.MenuItemConstructorOptions[]) => {
       menus.push(template);
       return template;
     },
@@ -84,7 +84,34 @@ describe("setupTray", () => {
     const labels = menus.at(-1)?.map((item) => item.label);
     expect(labels).toContain("Quit Rome");
     expect(labels).toContain("Status: Ready");
+    expect(labels?.some((label) => label?.startsWith("Computer Use:"))).toBe(false);
     expect(labels?.some((label) => /agent|Stopping/.test(label ?? ""))).toBe(false);
+  });
+
+  it("shows local Computer Use status and opens the selected privacy pane", () => {
+    const runtime = Object.assign(new EventEmitter(), {
+      getStatus: () => status({ phase: "ready" }),
+    }) as unknown as Runtime;
+    const open = rs.fn(async () => undefined);
+    setupTray({
+      getMainWindow: () => null,
+      ensureMainWindow: rs.fn(),
+      openSettings: rs.fn(),
+      runtime,
+      floatingPill: null,
+      computerUseSettings: {
+        status: () => ({ enabled: false, helperPresent: true }),
+        open,
+        revealHelper: rs.fn(),
+      },
+    });
+    const item = menus.at(-1)?.find(({ label }) => label === "Computer Use: Off");
+    const submenu = item?.submenu as Electron.MenuItemConstructorOptions[];
+    expect(submenu[0]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
+    submenu
+      .find(({ label }) => label === "Screen Recording Settings…")
+      ?.click?.({} as never, undefined, {} as never);
+    expect(open).toHaveBeenCalledWith("screenRecording");
   });
 });
 

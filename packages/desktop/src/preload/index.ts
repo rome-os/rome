@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { ComputerUsePane } from "../main/computer-use-settings";
 
 /**
  * This computer as a device of the signed-in account. The open Rome's
@@ -52,6 +53,17 @@ const audit = {
 const api = {
   device,
   audit,
+  ...(process.platform === "darwin"
+    ? {
+        computerUse: {
+          status: (): Promise<{ enabled: boolean; helperPresent: boolean }> =>
+            ipcRenderer.invoke("computerUse:status"),
+          openSettings: (pane: ComputerUsePane): Promise<void> =>
+            ipcRenderer.invoke("computerUse:openSettings", pane),
+          revealHelper: (): Promise<void> => ipcRenderer.invoke("computerUse:revealHelper"),
+        },
+      }
+    : {}),
 
   settings: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("settings:get", key),

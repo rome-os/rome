@@ -5,6 +5,7 @@ import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import type { DeviceStatus } from "./cloud/device-host";
+import type { ComputerUsePane, registerComputerUseSettings } from "./computer-use-settings";
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 
@@ -95,6 +96,7 @@ export interface SetupTrayOptions {
   floatingPill: FloatingPill | null;
   /** This computer as a device. Without it the menu has no line for it. */
   device?: { status(): DeviceStatus; onChange(listener: () => void): void };
+  computerUseSettings?: ReturnType<typeof registerComputerUseSettings>;
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
@@ -106,6 +108,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
     runtime,
     floatingPill,
     device,
+    computerUseSettings,
   } = options;
 
   tray = new Tray(resolveTrayIcon());
@@ -127,6 +130,12 @@ export function setupTray(options: SetupTrayOptions): Tray {
 
     const quitting = isQuitting();
     const deviceLine = device ? deviceLabel(device.status()) : null;
+    const computerUse = computerUseSettings?.status();
+    const openPrivacyPane = (pane: ComputerUsePane) => {
+      void computerUseSettings?.open(pane).catch((error) => {
+        log.warn(`Could not open macOS privacy settings (${String(error)})`);
+      });
+    };
     const template: Electron.MenuItemConstructorOptions[] = [
       {
         label: "Show Rome",
@@ -146,6 +155,32 @@ export function setupTray(options: SetupTrayOptions): Tray {
         click: openSettings,
       },
       ...(openAuditLog ? [{ label: "Computer Use Log…", click: openAuditLog }] : []),
+      ...(computerUse
+        ? [
+            {
+              label: `Computer Use: ${computerUse.enabled ? "On" : "Off"}`,
+              submenu: [
+                {
+                  label: `Bundled helper: ${computerUse.helperPresent ? "Installed" : "Missing"}`,
+                  enabled: false,
+                },
+                { label: "Accessibility Settings…", click: () => openPrivacyPane("accessibility") },
+                {
+                  label: "Screen Recording Settings…",
+                  click: () => openPrivacyPane("screenRecording"),
+                },
+                ...(computerUse.helperPresent
+                  ? [
+                      {
+                        label: "Show Rome Computer Use in Finder",
+                        click: computerUseSettings?.revealHelper,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : []),
       // The floating icon is off until it is ticked here, and this is the way
       // back after its own menu has hidden it.
       ...(floatingPill
