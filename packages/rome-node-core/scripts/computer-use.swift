@@ -387,8 +387,8 @@ func main() throws {
         try build(output, selfTest: flags.contains("--self-test-build"), identity: options["--identity"],
                   profile: options["--provisioning-profile"], iconPath: options["--icon"])
         print(output.path)
-    case "verify" where buildOptions.isEmpty && flags.isSubset(of: ["--release"]):
-        try validate(output, release: flags.contains("--release"))
+    case "verify" where buildOptions.isEmpty && (flags.isEmpty || flags == ["--release"] || flags == ["--self-test-build"]):
+        try validate(output, signed: !flags.contains("--self-test-build"), release: flags.contains("--release"))
         print("Verified \(output.path).")
     case "install" where buildOptions == ["--source"] && flags.isEmpty:
         guard let source = options["--source"] else { throw BuildError("Pass --source PATH.") }

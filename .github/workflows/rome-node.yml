@@ -11,6 +11,7 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-core-darwin-arm64/**
       - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
@@ -22,12 +23,14 @@ on:
       - pnpm-lock.yaml
       - tsconfig.json
       - .github/workflows/rome-node.yml
+      - .github/actions/build-computer-use/**
   push:
     branches: [main]
     paths:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-core-darwin-arm64/**
       - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
@@ -39,6 +42,7 @@ on:
       - pnpm-lock.yaml
       - tsconfig.json
       - .github/workflows/rome-node.yml
+      - .github/actions/build-computer-use/**
   workflow_dispatch:
     inputs:
       publish_image:
@@ -69,23 +73,44 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
-      - name: Compile and test the native helper without signing
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+      - uses: ./.github/actions/build-computer-use
+        with:
+          sign: "false"
+          notarize: "false"
+      - name: Test the helper and reject it at both publish gates
         run: |
           set -euo pipefail
           script=packages/rome-node-core/scripts/computer-use.swift
-          app="$RUNNER_TEMP/rome-native/Rome Computer Use.app"
-          swift "$script" build --self-test-build --app "$app"
+          dist="packages/rome-node-core-darwin-arm64/dist"
+          app="$dist/native/Rome Computer Use.app"
           swift "$script" test --app "$app"
-          if output=$(swift "$script" verify --release --app "$app" 2>&1); then
-            echo "::error::The release verifier accepted the compile-only helper."
-            exit 1
-          fi
-          printf '%s\n' "$output"
-          [[ "$output" == "A compile-only helper cannot be released or installed." ]]
+          for flag in "" --release; do
+            args=(verify --app "$app")
+            if [ -n "$flag" ]; then args+=("$flag"); fi
+            if output=$(swift "$script" "${args[@]}" 2>&1); then
+              echo "::error::The publish verifier accepted the compile-only helper."
+              exit 1
+            fi
+            printf '%s\n' "$output"
+            [[ "$output" == "A compile-only helper cannot be released or installed." ]]
+          done
+          tar -czf "$RUNNER_TEMP/computer-use-native.tgz" -C "$dist" "native/Rome Computer Use.app"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: computer-use-native-package-test
+          path: ${{ runner.temp }}/computer-use-native.tgz
+          if-no-files-found: error
 
   package:
-    runs-on: ubuntu-latest
+    needs: macos-native
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, macos-15]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
@@ -99,15 +124,16 @@ jobs:
       - run: pnpm --filter @rome-os/node-web build
       - run: pnpm --filter @rome-os/node-web test
       - run: node packages/rome-node-cli/bin/rome-node.js --help
-      - name: Install the standalone archive
+      - uses: actions/download-artifact@v7
+        with:
+          name: computer-use-native-package-test
+          path: ${{ runner.temp }}/computer-use-package-test
+      - name: Stage the helper fixture
         run: |
-          mkdir -p "$RUNNER_TEMP/rome-node-package"
-          pnpm --filter @rome-os/node-core pack --pack-destination "$RUNNER_TEMP/rome-node-package"
-          pnpm --filter @rome-os/node pack --pack-destination "$RUNNER_TEMP/rome-node-package"
-          npm install --prefix "$RUNNER_TEMP/rome-node-core-install" "$RUNNER_TEMP"/rome-node-package/rome-os-node-core-*.tgz
-          node packages/rome-node-cli/scripts/package-smoke.mjs "$RUNNER_TEMP/rome-node-core-install"
-          npm install --prefix "$RUNNER_TEMP/rome-node-install" "$RUNNER_TEMP"/rome-node-package/*.tgz
-          node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" --help
+          mkdir -p packages/rome-node-core-darwin-arm64/dist
+          tar -xzf "$RUNNER_TEMP/computer-use-package-test/computer-use-native.tgz" -C packages/rome-node-core-darwin-arm64/dist
+      - name: Pack and install the npm archives
+        run: node packages/rome-node-cli/scripts/package-smoke.mjs
 
   image:
     runs-on: ${{ matrix.runner }}

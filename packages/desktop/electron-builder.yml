@@ -9,6 +9,7 @@ files:
   - src/renderer/**/*
   - "!**/*.ts"
   - "!**/*.map"
+  - "!**/node_modules/@rome-os/node-core-darwin-arm64/**"
   # koffi ships sources and a prebuilt binary for every platform; the app
   # needs only its loader and the macOS binaries.
   - "!**/node_modules/koffi/{doc,lib,src,vendor}/**"
@@ -31,6 +32,8 @@ extraResources:
     to: tray/
     filter:
       - "*.png"
+beforePack: ./scripts/check-computer-use.mjs
+afterPack: ./scripts/check-computer-use.mjs
 
 protocols:
   - name: Rome
@@ -45,6 +48,7 @@ mac:
     - dmg
     - zip
   hardenedRuntime: true
+  signIgnore: ['/Contents/Resources/native/Rome Computer Use\.app(?:/|$)']
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   category: public.app-category.productivity
