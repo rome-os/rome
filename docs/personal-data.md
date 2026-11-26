@@ -152,4 +152,4 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 - Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read.
 - An installed app's page runs in the guardian's browser with their session, so it can call these routes as the guardian. No route returns a reading, but such a page can read the catalog and the ingest log, ingest, or delete an origin.
-- What an agent already wrote into memory or a chat is not checked. The system prompt tells it not to repeat the guardian's personal data in a shared chat, and only the model keeps that rule.
+- What an agent already wrote into memory or a chat is not checked.

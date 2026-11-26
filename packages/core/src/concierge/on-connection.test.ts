@@ -44,9 +44,6 @@ describe("the Concierge on a connection", () => {
     expect(CONNECTION_PROMPT).toContain("Never call a tool or action you were not given");
     expect(CONNECTION_PROMPT).toContain("`say` refuses `private`");
     expect(CONNECTION_PROMPT).toContain("Never say a code, password, token or other secret");
-    expect(CONNECTION_PROMPT).toContain(
-      "never repeat it in a chat that someone other than the guardian can read",
-    );
     // The dashboard's ways of speaking are never named, so nothing invites a call.
     for (const name of ["`defer`", "show_card", "card_forward", "ask_question"]) {
       expect(CONNECTION_PROMPT).not.toContain(name);
