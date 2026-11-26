@@ -43,13 +43,12 @@ export const BASELINE = {
     "text-[#d97757]": 1,
   },
   "packages/web/src/components/brand-icons/connection-badges.tsx": {
-    "bg-[#07C160]": 1,
     "bg-[#0A66C2]": 1,
     "bg-[#229ED9]": 1,
     "bg-[#25D366]": 1,
     "bg-[#5865F2]": 1,
     "bg-white": 3,
-    "text-white": 5,
+    "text-white": 4,
   },
   "packages/web/src/components/channels/channel-connect-card.tsx": { "bg-white": 1 },
   "packages/web/src/components/chat/ChatEmptyState.tsx": {

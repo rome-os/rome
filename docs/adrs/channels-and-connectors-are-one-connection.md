@@ -176,6 +176,10 @@ On a connection the Concierge answers in plain text, whether a kind linked it at
 
 `wechat`, the official bot service, is WeChat's only connection. Rome does not offer `wechat_user`, the guardian's own account read through a WeChat client in Rome's container. Channel records stored for `wechat_user` stay and still map to the `wechat` platform. Rome skips their Connections at boot, as it skips any Connection whose kind is not registered.
 
+## Amendment (2026-11-26): the WeChat bot connection is removed
+
+Rome has no WeChat connection. Rome does not offer `wechat`, the official WeChat bot that the guardian connected by scanning a QR code. A stored `wechat` Connection stays in the store, as a stored `slack_bot` one does: its Connection, its grant, which holds the bot token, its channel records, chats, messages, connected accounts and chat rules are all kept. Boot skips it with a warning, as it skips any Connection whose kind is not registered, so nothing lists it, starts it or sends through it. The `wechat_user → wechat` platform mapping stays for the channel records that name the personal connection.
+
 ## Amendment (2026-11-21): the kind of connection decides an account's agent
 
 Nobody picks an account's agent, and the dashboard has no page for it. An account of a kind that takes an agent is answered by main, the agent that answered every account before accounts took agents, or by the Concierge when its kind declares it, today only Rome's Slack app. Every such account answers from its first message, and Rome listens to every account. The 2026-10-21 amendment ("Rome never picks an account's agent") is withdrawn, and so are the guardian's link, switch and unlink operations from the 2026-10-16, 2026-10-20 and 2026-11-20 amendments. Own account and delegate still follow from the kind of connection. The connected account keeps the agent column it stored, and nothing reads it to answer, until a later change drops it.

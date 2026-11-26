@@ -1,4 +1,4 @@
-import type { ChatId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
+import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 
 const MAX_DIRECTORY_OFFSET = 10_000;
 
@@ -53,20 +53,6 @@ export function addressIsConversationFeature(): Pick<ChannelDirectMessaging, "ch
     async chatFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
       return trimmed === "" ? null : (trimmed as ChatId);
-    },
-  };
-}
-
-export function typingActivityFeature(adapter: {
-  notifyTyping(chatId: string): Promise<void>;
-}): ChannelActivity {
-  return {
-    async begin(input) {
-      await adapter.notifyTyping(input.chatId);
-      return {
-        update: async () => adapter.notifyTyping(input.chatId),
-        finish: async () => {},
-      };
     },
   };
 }
