@@ -1073,10 +1073,21 @@ and `~/Applications`, in that order. A host running under Rosetta can use a
 helper installed in either Applications directory.
 
 The host verifies the signature at launch before asking for local session
-approval. The helper may also need Accessibility and Screen Recording
-permissions in System Settings → Privacy & Security.
-In Rome Desktop, open **Computer Use** from the tray menu to see the switch and
-bundled helper status, open either privacy pane, or find the helper in Finder.
+approval. Set up Accessibility and Screen Recording on the Mac that runs the
+helper.
+
+```sh
+rome-node computer-use setup
+```
+
+In Rome Desktop, choose **Set Up Permissions…** from **Computer Use** in the
+tray menu to open the same guide. Use **Accessibility Settings…** or **Screen
+Recording Settings…** to start at a specific pane. For the CLI, pass
+`--pane accessibility` or `--pane screen-recording`. The guide uses the system
+language by default. The CLI accepts `--locale <tag>` to select a language.
+
+Turn on **Rome Computer Use** in each pane. If the app is missing from the list,
+drag it from the guide into System Settings.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,
 `prefix: "computer"`, and `personal: true`. The shared-chat audience guard

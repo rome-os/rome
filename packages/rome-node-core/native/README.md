@@ -487,9 +487,17 @@ batch that crossed the final check can still reach its destination.
 | `capture_failed`, `capture_limit` | Capture failed or exceeded a limit |
 | `internal_error` | Unclassified internal failure |
 
-System Settings supplies Accessibility and Screen Recording permissions.
-The helper checks permissions without opening prompts. The host can guide
-the user to System Settings when a permission is missing.
+Launch the signed app through LaunchServices to guide the user through
+Accessibility and Screen Recording permissions in System Settings.
+
+```sh
+open -n -a '/path/to/Rome Computer Use.app' --args --setup-permissions
+```
+
+Pass `accessibility` or `screen-recording` to start at a specific pane.
+The default, `all`, starts at the first missing permission. Add
+`--locale <tag>` to select the guide language. The guide follows the System
+Settings window and checks both permissions as the user grants them.
 
 For device status, the host verifies the release signature and uses
 LaunchServices to run `--check-permissions` in a hidden, short-lived instance.

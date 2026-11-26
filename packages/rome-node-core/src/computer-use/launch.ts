@@ -48,6 +48,17 @@ export interface LaunchOptions {
   launcher?: (context: LaunchContext) => void | Promise<void>;
 }
 
+export type PermissionSetupPane = "accessibility" | "screen-recording" | "all";
+
+export interface PermissionSetupOptions {
+  appPath: string;
+  pane?: PermissionSetupPane;
+  locale?: string;
+  signal?: AbortSignal;
+  verifyBundle?: LaunchOptions["verifyBundle"];
+  launcher?: (args: string[], signal: AbortSignal) => void | Promise<void>;
+}
+
 const exitCleanups = new Set<() => void>();
 
 function cleanOnExit(): void {
@@ -186,6 +197,27 @@ async function verifyHelperBundle(
   } catch (cause) {
     throw new ComputerUseError("invalid_helper_bundle", { cause });
   }
+}
+
+export async function launchPermissionSetup(options: PermissionSetupOptions): Promise<void> {
+  if (!options.launcher && process.platform !== "darwin") {
+    throw new ComputerUseError("computer_use_unsupported_platform");
+  }
+  const timeout = AbortSignal.timeout(5000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const app = await untilAbort(
+    () => verifyHelperBundle(options.appPath, signal, options.verifyBundle),
+    signal,
+  );
+  const args = ["-n", "-a", app, "--args", "--setup-permissions"];
+  if (options.pane !== undefined) args.push(options.pane);
+  if (options.locale !== undefined) args.push("--locale", options.locale);
+  const launch =
+    options.launcher ??
+    (async (args, signal) => {
+      await run("/usr/bin/open", args, { signal });
+    });
+  await untilAbort(() => launch(args, signal), signal);
 }
 
 export async function probeHelperPermissions(path: string): Promise<boolean | undefined> {
