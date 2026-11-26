@@ -4665,10 +4665,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         channelUserId = person.id;
       }
     } else {
-      const guardians = await deps.peopleRepo.byBondLevel("guardian");
-      if (guardians.length > 0) {
-        displayName = guardians[0].displayName;
-        channelUserId = guardians[0].id;
+      const guardian = await deps.guardianPerson();
+      if (guardian) {
+        displayName = guardian.name ?? displayName;
+        channelUserId = guardian.id;
       }
     }
 
@@ -5894,7 +5894,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       const project = await ensureStoredProjectSelection(projectPath);
       const workingDir = resolveWebchatProjectPath(project.path, getWebchatProjectsRoot());
-      const guardian = (await deps.peopleRepo.byBondLevel("guardian"))[0];
+      const guardian = await deps.guardianPerson();
       const modelSelection = await resolveSessionModelSelectionForTurn(
         { id: chatId, largeModelSelection: session.largeModelSelection },
         await deps.webchatRepo.getMessageCount(chatId),

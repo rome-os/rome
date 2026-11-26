@@ -108,6 +108,7 @@ import type { AccountLink } from "@rome/api-types/account-agents";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import { accountCodesVoidedIn } from "../chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "../identity/application/account-codes.js";
+import { guardianWithAccounts, memberContext } from "../access/application/members.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import { AppKeyInjector } from "../apps/app-keys/injector.js";
@@ -793,6 +794,7 @@ export async function buildTestDeps(
     appConnectionAccessRepo,
     sessionRepository,
     peopleRepo,
+    guardianPerson: async () => (await guardianWithAccounts(memberContext(db)))?.person ?? null,
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,
