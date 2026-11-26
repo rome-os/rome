@@ -153,6 +153,31 @@ describe("ApprovalHandler", () => {
       }
     });
 
+    it("marks a card failed when its replay never reaches the approved call", async () => {
+      const childA = recordingAction("child_a", { requiresApproval: true });
+      const childB = recordingAction("child_b", { requiresApproval: true });
+      const parent = buildAction("parent", {
+        execute: async () => {
+          const rA = await callAction("child_a", {});
+          if (rA.status === "error") return rA;
+          return callAction("child_b", {});
+        },
+      });
+      await setup({ actions: [childA.action, childB.action, parent] });
+      await rome.actionEngine.run("parent", {}, { initiator: "agent:main" });
+      const cardOf = async (name: string) =>
+        (await rome.repos.approvals.findPending()).find(
+          (c) => (c.payload as { actionName: string }).actionName === name,
+        )!;
+      const [cardA, cardB] = [await cardOf("child_a"), await cardOf("child_b")];
+      await rome.repos.approvals.resolvePending(cardA.id, "reject", "test-guardian");
+      await rome.repos.approvals.resolvePending(cardB.id, "approve", "test-guardian");
+
+      await rome.approvalHandler.onApproved(cardB.id);
+      expect(childB.calls).toEqual([]);
+      expect((await rome.repos.approvals.findById(cardB.id))!.executionState).toBe("failed");
+    });
+
     it("propagates replayRootExecutionId and channelContext into the replayed execution", async () => {
       let observed: { rootExecutionId?: string; channelContext?: ThreadContext } = {};
       const probe = buildAction("probe", {

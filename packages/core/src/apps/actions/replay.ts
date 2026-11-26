@@ -44,7 +44,7 @@ export interface ReplayStore {
 export const replayContext = new AsyncLocalStorage<ReplayStore>();
 
 /** Set while a call executes for real during a replay. Its own nested calls
- *  were never journaled, so they record instead of matching replay rows. */
+ *  run without journal rows, so they never enter the replay order. */
 export const freshCallContext = new AsyncLocalStorage<true>();
 
 /** Deterministic JSON serialization with sorted keys for stable hashing. */

@@ -924,10 +924,11 @@ export class ActionEngine {
       );
     }
     const argsHash = hashArgs(args);
+    const run = { action, args, store, context, observer, actionEventObserver };
+    if (freshCallContext.getStore()) return this.runUnjournaledCall(run);
 
-    if (store.mode === "replay" && !freshCallContext.getStore()) {
+    if (store.mode === "replay") {
       const entry = store.journal[store.replayIndex];
-      const run = { action, args, store, context, observer, actionEventObserver };
 
       if (entry && entry.actionName === action.config.name && entry.argsHash === argsHash) {
         // Every matched branch takes its slot before its first await, so
@@ -995,7 +996,36 @@ export class ActionEngine {
       }
     }
 
-    return this.runFreshCall({ action, args, store, context, observer, actionEventObserver });
+    return this.runFreshCall(run);
+  }
+
+  /** A call made by a call that executes during a replay. Later replays serve
+   *  that parent from its cached row and never reach this call, so it gets no
+   *  row: one would sit in the sibling replay order, and a card for it could
+   *  never run. A call that needs approval is refused for the same reason. */
+  private async runUnjournaledCall(run: NestedRun): Promise<ActionResult> {
+    const name = run.action.config.name;
+    let approval: CallApproval;
+    try {
+      approval = await this.approvalOf(run.action, run.args, run.store, run.context);
+    } catch (err) {
+      return { status: "error", error: approvalFailure(name, err) };
+    }
+    if (approval.asks) {
+      return {
+        status: "error",
+        error: `Action "${name}" needs approval, but its caller is already running under an approval`,
+      };
+    }
+    return this.executeNestedInvocation(
+      run.action,
+      run.args,
+      run.store,
+      run.context,
+      run.observer,
+      run.actionEventObserver,
+      false,
+    );
   }
 
   private advanceReplayIndex(store: ReplayStore): void {

@@ -261,6 +261,12 @@ export class ApprovalHandler {
         };
         return this.actionEngine.run(payload.rootActionName, payload.rootArgs, runContext);
       });
+      // The replay can end before it reaches the approved row, as when the
+      // root returns early after a refused sibling. Nothing ran for this card.
+      const journal = await this.journalRepo.loadJournal(payload.rootExecutionId);
+      if (journal.some((e) => e.sequence === approvedSequence && e.status === "pending_approval")) {
+        throw new Error("the replay did not reach the approved call");
+      }
 
       emit?.({
         type: "tool_result",

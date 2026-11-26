@@ -364,33 +364,51 @@ describe("Approval flow integration", () => {
       expect((await journalOf(card)).some((e) => e.status === "diverged")).toBe(false);
     });
 
-    it("records the approved call's own nested calls without consuming sibling entries", async () => {
+    it("keeps the approved call's own nested calls out of later sibling replays", async () => {
       const helper = ok();
-      const execB = ok();
+      const [execB, execC] = [ok(), ok()];
       const engine = engineFor(
         makeAction("helper", { execute: helper }),
+        guarded("gated_helper"),
         guarded(
           "child_a",
-          rs.fn(async () => callAction("helper", {})),
+          rs.fn(async () => {
+            await callAction("helper", {});
+            return callAction("gated_helper", {});
+          }),
         ),
         guarded("child_b", execB),
+        guarded("child_c", execC),
         parentOf(async () => {
           const rA = await callAction("child_a", {});
           const rB = await callAction("child_b", {});
-          return { status: "ok", data: statuses(rA, rB) };
+          if (rB.status === "pending_approval") return rB;
+          const rC = await callAction("child_c", {});
+          return { status: "ok", data: statuses(rA, rB, rC) };
         }),
       );
       const cards = await recordCards(engine);
       const cardB = cardFor(cards, "child_b");
 
       const first = await approveAndReplay(engine, cardFor(cards, "child_a"));
-      expect(helper).toHaveBeenCalledTimes(1);
       expect(first.status === "pending_approval" && first.approval.approvalId).toBe(cardB.id);
+      expect(helper).toHaveBeenCalledTimes(1);
+      // A gated call inside an approved call gets no card it could never run.
       expect((await approvalsRepo.findPending()).map((c) => c.id)).toEqual([cardB.id]);
 
-      expect(await approveAndReplay(engine, cardB)).toEqual({ status: "ok", data: ["ok", "ok"] });
-      expect([helper.mock.calls.length, execB.mock.calls.length]).toEqual([1, 1]);
-      expect((await journalOf(cardB)).some((e) => e.status === "diverged")).toBe(false);
+      await approveAndReplay(engine, cardB);
+      const [cardC] = await approvalsRepo.findPending();
+      expect(payloadOf(cardC).actionName).toBe("child_c");
+      expect(await approveAndReplay(engine, cardC)).toEqual({
+        status: "ok",
+        data: ["error", "ok", "ok"],
+      });
+      expect([helper, execB, execC].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1]);
+      expect((await journalOf(cardC)).map((e) => [e.actionName, e.status])).toEqual([
+        ["child_a", "completed"],
+        ["child_b", "completed"],
+        ["child_c", "completed"],
+      ]);
     });
   });
 
