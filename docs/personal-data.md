@@ -91,7 +91,7 @@ The ingest log keeps 90 days of rows with counts, ranges and codes, and never a 
 
 `core:personal_data_catalog` takes no input and lists each source and origin: its state, when it last synced, each type with its unit, range, count and `syncedThrough`, and its [live pointer](#live). `core:personal_data_query` aggregates or lists readings. Main reaches both through `actions: ["*"]`, and the Concierge lists both in `concierge.yaml`.
 
-Both are personal-data actions. They run only in a private turn and are refused in a shared one with `personal_data_private_only` and a reason the agent passes on ([audience](domains/participation.md#audience)).
+Any turn may call both: past [entry](domains/participation.md#entry) nothing asks who is asking.
 
 ## Live
 
@@ -147,10 +147,9 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 ## What is and is not enforced
 
-- Core refuses a personal-data action in a shared turn before it runs, and refuses a routine that reads personal data unless it works for a private chat.
 - A turn that an action starts through a worker, such as `system:summon` or the reply to a channel message, takes the audience Rome read for the turn or chat that ran the action. Only a first-party action's chat is trusted for that, and only a first-party action passes it on, so a third-party action's turn is shared. Rome reads who sent a direct message from People itself, never from what the caller says. A session the turn opens gets the same value in its shell, but a session already live keeps the one it opened with.
-- `system:run_on_device`, like its older name `core:device_run`, refuses an operation of a personal capability (one its device reports `personal`, such as Health) in a shared turn before it calls the device, with the same `personal_data_private_only`. A shell can still reach a device through `rome-node device run`. The agent's session carries `ROME_TURN_AUDIENCE`, and the CLI refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary. The variable is read when the session opens, so a chat that opens to visitors later keeps the value its session started with.
-- A private turn can still send what it read elsewhere, with `send_message` or an email, and a Concierge turn woken by outside content, such as a mail it follows, is private. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
-- The store lives in Rome's database, which an agent's shell can read. The private-only rule guards against a model mistake, not against an agent that content in a shared chat tells to read the database.
+- `rome-node device run` reaches a device from a shell. The agent's session carries `ROME_TURN_AUDIENCE`, and the CLI refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary. The variable is read when the session opens, so a chat that opens to visitors later keeps the value its session started with.
+- Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
+- The store lives in Rome's database, which an agent's shell can read.
 - An installed app's page runs in the guardian's browser with their session, so it can call these routes as the guardian. No route returns a reading, but such a page can read the catalog and the ingest log, ingest, or delete an origin.
 - What an agent already wrote into memory or a chat is not checked. The system prompt tells it not to repeat the guardian's personal data in a shared chat, and only the model keeps that rule.
