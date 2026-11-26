@@ -30,7 +30,7 @@ import type { SessionToolsProvider } from "./session-tools.js";
 import { connectServiceTools } from "./connect-service-tool.js";
 import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
-import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
+import { shareLocationTools } from "./share-location-tool.js";
 import { showCardTools } from "./show-card-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
@@ -59,8 +59,6 @@ export interface RomeToolPortsDeps {
   deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
   /** The guardian's language (`en`, `zh-CN`), which a device connect card's words follow. */
   guardianLanguage?: () => Promise<string | null>;
-  /** Whether a turn is read by the guardian alone. When absent, none is. */
-  privateTurn?: PrivateTurn;
 }
 
 export interface RomeToolPorts {
@@ -306,7 +304,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           turn,
           widgets: turn.widgets,
           hasSpeaker,
-          privateTurn: deps.privateTurn,
         }),
         // A session whose own tools already show an agent card (the
         // Concierge's `show_card`) keeps that one.

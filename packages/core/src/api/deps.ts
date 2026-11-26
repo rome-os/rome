@@ -4,7 +4,6 @@ import type { VoiceInputSource } from "../voice-input/index.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
-import type { PlaceAudience } from "../core/place-audience.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
@@ -175,8 +174,6 @@ export interface ApiDeps {
   personalData: PersonalDataRepository;
   /** What each of the guardian's devices lets Agents reach live. */
   deviceConnections: DeviceConnectionsRepository;
-  /** Who can read a place now, for checks made when an answer arrives. */
-  placeAudience: PlaceAudience;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
   /** The agents under every name they have had, for reading names stored before ids were canonical. */

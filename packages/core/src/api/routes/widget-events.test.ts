@@ -43,14 +43,13 @@ interface Row {
   content: unknown[];
 }
 
-/** The route with its messages, its chats (`private` = the guardian's own), and a caller. */
+/** The route with its messages, its chats, and a caller. */
 function setup(
   rows: Record<string, Row>,
   caller: string | null = "guardian",
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
-  audience: "private" | "shared" = "private",
   storedDevice: string | null = null,
   setupState: SetupStartOutcome = {
     status: "started",
@@ -69,7 +68,6 @@ function setup(
     device?: string | null;
   }[] = [];
   const app = widgetEventRoutes({
-    chatAudience: async () => audience,
     webchatRepo: {
       askingDeviceOf: async () => storedDevice,
       widgetMessage: async (id) =>
@@ -621,7 +619,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       { status: "refused", code: 404, error: "No setup for this grant." },
     );
@@ -637,7 +634,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       redirect("/settings/connections"),
     );
@@ -652,7 +648,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       redirect("/settings/connections"),
     );
@@ -825,7 +820,6 @@ describe("an event on the connect card for a device kind", () => {
         undefined,
         [],
         rows,
-        "private",
         storedDevice,
       );
       await fire("m", { name: "check", context }, headers);
@@ -978,23 +972,6 @@ describe("an event on the share-location card core owns", () => {
     ).not.toHaveProperty("auto");
   });
 
-  it("answers as declined, with no position, once the chat is no longer private", async () => {
-    // Visitors were let in while the card waited, so the chat is now shared.
-    const { fire, forwarded } = setup(
-      { m: { chatId: "c1", content: [locationCard] } },
-      "guardian",
-      undefined,
-      [],
-      [],
-      "shared",
-    );
-    const res = await fire("m", { name: "share-location", context: position });
-    expect(await res.json()).toMatchObject({ answered: true });
-    const output = (forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output;
-    expect(output).toMatchObject({ status: "declined", dismissed: true });
-    expect(JSON.stringify(forwarded)).not.toContain(String(position.latitude));
-  });
-
   it("lets the first of two clients answer, and refuses the other", async () => {
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => {
@@ -1011,7 +988,6 @@ describe("an event on the share-location card core owns", () => {
         getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
       callerOwner: async () => "guardian",
-      chatAudience: async () => "private",
       forward: async (request) => {
         turns.push(await request.json());
         await held;
