@@ -253,32 +253,13 @@ export class ApprovalsRepository {
     return { outcome: "resolved", approval: resolved };
   }
 
-  /** The action_execution approval whose card owns the journal entry at
-   *  `sequence`, limited to cards that can still produce its outcome. */
-  async findActiveForEntry(
-    rootExecutionId: string,
-    sequence: number,
-    actionName: string,
-  ): Promise<ApprovalRow | null> {
-    return this.findEntryApproval(rootExecutionId, sequence, actionName, true);
-  }
-
-  /** Any action_execution approval whose card owns the journal entry at
-   *  `sequence`, including terminal cards used to recognize approval-gated
-   *  work already completed under a sibling card. */
+  /** The action_execution card that owns journal entry `sequence` of a
+   *  root, or only a card that can still produce its outcome when `activeOnly`. */
   async findCardForEntry(
     rootExecutionId: string,
     sequence: number,
     actionName: string,
-  ): Promise<ApprovalRow | null> {
-    return this.findEntryApproval(rootExecutionId, sequence, actionName, false);
-  }
-
-  private async findEntryApproval(
-    rootExecutionId: string,
-    sequence: number,
-    actionName: string,
-    activeOnly: boolean,
+    activeOnly = false,
   ): Promise<ApprovalRow | null> {
     const rows = await this.db
       .select()
@@ -290,11 +271,10 @@ export class ApprovalsRepository {
           sql`json_extract(${approvals.payload}, '$.actionName') = ${actionName}`,
         ),
       );
-    for (const row of rows) {
-      const payload = row.payload as Record<string, unknown> | null;
-      if (payload && approvedEntrySequence(payload) === sequence) return read(row);
-    }
-    return null;
+    const owner = rows.find(
+      (row) => row.payload && approvedEntrySequence(row.payload as object) === sequence,
+    );
+    return owner ? read(owner) : null;
   }
 
   async claimExecution(id: string): Promise<boolean> {

@@ -14,8 +14,7 @@ const log = createLogger("approval-handler");
 interface ApprovalPayload {
   actionName: string;
   args: Record<string, unknown>;
-  /** The journal sequence of the pending entry this card owns; payloads
-   *  recorded before the binding existed derive it from their snapshot. */
+  /** The journal entry this card owns; older payloads derive it from the snapshot. */
   journalSequence?: number;
   rootActionName: string;
   rootArgs: Record<string, unknown>;
@@ -72,7 +71,8 @@ export function formatResultForAgent(result: ActionResult): string {
 }
 
 export class ApprovalHandler {
-  private replayTails = new Map<string, Promise<void>>();
+  /** Tail of each root's approval replays, so they run one at a time. */
+  private replayChains = new Map<string, Promise<unknown>>();
 
   constructor(
     private approvalsRepo: ApprovalsRepository,
@@ -198,22 +198,17 @@ export class ApprovalHandler {
     return withoutSessionActor(() => this.runApprovedAction(approvalId, payload, emit));
   }
 
-  /** Two replays of one root must not interleave: the next card has to read
-   *  the journal only after the previous replay finished writing it. */
-  private runSerializedRootReplay<T>(rootExecutionId: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.replayTails.get(rootExecutionId) ?? Promise.resolve();
-    const current = previous.then(run);
-    const tail = current.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.replayTails.set(rootExecutionId, tail);
+  /** Replays of one root must not interleave: each must load the journal
+   *  only after the previous one finished writing it. */
+  private serializeRootReplay<T>(rootExecutionId: string, run: () => Promise<T>): Promise<T> {
+    const result = (this.replayChains.get(rootExecutionId) ?? Promise.resolve()).then(run);
+    const tail = result.catch(() => {});
+    this.replayChains.set(rootExecutionId, tail);
     void tail.then(() => {
-      if (this.replayTails.get(rootExecutionId) === tail) {
-        this.replayTails.delete(rootExecutionId);
-      }
+      if (this.replayChains.get(rootExecutionId) === tail)
+        this.replayChains.delete(rootExecutionId);
     });
-    return current;
+    return result;
   }
 
   private async runApprovedAction(
@@ -243,39 +238,17 @@ export class ApprovalHandler {
       const requester = await this.requesterOf(payload.rootExecutionId);
       const approvedSequence = approvedEntrySequence(payload);
       if (approvedSequence === undefined) {
-        log.warn("approval payload names no pending journal entry; replay binds nothing", {
-          approvalId,
-          actionName: payload.actionName,
-        });
-        emit?.({
-          type: "tool_result",
-          toolUseId: traceId,
-          tool: payload.actionName,
-          output: { error: "Action execution failed. See server logs for details." },
-          isError: true,
-          agent: agentName,
-        });
-        await this.approvalsRepo.markExecutionFailed(
-          approvalId,
-          "approval could not be bound to a journal entry",
-        );
-        return;
+        throw new Error("approval could not be bound to a journal entry");
       }
-      const result = await this.runSerializedRootReplay(payload.rootExecutionId, async () => {
-        // Replay from the live journal, not the card's frozen snapshot: a
-        // sibling resolved under another card since may already hold a recorded
-        // outcome, and consuming its entry in replay mode keeps the call from
-        // recording (and running) a second time. The snapshot stays as the
-        // fallback for a payload whose journal row is gone.
-        const liveJournal = await this.journalRepo.loadJournal(payload.rootExecutionId);
-        const replayJournal =
-          liveJournal.length >= payload.replayJournal.length && liveJournal.length > 0
-            ? liveJournal
-            : payload.replayJournal;
+      const result = await this.serializeRootReplay(payload.rootExecutionId, async () => {
+        // Replay the live journal, not the card's snapshot, so a sibling
+        // resolved since then serves its recorded outcome instead of running
+        // again. The snapshot covers a journal not yet persisted.
+        const live = await this.journalRepo.loadJournal(payload.rootExecutionId);
         const runContext: ActionRunContext = {
           initiator: `approval:${approvalId}`,
           ...(requester ? { actor: requester } : {}),
-          replayJournal,
+          replayJournal: live.length >= payload.replayJournal.length ? live : payload.replayJournal,
           replayRootExecutionId: payload.rootExecutionId,
           approvedSequence,
           channelContext: payload.channelContext,

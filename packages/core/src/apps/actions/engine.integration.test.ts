@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActionEngine } from "./engine.js";
-import { ApprovalsRepository } from "../repositories/approvals.js";
+import { ApprovalsRepository, type ApprovalRow } from "../repositories/approvals.js";
 import { ExecutionJournalRepository } from "../repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../repositories/action-executions.js";
-import { hashArgs, type JournalEntry } from "./replay.js";
+import { hashArgs } from "./replay.js";
 import { callAction } from "./call-action.js";
 import type { Action, ActionConfig, ActionRegistry, ActionResult } from "./types.js";
 
@@ -143,7 +143,7 @@ describe("Approval flow integration", () => {
         initiator: `approval:${approvalId}`,
         replayJournal: journal,
         replayRootExecutionId: rootExecutionId,
-        approvedSequence: (payload.journalSequence as number) ?? 1,
+        approvedSequence: payload.journalSequence as number,
       },
     );
 
@@ -163,406 +163,235 @@ describe("Approval flow integration", () => {
     });
   });
 
-  it("executes only the resolved card's entry; a rejected sibling's pending call is refused", async () => {
-    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A-result" }));
-    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "B-result" }));
+  describe("replay binds to the approved card's entry", () => {
+    const ok = (data?: unknown) =>
+      rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data }));
+    const guarded = (name: string, execute = ok()) =>
+      makeAction(name, { requiresApproval: true, execute });
+    const parentOf = (execute: () => Promise<ActionResult>) => makeAction("parent", { execute });
+    const statuses = (...results: ActionResult[]) => results.map((r) => r.status);
 
-    const childA = makeAction("child_a", { requiresApproval: true, execute: execA });
-    const childB = makeAction("child_b", { requiresApproval: true, execute: execB });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const rA = await callAction("child_a", { id: 1 });
-        const rB = await callAction("child_b", { id: 2 });
-        return { status: "ok", data: [rA.status, rB.status] };
-      },
-    });
-
-    const registry = makeRegistry(parent, childA, childB);
-    const engine = new ActionEngine(registry, {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    expect(execA).not.toHaveBeenCalled();
-    expect(execB).not.toHaveBeenCalled();
-
-    const pending = await approvalsRepo.findPending();
-    const cardOf = (actionName: string) =>
-      pending.find((row) => (row.payload as { actionName?: string }).actionName === actionName);
-    const cardA = cardOf("child_a")!;
-    const cardB = cardOf("child_b")!;
-    const payloadA = cardA.payload as { journalSequence: number };
-    const payloadB = cardB.payload as {
-      journalSequence: number;
-      replayJournal: JournalEntry[];
-      rootExecutionId: string;
-    };
-    // Each card names the journal entry its own pending call recorded.
-    expect(payloadA.journalSequence).toBe(0);
-    expect(payloadB.journalSequence).toBe(1);
-
-    // The guardian rejects child_a's card and approves child_b's.
-    await approvalsRepo.resolvePending(cardA.id, "reject", "guardian");
-    await approvalsRepo.resolvePending(cardB.id, "approve", "guardian");
-
-    const replayResult = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${cardB.id}`,
-        replayJournal: payloadB.replayJournal,
-        replayRootExecutionId: payloadB.rootExecutionId,
-        approvedSequence: payloadB.journalSequence,
-      },
-    );
-
-    // child_b's resolved card ran its own entry. child_a's pending entry was
-    // never authorized by that card, and its card is gone, so the call is
-    // refused rather than parked on a fabricated empty approval id.
-    expect(execA).not.toHaveBeenCalled();
-    expect(execB).toHaveBeenCalledTimes(1);
-    expect(replayResult).toEqual({ status: "ok", data: ["error", "ok"] });
-  });
-
-  it("serves an earlier-resolved sibling from the journal when cards resolve out of order", async () => {
-    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A-result" }));
-    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "B-result" }));
-
-    const childA = makeAction("child_a", { requiresApproval: true, execute: execA });
-    const childB = makeAction("child_b", { requiresApproval: true, execute: execB });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const rA = await callAction("child_a", { id: 1 });
-        const rB = await callAction("child_b", { id: 2 });
-        return { status: "ok", data: [rA.status, rB.status] };
-      },
-    });
-
-    const registry = makeRegistry(parent, childA, childB);
-    const engine = new ActionEngine(registry, {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
+    function engineFor(...actions: Action[]) {
+      return new ActionEngine(makeRegistry(...actions), {
+        executions: executionsRepo,
+        approvals: approvalsRepo,
+        journal: journalRepo,
+      });
     }
 
-    const pending = await approvalsRepo.findPending();
-    const cardOf = (actionName: string) =>
-      pending.find((row) => (row.payload as { actionName?: string }).actionName === actionName)!;
-    const cardA = cardOf("child_a");
-    const cardB = cardOf("child_b");
-    const payloadB = cardB.payload as { journalSequence: number; rootExecutionId: string };
-    const payloadA = cardA.payload as { journalSequence: number; rootExecutionId: string };
-    const rootExecutionId = payloadB.rootExecutionId;
-
-    // Approve the later card first: child_b executes, then the replay parks
-    // on child_a's still-pending card.
-    await approvalsRepo.resolvePending(cardB.id, "approve", "guardian");
-    const replayB = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${cardB.id}`,
-        replayJournal: await journalRepo.loadJournal(rootExecutionId),
-        replayRootExecutionId: rootExecutionId,
-        approvedSequence: payloadB.journalSequence,
-      },
-    );
-    expect(execA).not.toHaveBeenCalled();
-    expect(execB).toHaveBeenCalledTimes(1);
-    if (replayB.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${replayB.status}`);
-    }
-    expect(replayB.approval.approvalId).toBe(cardA.id);
-
-    // Approve the earlier card second: child_a executes and the completed
-    // sibling entry is consumed from the journal instead of running again.
-    await approvalsRepo.resolvePending(cardA.id, "approve", "guardian");
-    const replayA = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${cardA.id}`,
-        replayJournal: await journalRepo.loadJournal(rootExecutionId),
-        replayRootExecutionId: rootExecutionId,
-        approvedSequence: payloadA.journalSequence,
-      },
-    );
-    expect(execA).toHaveBeenCalledTimes(1);
-    expect(execB).toHaveBeenCalledTimes(1);
-    expect(replayA).toEqual({ status: "ok", data: ["ok", "ok"] });
-
-    // No second card for the already-executed sibling and no duplicate
-    // journal sequence was recorded.
-    expect(await approvalsRepo.findPending()).toHaveLength(0);
-    const journal = await journalRepo.loadJournal(rootExecutionId);
-    expect(journal.every((e) => e.status === "completed")).toBe(true);
-    expect(new Set(journal.map((e) => e.sequence)).size).toBe(journal.length);
-  });
-
-  it("refreshes an unguarded call recorded after the approved entry", async () => {
-    let value = 0;
-    const write = makeAction("write", {
-      requiresApproval: true,
-      execute: async () => {
-        value = 1;
-        return { status: "ok" };
-      },
-    });
-    const read = makeAction("read", {
-      execute: async () => ({ status: "ok", data: value }),
-    });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        await callAction("write", {});
-        const readResult = await callAction("read", {});
-        return { status: "ok", data: readResult.status === "ok" ? readResult.data : null };
-      },
-    });
-
-    const engine = new ActionEngine(makeRegistry(parent, write, read), {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    const approvalId = recorded.approval.approvalId;
-    const approval = await approvalsRepo.findById(approvalId);
-    const payload = approval!.payload as { journalSequence: number; rootExecutionId: string };
-    await approvalsRepo.resolvePending(approvalId, "approve", "guardian");
-
-    const replayed = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${approvalId}`,
-        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
-        replayRootExecutionId: payload.rootExecutionId,
-        approvedSequence: payload.journalSequence,
-      },
-    );
-
-    expect(replayed).toEqual({ status: "ok", data: 1 });
-    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
-    expect(journal).toHaveLength(2);
-    expect(journal.map((entry) => [entry.sequence, entry.status])).toEqual([
-      [0, "completed"],
-      [1, "completed"],
-    ]);
-  });
-
-  it("asks approval again for a new identical call after the approved entry", async () => {
-    const exec = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
-    const child = makeAction("child", { requiresApproval: true, execute: exec });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const first = await callAction("child", { id: 1 });
-        if (first.status === "pending_approval") {
-          return { status: "ok", data: "first-pending" };
-        }
-        const second = await callAction("child", { id: 1 });
-        return { status: "ok", data: [first.status, second.status] };
-      },
-    });
-
-    const engine = new ActionEngine(makeRegistry(parent, child), {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    const firstCard = (await approvalsRepo.findPending())[0];
-    const payload = firstCard.payload as { journalSequence: number; rootExecutionId: string };
-    await approvalsRepo.resolvePending(firstCard.id, "approve", "guardian");
-    exec.mockClear();
-
-    const replayed = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${firstCard.id}`,
-        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
-        replayRootExecutionId: payload.rootExecutionId,
-        approvedSequence: payload.journalSequence,
-      },
-    );
-
-    expect(exec).toHaveBeenCalledTimes(1);
-    if (replayed.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${replayed.status}`);
-    }
-    const pending = await approvalsRepo.findPending();
-    expect(pending).toHaveLength(1);
-    expect((pending[0].payload as { journalSequence?: number }).journalSequence).toBe(1);
-    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
-    expect(journal.map((entry) => entry.status)).toEqual(["completed", "pending_approval"]);
-  });
-
-  it("runs a new post-approval call without recording a divergence", async () => {
-    const guarded = makeAction("guarded", { requiresApproval: true });
-    const after = makeAction("after");
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const first = await callAction("guarded", {});
-        if (first.status === "pending_approval") {
-          return { status: "ok", data: "first-pending" };
-        }
-        await callAction("after", {});
-        return { status: "ok" };
-      },
-    });
-
-    const engine = new ActionEngine(makeRegistry(parent, guarded, after), {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    const card = (await approvalsRepo.findPending())[0];
-    const payload = card.payload as { journalSequence: number; rootExecutionId: string };
-    await approvalsRepo.resolvePending(card.id, "approve", "guardian");
-
-    await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${card.id}`,
-        replayJournal: await journalRepo.loadJournal(payload.rootExecutionId),
-        replayRootExecutionId: payload.rootExecutionId,
-        approvedSequence: payload.journalSequence,
-      },
-    );
-
-    const journal = await journalRepo.loadJournal(payload.rootExecutionId);
-    expect(journal.some((entry) => entry.status === "diverged")).toBe(false);
-  });
-
-  it("parks on an approved sibling whose execution is still active", async () => {
-    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
-    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
-    const childA = makeAction("child_a", { requiresApproval: true, execute: execA });
-    const childB = makeAction("child_b", { requiresApproval: true, execute: execB });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const resultA = await callAction("child_a", {});
-        if (resultA.status === "error") return { status: "error", error: resultA.error };
-        const resultB = await callAction("child_b", {});
-        return { status: "ok", data: [resultA.status, resultB.status] };
-      },
-    });
-
-    const engine = new ActionEngine(makeRegistry(parent, childA, childB), {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    const pending = await approvalsRepo.findPending();
-    const cardOf = (actionName: string) =>
-      pending.find((row) => (row.payload as { actionName?: string }).actionName === actionName)!;
-    const cardA = cardOf("child_a");
-    const cardB = cardOf("child_b");
-    await approvalsRepo.resolvePending(cardA.id, "approve", "guardian");
-    const payloadB = cardB.payload as { journalSequence: number; rootExecutionId: string };
-
-    const replayed = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${cardB.id}`,
-        replayJournal: await journalRepo.loadJournal(payloadB.rootExecutionId),
-        replayRootExecutionId: payloadB.rootExecutionId,
-        approvedSequence: payloadB.journalSequence,
-      },
-    );
-
-    if (replayed.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${replayed.status}`);
-    }
-    expect(replayed.approval.approvalId).toBe(cardA.id);
-    expect(execB).toHaveBeenCalledTimes(1);
-  });
-
-  it("runs one pending entry once when concurrent calls share one resolved card", async () => {
-    const exec = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "done" }));
-    const child = makeAction("child", { requiresApproval: true, execute: exec });
-    const parent = makeAction("parent", {
-      execute: async () => {
-        const [r1, r2] = await Promise.all([
-          callAction("child", { id: 1 }),
-          callAction("child", { id: 1 }),
-        ]);
-        return { status: "ok", data: [r1.status, r2.status] };
-      },
-    });
-
-    const registry = makeRegistry(parent, child);
-    const engine = new ActionEngine(registry, {
-      executions: executionsRepo,
-      approvals: approvalsRepo,
-      journal: journalRepo,
-    });
-
-    const recorded = await engine.run("parent", {}, { initiator: "test" });
-    if (recorded.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${recorded.status}`);
-    }
-    const pending = await approvalsRepo.findPending();
-    const cardOf = (journalSequence: number) =>
-      pending.find(
-        (row) => (row.payload as { journalSequence?: number }).journalSequence === journalSequence,
+    async function recordCards(engine: ActionEngine): Promise<ApprovalRow[]> {
+      expect((await engine.run("parent", {}, { initiator: "test" })).status).toBe(
+        "pending_approval",
       );
-    const card0 = cardOf(0)!;
-    const card1 = cardOf(1)!;
-    const rootExecutionId = (card0.payload as { rootExecutionId: string }).rootExecutionId;
-    const journal = await journalRepo.loadJournal(rootExecutionId);
-    await approvalsRepo.resolvePending(card0.id, "approve", "guardian");
-    exec.mockClear();
-
-    const replayResult = await engine.run(
-      "parent",
-      {},
-      {
-        initiator: `approval:${card0.id}`,
-        replayJournal: journal,
-        replayRootExecutionId: rootExecutionId,
-        approvedSequence: 0,
-      },
-    );
-
-    // The resolved card covers exactly one journal entry: the second
-    // concurrent call lands on its own still-pending entry, not on the slot
-    // the approved card owns, so the effect ran once.
-    expect(exec).toHaveBeenCalledTimes(1);
-    if (replayResult.status !== "pending_approval") {
-      throw new Error(`expected pending_approval, got ${replayResult.status}`);
+      return approvalsRepo.findPending();
     }
-    expect(replayResult.approval.approvalId).toBe(card1.id);
+
+    const payloadOf = (card: ApprovalRow) =>
+      card.payload as { actionName: string; journalSequence: number; rootExecutionId: string };
+    const cardFor = (cards: ApprovalRow[], match: string | number) =>
+      cards.find((c) =>
+        typeof match === "number"
+          ? payloadOf(c).journalSequence === match
+          : payloadOf(c).actionName === match,
+      )!;
+    const journalOf = (card: ApprovalRow) =>
+      journalRepo.loadJournal(payloadOf(card).rootExecutionId);
+
+    /** What ApprovalHandler does for one card: approve, then replay the live journal. */
+    async function approveAndReplay(engine: ActionEngine, card: ApprovalRow) {
+      const { rootExecutionId, journalSequence } = payloadOf(card);
+      await approvalsRepo.resolvePending(card.id, "approve", "guardian");
+      return engine.run(
+        "parent",
+        {},
+        {
+          initiator: `approval:${card.id}`,
+          replayJournal: await journalRepo.loadJournal(rootExecutionId),
+          replayRootExecutionId: rootExecutionId,
+          approvedSequence: journalSequence,
+        },
+      );
+    }
+
+    function twoSiblings(stopOnError = false) {
+      const execA = ok();
+      const execB = ok();
+      const engine = engineFor(
+        guarded("child_a", execA),
+        guarded("child_b", execB),
+        parentOf(async () => {
+          const rA = await callAction("child_a", {});
+          if (stopOnError && rA.status === "error") return rA;
+          const rB = await callAction("child_b", {});
+          return { status: "ok", data: statuses(rA, rB) };
+        }),
+      );
+      return { engine, execA, execB };
+    }
+
+    it("runs only its own entry; a rejected sibling is refused", async () => {
+      const { engine, execA, execB } = twoSiblings();
+      const cards = await recordCards(engine);
+      expect([0, 1].map((seq) => payloadOf(cardFor(cards, seq)).actionName)).toEqual([
+        "child_a",
+        "child_b",
+      ]);
+      await approvalsRepo.resolvePending(cardFor(cards, "child_a").id, "reject", "guardian");
+
+      const result = await approveAndReplay(engine, cardFor(cards, "child_b"));
+      expect(execA).not.toHaveBeenCalled();
+      expect(execB).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ status: "ok", data: ["error", "ok"] });
+    });
+
+    it("serves a sibling resolved earlier from the journal when cards resolve out of order", async () => {
+      const { engine, execA, execB } = twoSiblings();
+      const cards = await recordCards(engine);
+      const [cardA, cardB] = [cardFor(cards, "child_a"), cardFor(cards, "child_b")];
+
+      const first = await approveAndReplay(engine, cardB);
+      expect(first.status === "pending_approval" && first.approval.approvalId).toBe(cardA.id);
+      expect(await approveAndReplay(engine, cardA)).toEqual({ status: "ok", data: ["ok", "ok"] });
+
+      expect([execA.mock.calls.length, execB.mock.calls.length]).toEqual([1, 1]);
+      expect(await approvalsRepo.findPending()).toHaveLength(0);
+      const journal = await journalOf(cardA);
+      expect(journal.map((e) => [e.sequence, e.status])).toEqual([
+        [0, "completed"],
+        [1, "completed"],
+      ]);
+    });
+
+    it("waits on an approved sibling that has not run yet", async () => {
+      const { engine, execB } = twoSiblings(true);
+      const cards = await recordCards(engine);
+      await approvalsRepo.resolvePending(cardFor(cards, "child_a").id, "approve", "guardian");
+
+      const result = await approveAndReplay(engine, cardFor(cards, "child_b"));
+      expect(result.status === "pending_approval" && result.approval.approvalId).toBe(
+        cardFor(cards, "child_a").id,
+      );
+      expect(execB).toHaveBeenCalledTimes(1);
+    });
+
+    it("reruns an unguarded call recorded after the approved one", async () => {
+      let value = 0;
+      const engine = engineFor(
+        guarded(
+          "write",
+          rs.fn(async (): Promise<ActionResult> => {
+            value = 1;
+            return { status: "ok" };
+          }),
+        ),
+        makeAction("read", { execute: async () => ({ status: "ok", data: value }) }),
+        parentOf(async () => {
+          await callAction("write", {});
+          return callAction("read", {});
+        }),
+      );
+      const [card] = await recordCards(engine);
+
+      expect(await approveAndReplay(engine, card)).toEqual({ status: "ok", data: 1 });
+      expect((await journalOf(card)).map((e) => e.status)).toEqual(["completed", "completed"]);
+    });
+
+    it("asks again for a new identical call made after the approved one", async () => {
+      const exec = ok();
+      const engine = engineFor(
+        guarded("child", exec),
+        parentOf(async () => {
+          const first = await callAction("child", { id: 1 });
+          if (first.status === "pending_approval") return { status: "ok" };
+          return callAction("child", { id: 1 });
+        }),
+      );
+      const [card] = await recordCards(engine);
+
+      expect((await approveAndReplay(engine, card)).status).toBe("pending_approval");
+      expect(exec).toHaveBeenCalledTimes(1);
+      const [next] = await approvalsRepo.findPending();
+      expect(payloadOf(next).journalSequence).toBe(1);
+      expect((await journalOf(card)).map((e) => e.status)).toEqual([
+        "completed",
+        "pending_approval",
+      ]);
+    });
+
+    it("gives concurrent identical calls one entry each", async () => {
+      const exec = ok();
+      const engine = engineFor(
+        guarded("child", exec),
+        parentOf(async () => {
+          const results = await Promise.all([
+            callAction("child", { id: 1 }),
+            callAction("child", { id: 1 }),
+          ]);
+          return { status: "ok", data: statuses(...results) };
+        }),
+      );
+      const cards = await recordCards(engine);
+
+      const first = await approveAndReplay(engine, cardFor(cards, 0));
+      expect(exec).toHaveBeenCalledTimes(1);
+      expect(first.status === "pending_approval" && first.approval.approvalId).toBe(
+        cardFor(cards, 1).id,
+      );
+      expect(await approveAndReplay(engine, cardFor(cards, 1))).toEqual({
+        status: "ok",
+        data: ["ok", "ok"],
+      });
+      expect(exec).toHaveBeenCalledTimes(2);
+    });
+
+    it("serves concurrent cached reads before running the approved call", async () => {
+      const read1 = ok("r1");
+      const read2 = ok("r2");
+      const exec = ok("done");
+      const engine = engineFor(
+        makeAction("r1", { execute: read1 }),
+        makeAction("r2", { execute: read2 }),
+        guarded("child", exec),
+        parentOf(async () => {
+          await Promise.all([callAction("r1", {}), callAction("r2", {})]);
+          return callAction("child", {});
+        }),
+      );
+      const [card] = await recordCards(engine);
+
+      expect(await approveAndReplay(engine, card)).toEqual({ status: "ok", data: "done" });
+      expect([read1, read2, exec].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1]);
+      expect((await journalOf(card)).some((e) => e.status === "diverged")).toBe(false);
+    });
+
+    it("records the approved call's own nested calls without consuming sibling entries", async () => {
+      const helper = ok();
+      const execB = ok();
+      const engine = engineFor(
+        makeAction("helper", { execute: helper }),
+        guarded(
+          "child_a",
+          rs.fn(async () => callAction("helper", {})),
+        ),
+        guarded("child_b", execB),
+        parentOf(async () => {
+          const rA = await callAction("child_a", {});
+          const rB = await callAction("child_b", {});
+          return { status: "ok", data: statuses(rA, rB) };
+        }),
+      );
+      const cards = await recordCards(engine);
+      const cardB = cardFor(cards, "child_b");
+
+      const first = await approveAndReplay(engine, cardFor(cards, "child_a"));
+      expect(helper).toHaveBeenCalledTimes(1);
+      expect(first.status === "pending_approval" && first.approval.approvalId).toBe(cardB.id);
+      expect((await approvalsRepo.findPending()).map((c) => c.id)).toEqual([cardB.id]);
+
+      expect(await approveAndReplay(engine, cardB)).toEqual({ status: "ok", data: ["ok", "ok"] });
+      expect([helper.mock.calls.length, execB.mock.calls.length]).toEqual([1, 1]);
+      expect((await journalOf(cardB)).some((e) => e.status === "diverged")).toBe(false);
+    });
   });
 
   it("divergence during replay falls through gracefully in default mode", async () => {
