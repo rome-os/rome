@@ -6,7 +6,7 @@
  * to change.
  *
  * The gates' own tables live with them in packages/core/src/participation:
- * which sender, policy and settings wake the agent (chat-settings-wake.test.ts),
+ * which policy and settings wake the agent (chat-settings-wake.test.ts),
  * and which reply is checked (guarded-send.test.ts). The rows here take the
  * gates' answers as given and pin what Inbox does with each.
  */
@@ -49,7 +49,7 @@ interface Setup {
   /** What Core's wake gate answers, `wake` when absent. */
   wake?: ReturnType<WakeGate>;
   /** The hook's decision passed on with the message, so Inbox asks no gate. */
-  decidedByHook?: "wake" | "review";
+  decidedByHook?: "wake";
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
   /** What Core's send gate answers. Its own table is guarded-send.test.ts in
@@ -109,7 +109,6 @@ async function handle(setup: Setup) {
     personMappingRepo: {
       findByChannelUser: async () => (setup.sender === "stranger" ? null : person(setup.sender)),
     },
-    sentinelLogRepo: { create: async () => "sentinel-1" },
     approvalsRepo: {
       create: async (approval: Record<string, unknown>) => {
         approvals.push(approval);
@@ -161,16 +160,14 @@ async function handle(setup: Setup) {
   return { outcome, runs, stored, promoted, sent, approvals, wakeRequests, gateRequests };
 }
 
-type Wake = "woke" | "quiet" | "blocked" | "reviewed";
+type Wake = "woke" | "quiet" | "blocked";
 
 /** The wake decision as a caller sees it: which agent ran first, if any. */
 function wakeOf(handled: Awaited<ReturnType<typeof handle>>): Wake {
   const data = handled.outcome.data as { action?: string } | undefined;
   if (data?.action === "blocked") return "blocked";
   if (data?.action === "ignored_by_reply_settings") return "quiet";
-  const first = handled.runs[0]?.agentName;
-  if (first === "sentinel") return "reviewed";
-  if (first === "main") return "woke";
+  if (handled.runs[0]?.agentName === "main") return "woke";
   throw new Error(`unexpected handler outcome: ${JSON.stringify(handled.outcome)}`);
 }
 
@@ -179,53 +176,31 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     { wake: "wake", outcome: "woke" },
     { wake: "quiet", outcome: "quiet" },
     { wake: "block", outcome: "blocked" },
-    { wake: "review", outcome: "reviewed" },
   ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
-    const answers = wake === "review" ? [[result("IGNORE")]] : [];
-    const handled = await handle({ sender: "inner-circle", wake, answers });
+    const handled = await handle({ sender: "inner-circle", wake });
     expect(wakeOf(handled)).toBe(outcome);
   });
 
   it("records a message that wakes the agent as said to it, and any other as said around it", async () => {
     const woke = await handle({ sender: "guardian", wake: "wake" });
     const quiet = await handle({ sender: "stranger", wake: "quiet" });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("IGNORE")]],
-    });
     const blocked = await handle({ sender: "guardian", wake: "block" });
 
     expect(woke.stored.map((m) => m.role)).toEqual(["user"]);
     expect(quiet.stored.map((m) => m.role)).toEqual(["notification"]);
-    expect(reviewed.stored.map((m) => m.role)).toEqual(["notification"]);
     expect(blocked.stored).toEqual([]);
   });
 
   it("on a message the host recorded, makes it the turn's prompt only when it wakes the agent", async () => {
     const woke = await handle({ sender: "guardian", wake: "wake", recorded: true });
     const quiet = await handle({ sender: "stranger", wake: "quiet", recorded: true });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("IGNORE")]],
-      recorded: true,
-    });
-    const escalated = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("ESCALATE")]],
-      recorded: true,
-    });
     const blocked = await handle({ sender: "guardian", wake: "block", recorded: true });
 
-    for (const handled of [woke, quiet, reviewed, escalated, blocked]) {
+    for (const handled of [woke, quiet, blocked]) {
       expect(handled.stored).toEqual([]);
     }
     expect(woke.promoted).toEqual(["message-1"]);
     expect(quiet.promoted).toEqual([]);
-    expect(reviewed.promoted).toEqual([]);
-    expect(escalated.promoted).toEqual(["message-1"]);
     expect(blocked.promoted).toEqual([]);
   });
 
@@ -250,44 +225,9 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
 
   it("takes the hook's decision without asking the gate again", async () => {
     const woke = await handle({ sender: "guardian", wake: "block", decidedByHook: "wake" });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "block",
-      decidedByHook: "review",
-      answers: [[result("IGNORE")]],
-    });
 
     expect(wakeOf(woke)).toBe("woke");
-    expect(wakeOf(reviewed)).toBe("reviewed");
-    expect([...woke.wakeRequests, ...reviewed.wakeRequests]).toEqual([]);
-  });
-});
-
-describe("wake: what review decides", () => {
-  const reviewable: Setup = { sender: "stranger", wake: "review" };
-
-  it.each([
-    { sentinel: "IGNORE", action: "sentinel_ignored", agents: ["sentinel"] },
-    { sentinel: "REPLY: Hi there", action: "sentinel_replied", agents: ["sentinel"] },
-    { sentinel: "ESCALATE", action: "no_response", agents: ["sentinel", "main"] },
-    { sentinel: "", action: "no_response", agents: ["sentinel", "main"] },
-  ])("Sentinel answers '$sentinel' → $action", async ({ sentinel, action, agents }) => {
-    const handled = await handle({ ...reviewable, answers: [[result(sentinel)]] });
-
-    expect(handled.outcome.data).toMatchObject({ action });
-    expect(handled.runs.map((run) => run.agentName)).toEqual(agents);
-    // An escalated message wakes the agent as if it had been said to it.
-    expect(handled.promoted).toEqual(agents.includes("main") ? ["message-1"] : []);
-  });
-
-  it("wakes the agent when Sentinel fails", async () => {
-    const handled = await handle({
-      ...reviewable,
-      answers: [[{ type: "error", error: "model down" } as AgentMessage]],
-    });
-
-    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel", "main"]);
-    expect(handled.promoted).toEqual(["message-1"]);
+    expect(woke.wakeRequests).toEqual([]);
   });
 });
 
@@ -395,8 +335,7 @@ describe("send: send gate × Envoy", () => {
     });
     const stranger = await handle({
       sender: "stranger",
-      wake: "review",
-      answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
+      answers: [[result("Hi")], [envoy("approve", "Fine")]],
     });
 
     const guardianDirect = await handle({
@@ -429,19 +368,6 @@ describe("send: send gate × Envoy", () => {
       }),
     ]);
     expect(stranger.gateRequests).toEqual([expect.objectContaining({ recipient: null })]);
-  });
-
-  it("sends Sentinel's own reply without asking the gate or Envoy", async () => {
-    const handled = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("REPLY: I'll pass that on")]],
-    });
-
-    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel"]);
-    expect(handled.gateRequests).toEqual([]);
-    expect(handled.sent).toEqual([expect.objectContaining({ text: "I'll pass that on" })]);
-    expect(handled.approvals).toEqual([]);
   });
 
   it("sends nothing and asks no one when the agent says nothing", async () => {
@@ -563,7 +489,6 @@ describe("wake: in the hook", () => {
   // the wake gate, the hook showed typing for it and Inbox dropped it after.
   it.each([
     { gate: "wake", heard: "handled", wake: "wake", typing: true },
-    { gate: "review", heard: "handled", wake: "review", typing: true },
     { gate: "quiet", heard: "quiet", wake: undefined, typing: false },
     { gate: "block", heard: "quiet", wake: undefined, typing: false },
   ] as const)("with the sender named, the gate says $gate → $heard", async ({

@@ -229,7 +229,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     // gate decides here, before typing shows. Without
     // it, `inbox:message_handler` asks the gate once it has looked the sender up.
     const sender = "sender" in event ? event.sender : undefined;
-    let wake: "wake" | "review" | undefined;
+    let wake: "wake" | undefined;
     if (sender && this.options.wakeGateFor) {
       const gate = await this.options.wakeGateFor({ chat: ref });
       const decision = gate(
@@ -256,7 +256,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         bondLevel: sender.person?.bondLevel ?? "other",
         decision,
       });
-      if (decision === "quiet" || decision === "block") return;
+      if (decision !== "wake") return;
       wake = decision;
     } else if (!enabled) {
       log.debug("conversation disabled", { connectionId, chatId: message.chatId });
@@ -319,7 +319,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName: string | undefined;
       accountAgentName: string | undefined;
       recordedMessageId?: string;
-      wake?: "wake" | "review";
+      wake?: "wake";
     },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;

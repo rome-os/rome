@@ -4,11 +4,9 @@ import type { MessageAddressing, MessageReplyReference } from "@rome-os/app-runt
  * message_handler — Process an inbound message from a channel.
  *
  * Event-only action (no inputSchema). Triggered by ChannelMessageHook when a
- * message arrives on any connected channel. Routes through trusted/untrusted
- * paths based on the sender's bond level.
- *
- * Trusted path:  main agent processes -> envoy validates -> send (or approval gate)
- * Untrusted path: sentinel triages (REPLY/ESCALATE/IGNORE) -> logged
+ * message from someone let in arrives on any connected channel. Where the wake
+ * gate lets it wake the agent, the agent answers, and the envoy validates the
+ * reply before it is sent.
  *
  * @example
  * // Triggered internally by ChannelMessageHook — not called directly.
@@ -96,19 +94,12 @@ export interface MessageHandlerInput {
    *  asked the gate itself. Only that hook sets it: a caller that passes it
    *  skips the gate, policy blocks and the chat's on/off switch included.
    *  Absent, the handler asks the gate. */
-  wake?: "wake" | "review";
+  wake?: "wake";
 }
 
 export interface MessageHandlerOutput {
   /** What action was taken on the message. */
-  action:
-    | "blocked"
-    | "sent"
-    | "no_response"
-    | "pending_approval"
-    | "rejected_by_envoy"
-    | "sentinel_replied"
-    | "sentinel_ignored";
+  action: "blocked" | "sent" | "no_response" | "pending_approval" | "rejected_by_envoy";
   /** Agent response text, if one was generated. */
   response?: string;
   /** Reason for the action taken (e.g. block or rejection reason). */
