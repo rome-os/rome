@@ -57,11 +57,15 @@ describe("entrance", () => {
   it("answers a press by someone let in alone, told whom as", async () => {
     const { entrance: door } = onlyAda();
     const answered: string[] = [];
+    const ran: boolean[] = [];
     for (const id of ["sam", "ada"]) {
-      await door.press({ platform: "feishu", id }, async (by) => {
-        answered.push(`${id} as ${by}`);
-      });
+      ran.push(
+        await door.press({ platform: "feishu", id }, async (by) => {
+          answered.push(`${id} as ${by}`);
+        }),
+      );
     }
+    expect(ran).toEqual([false, true]);
     expect(answered).toEqual(["ada as Ada"]);
   });
 });
