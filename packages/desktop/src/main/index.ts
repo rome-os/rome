@@ -196,7 +196,9 @@ async function bootstrap() {
     const appShims = setupAppShims(desktopSettings, () => runtimeReady);
     // Reading another app's selection is macOS Accessibility.
     const shareShortcut =
-      process.platform === "darwin" ? setupShareShortcut(desktopSettings) : null;
+      process.platform === "darwin"
+        ? setupShareShortcut(desktopSettings, () => runtimeReady)
+        : null;
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
       openAuditWindow: () => createAuditWindow(),

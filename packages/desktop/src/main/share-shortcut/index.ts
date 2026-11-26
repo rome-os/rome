@@ -35,10 +35,15 @@ export interface ShareShortcut {
  * that text. Which app is the user's choice, from the app's menu in Rome; any
  * app that declares `web.shareTarget` can be the one.
  */
-export function setupShareShortcut(settings: SettingsAccess): ShareShortcut {
+export function setupShareShortcut(
+  settings: SettingsAccess,
+  /** Resolves once the Rome is reachable and its session is in place. */
+  whenReady: () => Promise<void>,
+): ShareShortcut {
   let panel: BrowserWindow | null = null;
   let loadedUrl: string | null = null;
   let changed: (() => void) | null = null;
+  let pressing = false;
 
   const current = (): ShareShortcutApp | null => readShareShortcutApp(settings);
 
@@ -126,23 +131,37 @@ export function setupShareShortcut(settings: SettingsAccess): ShareShortcut {
     const url = shareUrl(target, text);
     if (text || loadedUrl === null || !loadedUrl.startsWith(target.url)) {
       loadedUrl = url;
-      void win.loadURL(url).catch((err: unknown) => {
-        log.warn(`${target.name} did not load (${String(err)})`);
-      });
+      // As for apps on the Desktop: a press right after launch waits for the
+      // Rome, so the page does not land on a sign-in it can't complete.
+      void whenReady()
+        .then(() => (win.isDestroyed() || loadedUrl !== url ? undefined : win.loadURL(url)))
+        .catch((err: unknown) => {
+          log.warn(`${target.name} did not load (${String(err)})`);
+          // The next press loads again rather than keeping the failed page.
+          if (loadedUrl === url) loadedUrl = null;
+        });
     }
     win.showInactive();
   };
 
   const onPress = async (): Promise<void> => {
     const target = current();
-    if (!target) return;
-    const text = await readSelectedText();
-    // The same key closes an open panel when nothing new is selected.
-    if (!text && panel && !panel.isDestroyed() && panel.isVisible()) {
-      dismiss();
-      return;
+    // A key held down repeats; one press is handled at a time.
+    if (!target || pressing) return;
+    pressing = true;
+    try {
+      const text = await readSelectedText();
+      // The same key closes an open panel when nothing new is selected. The
+      // app the user reads in keeps its selection, so the same text counts.
+      const open = panel !== null && !panel.isDestroyed() && panel.isVisible();
+      if (open && (!text || shareUrl(target, text) === loadedUrl)) {
+        dismiss();
+        return;
+      }
+      show(target, text);
+    } finally {
+      pressing = false;
     }
-    show(target, text);
   };
 
   const register = (): void => {

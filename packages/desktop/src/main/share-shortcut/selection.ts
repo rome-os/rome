@@ -4,19 +4,32 @@
 // Accessibility answers first: it reads the selection without touching the
 // clipboard. Apps that do not report their selection that way (Chrome and
 // Electron apps, unless asked to build their accessibility tree) get a ⌘C
-// instead, and the clipboard is put back afterwards.
+// instead, and the clipboard is put back afterwards, every item and type of it.
 
-import { clipboard, systemPreferences } from "electron";
+import { systemPreferences } from "electron";
 import { createLogger } from "../logger";
 
 const log = createLogger("share-shortcut");
 
+/** What the clipboard held, kept until it is put back or let go. */
+export interface PasteboardSnapshot {
+  restore(): void;
+  discard(): void;
+}
+
 /** The macOS calls this file makes. Injected in tests. */
 export interface MacText {
-  /** The focused element's selected text through Accessibility, or null. */
+  /**
+   * The focused element's selected text through Accessibility: "" when it
+   * answers that nothing is selected, null when it cannot answer.
+   */
   selectedText(): string | null;
   /** NSPasteboard's change count, which goes up on every write to the clipboard. */
   pasteboardChangeCount(): number;
+  /** The clipboard's plain text, or null. */
+  pasteboardString(): string | null;
+  /** Every item on the clipboard with the data of each of its types. */
+  snapshotPasteboard(): PasteboardSnapshot;
   /** Posts ⌘C to the frontmost app. */
   pressCopy(): void;
 }
@@ -36,6 +49,8 @@ function loadMacText(): MacText {
   );
   const cg = koffi.load("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics");
   const objc = koffi.load("/usr/lib/libobjc.A.dylib");
+  // NSPasteboard and NSPasteboardItem live in AppKit, which Electron has loaded.
+  koffi.load("/System/Library/Frameworks/AppKit.framework/AppKit");
 
   const UTF8 = 0x08000100; // kCFStringEncodingUTF8
   const cfString = cf.func("CFStringCreateWithCString", "void *", ["void *", "str", "uint32"]);
@@ -60,7 +75,10 @@ function loadMacText(): MacText {
   const sel = objc.func("sel_registerName", "void *", ["str"]);
   // objc_msgSend takes the callee's exact signature, so it is bound once per
   // shape of message sent.
-  const sendId = objc.func("objc_msgSend", "void *", ["void *", "void *"]);
+  const send = objc.func("objc_msgSend", "void *", ["void *", "void *"]);
+  const sendWith = objc.func("objc_msgSend", "void *", ["void *", "void *", "void *"]);
+  const sendAt = objc.func("objc_msgSend", "void *", ["void *", "void *", "ulong"]);
+  const sendSetData = objc.func("objc_msgSend", "bool", ["void *", "void *", "void *", "void *"]);
   const sendLong = objc.func("objc_msgSend", "long", ["void *", "void *"]);
   const sendString = objc.func("objc_msgSend", "str", ["void *", "void *"]);
 
@@ -69,13 +87,22 @@ function loadMacText(): MacText {
   axSetTimeout(system, AX_TIMEOUT_SECONDS);
   const focusedAttr = cfString(null, "AXFocusedUIElement", UTF8);
   const selectedTextAttr = cfString(null, "AXSelectedText", UTF8);
-  const utf8Selector = sel("UTF8String");
+  const plainTextType = cfString(null, "public.utf8-plain-text", UTF8);
 
   const copyAttribute = (element: unknown, attribute: unknown): unknown => {
     const out: unknown[] = [null];
     const error = axCopyAttribute(element, attribute, out) as number;
     return error === 0 ? out[0] : null;
   };
+  // A CFString is an NSString, so it can hand over its UTF-8 bytes.
+  const jsString = (nsString: unknown): string | null =>
+    nsString ? ((sendString(nsString, sel("UTF8String")) as string | null) ?? null) : null;
+  const forEach = (array: unknown, visit: (item: unknown) => void): void => {
+    if (!array) return;
+    const count = sendLong(array, sel("count")) as number;
+    for (let i = 0; i < count; i++) visit(sendAt(array, sel("objectAtIndex:"), i));
+  };
+  const pasteboard = () => send(getClass("NSPasteboard"), sel("generalPasteboard"));
 
   return {
     selectedText: () => {
@@ -85,9 +112,7 @@ function loadMacText(): MacText {
         const value = copyAttribute(focused, selectedTextAttr);
         if (!value) return null;
         try {
-          if (cfGetTypeId(value) !== cfStringTypeId) return null;
-          // A CFString is an NSString, so it can hand over its UTF-8 bytes.
-          return (sendString(value, utf8Selector) as string | null) ?? null;
+          return cfGetTypeId(value) === cfStringTypeId ? (jsString(value) ?? "") : null;
         } finally {
           cfRelease(value);
         }
@@ -95,11 +120,47 @@ function loadMacText(): MacText {
         cfRelease(focused);
       }
     },
-    pasteboardChangeCount: () =>
-      sendLong(
-        sendId(getClass("NSPasteboard"), sel("generalPasteboard")),
-        sel("changeCount"),
-      ) as number,
+    pasteboardChangeCount: () => sendLong(pasteboard(), sel("changeCount")) as number,
+    pasteboardString: () => jsString(sendWith(pasteboard(), sel("stringForType:"), plainTextType)),
+    snapshotPasteboard: () => {
+      // Each type's data is read now and retained: the snapshot outlives the
+      // autorelease pool that hands it over, and a later read would see the copy.
+      const held: unknown[] = [];
+      const retain = (object: unknown) => {
+        held.push(object);
+        return send(object, sel("retain"));
+      };
+      const items: Array<Array<{ type: unknown; data: unknown }>> = [];
+      forEach(send(pasteboard(), sel("pasteboardItems")), (item) => {
+        const entries: Array<{ type: unknown; data: unknown }> = [];
+        forEach(send(item, sel("types")), (type) => {
+          const data = sendWith(item, sel("dataForType:"), type);
+          if (data) entries.push({ type: retain(type), data: retain(data) });
+        });
+        if (entries.length > 0) items.push(entries);
+      });
+      const release = () => {
+        for (const object of held.splice(0)) send(object, sel("release"));
+      };
+      return {
+        restore: () => {
+          const board = pasteboard();
+          sendLong(board, sel("clearContents"));
+          const restored = send(getClass("NSMutableArray"), sel("array"));
+          for (const entries of items) {
+            const item = send(send(getClass("NSPasteboardItem"), sel("alloc")), sel("init"));
+            for (const { type, data } of entries) {
+              sendSetData(item, sel("setData:forType:"), data, type);
+            }
+            sendWith(restored, sel("addObject:"), item);
+            send(item, sel("release"));
+          }
+          if (items.length > 0) sendWith(board, sel("writeObjects:"), restored);
+          release();
+        },
+        discard: release,
+      };
+    },
     pressCopy: () => {
       const KEY_C = 8; // kVK_ANSI_C
       const COMMAND = 0x100000; // kCGEventFlagMaskCommand
@@ -124,39 +185,58 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Copies the selection with ⌘C, then puts back what the clipboard held. */
 async function copySelection(text: MacText): Promise<string | null> {
   const before = text.pasteboardChangeCount();
-  const saved = await clipboard.read();
-  text.pressCopy();
-  for (let waited = 0; waited < COPY_WAIT_MS; waited += COPY_POLL_MS) {
-    await sleep(COPY_POLL_MS);
-    if (text.pasteboardChangeCount() === before) continue;
-    const copied = await clipboard.readText();
-    if (saved.length > 0) await clipboard.write(saved);
-    else clipboard.clear();
-    return copied;
+  const saved = text.snapshotPasteboard();
+  try {
+    text.pressCopy();
+    for (let waited = 0; waited < COPY_WAIT_MS; waited += COPY_POLL_MS) {
+      await sleep(COPY_POLL_MS);
+      if (text.pasteboardChangeCount() === before) continue;
+      const copied = text.pasteboardString();
+      saved.restore();
+      return copied;
+    }
+  } catch (err) {
+    saved.restore();
+    throw err;
   }
   // Nothing was selected, or the app has no Copy: the clipboard never changed.
+  saved.discard();
   return null;
 }
+
+async function read(text: MacText): Promise<string | null> {
+  const selected = text.selectedText();
+  // Accessibility answered and nothing is selected: a ⌘C would only copy
+  // whatever some apps copy without a selection, such as the current line.
+  if (selected !== null) return selected.trim() || null;
+  return (await copySelection(text))?.trim() || null;
+}
+
+// One read at a time: two overlapping ⌘C fallbacks would each save the other's
+// copy as "the clipboard" and put the wrong one back.
+let reading: Promise<string | null> | null = null;
 
 /**
  * The selection in the frontmost app, or null when there is none or Rome may
  * not read it. The first call without Accessibility asks macOS to show its
- * prompt.
+ * prompt. A call while a read is running gets that read's answer.
  */
-export async function readSelectedText(macText?: MacText): Promise<string | null> {
-  if (process.platform !== "darwin") return null;
+export function readSelectedText(macText?: MacText): Promise<string | null> {
+  if (process.platform !== "darwin") return Promise.resolve(null);
   if (!systemPreferences.isTrustedAccessibilityClient(false)) {
     systemPreferences.isTrustedAccessibilityClient(true);
     log.info("Accessibility is off for Rome, so the share shortcut opens without the selection");
-    return null;
+    return Promise.resolve(null);
   }
-  try {
-    const text = macText ?? (mac ??= loadMacText());
-    const selected = text.selectedText()?.trim();
-    if (selected) return selected;
-    return (await copySelection(text))?.trim() || null;
-  } catch (err) {
-    log.warn(`Could not read the selection (${String(err)})`);
-    return null;
-  }
+  reading ??= (async () => {
+    try {
+      return await read(macText ?? (mac ??= loadMacText()));
+    } catch (err) {
+      log.warn(`Could not read the selection (${String(err)})`);
+      return null;
+    } finally {
+      reading = null;
+    }
+  })();
+  return reading;
 }
