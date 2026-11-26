@@ -29,8 +29,9 @@ export interface Entrance<Person> {
     platform: string,
     commands: All & RunCommands<C, Person>,
   ): Omit<All, "ran"> & { ran(command: C): Promise<string> };
-  /** Runs `answer` to a press when whoever pressed is let in, else nothing. */
-  press(presser: EntryAccount, answer: () => Promise<void>): Promise<void>;
+  /** Runs `answer` to a press, told whom as, when whoever pressed is let in,
+   *  else nothing. */
+  press(presser: EntryAccount, answer: (by: Person) => Promise<void>): Promise<void>;
 }
 
 export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
@@ -62,7 +63,8 @@ export function entrance<Person>(entry: EntryPort<Person>): Entrance<Person> {
       };
     },
     async press(presser, answer) {
-      if ((await ask(presser, "press")).kind === "entered") await answer();
+      const entered = await ask(presser, "press");
+      if (entered.kind === "entered") await answer(entered.person);
     },
   };
 }

@@ -23,6 +23,7 @@ import type {
   ChatSettingsControl,
   ChatSettingsSnapshot,
   MessageReceipt,
+  SettingsActor,
 } from "@rome-os/app-runtime";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 
@@ -44,6 +45,15 @@ const CHAT_NAME_RETRY_MS = 10 * 60_000;
 /** Feishu content types whose bot mention can be the whole message. */
 const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
 
+/** Whom a press was let in as: the guardian, or a member signed in as a
+ *  visitor. */
+export interface PressedBy {
+  readonly kind: "guardian" | "visitor";
+}
+
+/** How a chat's settings record whoever pressed the card that wrote them. */
+const SETTINGS_KIND = { guardian: "guardian", visitor: "member" } as const;
+
 export interface FeishuConfig {
   appId: string;
   appSecret: string;
@@ -54,11 +64,12 @@ export interface FeishuConfig {
   chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  /** Reports that `presser` pressed a card or asked for one. Rome runs `answer`
-   *  when they are let in. Absent, nothing is answered. */
+  /** Reports that `presser` pressed a card or asked for one. Rome runs `answer`,
+   *  told whom they were let in as, when they are let in. Absent, nothing is
+   *  answered. */
   pressed?: (
     presser: { platform: string; id: string },
-    answer: () => Promise<void>,
+    answer: (by: PressedBy) => Promise<void>,
   ) => Promise<void>;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
@@ -371,8 +382,8 @@ export class FeishuAdapter {
   private async handleCardAction(evt: CardActionEvent): Promise<void> {
     const value = evt.action.value;
     if (isFeishuGroupConfigAction(value)) {
-      await this.pressed({ platform: this.platform, id: evt.operator.openId }, () =>
-        this.handleGroupConfigAction(evt),
+      await this.pressed({ platform: this.platform, id: evt.operator.openId }, (by) =>
+        this.handleGroupConfigAction(evt, by),
       );
     }
   }
@@ -450,7 +461,7 @@ export class FeishuAdapter {
     );
   }
 
-  private async handleGroupConfigAction(evt: CardActionEvent): Promise<void> {
+  private async handleGroupConfigAction(evt: CardActionEvent, by: PressedBy): Promise<void> {
     const value = evt.action.value;
     if (!isFeishuGroupConfigAction(value)) return;
     if (!this.chatSettings || !this.connectionId) {
@@ -488,7 +499,10 @@ export class FeishuAdapter {
       }
     }
 
-    const next = await this.updateChannelConfig(evt.chatId, patch, evt.operator.name);
+    const next = await this.updateChannelConfig(evt.chatId, patch, {
+      kind: SETTINGS_KIND[by.kind],
+      id: evt.operator.name ?? "feishu-card",
+    });
     log.info("updated Feishu group configuration", {
       chatId: evt.chatId,
       op,
@@ -611,7 +625,7 @@ export class FeishuAdapter {
   private async updateChannelConfig(
     chatId: string,
     patch: Partial<FeishuChannelConfig> | null,
-    updatedBy?: string,
+    actor: SettingsActor,
   ): Promise<FeishuChannelConfig> {
     if (!this.chatSettings || !this.connectionId) return {};
     const current = await this.getChannelConfig(chatId);
@@ -619,7 +633,7 @@ export class FeishuAdapter {
     if (patch === null) {
       const saved = await this.chatSettings.reset({
         ref,
-        actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
+        actor,
       });
       return {
         mode: saved.effective.enabled ? "allow" : "ignore",
@@ -649,7 +663,7 @@ export class FeishuAdapter {
       ref,
       set,
       clear,
-      actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
+      actor,
     });
     return this.getChannelConfig(chatId, true).then((saved) => ({ ...current, ...saved }));
   }
