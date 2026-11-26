@@ -25,6 +25,11 @@ function makeAdapter(service = "discord"): ChannelsService {
   };
 }
 
+/** The host's `ctx.access`, answering the guardian's accounts in its order. */
+function guardianWith(accounts: { platform: string; id: string }[]) {
+  return { guardianAccounts: rs.fn(async () => accounts) };
+}
+
 /** A host's chats, which send and record through Chats. A session main opens
  *  at an address is named after it, so a send's session says where it went. */
 function host() {
@@ -263,19 +268,13 @@ describe("send_message chat recipient aliases", () => {
     });
   });
 
-  it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
+  it("resolves WhatsApp to: guardian through the guardian's account there", async () => {
     const adapter = makeAdapter("whatsapp");
     const chats = host();
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [
-        {
-          channelMappings: [
-            { channel: "email", channelUserId: "guardian@example.com" },
-            { channel: "whatsapp", channelUserId: "15551234567@s.whatsapp.net" },
-          ],
-        },
-      ]),
-    };
+    const access = guardianWith([
+      { platform: "email", id: "guardian@example.com" },
+      { platform: "whatsapp", id: "15551234567@s.whatsapp.net" },
+    ]);
 
     await executeSendMessage(
       adapter,
@@ -284,10 +283,10 @@ describe("send_message chat recipient aliases", () => {
         to: "guardian",
         text: "hello guardian",
       },
-      { personMappingRepo, chats },
+      { access, chats },
     );
 
-    expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
+    expect(access.guardianAccounts).toHaveBeenCalled();
     expect(chats.send).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "whatsapp:15551234567@s.whatsapp.net",
@@ -297,11 +296,9 @@ describe("send_message chat recipient aliases", () => {
     );
   });
 
-  it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {
+  it("fails loudly when the guardian has no account on the channel", async () => {
     const adapter = makeAdapter("whatsapp");
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
-    };
+    const access = guardianWith([]);
 
     await expect(
       executeSendMessage(
@@ -311,9 +308,9 @@ describe("send_message chat recipient aliases", () => {
           to: "guardian",
           text: "hello guardian",
         },
-        { personMappingRepo },
+        { access },
       ),
-    ).rejects.toThrow('No guardian mapping found for channel "whatsapp"');
+    ).rejects.toThrow('The guardian has no account on channel "whatsapp"');
     expect(adapter.send).not.toHaveBeenCalled();
   });
 
@@ -336,9 +333,7 @@ describe("send_message connection choice", () => {
   // the error names the channel rather than an attachment or a recipient.
   it("refuses an unconfigured channel before checking attachments or recipients", async () => {
     const adapter = makeAdapter("telegram_user");
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
-    };
+    const access = guardianWith([]);
 
     await expect(
       executeSendMessage(adapter, {
@@ -351,10 +346,10 @@ describe("send_message connection choice", () => {
       executeSendMessage(
         adapter,
         { channel: "whatsapp", to: "guardian", text: "hello guardian" },
-        { personMappingRepo },
+        { access },
       ),
     ).rejects.toThrow('No Talk connection registered for "whatsapp"');
-    expect(personMappingRepo.findByBondLevel).not.toHaveBeenCalled();
+    expect(access.guardianAccounts).not.toHaveBeenCalled();
     expect(adapter.send).not.toHaveBeenCalled();
   });
 });
@@ -479,46 +474,20 @@ describe("send_message to an account with an opaque id", () => {
     expectSent(chats, FIRST, "42");
   });
 
-  it("resolves to: guardian through the link People keys by platform", async () => {
+  it("resolves to: guardian through the first account on the sending account's platform", async () => {
     const adapter = accounts(FIRST);
     const chats = host();
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [
-        { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
-      ]),
-    };
+    // The host lists the account given to the guardian last first.
+    const access = guardianWith([
+      { platform: "whatsapp", id: "wa-1" },
+      { platform: "telegram", id: "2002" },
+      { platform: "telegram", id: "1001" },
+    ]);
 
     await executeSendMessage(
       adapter,
       { channel: FIRST, to: "guardian", text: "hi" },
-      { personMappingRepo, chats },
-    );
-
-    expectSent(chats, FIRST, "1001");
-  });
-
-  // A host that fills `accounts` names the guardian's link by its platform,
-  // whatever `channelMappings` still says.
-
-  it("resolves to: guardian through the account on the sending account's platform", async () => {
-    const adapter = accounts(FIRST);
-    const chats = host();
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [
-        {
-          channelMappings: [{ channel: "whatsapp", channelUserId: "wa-1" }],
-          accounts: [
-            { platform: "whatsapp", id: "wa-1" },
-            { platform: "telegram", id: "2002" },
-          ],
-        },
-      ]),
-    };
-
-    await executeSendMessage(
-      adapter,
-      { channel: FIRST, to: "guardian", text: "hi" },
-      { personMappingRepo, chats },
+      { access, chats },
     );
 
     expectSent(chats, FIRST, "2002");
@@ -747,16 +716,12 @@ describe("send_message to an agent by name", () => {
     const adapter = makeAdapter("agents");
     const chats = host();
     const agentNames = names({ status: "found", agentId: ATLAS });
-    const personMappingRepo = {
-      findByBondLevel: rs.fn(async () => [
-        { channelMappings: [{ channel: "agents", channelUserId: ATLAS }] },
-      ]),
-    };
+    const access = guardianWith([{ platform: "agents", id: ATLAS }]);
 
     await executeSendMessage(
       adapter,
       { channel: "agents", to: " guardian", text: "hi" },
-      { agentNames, personMappingRepo, chats },
+      { agentNames, access, chats },
     );
 
     expect(agentNames.resolve).not.toHaveBeenCalled();
