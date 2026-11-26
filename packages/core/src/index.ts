@@ -170,11 +170,7 @@ import { ConnectedAccountsRepository } from "./db/repositories/connected-account
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { peopleLinkChanged } from "./access/application/guardian-links.js";
-import {
-  guardianWithAccounts,
-  logStepFailure,
-  memberContext,
-} from "./access/application/members.js";
+import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -2110,11 +2106,7 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo: appPersonMapping(
-      peopleRepo,
-      () => guardianWithAccounts(memberContext(db)),
-      platformOfChannel,
-    ),
+    personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
     people: appPeople(peopleRepo),
     sentinelLogRepo,
     approvalsRepo,

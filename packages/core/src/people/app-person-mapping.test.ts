@@ -5,10 +5,6 @@ import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-reposit
 import type { PeopleRepository } from "./model/people-repository.js";
 import { appPersonMapping } from "./app-person-mapping.js";
 
-/** The guardian's answer comes from Access and Identity, tested in
- *  src/guardian-for-apps.test.ts. */
-const noGuardian = async () => null;
-
 describe("appPersonMapping", () => {
   let testDb: TestDb;
   let people: PeopleRepository;
@@ -17,7 +13,7 @@ describe("appPersonMapping", () => {
   beforeEach(() => {
     testDb = createTestDb();
     people = new DrizzlePeopleRepository(testDb.db);
-    app = appPersonMapping(people, noGuardian);
+    app = appPersonMapping(people);
   });
 
   afterEach(() => {
@@ -56,7 +52,7 @@ describe("appPersonMapping", () => {
   });
 
   it("reads a channel an app names as the platform its accounts live on", async () => {
-    app = appPersonMapping(people, noGuardian, (channel) =>
+    app = appPersonMapping(people, (channel) =>
       channel === "telegram_user" || channel === "tg-second" ? "telegram" : channel,
     );
     const id = await people.create({
@@ -81,7 +77,7 @@ describe("appPersonMapping", () => {
   it("finds a person by the account an app names, as it is", async () => {
     // A channel name that would read as another platform, to show the account
     // is taken as it is.
-    app = appPersonMapping(people, noGuardian, () => "elsewhere");
+    app = appPersonMapping(people, () => "elsewhere");
     const id = await people.create({
       displayName: "Alice",
       bondLevel: "inner-circle",

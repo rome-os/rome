@@ -17,7 +17,6 @@ import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
-import { guardianWithAccounts, memberContext } from "../access/application/members.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
 import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -226,10 +225,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo: appPersonMapping(
-        peopleRepo,
-        () => guardianWithAccounts(memberContext(db)),
-        (name) => channelRecords.platformOfChannel(name),
+      personMappingRepo: appPersonMapping(peopleRepo, (name) =>
+        channelRecords.platformOfChannel(name),
       ),
       people: appPeople(peopleRepo),
       sentinelLogRepo,
