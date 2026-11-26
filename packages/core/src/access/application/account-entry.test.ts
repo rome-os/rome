@@ -7,7 +7,7 @@ import { guardianSeatCreated, inviteMember, memberContext, removeMember } from "
 
 const OWNER = { platform: "slack", id: "T1:U0" };
 const ADA = { platform: "slack", id: "T1:U2" };
-const GUARDIAN = { kind: "guardian", userId: "owner", via: "loopback" } as const;
+const GUARDIAN = { kind: "guardian", userId: "owner", via: "account" } as const;
 
 describe("accountEntry", () => {
   let testDb: TestDb;

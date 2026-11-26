@@ -38,9 +38,12 @@ export function accountEntry(deps: AccountEntryDeps) {
 
   const profiles = new VisitorProfilesRepository(deps.db);
 
+  /** The guardian, by one of their own accounts. */
   const guardian = async (): Promise<AccountEntry> => {
     const actor = await guardianActor(deps.db);
-    return actor?.kind === "guardian" ? { kind: "entered", person: actor } : REFUSED;
+    return actor?.kind === "guardian"
+      ? { kind: "entered", person: { ...actor, via: "account" } }
+      : REFUSED;
   };
 
   /** A member as their own sign-in names them. A member adds an account only

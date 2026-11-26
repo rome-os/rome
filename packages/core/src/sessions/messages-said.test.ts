@@ -10,6 +10,7 @@ import type {
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
 import { SenderLabels } from "../chats/sender-labels.js";
+import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
 import { markArrival } from "../participation/entrance.js";
 import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
@@ -77,7 +78,7 @@ function fakeChannel(name: string) {
       media: null,
     },
   };
-  const deliver = async (incoming: ChannelMessage, person: string | null = "Alice") => {
+  const deliver = async (incoming: ChannelMessage, person: SessionActor | null = ALICE) => {
     for (const handler of handlers) {
       const event: InboundEvent = {
         kind: "message",
@@ -94,6 +95,12 @@ function fakeChannel(name: string) {
   };
   return { channel, deliver, handlers };
 }
+
+const ALICE: SessionActor = {
+  kind: "visitor",
+  accountId: "cloud-alice",
+  email: "alice@example.com",
+};
 
 describe("messagesSaid", () => {
   let testDb: TestDb;
@@ -223,6 +230,16 @@ describe("messagesSaid", () => {
     // Decided at once, so the next turn there may read it.
     const session = heard[0]?.recorded.chatRecordId ?? "";
     expect(wiring.links.unseen(session).map((line) => line.text)).toContain("Hello");
+  });
+
+  it("hands a message to a hook as the work of who said it", async () => {
+    const worksFor: unknown[] = [];
+    said.subscribe(async () => {
+      worksFor.push(await currentSessionActor());
+    });
+    await telegram.deliver(message());
+    await settled();
+    expect(worksFor).toEqual([ALICE]);
   });
 
   it("neither records nor hears a redelivery twice", async () => {

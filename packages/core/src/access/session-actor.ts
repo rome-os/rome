@@ -20,10 +20,12 @@ const log = createLogger("session-actor");
  * The authenticated session identity accountable for a piece of work — the
  * "who did this" answer stamped on `action_executions.actor`. Orthogonal to an
  * execution's `initiator` (the triggering mechanism, e.g. `app:dream`): the
- * actor is the human session the request chain originated from.
+ * actor is the human the request chain originated from, by their session or by
+ * their account on a platform (application/account-entry.ts).
  *
- * Only ever constructed host-side from verified session material — never from
- * request headers or app-supplied input, so it cannot be forged.
+ * Only ever constructed host-side from verified session material or that
+ * account — never from request headers or app-supplied input, so it cannot be
+ * forged.
  */
 export type SessionActor =
   | {
@@ -37,9 +39,10 @@ export type SessionActor =
       accountId?: string;
       /** Email of the bound cloud account, when known. */
       email?: string;
-      /** How guardianship was proven: a browser session cookie, or a trusted
-       * in-container loopback caller acting as the seat. */
-      via: "cookie" | "loopback";
+      /** How guardianship was proven: a browser session cookie, a trusted
+       * in-container loopback caller acting as the seat, or the account on a
+       * platform that said or pressed something there. */
+      via: "cookie" | "loopback" | "account";
     }
   | { kind: "visitor"; accountId: string; email: string }
   /** An entry on a session-capable surface (/api routes, the app WS server)
@@ -79,7 +82,7 @@ export function upgradeActorMaterial(req: IncomingMessage): SessionActorMaterial
  */
 export async function enrichGuardianActor(
   db: DrizzleDb,
-  session: GuardianSession,
+  session: Pick<Extract<SessionActor, { kind: "guardian" }>, "userId" | "via">,
 ): Promise<SessionActor> {
   const [seat] = await db
     .select({
