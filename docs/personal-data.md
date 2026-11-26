@@ -147,7 +147,7 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 ## What is and is not enforced
 
-- `rome-node device run` reaches a device from a shell. The agent's session carries `ROME_TURN_AUDIENCE`, and the CLI refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary. The variable is read when the session opens, so a chat that opens to visitors later keeps the value its session started with.
+- `rome-node device run` reaches any capability of a device from a shell, in any chat.
 - Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read.
 - An installed app's page runs in the guardian's browser with their session, so it can call these routes as the guardian. No route returns a reading, but such a page can read the catalog and the ingest log, ingest, or delete an origin.
