@@ -549,6 +549,35 @@ describe("WebChatRepository", () => {
     expect(messages.find((m) => m.id === "reply")?.actor).toBeNull();
   });
 
+  it("keeps a task chat's owner on a fork another person made", async () => {
+    await repo.createSession(
+      "task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await repo.setSessionTrigger("task", { triggerKind: "concierge", triggerName: "Task" });
+    await repo.ensureRomeSession({
+      id: "fork",
+      type: "fork",
+      name: "Fork",
+      agentName: null,
+      parentSessionId: "task",
+    });
+    await repo.addMessage("prompt", "fork", "user", "[]", "fork-turn");
+    const actor = { kind: "visitor" as const, accountId: "b", email: "b@example.com" };
+    await repo.attributePersonFork("fork", "fork-turn", actor);
+    expect(await repo.getSessionOwnerKey("fork")).toBe("guardian");
+    const messages = await testDb.db.select().from(romeAgentMessages);
+    expect(messages.find((m) => m.id === "prompt")?.actor).toEqual(actor);
+  });
+
   it("pushes every sent message to open chats", async () => {
     await repo.createSession("sent-session", "Sent");
     const pushed: string[] = [];

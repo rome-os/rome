@@ -94,7 +94,6 @@ import { agentOfKindIn } from "../concierge/on-connection.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
-import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 import { requireConnectionRegistry, requireSetupManager } from "./helpers.js";
 import { startConnectionSetup } from "../connections/setup/start.js";
@@ -400,9 +399,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardAccessState,
         {
           subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-          hasChatSession: async (sessionId, owner) =>
-            (await webchatRuntime.hasStoredSession(sessionId)) &&
-            (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
