@@ -2171,9 +2171,10 @@ export type InboundEvent = {
  *   hears an event. On a channel that pairs accounts (Telegram, Discord,
  *   Feishu), an account the guardian has not approved never reaches a
  *   subscriber, and neither does a pairing code. Any other channel delivers
- *   every sender, and a subscriber decides what a stranger gets. An admission
- *   that has not decided within fifteen seconds fails closed: that message is
- *   not delivered, and the conversation's next message is admitted in order.
+ *   every sender, and an app's hook hears only senders who are let in. An
+ *   admission that has not decided within fifteen seconds fails closed: that
+ *   message is not delivered, and the conversation's next message is admitted
+ *   in order.
  * - **R2 Answerable only.** An event is something a subscriber may answer: not
  *   Rome's own sends, not the guardian's own messages from another device, not
  *   reactions, edits or frames with no text and no attachments. The complete
