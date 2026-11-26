@@ -11,7 +11,7 @@ import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
-import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
+import { CONCIERGE_AGENT_ID } from "./concierge/service.js";
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
@@ -176,9 +176,7 @@ describe("live events WebSocket", () => {
     };
     const sources: LiveEventSources = {
       subscribeChatStatus: (emit) => track(runtime.subscribeStatusEvents(emit)),
-      hasChatSession: async (sessionId, owner) =>
-        (await runtime.hasStoredSession(sessionId)) &&
-        (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
+      hasChatSession: (sessionId) => runtime.hasStoredSession(sessionId),
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
@@ -299,7 +297,7 @@ describe("live events WebSocket", () => {
     expect(catalogHandlers.size).toBe(1);
   });
 
-  it("gives a visitor their own Concierge rows and hides the guardian's Concierge chat", async () => {
+  it("opens the guardian's Concierge chat to a member, and tells them of their own activity", async () => {
     const client = await connect({
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -322,13 +320,10 @@ describe("live events WebSocket", () => {
       );
     await conciergeChat("concierge", null);
     await conciergeChat("visitor-main", "visitor:account-1");
-    client.send({ type: "subscribe", topic: "chat.session:concierge" });
-    expect(
-      await client.next((m) => m.type === "error" && m.topic === "chat.session:concierge"),
-    ).toMatchObject({ message: "Not found" });
+    await client.subscribe("chat.session:concierge");
     await client.subscribe("chat.session:visitor-main");
 
-    // concierge.activity tells the visitor about their own chats only.
+    // concierge.activity tells a person about their own chats only.
     await client.subscribe("concierge.activity");
     expect(
       await client.next((m) => m.type === "event" && m.topic === "concierge.activity"),

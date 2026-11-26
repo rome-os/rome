@@ -7,6 +7,7 @@ import {
   rowsSince,
   type ChatRow,
 } from "./renewal-handoffs.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { ModelResolver } from "../agent/index.js";
 
 const row = (role: string, text: string, turnId: string | null): ChatRow => ({
@@ -40,12 +41,19 @@ describe("recentMessagesOf", () => {
   });
 });
 
-describe("recentMessagesOf with an owner", () => {
-  it("names the owner's lines as the chat's owner, and Rome's as before", () => {
-    const rows = [row("user", "Book dinner", "t1"), row("assistant", "Done", "t1")];
-    expect(recentMessagesOf(rows, undefined, "Visitor (Ana)").map((m) => m.senderName)).toEqual([
-      "Visitor (Ana)",
+describe("recentMessagesOf with two writers", () => {
+  it("names each line by who wrote it, whose chat it is or not", () => {
+    const ana: SessionActor = { kind: "visitor", accountId: "ana", email: "ana@example.com" };
+    const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
+    const rows = [
+      { ...row("user", "Book dinner", "t1"), actor: ana },
+      row("assistant", "Done", "t1"),
+      { ...row("user", "Thanks", "t2"), actor: guardian },
+    ];
+    expect(recentMessagesOf(rows).map((m) => m.senderName)).toEqual([
+      "Visitor (ana@example.com)",
       "You",
+      "Guardian",
     ]);
   });
 });

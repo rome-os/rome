@@ -154,6 +154,8 @@ describe("ChatsWebChatRepository", () => {
     ]);
     expect((await repo.getReplyTarget("chat-1", "out-1"))?.role).toBe("assistant");
     expect((await repo.getUserMessageActors("chat-1")).get("in-1")?.kind).toBe("guardian");
+    expect((await repo.getUserMessageActors("chat-1", ["other"])).size).toBe(0);
+    expect((await repo.getUserMessageActors("chat-1", ["in-1"])).size).toBe(1);
   });
 
   it("pages a chat's transcript by message, newest first, with each page's turns' traces", async () => {

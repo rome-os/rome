@@ -40,6 +40,7 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - Some kinds have no platform, such as GitHub, since no chats live there.
 - The Rome-managed Google kind reads Gmail without modifying, deleting or labeling mail. Every send needs the guardian's approval of that exact message, including its sender, recipients, subject and body. A schedule or another agent cannot approve a send on the guardian's behalf.
 - The Rome-managed Microsoft kind reads Outlook mail the same way, without modifying, moving, deleting or flagging it, under the same approval rule for every send. Each send is a new message, never a threaded reply.
+- Gmail and Outlook mail each run through one connection. A Rome-managed Google or Microsoft connection that was granted mail reading carries that mail, for reading and sending alike. Otherwise the mail stays on the Composio connection, which reads and sends with its own tools like any Composio toolkit. A Rome-managed connection that is broken, or that reads but was not granted sending, never hands its mail to Composio or another mailbox: the guardian reconnects it.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
 
 ## Watch

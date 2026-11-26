@@ -60,6 +60,7 @@ describe("task input attribution", () => {
 
   it("preserves a visitor, never promotes them to guardian", async () => {
     expect(await admitted(visitor, "visitor:v")).toEqual(visitor);
+    expect(await admitted(visitor, "guardian")).toEqual(visitor);
   });
 
   it("has no authority without the internal scope, regardless of submitted actor/source fields", () => {
@@ -154,7 +155,6 @@ describe("task input attribution", () => {
   });
 
   for (const reason of [
-    "other owner",
     "other source",
     "ordinary chat",
     "archived",
@@ -164,7 +164,6 @@ describe("task input attribution", () => {
   ] as const) {
     it(`refuses ${reason}`, async () => {
       const { rows, repo } = repository();
-      if (reason === "other owner") rows.get("target")!.ownerKey = "visitor:other";
       if (reason === "ordinary chat") rows.get("target")!.triggerKind = "";
       if (reason === "archived") Object.assign(rows.get("target")!, { archivedAt: new Date() });
       const actor = reason === "unknown actor" ? { kind: "anonymous" as const } : guardian;
@@ -196,7 +195,7 @@ describe("task input admission", () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses cancellation after ownership was checked but before enqueue", async () => {
+  it("refuses cancellation after the chats were checked but before enqueue", async () => {
     const { admitTaskInput } = await import("./task-input-actor.js");
     let active = true;
     const enqueue = rs.fn();
@@ -211,25 +210,25 @@ describe("task input admission", () => {
   });
 });
 
-it("does not admit an input whose ownership check failed", async () => {
+it("does not admit an input whose check failed", async () => {
   const { admitTaskInput } = await import("./task-input-actor.js");
   const enqueue = rs.fn();
   await withTaskInputActor(source(), "target", body, async () => {
     const claim = claimTaskInputActor("target", body, speaker)!;
-    await expect(taskInputActor(claim, repository("visitor:other").repo, origin)).rejects.toThrow();
+    await expect(taskInputActor(claim, repository().repo, async () => "other")).rejects.toThrow();
     expect(() => admitTaskInput(claim, enqueue)).toThrow();
   });
   expect(enqueue).not.toHaveBeenCalled();
 });
 
-it("does not reuse a prior authorization after its final ownership refresh fails", async () => {
+it("does not reuse a prior authorization after its final refresh fails", async () => {
   const { admitTaskInput, refreshTaskInputActor } = await import("./task-input-actor.js");
   const { repo, rows } = repository();
   const enqueue = rs.fn();
   await withTaskInputActor(source(), "target", body, async () => {
     const claim = claimTaskInputActor("target", body, speaker)!;
     await taskInputActor(claim, repo, origin);
-    rows.get("target")!.ownerKey = "visitor:other";
+    Object.assign(rows.get("target")!, { archivedAt: new Date() });
     await expect(refreshTaskInputActor(claim, repo, origin)).rejects.toThrow();
     expect(() => admitTaskInput(claim, enqueue)).toThrow();
   });

@@ -3,6 +3,7 @@
 // fallback that writes the handoff from those messages with a small model, and
 // the chat's "tidying up" activity while it is written.
 
+import type { SessionActor } from "../access/session-actor.js";
 import type { ModelSession } from "./agent-runner.js";
 import {
   createRomeTools,
@@ -78,6 +79,8 @@ export interface ChatRow {
   content: string;
   turnId: string | null;
   createdAt: Date;
+  /** The person who wrote it, when that is known. */
+  actor?: SessionActor;
 }
 
 /** One page of a chat's rows, and where the next older page starts. */
@@ -97,8 +100,6 @@ export interface RenewalHandoffSources {
    * next older page starts, or null.
    */
   page(chatId: string, limit: number, before?: unknown): Promise<ChatPage>;
-  /** Who said chat `chatId`'s user lines, or null for the default "Guardian". */
-  ownerLabel?: (chatId: string) => Promise<string | null>;
   /** Chat `chatId`'s open tasks, one per line, or null for none or a chat that keeps none. */
   openTasks(chatId: string): Promise<string | null>;
   /** Runs `work` while chat `chatId` says it is tidying up. Absent, `work` just runs. */
@@ -114,13 +115,14 @@ const SENDER: Record<string, string> = {
 };
 
 /** The chat's said messages in `rows`, oldest first, leaving out turn `exceptTurnId`'s. */
-export function recentMessagesOf(
-  rows: readonly ChatRow[],
-  exceptTurnId?: string,
-  ownerLabel?: string | null,
-): RecentMessage[] {
+export function recentMessagesOf(rows: readonly ChatRow[], exceptTurnId?: string): RecentMessage[] {
   return rows.flatMap((row) => {
-    const senderName = row.role === "user" && ownerLabel ? ownerLabel : SENDER[row.role];
+    const senderName =
+      row.actor?.kind === "visitor"
+        ? row.actor.email
+          ? `Visitor (${row.actor.email})`
+          : "Visitor"
+        : SENDER[row.role];
     if (!senderName || (exceptTurnId && row.turnId === exceptTurnId)) return [];
     const text = messageContentText(row.content);
     return text
@@ -309,13 +311,10 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
     return rowsSince(pages.flat(), since);
   };
   const recent = async (chatId: string, exceptTurnId?: string, since?: Date) => {
-    const [rows, owner] = await Promise.all([
-      since
-        ? rowsFrom(chatId, since)
-        : sources.page(chatId, RECENT_MESSAGES).then((page) => page.rows),
-      sources.ownerLabel ? sources.ownerLabel(chatId).catch(() => null) : null,
-    ]);
-    return recentMessagesOf(rows, exceptTurnId, owner);
+    const rows = since
+      ? await rowsFrom(chatId, since)
+      : (await sources.page(chatId, RECENT_MESSAGES)).rows;
+    return recentMessagesOf(rows, exceptTurnId);
   };
   return {
     timeoutMs: sources.timeoutMs,

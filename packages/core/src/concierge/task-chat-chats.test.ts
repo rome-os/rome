@@ -65,6 +65,8 @@ describe("chatsTaskChatMessages", () => {
       ["q", "toRome", "Find flights"],
       ["a", "fromRome", "3 options"],
     ]);
+    // A person's message names the account that wrote it, and an agent's names none.
+    expect(said.map((message) => message.saidBy?.account.id)).toEqual(["guardian", undefined]);
   });
 
   it("finds the latest answer behind more than a page of lines without text", async () => {
