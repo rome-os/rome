@@ -3,12 +3,12 @@ import type { PersonMappingRepository } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
 import type { PeopleRepository } from "./model/people-repository.js";
-import { type AppPersonMapping, appPersonMapping } from "./app-person-mapping.js";
+import { appPersonMapping } from "./app-person-mapping.js";
 
 describe("appPersonMapping", () => {
   let testDb: TestDb;
   let people: PeopleRepository;
-  let app: AppPersonMapping;
+  let app: PersonMappingRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -105,12 +105,10 @@ describe("appPersonMapping", () => {
     expect((await app.findByChannelUser("telegram", "tg-carol"))?.id).toBe(other);
   });
 
-  it("adds no person when an app built against the SDK type calls create", async () => {
-    const sdkShaped = app as unknown as PersonMappingRepository;
-
-    await expect(
-      (async () => sdkShaped.create({ displayName: "Dana", bondLevel: "acquaintance" }))(),
-    ).rejects.toThrow(TypeError);
+  it("refuses an app's request to add a person, and writes nothing", async () => {
+    await expect(app.create({ displayName: "Dana", bondLevel: "acquaintance" })).rejects.toThrow(
+      "Apps cannot add persons. Rome no longer lets an app add a person.",
+    );
     expect(await people.all()).toEqual([]);
   });
 });
