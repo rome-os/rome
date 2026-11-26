@@ -32,14 +32,18 @@ export function parseShareLocationInput(
  * on the card; `builtin: true` marks it as core's own, which the drain checks
  * against the tool that emitted it.
  */
-export function shareLocationToolOutput(reason: string, autoShare = false): unknown {
+export function shareLocationToolOutput(reason: string, asker: string | null = null): unknown {
   return {
     pendingInteraction: true,
     appId: "core",
     render: {
       kind: "inline",
       componentId: LOCATION_CARD_ID,
-      props: autoShare ? { reason, autoShareToken: issueAutoShareToken() } : { reason },
+      // The card shares by itself only on the client of `asker`, whose own
+      // message raised it (widget-events.ts).
+      props: asker
+        ? { reason, autoShareToken: issueAutoShareToken(), autoShareFor: asker }
+        : { reason },
       builtin: true,
     },
     message:
@@ -122,6 +126,7 @@ export function storedLocationAnswer(output: unknown): Record<string, unknown> {
     accuracyMeters: answer.accuracyMeters,
     fixedAt: answer.fixedAt,
     ...(answer.auto === true ? { auto: true } : {}),
+    ...(answer.sharedBy ? { sharedBy: answer.sharedBy } : {}),
   };
 }
 
@@ -137,8 +142,9 @@ export function locationAnswerPrompt(output: unknown): string {
     );
   }
   const coarse = (answer.accuracyMeters ?? Number.POSITIVE_INFINITY) > COARSE_ACCURACY_METERS;
+  const who = answer.sharedBy ? `The member ${answer.sharedBy}` : "The guardian";
   return (
-    "The guardian shared their current location for this answer only:\n\n" +
+    `${who} shared their current location for this answer only:\n\n` +
     `- latitude: ${answer.latitude}\n- longitude: ${answer.longitude}\n` +
     `- accuracy: ±${answer.accuracyMeters} m\n- taken at: ${answer.fixedAt}\n\n` +
     "Use your own tools to turn it into a place if you need one. " +

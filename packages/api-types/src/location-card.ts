@@ -40,6 +40,8 @@ export type LocationAnswer =
       /** The client shared it by itself, on a card core marked for that:
        *  clients then show one line in place of the card. */
       auto?: true;
+      /** The email of the member who shared it, when not the guardian. */
+      sharedBy?: string;
     }
   | { status: "declined"; dismissed: true };
 

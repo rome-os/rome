@@ -90,6 +90,7 @@ function setup(
           : { id, agentName: null, ownerKey: null, triggerKind: null }) as never,
     },
     callerOwner: async () => caller,
+    callerEmail: async () => (caller?.startsWith("visitor:") ? "member@example.test" : undefined),
     startSetup: async (request) => {
       setups.push(request);
       return setupState;
@@ -970,6 +971,35 @@ describe("an event on the share-location card core owns", () => {
       (plain.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
         ?.output,
     ).not.toHaveProperty("auto");
+  });
+
+  it("shares by itself only on the client of who asked, and records a member's share as theirs", async () => {
+    const marked = {
+      ...locationCard,
+      render: {
+        ...locationCard.render,
+        props: { reason: "r", autoShareToken: "t", autoShareFor: "guardian" },
+      },
+    };
+    const output = (s: ReturnType<typeof setup>) =>
+      (s.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]?.output;
+    // Another viewer's client answering by itself starts nothing.
+    const other = setup({ m: { chatId: "c1", content: [marked] } }, "visitor:v");
+    const res = await other.fire("m", {
+      name: "share-location",
+      context: { ...position, auto: true },
+    });
+    expect(res.status).toBe(409);
+    expect(other.forwarded).toEqual([]);
+    // Their press is their own location.
+    await other.fire("m", { name: "share-location", context: position });
+    expect(output(other)).toMatchObject({ status: "shared", sharedBy: "member@example.test" });
+    expect(output(other)).not.toHaveProperty("auto");
+    // The asker's client still shares by itself.
+    const asker = setup({ m: { chatId: "c1", content: [marked] } });
+    await asker.fire("m", { name: "share-location", context: { ...position, auto: true } });
+    expect(output(asker)).toMatchObject({ status: "shared", auto: true });
+    expect(output(asker)).not.toHaveProperty("sharedBy");
   });
 
   it("lets the first of two clients answer, and refuses the other", async () => {

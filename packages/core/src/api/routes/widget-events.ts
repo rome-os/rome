@@ -1,6 +1,6 @@
 import { isWidgetAppPath } from "@rome-os/app-runtime";
 import { Hono } from "hono";
-import { currentChatOwner } from "../../access/session-actor.js";
+import { currentChatOwner, currentSessionActor, memberEmail } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { privateOwnerOf } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
@@ -36,6 +36,8 @@ interface CoreIo {
   /** Whether the event came from this instance's own pages, which the setup
    *  route asks of a request too. */
   sameOrigin: boolean;
+  /** Who sent the event: the owner key of their chats, and a member's email. */
+  caller: () => Promise<{ owner: string | null; email?: string }>;
 }
 
 /** What a setup start names: as `POST /api/connections/:idOrKind/grants/:grant/setup` takes it. */
@@ -199,7 +201,19 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
       // A share the client sent by itself is marked so only on a card core
       // marked for it; a client cannot mark any other.
       const auto = context.auto === true && typeof io.props.autoShareToken === "string";
-      return { answer: auto ? { ...shared, auto: true } : shared };
+      const caller = await io.caller();
+      // Only the client of the person whose message raised the card answers
+      // it by itself; a card from before the asker was kept is the guardian's.
+      const asker = typeof io.props.autoShareFor === "string" ? io.props.autoShareFor : "guardian";
+      if (auto && caller.owner !== asker) {
+        return Response.json(
+          { error: "This card shares by itself only for who asked." },
+          { status: 409 },
+        );
+      }
+      // A share is the location of whoever pressed it.
+      const sharedBy = caller.email ? { sharedBy: caller.email } : {};
+      return { answer: { ...shared, ...(auto ? { auto: true as const } : {}), ...sharedBy } };
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
@@ -262,6 +276,8 @@ export interface WidgetEventDeps {
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
   /** Whose share-location cards the caller answers. */
   callerOwner?: () => Promise<string | null>;
+  /** A member caller's email, which a location they share is recorded under. */
+  callerEmail?: () => Promise<string | undefined>;
   /** Starts a connection's setup: the operation behind the Connections page's
    *  Connect. Absent, the connect card's Connect starts none and says so. */
   startSetup?: (request: SetupStartRequest) => Promise<SetupStartOutcome>;
@@ -279,6 +295,7 @@ export interface WidgetEventDeps {
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
   const callerOwner = deps.callerOwner ?? currentChatOwner;
+  const callerEmail = deps.callerEmail ?? (async () => memberEmail(await currentSessionActor()));
   /** The cards whose answer is on its way to their chat. */
   const answering = new Set<string>();
 
@@ -354,6 +371,10 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
             ? deps.startSetup(request)
             : { status: "refused", code: 409, error: "Connect it in Settings › Connections." },
         sameOrigin: isSameOriginMutationRequest(c.req.raw),
+        caller: async () => {
+          const email = await callerEmail();
+          return { owner: await callerOwner(), ...(email ? { email } : {}) };
+        },
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),

@@ -2,8 +2,12 @@ import { describe, expect, it } from "@rstest/core";
 import type { TurnFacts } from "../agent/index.js";
 import { shareLocationTools } from "./share-location-tool.js";
 
-const turnStartedBy = (actor?: { kind: string; userId?: string; via?: string }) =>
-  ({ actor: () => actor }) as unknown as TurnFacts;
+const turnStartedBy = (actor?: {
+  kind: string;
+  userId?: string;
+  via?: string;
+  accountId?: string;
+}) => ({ actor: () => actor }) as unknown as TurnFacts;
 
 const call = async (
   input: {
@@ -37,23 +41,28 @@ describe("share_location", () => {
     });
   });
 
-  it("lets the card share by itself only in a turn the guardian's own message started", async () => {
+  it("lets the card share by itself only for the person whose own message started the turn", async () => {
     const props = async (turn: TurnFacts) => {
       const { result } = await call({ turn });
       return JSON.parse(result.content[0]!.text).render.props;
     };
+    const reason = "To find coffee near you";
     expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "cookie" }))).toEqual({
-      reason: "To find coffee near you",
+      reason,
       autoShareToken: expect.any(String),
+      autoShareFor: "guardian",
+    });
+    expect(await props(turnStartedBy({ kind: "visitor", accountId: "a1" }))).toEqual({
+      reason,
+      autoShareToken: expect.any(String),
+      autoShareFor: "visitor:a1",
     });
     // A followed event, a routine or a task's result acts for the guardian by loopback.
     expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "loopback" }))).toEqual({
-      reason: "To find coffee near you",
+      reason,
     });
-    expect(await props(turnStartedBy())).toEqual({ reason: "To find coffee near you" });
-    expect(await props(turnStartedBy({ kind: "visitor" }))).toEqual({
-      reason: "To find coffee near you",
-    });
+    expect(await props(turnStartedBy())).toEqual({ reason });
+    expect(await props(turnStartedBy({ kind: "anonymous" }))).toEqual({ reason });
   });
 
   it("reads a request for places that names none as near the guardian, with no questions first", async () => {

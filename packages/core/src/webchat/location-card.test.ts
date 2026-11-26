@@ -46,6 +46,14 @@ describe("the share-location answer", () => {
     expect(answer(25_000)).toContain("around <city>");
   });
 
+  it("names the member who shared, and the guardian otherwise", () => {
+    const shared = { status: "shared", latitude: 1, longitude: 2, accuracyMeters: 5, fixedAt: "t" };
+    expect(locationAnswerPrompt(shared)).toContain("The guardian shared");
+    expect(locationAnswerPrompt({ ...shared, sharedBy: "a@example.test" })).toContain(
+      "The member a@example.test shared",
+    );
+  });
+
   it("tells the agent a decline covers that message only", () => {
     const prompt = locationAnswerPrompt({ status: "declined", dismissed: true });
     expect(prompt).toContain("Don't show the card again for it");
@@ -55,7 +63,7 @@ describe("the share-location answer", () => {
 
 describe("the card a stored share-location card draws", () => {
   it("marks it to share by itself only with a token core's own tool issued", () => {
-    const issued = shareLocationToolOutput("r", true) as { render: { props: unknown } };
+    const issued = shareLocationToolOutput("r", "guardian") as { render: { props: unknown } };
     expect(mayAutoShare(locationCardUiFromProps(issued.render.props) ?? undefined)).toBe(true);
     // Another tool named `*__share_location` can return any props, but not a token core issued.
     expect(
