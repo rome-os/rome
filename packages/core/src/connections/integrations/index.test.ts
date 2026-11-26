@@ -130,32 +130,6 @@ describe("registerBuiltinConnections", () => {
     expect(registry.registeredKinds()).not.toContain("slack_bot");
   });
 
-  it("boots past a stored WeChat bot, skipping it", async () => {
-    const stored = {
-      id: "conn-wechat",
-      connectionKind: "wechat",
-      label: "WeChat",
-      createdAt: new Date("2026-10-01T00:00:00Z"),
-      grant: { state: "unauthorized" },
-    } as unknown as StoredConnection;
-    const warn = rs.fn();
-    const logger = { warn, info() {}, error() {}, debug() {} } as unknown as Logger;
-    const registry = new ConnectionRegistry({
-      repository: { all: async () => [stored] } as unknown as ConnectionsRepository,
-      logger,
-    });
-    registerEveryKind(registry);
-
-    await registry.load();
-
-    expect(warn).toHaveBeenCalledWith("Skipping connection for unregistered connectionKind", {
-      connectionId: "conn-wechat",
-      connectionKind: "wechat",
-    });
-    expect(registry.all()).toEqual([]);
-    expect(registry.registeredKinds()).not.toContain("wechat");
-  });
-
   // A bot takes an agent as its own account and the guardian's signed-in
   // account as a delegate; Dream and the test fixtures keep their own lists of
   // these kinds, so all three must agree.
