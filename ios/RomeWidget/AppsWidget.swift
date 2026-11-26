@@ -6,6 +6,7 @@ import WidgetKit
 struct RomeWidgets: WidgetBundle {
     var body: some Widget {
         AppsWidget()
+        VoiceConversationLiveActivity()
     }
 }
 

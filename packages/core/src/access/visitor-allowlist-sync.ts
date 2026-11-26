@@ -338,10 +338,19 @@ export class VisitorAllowListSync {
   }
 }
 
-/** Queues the stored allow-list. Boot and instance linking call this. */
+/**
+ * Queues the stored allow-list. Boot and instance linking call this. Queues
+ * nothing while the members are not yet the source of the list, since they
+ * may lack invited emails and Rome Cloud would be told the list is empty.
+ */
 export async function syncStoredVisitorAllowList(
-  store: Pick<DashboardAccessStore, "read">,
+  store: Pick<DashboardAccessStore, "read" | "membersAreSource">,
   sync: Pick<VisitorAllowListSync, "push">,
+  log: Pick<Logger, "error"> = createLogger("visitor-allowlist-sync"),
 ): Promise<void> {
+  if (!store.membersAreSource()) {
+    log.error("visitor allow-list not sent: the members' starting data did not load");
+    return;
+  }
   sync.push(await store.read());
 }

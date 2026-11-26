@@ -73,7 +73,7 @@ describe("Outlook actions", () => {
       await read(harness([{ id: "broken", state: () => "broken", act: null }]).actions),
     ).toMatchObject({
       status: "error",
-      error: expect.not.stringContaining("outlook_not_connected:"),
+      error: expect.stringMatching(/^outlook_connection_broken: /),
     });
   });
 
@@ -108,8 +108,28 @@ describe("Outlook actions", () => {
       await withForwardedApprovalId("test-approved", () =>
         readOnly.actions.get(OUTLOOK_SEND_ACTION)!.execute(message),
       ),
-    ).toMatchObject({ status: "error", error: expect.stringContaining("Nothing was sent") });
+    ).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^outlook_send_not_granted: .*Nothing was sent/),
+    });
     expect(readOnly.invoke).not.toHaveBeenCalled();
+  });
+
+  it("names a missing send grant and a stale connectionId apart from a missing connection", async () => {
+    const send = (scopes: string[], input = message) =>
+      withForwardedApprovalId("test-approved", () =>
+        harness(undefined, scopes).actions.get(OUTLOOK_SEND_ACTION)!.execute(input),
+      );
+    for (const scopes of [["User.Read", "Mail.Read"], ["Mail.Send"], []]) {
+      expect(await send(scopes)).toMatchObject({
+        status: "error",
+        error: expect.stringMatching(/^outlook_send_not_granted: /),
+      });
+    }
+    expect(await send(SCOPES, { ...message, connectionId: "no-such" })).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^outlook_connection_changed: /),
+    });
   });
 
   it("does not retry uncertain send outcomes, and reports provider errors", async () => {
