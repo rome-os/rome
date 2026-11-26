@@ -554,6 +554,13 @@ describe("Webchat API", () => {
     await expect(channel.send!.send("gone" as never, { text: "hi" })).rejects.toThrow(
       "No dashboard chat gone",
     );
+    // An app's own work, such as its endpoint for another service's webhook.
+    await expect(
+      webchatCaller.run({ actor: { kind: "anonymous" }, chatId: null }, () =>
+        channel.send!.send("concierge" as never, { text: "hi" }),
+      ),
+    ).resolves.toBeTruthy();
+    await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 
   it("resolves automated senders ahead of actors, including removed apps and unknown sources", async () => {

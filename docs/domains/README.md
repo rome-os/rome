@@ -93,7 +93,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 Diffs still owed to the model, each a change of its own:
 
 - Only [Access's steps on members](access.md#steps-rome-takes-today) read or write [Identity](identity.md) yet. The parts that work with a person move onto it one at a time.
-- Every check of who may use the dashboard still reads the guardian's seat and the dashboard allow-list. The [members](access.md#member) are kept in line with them, and nothing reads them yet.
+- Every check of who may use the dashboard still recognizes the guardian by the guardian's seat, not by the guardian's role among the [members](access.md#member).
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.

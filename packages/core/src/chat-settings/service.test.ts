@@ -616,9 +616,9 @@ describe("ChatSettingsService", () => {
         ref: parent,
         set: { enabled: false },
         clear: [],
-        actor: { kind: "guardian" },
+        actor: { kind: "member" },
       }),
-    ).resolves.toMatchObject({ updatedBy: { kind: "guardian" } });
+    ).resolves.toMatchObject({ updatedBy: { kind: "member" } });
 
     expect(
       (await service.list()).items.find(

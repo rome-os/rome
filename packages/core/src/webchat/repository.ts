@@ -2746,9 +2746,12 @@ export class WebChatRepository {
     return new Map(rows.flatMap((row) => (row.senderId ? [[row.id, row.senderId] as const] : [])));
   }
 
-  /** The person who sent each user message in a session, for messages that
+  /** The person who sent each user message in a session, or each of `ids`, for messages that
    * recorded one. */
-  async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
+  async getUserMessageActors(
+    sessionId: string,
+    ids?: readonly string[],
+  ): Promise<Map<string, SessionActor>> {
     const rows = await this.db
       .select({ id: romeAgentMessages.id, actor: romeAgentMessages.actor })
       .from(romeAgentMessages)
@@ -2757,6 +2760,7 @@ export class WebChatRepository {
           eq(romeAgentMessages.sessionId, sessionId),
           eq(romeAgentMessages.role, "user"),
           isNotNull(romeAgentMessages.actor),
+          ids ? inArray(romeAgentMessages.id, [...ids]) : undefined,
         ),
       );
     return new Map(rows.flatMap((row) => (row.actor ? [[row.id, row.actor] as const] : [])));
