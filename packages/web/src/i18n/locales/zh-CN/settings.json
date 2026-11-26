@@ -1040,6 +1040,29 @@
         "show": "显示麦克风",
         "refused": "浏览器已阻止使用麦克风，因此无法列出。请在浏览器的网站设置中允许。"
       }
+    },
+    "voiceConversation": {
+      "title": "语音对话",
+      "loadFailed": "语音对话设置加载失败",
+      "sampleFailed": "这个声音没能播放，请再试一次。",
+      "playSample": "试听",
+      "stopSample": "停止试听",
+      "voice": {
+        "title": "对话声音",
+        "description": "语音对话时 Rome 用这个声音说话，网页和 iPhone 都一样。选中就会试听。"
+      },
+      "speed": {
+        "title": "对话语速",
+        "description": "语音对话时 Rome 说话的快慢。"
+      },
+      "voices": {
+        "Iris": "女声 · 清晰、耐心",
+        "Grace": "女声 · 美式，平静从容",
+        "Nina": "女声 · 英式，年轻活泼",
+        "Adrian": "男声 · 低沉、沉稳",
+        "Daniel": "男声 · 英式男中音，低沉稳重",
+        "Reid": "男声 · 美式，低沉不急"
+      }
     }
   },
   "easterEgg": {

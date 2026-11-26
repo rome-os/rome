@@ -6,7 +6,7 @@
 
 import type { AgentTool } from "../apps/actions/agent-tool.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
-import { type OwnerOfChat, whoMayAsk } from "../apps/actions/who-may-ask.js";
+import { whoMayAsk } from "../apps/actions/who-may-ask.js";
 import { connectionTools } from "../connections/agent-tools.js";
 import { routineTools } from "../routines/agent-tools.js";
 import { deviceTools } from "../connections/device/agent-tools.js";
@@ -30,16 +30,13 @@ export const agentTools: ReadonlyArray<AgentTool<never>> = Object.values(PAGES).
 /** The names of core's agent tools, which run in the main process as a root. */
 export const agentToolNames: ReadonlySet<string> = new Set(agentTools.map((tool) => tool.name));
 
-/** Registers every agent tool, each page's over its deps. `ownerOfChat` is
- * what the check of who may ask reads. */
+/** Registers every agent tool, each page's over its deps. */
 export function registerAgentTools(
   actions: Pick<ActionRegistry, "register">,
-  ownerOfChat: OwnerOfChat,
   deps: AgentToolDeps,
 ): void {
-  const check = whoMayAsk(ownerOfChat);
   for (const page of Object.keys(PAGES) as Page[]) {
     const tools = PAGES[page] as ReadonlyArray<AgentTool<AgentToolDeps[Page]>>;
-    for (const tool of tools) actions.register(tool.action(deps[page], check));
+    for (const tool of tools) actions.register(tool.action(deps[page], whoMayAsk));
   }
 }

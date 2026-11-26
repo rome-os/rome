@@ -520,6 +520,7 @@ describe("WebChatRepository", () => {
     expect(await repo.recordUserInput("input", "chat", "[]", actor)).toBe(true);
     expect(await repo.recordUserInput("input", "chat", "[]", { kind: "anonymous" })).toBe(false);
     expect((await repo.getUserMessageActors("chat")).get("input")).toEqual(actor);
+    expect((await repo.getUserMessageActors("chat", ["other"])).size).toBe(0);
     const guardian = {
       kind: "guardian" as const,
       userId: "seat",

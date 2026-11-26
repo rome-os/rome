@@ -63,6 +63,8 @@ export interface SonioxSpeakerOptions {
   voice?: string;
   /** The main language of the text, which sets the prosody. Any voice speaks any language. */
   language?: string;
+  /** How fast the voice speaks, from 0.7 to 1.3 times its own pace. The provider's 1.0 unless set. */
+  speed?: number;
   sampleRate?: number;
   /**
    * Streams this session runs at once, 2 unless set, and at most 5 for the
@@ -112,6 +114,7 @@ class SonioxSession implements SpeakerSession {
   private readonly model: string;
   private readonly voice: string;
   private readonly language: string;
+  private readonly speed: number | undefined;
   // Streams run at once. Only ever lowered after the constructor.
   private maxStreams: number;
   private readonly keepAliveMs: number;
@@ -148,6 +151,7 @@ class SonioxSession implements SpeakerSession {
     this.model = options.model ?? SONIOX_TTS_DEFAULT_MODEL;
     this.voice = options.voice ?? SONIOX_TTS_DEFAULT_VOICE;
     this.language = options.language ?? SONIOX_TTS_DEFAULT_LANGUAGE;
+    this.speed = options.speed;
     this.format = {
       encoding: "pcm_s16le",
       sampleRate: options.sampleRate ?? SONIOX_TTS_SAMPLE_RATE,
@@ -267,6 +271,7 @@ class SonioxSession implements SpeakerSession {
       model: this.model,
       language: this.language,
       voice: this.voice,
+      ...(this.speed === undefined ? {} : { speed: this.speed }),
       audio_format: "pcm_s16le",
       sample_rate: this.format.sampleRate,
     });
