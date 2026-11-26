@@ -262,7 +262,9 @@ function inviteMemberWithinTx({ identity, access }: SyncMemberContext, email: st
   return person;
 }
 
-function giveGuardian(identity: SyncIdentity, guardianId: string, account: Account) {
+/** Gives the guardian's person `account`. One another person holds moves to
+ *  the guardian, and the move is logged. */
+export function giveGuardian(identity: SyncIdentity, guardianId: string, account: Account) {
   const holder = identity.personOf(account);
   if (holder?.id === guardianId) return;
   if (holder) {

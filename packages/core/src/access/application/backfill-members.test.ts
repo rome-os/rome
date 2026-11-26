@@ -52,8 +52,9 @@ function seed(db: DrizzleDb) {
     .values([
       { id: "l1", personId: "p-owner", platform: "slack", accountId: "T1:U1" },
       { id: "l2", personId: "p-owner", platform: "telegram", accountId: "42" },
-      // An agent's own account acting for the guardian is not the guardian's.
-      { id: "l3", personId: "p-owner", platform: "slack", accountId: "T1:BOT", delegate: true },
+      // An agent's own account is the guardian's like any other.
+      { id: "l3", personId: "p-owner", platform: "agents", accountId: "ep-atlas", delegate: true },
+      { id: "l6", personId: "p-owner", platform: "rome-cloud", accountId: "acct-owner" },
       { id: "l4", personId: "p-friend", platform: "slack", accountId: "T1:U2" },
     ])
     .run();
@@ -117,7 +118,12 @@ describe("backfillMembers", () => {
         name: "Olive",
         avatarUrl: "https://example.com/owner.png",
         role: "guardian",
-        accounts: ["rome-cloud-email:owner@example.com", "slack:T1:U1", "telegram:42"],
+        accounts: [
+          "agents:ep-atlas",
+          "rome-cloud-email:owner@example.com",
+          "slack:T1:U1",
+          "telegram:42",
+        ],
       },
       {
         name: null,
@@ -427,6 +433,7 @@ describe("backfillMembers", () => {
     const guardian = (await listMembers(memberContext(db)))[0];
     expect(guardian?.role).toBe("guardian");
     expect(guardian?.accounts.map((a) => `${a.platform}:${a.accountId}`)).toEqual([
+      "agents:ep-atlas",
       "email:olive@example.com",
       "rome-cloud-email:new@example.com",
       "rome-cloud-email:owner@example.com",
@@ -492,6 +499,7 @@ describe("backfillMembers", () => {
         (a) => `${a.platform}:${a.accountId}`,
       );
       expect(accounts).toEqual([
+        "agents:ep-atlas",
         ...(linkedByPeople ? ["email:owner@example.com"] : []),
         "rome-cloud-email:owner@example.com",
         "slack:T1:U1",

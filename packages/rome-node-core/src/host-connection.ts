@@ -154,6 +154,7 @@ export async function runHostConnection(
       onFrame: (frame) => void executor.receiveFrame(frame),
       onNotification: options.onNotification,
       onStatus: (status) => {
+        if (status !== "online" && status !== "connecting") executor.disconnect();
         options.audit?.host(
           {
             event: "connection",
@@ -165,7 +166,6 @@ export async function runHostConnection(
           [active.token],
         );
         options.onEvent?.({ type: "connection", status });
-        if (status !== "online" && status !== "connecting") executor.disconnect();
         if (status === "revoked" || status === "superseded") {
           queueMicrotask(() =>
             finish(
