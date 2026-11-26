@@ -11,6 +11,7 @@ const BODIES: Record<string, unknown> = {
   "PUT /api/app-connection-access/:appId/:connectionId/:identity/:operation": {
     approval: "not_required",
   },
+  "PUT /api/voice-conversation/settings": { voice: "Iris", speed: 1 },
   [STAND_IN_GUARDIAN_ONLY_WRITE]: { confirm: true },
 };
 

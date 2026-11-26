@@ -6,8 +6,7 @@ import {
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { request } from "node:http";
-import { mayEnter } from "../../access/entry.js";
-import { currentSessionActor } from "../../access/session-actor.js";
+import { enteredPerson } from "../../access/require-entry.js";
 import { signerSocketPath } from "../../instance/instance-identity.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
@@ -80,14 +79,11 @@ function askedNames(source: Record<string, unknown>): string[] | null {
 // PIN. These routes forward the team's requests to its unix socket and keep
 // nothing: no database row, no log line with a body, no process.env entry. The
 // PIN passes through memory from the request body to the signer's.
-export function vaultRoutes(
-  deps: Pick<ApiDeps, "approvalHandler" | "approvalsRepo" | "dashboardAccessState">,
-): Hono {
+export function vaultRoutes(deps: Pick<ApiDeps, "approvalHandler" | "approvalsRepo">): Hono {
   const app = new Hono();
 
   app.use("/vault/*", async (c, next) => {
-    const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
-    if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
+    const actor = enteredPerson(c);
     const readOnly = ["GET", "HEAD", "OPTIONS"].includes(c.req.method);
     // Only a browser session types a PIN. A loopback caller is any process in the container.
     if (
@@ -127,7 +123,7 @@ export function vaultRoutes(
   // A reset deletes every secret and replaces the PIN without the old one, and
   // the PIN is the guardian's credential, so a dashboard admin may not reset.
   app.post("/vault/reset", async (c) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
+    if (enteredPerson(c).kind !== "guardian")
       return c.json({ error: "Only the guardian can reset the vault." }, 403);
     const { pin } = await c.req.json<{ pin?: unknown }>().catch(() => ({}) as { pin?: unknown });
     const reply = await signerCall("POST", "/v1/reset", { pin });
@@ -135,8 +131,6 @@ export function vaultRoutes(
   });
 
   app.post("/vault/grants", async (c) => {
-    const actor = await mayEnter(await currentSessionActor(), deps.dashboardAccessState);
-    if (!actor) return c.json({ error: "Guardian authentication required" }, 403);
     const input = await c.req
       .json<Record<string, unknown>>()
       .catch((): Record<string, unknown> => ({}));
@@ -167,7 +161,12 @@ export function vaultRoutes(
     if (reply.status !== 200) {
       return relayFailure(c, reply, "The vault could not grant the secrets.");
     }
-    const resolved = await resolveApproval(deps, approvalId, "approve", resolverOf(actor));
+    const resolved = await resolveApproval(
+      deps,
+      approvalId,
+      "approve",
+      resolverOf(enteredPerson(c)),
+    );
     return resolved.status === 202 ? c.json({ ok: true }) : c.json(resolved.body, resolved.status);
   });
 

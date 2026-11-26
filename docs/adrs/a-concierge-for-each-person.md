@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-06
-- **Superseded in part by**: [A dashboard admin has the guardian's access](a-dashboard-admin-has-the-guardians-access.md), for who decides approvals
+- **Superseded in part by**: [A dashboard admin has the guardian's access](a-dashboard-admin-has-the-guardians-access.md), for who decides approvals and who opens a Concierge chat
 
 ## Context
 
@@ -29,7 +29,7 @@ Two people who follow the same thing each hear it, once each. The connection sti
 
 Future diffs must respect:
 
-- A Concierge chat, a task chat it starts, and a child session of either (a fork, a subagent) answer as not found to anyone but their owner, on every path that reads or writes a chat. A child session takes its parent's privacy when it is made.
+- A child session of a Concierge chat or a task chat (a fork, a subagent) takes its parent's owner when it is made.
 - A follow, a task row and a kept event record the owner of the chat they were made in, and keep it after that chat is gone. A stored event is unique per owner and event.
 - Triage, the hourly cap of important turns, quiet hours and the digest are each owner's own.
 - Memory and connections are shared, and approvals are decided by the guardian.

@@ -17,18 +17,14 @@ import { sessionActorMiddleware } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
+import { entryStep } from "../../test/entry-step.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
 const visitorCookie = (accountId: string, email: string) => ({
   headers: { Cookie: `${VISITOR_COOKIE_NAME}=${createVisitorSession(accountId, email)}` },
 });
-/** Ann is on the dashboard allow-list; an app user is not. */
+/** Ann is on the dashboard allow-list. */
 const ann = visitorCookie("acct-ann", "ann@example.com");
-const appUser = visitorCookie("acct-app", "app@example.com");
-const dashboardAccessState = {
-  isCloudEmailAllowed: (email: string) => email === "ann@example.com",
-} as unknown as ApiDeps["dashboardAccessState"];
-
 /** The routes behind the actor middleware, as /api mounts them. */
 function mount(
   testDb: TestDb,
@@ -36,8 +32,8 @@ function mount(
   webchatRepo: ApiDeps["webchatRepo"],
 ): Hono {
   return new Hono()
-    .use("*", sessionActorMiddleware(testDb.db))
-    .route("/", conciergeRoutes({ concierge, dashboardAccessState, webchatRepo }));
+    .use("*", sessionActorMiddleware(testDb.db), entryStep(["ann@example.com"]))
+    .route("/", conciergeRoutes({ concierge, webchatRepo }));
 }
 
 describe("GET /concierge/session", () => {
@@ -116,13 +112,11 @@ describe("GET /concierge/session", () => {
     expect(body.unread).toBe(CONCIERGE_UNREAD_CAP);
   });
 
-  it("answers a dashboard admin with their own main chat, and nobody else", async () => {
+  it("answers a dashboard admin with their own main chat", async () => {
     await expect((await app().request("/concierge/session", asAnn())).json()).resolves.toEqual({
       id: "concierge-visitor-acct-ann",
       unread: 0,
     });
-    expect((await app().request("/concierge/session", appUser)).status).toBe(401);
-    expect((await app().request("/concierge/session")).status).toBe(401);
   });
 });
 
@@ -173,8 +167,7 @@ describe("/concierge/connectors", () => {
     testDb.close();
   });
 
-  it("answers the same structure the Concierge reads, for the guardian only, ", async () => {
-    expect((await app().request("/concierge/connectors")).status).toBe(401);
+  it("answers the same structure the Concierge reads", async () => {
     await expect((await app().request("/concierge/connectors", guardian)).json()).resolves.toEqual(
       listing,
     );
@@ -242,13 +235,6 @@ describe("/concierge/chats", () => {
     // No name: an untitled chat, which its first message names.
     expect((await post({})).status).toBe(201);
     expect(started).toEqual([" Trips ", undefined]);
-  });
-
-  it("answers only the guardian", async () => {
-    expect((await app().request("/concierge/chats")).status).toBe(401);
-    expect((await app().request("/concierge/chats", { method: "POST", body: "{}" })).status).toBe(
-      401,
-    );
   });
 });
 
@@ -397,11 +383,6 @@ describe("POST /concierge/chats/:chatId/service-connected", () => {
     expect((await post("gone", { service: "mail" })).status).toBe(404);
     // Ann's own Concierge is not the guardian's chat.
     expect((await post("concierge", { service: "mail" }, ann)).status).toBe(404);
-    expect(serviceConnected).not.toHaveBeenCalled();
-  });
-
-  it("answers 401 to a caller with no Concierge", async () => {
-    expect((await post("concierge", { service: "mail" }, appUser)).status).toBe(401);
     expect(serviceConnected).not.toHaveBeenCalled();
   });
 });

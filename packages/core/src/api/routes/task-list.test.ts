@@ -31,17 +31,14 @@ import { approvalWaits } from "../../test/open-waits.js";
 import { CONCIERGE_DIGEST_ACTION, CONCIERGE_FOLLOW_ACTION } from "../../concierge/following.js";
 import { CONCIERGE_TASK_RUN_ACTION } from "../../concierge/task-schedule.js";
 import { chatTaskListRoutes } from "./task-list.js";
+import { entryStep } from "../../test/entry-step.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
 const visitorCookie = (accountId: string, email: string) => ({
   headers: { Cookie: `${VISITOR_COOKIE_NAME}=${createVisitorSession(accountId, email)}` },
 });
-/** Ann is on the dashboard allow-list; an app user is not. */
+/** Ann is on the dashboard allow-list. */
 const ann = visitorCookie("acct-ann", "ann@example.com");
-const appUser = visitorCookie("acct-app", "app@example.com");
-const dashboardAccessState = {
-  isCloudEmailAllowed: (email: string) => email === "ann@example.com",
-} as unknown as ApiDeps["dashboardAccessState"];
 
 /** Each Concierge chat and its owner. */
 const OWNERS: Record<string, string> = {
@@ -116,16 +113,17 @@ describe("/chats/:chatId/tasks", () => {
         calls.push(`deactivate ${id}`);
       },
     } as unknown as ApiDeps["routineEngine"];
-    return new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
-      "/",
-      chatTaskListRoutes({
-        concierge,
-        dashboardAccessState,
-        routinesRepo: routines,
-        routineRunsRepo: new RoutineRunsRepository(testDb.db),
-        routineEngine,
-      }),
-    );
+    return new Hono()
+      .use("*", sessionActorMiddleware(testDb.db), entryStep(["ann@example.com"]))
+      .route(
+        "/",
+        chatTaskListRoutes({
+          concierge,
+          routinesRepo: routines,
+          routineRunsRepo: new RoutineRunsRepository(testDb.db),
+          routineEngine,
+        }),
+      );
   };
   const read = async (chatId: string, as = guardian) =>
     (await (await app().request(`/chats/${chatId}/tasks`, as)).json()) as TaskListResponse;
@@ -327,8 +325,6 @@ describe("/chats/:chatId/tasks", () => {
     // Another person's chat does not exist to the caller.
     expect((await app().request("/chats/ann-main/tasks", guardian)).status).toBe(404);
     expect((await app().request("/chats/concierge/tasks", ann)).status).toBe(404);
-    expect((await app().request("/chats/concierge/tasks", appUser)).status).toBe(401);
-    expect((await app().request("/chats/concierge/tasks")).status).toBe(401);
   });
 
   it("shows a routine made in one of the chat's task chats, naming its task, and none of another owner's", async () => {
@@ -464,15 +460,16 @@ describe("/chats/:chatId/tasks", () => {
       onChange: () => () => {},
     } as unknown as ApiDeps["routineEngine"];
     const concierge = { ownerOfChat: async (chatId: string) => OWNERS[chatId] ?? null };
-    const card = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
-      "/",
-      routinesRoutes({
-        ...deps,
-        routineEngine,
-        concierge: concierge as unknown as ConciergeService,
-        dashboardAccessState,
-      }),
-    );
+    const card = new Hono()
+      .use("*", sessionActorMiddleware(testDb.db), entryStep(["ann@example.com"]))
+      .route(
+        "/",
+        routinesRoutes({
+          ...deps,
+          routineEngine,
+          concierge: concierge as unknown as ConciergeService,
+        }),
+      );
     // The card's "Turn it on" in chat ann-main: a routine whose args name no chat.
     const turnOn = (as: typeof guardian) =>
       card.request("/routines", {

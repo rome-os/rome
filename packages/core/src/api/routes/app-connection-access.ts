@@ -9,7 +9,6 @@ import { isResolvedApp } from "../../apps/state.js";
 import { appAccessibleOperations } from "../../connections/app-connections.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { teamOnly } from "../../access/team-only.js";
 
 const ConstraintSchema = z
   .object({
@@ -37,8 +36,6 @@ const AuditQuerySchema = z.object({
 export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const repo = deps.appConnectionAccessRepo;
-
-  app.use("/app-connection-access/*", teamOnly(deps.dashboardAccessState));
 
   app.get("/app-connection-access/:appId", async (c) => {
     const policies = await repo.listActiveForApp(c.req.param("appId"));
