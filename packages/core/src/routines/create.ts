@@ -515,7 +515,6 @@ export async function checkRoutineAction(
   if (!(await deps.actionRegistry.has(actionName))) {
     return { ok: false, error: unknownActionError(actionName) };
   }
-  // A routine's fire acts through loopback, which these refuse on every fire.
   // A routine fires its action outside the agent tool gate, so an explicit
   // target needs a principal that may call it: the app code that owns the call
   // (callerAppId), or an agent that holds the action. Unattributed calls, such

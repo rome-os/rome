@@ -252,17 +252,17 @@ describe("ConnectionsSection — cards", () => {
     expect(row.querySelector("svg.lucide-triangle-alert")).toBeTruthy();
   });
 
-  it("a stale WeChat runtime reads Working with an attention dot while its grant remains authorized", () => {
+  it("a stale LinkedIn runtime reads Working with an attention dot while its grant remains authorized", () => {
     renderSection([
       ...minimalConnections(),
       connection({
-        connectionKind: "wechat",
-        grants: { account: "authorized" },
+        connectionKind: "linkedin",
+        grants: { session: "authorized" },
         capabilities: {
           chat: {
             state: "unlocked",
             degradation: {
-              reason: "WeChat reported a stale session.",
+              reason: "LinkedIn reported a stale session.",
               retryAt: "2026-07-20T12:00:00.000Z",
             },
           },
@@ -272,7 +272,7 @@ describe("ConnectionsSection — cards", () => {
       }),
     ]);
 
-    const row = within(connectedList()).getByRole("button", { name: "Open WeChat" });
+    const row = within(connectedList()).getByRole("button", { name: "Open LinkedIn" });
     expect(within(row).getByText("Working")).toBeTruthy();
     expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
   });

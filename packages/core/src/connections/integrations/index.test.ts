@@ -237,7 +237,6 @@ const BEFORE_OFFERED = new Map<string, readonly ChatSettingField[]>([
     "feishu",
     ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
   ],
-  ["wechat", ["enabled", "routing.agentName", "session.reset"]],
 ]);
 const BEFORE_CORE: readonly ChatSettingField[] = ["session.reset"];
 /** Kinds added after kinds declared their rules, which have no before. */

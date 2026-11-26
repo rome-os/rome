@@ -147,7 +147,7 @@ export function refreshingAfter<S extends object>(
 /**
  * A name, or null where it only echoes the sender's id. Some channels label a
  * nameless sender with its id, or the part of it a person would read: an email
- * address for an `unauthenticated:` sender, a WeChat id before its `@`.
+ * address for an `unauthenticated:` sender, a WhatsApp number before its `@`.
  */
 function notAnId(name: string | null, senderId: string): string | null {
   if (!name) return null;

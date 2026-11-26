@@ -3,7 +3,8 @@ import { ActionExecutionsRepository } from "../apps/repositories/action-executio
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { callTool, GUARDIAN_TURN } from "../apps/actions/agent-tool-contract.js";
+import { actionOf, callTool, GUARDIAN_TURN } from "../apps/actions/agent-tool-contract.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { type RoutineToolDeps, runRoutine, stopRoutine, stopRoutineRun } from "./agent-tools.js";
 
 const guardianAsked = GUARDIAN_TURN;
@@ -103,11 +104,24 @@ describe("running a routine now", () => {
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 
-  it("runs for a turn no one started, such as a routine's", async () => {
+  it("runs for a turn no one started", async () => {
     const id = await createRoutine();
     const result = await callTool(runRoutine, deps, { routineId: id }, {});
     expect(result).toMatchObject({ status: "ok" });
     expect(routineEngine.runNow).toHaveBeenCalledTimes(1);
+  });
+  it("starts no run from inside a routine's run, so one routine cannot run another without end", async () => {
+    const id = await createRoutine();
+    // A routine whose action is system:run_routine, or an action its fire calls.
+    const result = await actionExecutionContext.run(
+      { executionId: "fire", rootExecutionId: "fire", initiator: "routine:Weekly report" },
+      () => actionOf(runRoutine, deps).execute({ routineId: id }),
+    );
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("cannot start"),
+    });
+    expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 });
 

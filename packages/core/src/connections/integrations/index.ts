@@ -22,14 +22,12 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
-import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
-export { createWechatDescriptor } from "./wechat.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -84,7 +82,6 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
-  registry.register(createWechatDescriptor());
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,
