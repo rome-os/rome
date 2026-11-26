@@ -8,7 +8,8 @@ import type {
 import type { Command } from "../connections/index.js";
 import { entrance } from "../participation/entrance.js";
 import type { Entry, EntryAccount } from "../participation/entry.js";
-import { type ChatCommandsDeps, chatCommands, type RanBy } from "./chat-commands.js";
+import { type ChatCommandsDeps, chatCommands } from "./chat-commands.js";
+import type { LetInAs } from "./settings-actor.js";
 
 const CONNECTION_ID = "connection:discord";
 const CHANNEL_ID = "channel-1" as ChatId;
@@ -47,7 +48,7 @@ function makeSettings() {
 
 function commands(overrides: Partial<ChatCommandsDeps> = {}) {
   const settings = makeSettings();
-  const enter = rs.fn(async ({ id }: EntryAccount): Promise<Entry<RanBy>> => {
+  const enter = rs.fn(async ({ id }: EntryAccount): Promise<Entry<LetInAs>> => {
     if (id === GUARDIAN_ID) return { kind: "entered", person: { kind: "guardian" } };
     if (id === MEMBER_ID) return { kind: "entered", person: { kind: "visitor" } };
     return { kind: "unknown" };
