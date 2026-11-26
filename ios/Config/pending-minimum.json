@@ -1,10 +1,3 @@
 {
-  "entries": [
-    {
-      "tier": "background",
-      "reason": "The voice conversation button asks whether the account is on the voice input list.",
-      "pr": 2640,
-      "server": "#2636"
-    }
-  ]
+  "entries": []
 }
