@@ -1397,7 +1397,7 @@ const chatAgents: AgentCatalogGroup[] = [
     iconUrl: null,
     agents: [
       { name: "main", description: "The guardian's primary agent" },
-      { name: "envoy", description: "Handles messages from everyone who isn't the guardian" },
+      { name: "concierge", description: "Keeps the guardian's chats, tasks and follows" },
     ],
   },
 ];

@@ -346,7 +346,6 @@ import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
 import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
-import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -2069,7 +2068,6 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: guardedSend,
     wakeGateFor,
     routinesRepo,
     routineEngine,

@@ -25,7 +25,7 @@ export interface AppRefDto {
 }
 
 interface TraceEventBase {
-  /** Sub-agent that produced this block: "main" | "envoy" | <subagent>. */
+  /** Sub-agent that produced this block: "main" | <subagent>. */
   agent?: string;
 }
 
