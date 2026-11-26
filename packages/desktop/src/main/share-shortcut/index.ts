@@ -7,7 +7,8 @@ import { readSelectedText } from "./selection";
 import {
   panelPosition,
   readShareShortcutApp,
-  SHARE_PANEL_DEFAULT_SIZE,
+  panelSize,
+  SHARE_PANEL_LIMITS,
   SHARE_SHORTCUT_ACCELERATOR,
   SHARE_SHORTCUT_KEY,
   shareUrl,
@@ -65,9 +66,9 @@ export function setupShareShortcut(
       return panel;
     }
     const created = new BrowserWindow({
-      ...SHARE_PANEL_DEFAULT_SIZE,
-      minWidth: 320,
-      minHeight: 240,
+      ...panelSize(target, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
+      minWidth: SHARE_PANEL_LIMITS.width.min,
+      minHeight: SHARE_PANEL_LIMITS.height.min,
       title: target.name,
       // An NSPanel floats over the app the user is reading in, and showing it
       // inactive leaves that app in front: the answer needs no focus to read.
@@ -199,6 +200,8 @@ export function setupShareShortcut(
         name: identity.name,
         url: identity.shareTarget.url,
         param: identity.shareTarget.param,
+        width: identity.shareTarget.width,
+        height: identity.shareTarget.height,
       };
       register();
       settings.write(SHARE_SHORTCUT_KEY, JSON.stringify(record));

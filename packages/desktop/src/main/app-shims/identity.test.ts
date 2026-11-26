@@ -37,6 +37,7 @@ describe("fetchAppIdentity", () => {
         name: "Translate",
         start_url: "/full/apps/translate",
         share_target: { action: "/full/apps/translate/quick", params: { text: "text" } },
+        rome_share_panel: { width: 380, height: 460 },
       }),
       ORIGIN,
       "translate",
@@ -44,6 +45,8 @@ describe("fetchAppIdentity", () => {
     expect(shared.shareTarget).toEqual({
       url: `${ORIGIN}/full/apps/translate/quick`,
       param: "text",
+      width: 380,
+      height: 460,
     });
     const elsewhere = await fetchAppIdentity(
       server({

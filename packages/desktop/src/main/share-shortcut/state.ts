@@ -10,6 +10,11 @@ export const SHARE_SHORTCUT_LABEL = "⌥D";
 export const SHARE_SHORTCUT_KEY = "shareShortcut.app";
 
 export const SHARE_PANEL_DEFAULT_SIZE = { width: 420, height: 560 };
+/** The sizes an app may ask for, as core's SHARE_PANEL_LIMITS. */
+export const SHARE_PANEL_LIMITS = {
+  width: { min: 280, max: 720 },
+  height: { min: 200, max: 900 },
+} as const;
 
 // A URL carries the text, and servers refuse very long ones. A selection this
 // long is a passage, which no quick lookup needs whole.
@@ -39,6 +44,9 @@ const recordSchema = z.object({
   url: z.string().url(),
   /** The query parameter the page reads the text from. */
   param: z.string().min(1),
+  /** The window size the app's share page is designed for, in points. */
+  width: z.number().optional(),
+  height: z.number().optional(),
 });
 
 export type ShareShortcutApp = z.infer<typeof recordSchema>;
@@ -64,6 +72,22 @@ export function shareUrl(
   const trimmed = text ? clipSharedText(text.trim()) : "";
   if (trimmed) url.searchParams.set(app.param, trimmed);
   return url.toString();
+}
+
+const clamp = (value: number, { min, max }: { min: number; max: number }) =>
+  Math.round(Math.min(max, Math.max(min, value)));
+
+/**
+ * The size the panel opens at: the app's own, within the limits, else the
+ * default; never larger than the display's work area.
+ */
+export function panelSize(
+  app: Pick<ShareShortcutApp, "width" | "height">,
+  workArea: { width: number; height: number },
+): { width: number; height: number } {
+  const width = clamp(app.width ?? SHARE_PANEL_DEFAULT_SIZE.width, SHARE_PANEL_LIMITS.width);
+  const height = clamp(app.height ?? SHARE_PANEL_DEFAULT_SIZE.height, SHARE_PANEL_LIMITS.height);
+  return { width: Math.min(width, workArea.width), height: Math.min(height, workArea.height) };
 }
 
 interface Point {

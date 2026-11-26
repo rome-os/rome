@@ -15,13 +15,18 @@ export interface AppIdentity {
    * The app page that takes shared text in `?<param>=`, from the manifest's
    * `share_target`; null when the app takes none.
    */
-  shareTarget: { url: string; param: string } | null;
+  shareTarget: { url: string; param: string; width?: number; height?: number } | null;
 }
 
 const manifestSchema = z.object({
   name: z.string().trim().min(1),
   start_url: z.string().min(1),
   icons: z.array(z.object({ src: z.string().min(1) })).optional(),
+  // Rome's own member: the window size the share page is designed for.
+  rome_share_panel: z
+    .object({ width: z.number().optional(), height: z.number().optional() })
+    .optional()
+    .catch(undefined),
   share_target: z
     .object({
       action: z.string().min(1),
@@ -86,7 +91,11 @@ export async function fetchAppIdentity(
   const target = manifest.share_target;
   if (target?.params?.text) {
     try {
-      shareTarget = { url: appPage(target.action, origin).toString(), param: target.params.text };
+      shareTarget = {
+        url: appPage(target.action, origin).toString(),
+        param: target.params.text,
+        ...manifest.rome_share_panel,
+      };
     } catch {
       shareTarget = null;
     }

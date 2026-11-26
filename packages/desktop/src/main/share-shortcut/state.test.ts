@@ -3,6 +3,7 @@ import {
   MAX_ENCODED_TEXT,
   MAX_SHARED_TEXT,
   panelPosition,
+  panelSize,
   readShareShortcutApp,
   SHARE_SHORTCUT_KEY,
   shareUrl,
@@ -67,5 +68,25 @@ describe("panelPosition", () => {
   it("stays on screen near the edges", () => {
     expect(panelPosition({ x: 1430, y: 890 }, size, workArea)).toEqual({ x: 1020, y: 340 });
     expect(panelPosition({ x: -500, y: 0 }, size, workArea)).toEqual({ x: 0, y: 25 });
+  });
+});
+
+describe("panelSize", () => {
+  const workArea = { width: 1440, height: 875 };
+
+  it("opens at the size the app's page is designed for", () => {
+    expect(panelSize({ width: 380, height: 460 }, workArea)).toEqual({ width: 380, height: 460 });
+  });
+
+  it("falls back to the default, and keeps an app's size within the limits", () => {
+    expect(panelSize({}, workArea)).toEqual({ width: 420, height: 560 });
+    expect(panelSize({ width: 40, height: 5000 }, workArea)).toEqual({ width: 280, height: 875 });
+  });
+
+  it("never opens larger than the display", () => {
+    expect(panelSize({ width: 720, height: 900 }, { width: 600, height: 500 })).toEqual({
+      width: 600,
+      height: 500,
+    });
   });
 });

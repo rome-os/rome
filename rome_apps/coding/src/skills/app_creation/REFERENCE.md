@@ -1088,7 +1088,7 @@ Declare `web.shareTarget` when the app does something useful with a piece of tex
 
 - reads `text` once on load (`new URLSearchParams(location.search).get("text")`), starts its work with it, and removes it from the URL so a reload does not repeat the work;
 - treats no `text` as an ordinary open;
-- is designed for the window it opens in. Point `path` at a compact view built for it (the answer first and large, secondary detail collapsed, a small input for the next lookup, a link to the full page) and give that view's `width` and `height`. Without a size, the window opens at 420 × 560.
+- is designed for the window it opens in. Point `path` at a compact view built for it (the answer first and large, secondary detail collapsed, a small input for the next lookup, a link to the full page) and give that view's `width` and `height`. Without a size, the Mac panel opens at 420 × 560.
 
 ### Mobile / responsive design
 
