@@ -23,11 +23,12 @@ Two policies decide reach, each held as its own setting:
 
 ## Entry
 
-Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)).
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)). It is asked once on each boundary, and what is inside asks nothing.
 
 ### Invariants
 
-- A dashboard way in asks `mayEnter`: the verify probe, each route that decides for itself, and each WebSocket upgrade. Onboarding and visitor sign-in read the allow-list themselves.
+- Every `/api` request passes the entry step, `requireEntry` in `packages/core/src/access/require-entry.ts`, before its route. The public paths and an app's, which follow the app's own access, need no entry. `packages/core/src/api/ways-in.ts` lists both, for the step and the verify probe alike, and any other path needs entry. A route may still ask for more than entry, such as the guardian.
+- Every WebSocket upgrade but an app's passes `gateUpgrade`. Onboarding and visitor sign-in, on public paths, read the allow-list themselves.
 - A message a connection delivers passes `entrance` in `packages/core/src/participation/entrance.ts`, which asks once, before anything else hears it. The answer stays on the message's event, so an app's `channel-message` hook hears only what someone let in said, whether as a recorded message (`packages/core/src/sessions/messages-said.ts`) or from a channel (`packages/core/src/app-host/entered-channels.ts`).
 - The answer holds for what was asked about: one request, one connection, one message. Nothing else keeps it.
 - A person Rome cannot tell never enters.

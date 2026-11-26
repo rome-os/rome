@@ -23,10 +23,13 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { attachVoiceConversationServer } from "../voice-conversation/conversation-server.js";
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { voiceConversationRoutes } from "./routes/voice-conversation.js";
+import { readSpeakingPick } from "../voice-output/speaking-settings.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
+import { requireEntry } from "../access/require-entry.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
+import { needsNoEntry } from "./ways-in.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -91,7 +94,6 @@ import { agentOfKindIn } from "../concierge/on-connection.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
-import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 import { requireConnectionRegistry, requireSetupManager } from "./helpers.js";
 import { startConnectionSetup } from "../connections/setup/start.js";
@@ -142,13 +144,9 @@ export function buildApp(
   // Home-screen manifest and icon per installed app (public).
   app.route("/", appHomeScreenRoutes(deps));
 
-  // Internal dashboard/app routes — mounted under /api. No global auth gate
-  // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
-  // so the only callers are (1) internal Rome processes inside the container
-  // and (2) Caddy after `forward_auth` clears the request at the public edge.
-  // A Rome instance is single-tenant by design, so route handlers do not need
-  // to derive a userId — the instance itself is the user. See
-  // `scripts/generate-caddyfile.ts` for the edge-side enforcement.
+  // Internal dashboard/app routes — mounted under /api. The entry step below
+  // asks who may enter once, so no route here asks again
+  // (docs/architecture/access-control.md#entry).
   const api = new Hono();
 
   // Dynamic API responses are mutable single-tenant state; default them to
@@ -160,6 +158,8 @@ export function buildApp(
   // so any action run during the request is stamped with who triggered it —
   // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
+
+  api.use("*", requireEntry(deps.dashboardAccessState, needsNoEntry));
 
   api.route("/", healthRoutes(deps));
   api.route("/", uptimeRoutes());
@@ -399,9 +399,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardAccessState,
         {
           subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-          hasChatSession: async (sessionId, owner) =>
-            (await webchatRuntime.hasStoredSession(sessionId)) &&
-            (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
@@ -434,6 +432,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             dashboardAccess: deps.dashboardAccessState,
             listening: deps.voiceInput ?? NO_VOICE_INPUT,
             speaker: deps.speaker,
+            speaking: () => readSpeakingPick(deps.settingsRepo),
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
             send: (chatId, text, inputId, signal) =>
               webchatRuntime.sendSpoken(chatId, text, signal, inputId),

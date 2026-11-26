@@ -34,11 +34,22 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 - Declare the tool in the `agent-tools.ts` file of the context that owns its operation, beside that operation, with the page's `agentTool` from [`agentToolsOf`](../../packages/core/src/apps/actions/agent-tool.ts). Add it to the page's list in the same file.
 - Give it a name, a description, `sideEffects`, `input`, and `run`. Add `approval` when the guardian approves a call on a card first. `approval` returns the card's words, or nothing for an input that runs without approval, such as every change but a removal. A call whose `approval` throws does not run.
 - Write the arguments once, as the Zod `input`, each with a `.describe()` the agent reads. `run` and `approval` get their argument types from it. An input that does not fit answers the agent with what is wrong.
-- Set `sideEffects` to `read-only` or `write`. It decides who may ask, in one check before `approval` and `run` ([`who-may-ask.ts`](../../packages/core/src/apps/actions/who-may-ask.ts)), so a turn that may not ask gets its refusal and no approval card. A read needs a turn that works for the guardian. A write needs the guardian's own message in their private chat. A tool holds no check of its own.
+- Set `sideEffects` to `read-only` or `write`. It decides who may ask, in one check before `approval` and `run` ([`who-may-ask.ts`](../../packages/core/src/apps/actions/who-may-ask.ts)), so a turn that may not ask gets its refusal and no approval card. Any turn reads. A write needs the guardian's own message in their private chat. A tool holds no check of its own.
 - Return plain data from `run` for the agent to read, or `toolError(message)` for something not found or turned down. Say in an error what the agent does next.
 - Reach other code only through the page's deps, which the wiring hands each page once ([`wiring/agent-tools.ts`](../../packages/core/src/wiring/agent-tools.ts)). A new page joins `PAGES` there, and its deps join the `registerAgentTools` call in `index.ts`.
 - Enroll each tool in `whoMayAskSuite` in the page's test file. Test the operation through `callTool`, as the guardian.
 - Never rename a tool. Agents, agent prompts and saved routines call it by its name.
+
+**Names:**
+
+A tool's name is `system:<verb>_<thing>`, in lower-case words joined by `_`. The test of the tool list ([`wiring/agent-tools.test.ts`](../../packages/core/src/wiring/agent-tools.test.ts)) checks that shape and the verb. The other rules stay with the reader.
+
+- Put the verb first, then the thing, in the words the guardian uses for the request: `system:pause_routine`, `system:disconnect_service`. Name the request, not the button or the step behind it.
+- Name the read of a page `read_<page>`, such as `system:read_connections`. One read answers what the page shows, so a page has no `list_` or `get_` tool beside it.
+- Use one word for one thing everywhere. When the page says "AI tool", the tool says `ai_tool`, never `provider`.
+- Name exactly the thing the tool acts on. A tool that stops a run is `system:stop_routine_run`, not `system:stop_routine`.
+- Give `core:` no new names. Everything core offers an agent carries `system:`.
+- Keep an older name that breaks these rules beside the name that replaces it. The test lists each one its check refuses.
 
 **Example:**
 
