@@ -10,7 +10,6 @@ import type {
   ActionEvent,
 } from "@rome-os/app-runtime";
 import {
-  CallRefusal,
   decidesApprovalPerCall,
   type Action,
   type ActionRegistry,
@@ -2341,10 +2340,8 @@ export class ActionEngine {
  *  action worded one in deciding. */
 type CallApproval = { asks: false } | { asks: true; preview?: PreviewPayload };
 
-/** The error of a call whose approval could not be decided. A refusal of the
- *  turn (`CallRefusal`) is the call's error as worded. */
+/** The error of a call whose approval could not be decided. */
 function approvalFailure(actionName: string, err: unknown): string {
-  if (err instanceof CallRefusal) return err.message;
   const reason = err instanceof Error ? err.message : String(err);
   return `${actionName} did not run: whether it needs the guardian's approval could not be decided (${reason}).`;
 }

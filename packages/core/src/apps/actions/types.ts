@@ -26,11 +26,6 @@ export function decidesApprovalPerCall(action: Action): boolean {
   return (action as { [APPROVAL_PER_CALL]?: boolean })[APPROVAL_PER_CALL] === true;
 }
 
-/** Thrown by the preview of an action that decides per call when the turn may
- *  not make the call: the call's result is the error `message`, with no
- *  approval recorded and nothing run. */
-export class CallRefusal extends Error {}
-
 export interface ActionRegistry {
   register(action: Action): void;
   get(name: string): Action | undefined;

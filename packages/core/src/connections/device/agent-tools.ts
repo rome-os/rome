@@ -127,7 +127,7 @@ export const runOnDeviceTool = agentTool({
 export const renameDevice = agentTool({
   name: "system:rename_device",
   description:
-    "Rename one of the guardian's devices, such as calling their phone \"Work iPhone\". Use it when the guardian asks to rename or relabel a device. Only the name changes, and the device may be offline. Only in the guardian's private chat, in a turn their own message started. Find the device's id with system:read_devices",
+    "Rename one of the guardian's devices, such as calling their phone \"Work iPhone\". Use it when the guardian asks to rename or relabel a device. Only the name changes, and the device may be offline. Find the device's id with system:read_devices",
   sideEffects: "write",
   input: deviceRenameSchema.extend({ deviceId }),
   run: async (input, { deps }) => {
@@ -141,7 +141,7 @@ export const renameDevice = agentTool({
 export const removeDevice = agentTool({
   name: "system:remove_device",
   description:
-    "Remove one of the guardian's devices from their account, so Rome can no longer reach it or read what it offers. Use it when the guardian asks to remove, unlink or forget a device. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find the device's id with system:read_devices",
+    "Remove one of the guardian's devices from their account, so Rome can no longer reach it or read what it offers. Use it when the guardian asks to remove, unlink or forget a device. The guardian approves it on a card first. Find the device's id with system:read_devices",
   sideEffects: "write",
   input: z.object({ deviceId }),
   // Shown to the guardian alone, so it names the device whoever asked.
