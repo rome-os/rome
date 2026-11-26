@@ -19,6 +19,7 @@ vault load GITHUB_TOKEN -- gh release create v1.2.0
 ## Grants
 
 - A grant covers one secret name for the whole instance, whichever agent or chat asks.
+- A grant lasts for its whole time in every chat, wherever it was approved.
 - A request that names several secrets gets one PIN check and one duration. The signer grants all of them or none, so one unknown name grants nothing.
 - The default length is 15 minutes and the longest is 3 hours. During the window `vault load` can run as often as it needs to.
 - The window decides only whether `vault load` can still fetch the value. A command that started inside the window runs to the end, even after the grant expires.
