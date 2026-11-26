@@ -128,7 +128,7 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
   },
   "packages/core/src/usage/attribution.ts": {
     lines: [
-      'if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {',
+      'if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via !== "loopback")) {',
       'if (actor?.kind === "guardian") return "background";',
     ],
     why: "labels usage by who caused it",
