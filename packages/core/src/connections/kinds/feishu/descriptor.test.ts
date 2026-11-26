@@ -125,7 +125,7 @@ function makeDescriptor(channel: FakeLarkChannel) {
         supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
       }),
     } as never,
-    pressed: async () => {},
+    pressed: async () => false,
     listAgents: () => ["main"],
     createChannel: () => channel as never,
   });
