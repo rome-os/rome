@@ -73,7 +73,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 
 ## Personal data
 
-Personal data is data about the guardian that only they should see, which their devices push to Rome and Rome stores, such as Apple Health. It lives in the personal-data store and is read only in private turns ([audience](../domains/participation.md#audience)). Agents read it through `core:personal_data_catalog` and `core:personal_data_query`. The contracts for the ingest, the routes and the query are in [personal-data.md](../personal-data.md).
+Personal data is data about the guardian that only they should see, which their devices push to Rome and Rome stores, such as Apple Health. It lives in the personal-data store. Agents read it through `core:personal_data_catalog` and `core:personal_data_query`. The contracts for the ingest, the routes and the query are in [personal-data.md](../personal-data.md).
 
 - **Source**: where personal data comes from, such as `apple_health`. Each source declares its types in core.
 - **Origin**: the device that sent a source's data, such as the guardian's iPhone. A query reads one origin per source.
