@@ -108,10 +108,14 @@ describe("PolicyEngine", () => {
     expect(result).toEqual({ action: "block" });
   });
 
-  it('evaluate() returns "allow" when no policies match, whatever the bond level', async () => {
-    for (const bondLevel of ["guardian", "inner-circle"]) {
-      expect(await engine.evaluate(makeContext({ bondLevel }))).toEqual({ action: "allow" });
-    }
+  it('evaluate() returns "allow" when no policies match and the sender is the guardian', async () => {
+    const result = await engine.evaluate(makeContext({ bondLevel: "guardian" }));
+    expect(result).toEqual({ action: "allow" });
+  });
+
+  it('evaluate() defaults non-guardian bond levels to "sentinel_review"', async () => {
+    const result = await engine.evaluate(makeContext({ bondLevel: "inner-circle" }));
+    expect(result).toEqual({ action: "sentinel_review" });
   });
 
   it("evaluate() lets scope specificity beat higher-priority broader scopes", async () => {
@@ -148,6 +152,12 @@ describe("PolicyEngine", () => {
 
     const result = await engine.evaluate(makeContext({ sender: null }));
     expect(result.action).toBe("require_approval");
+  });
+
+  it('evaluate() handles "sentinel_review" action', async () => {
+    // Default when untrusted and no policies
+    const result = await engine.evaluate(makeContext({ bondLevel: "other" }));
+    expect(result.action).toBe("sentinel_review");
   });
 
   // Policy decision span-event emission
@@ -192,13 +202,13 @@ describe("PolicyEngine", () => {
 
       const [parent] = await harness.finishedSpans();
       const event = parent.events.find((e) => e.name === "policy.decision");
-      expect(event!.attributes?.["policy.decision"]).toBe("allow");
+      expect(event!.attributes?.["policy.decision"]).toBe("sentinel_review");
       expect(event!.attributes?.["policy.matched_scope"]).toBe("default");
     });
 
     it("no-ops when evaluate runs outside any span (no crash)", async () => {
       const result = await engine.evaluate(makeContext());
-      expect(result.action).toBe("allow");
+      expect(result.action).toBe("sentinel_review"); // default trust is guardian-only.
       expect(await harness.finishedSpans()).toHaveLength(0);
     });
   });
