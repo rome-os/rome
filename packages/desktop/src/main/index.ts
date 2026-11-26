@@ -52,6 +52,7 @@ import { createAuditWindow } from "./window";
 import { dashboardOrigin, installMicrophonePermission } from "./microphone-permission";
 import { appShimsSupported, setupAppShims } from "./app-shims";
 import { APP_SHIM_LAUNCH_ARG } from "./app-shims/bundle";
+import { setupShareShortcut } from "./share-shortcut";
 
 const log = createLogger("main");
 
@@ -193,6 +194,9 @@ async function bootstrap() {
       markRuntimeReady = resolve;
     });
     const appShims = setupAppShims(desktopSettings, () => runtimeReady);
+    // Reading another app's selection is macOS Accessibility.
+    const shareShortcut =
+      process.platform === "darwin" ? setupShareShortcut(desktopSettings) : null;
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
       openAuditWindow: () => createAuditWindow(),
@@ -204,6 +208,7 @@ async function bootstrap() {
       },
       device,
       apps: appShimsSupported() ? appShims : undefined,
+      shareShortcut: shareShortcut ?? undefined,
     });
 
     installMicrophonePermission(session.defaultSession, () =>
@@ -345,6 +350,7 @@ async function bootstrap() {
       },
       runtime,
       floatingPill,
+      shareShortcut,
       computerUseSettings,
       device: {
         status: device.status,

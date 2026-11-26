@@ -382,6 +382,7 @@ A surface that shows the page in a window of its own owns that window, and the a
 
 Surfaces that send text:
 
+- **The Mac app's share shortcut.** The guardian picks the app with **Open with ⌥D** in its app menu. Pressing ⌥D anywhere reads the selection in the frontmost app, through Accessibility first and a ⌘C with the clipboard put back otherwise, and shows the page in a floating panel beside the pointer. Pressing ⌥D again with nothing selected hides the panel. The tray names the chosen app and turns the key off.
 - **A phone's share sheet**, for an app installed to the home screen from a browser that honors `share_target`.
 
 **Contracts:**
@@ -390,6 +391,7 @@ Surfaces that send text:
 - The target is always the app's full-screen route, on the same Rome.
 - The app does not set the window's frame, position, transparency or stacking. A borderless page from an untrusted app could pass for another app or a system dialog.
 - The installed-apps list marks such an app with `acceptsSharedText`, so surfaces offer only apps that take text.
+- The Mac app cuts the text to 2,000 characters, because it travels in the URL, and shows the page in a 420 × 560 panel.
 
 ## Event sources
 

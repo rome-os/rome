@@ -1084,7 +1084,7 @@ use [<appName>](/apps/<appId>) to get the correct URL. DO NOT present the localh
 
 ### Taking shared text: `web.shareTarget`
 
-Declare `web.shareTarget` when the app does something useful with a piece of text the user is looking at elsewhere: translate it, define it, save it, reply to it. Phones list the app in their share sheet, and Rome surfaces such as the Mac app's share shortcut open the page with the text. Rome opens `/full/apps/<appId><path>?text=…`. The page:
+Declare `web.shareTarget` when the app does something useful with a piece of text the user is looking at elsewhere: translate it, define it, save it, reply to it. The Mac app's ⌥D shortcut then opens the page in a floating panel with the selected text, and phones list the app in their share sheet. Rome opens `/full/apps/<appId><path>?text=…`. The page:
 
 - reads `text` once on load (`new URLSearchParams(location.search).get("text")`), starts its work with it, and removes it from the URL so a reload does not repeat the work;
 - treats no `text` as an ordinary open;

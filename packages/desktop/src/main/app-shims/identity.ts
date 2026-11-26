@@ -11,12 +11,23 @@ export interface AppIdentity {
   url: string;
   /** The icon as a PNG, or null when the Rome has none to give. */
   icon: Buffer | null;
+  /**
+   * The app page that takes shared text in `?<param>=`, from the manifest's
+   * `share_target`; null when the app takes none.
+   */
+  shareTarget: { url: string; param: string } | null;
 }
 
 const manifestSchema = z.object({
   name: z.string().trim().min(1),
   start_url: z.string().min(1),
   icons: z.array(z.object({ src: z.string().min(1) })).optional(),
+  share_target: z
+    .object({
+      action: z.string().min(1),
+      params: z.object({ text: z.string().min(1).optional() }).optional(),
+    })
+    .optional(),
 });
 
 /** An unscoped app id, as core's APP_ID_PATTERN (apps/packaging/app-id.ts). */
@@ -47,6 +58,15 @@ function sameOrigin(raw: string, origin: string): URL {
   return url;
 }
 
+/** `raw` resolved on `origin`, when it is one of that Rome's full-screen app pages. */
+function appPage(raw: string, origin: string): URL {
+  const url = sameOrigin(raw, origin);
+  if (!url.pathname.startsWith("/full/apps/")) {
+    throw new Error("The app's page is not an app page.");
+  }
+  return url;
+}
+
 /** Reads the app's web manifest and icon from `origin`. */
 export async function fetchAppIdentity(
   fetchImpl: (url: string) => Promise<Response>,
@@ -59,9 +79,17 @@ export async function fetchAppIdentity(
     throw new Error(`This app has no page to put on the Desktop (${response.status}).`);
   }
   const manifest = manifestSchema.parse(await response.json());
-  const url = sameOrigin(manifest.start_url, origin);
-  if (!url.pathname.startsWith("/full/apps/")) {
-    throw new Error("The app's page is not an app page.");
+  const url = appPage(manifest.start_url, origin);
+  // A target the Rome names on another page than an app's is ignored rather
+  // than refused: the app still goes on the Desktop.
+  let shareTarget: AppIdentity["shareTarget"] = null;
+  const target = manifest.share_target;
+  if (target?.params?.text) {
+    try {
+      shareTarget = { url: appPage(target.action, origin).toString(), param: target.params.text };
+    } catch {
+      shareTarget = null;
+    }
   }
 
   let icon: Buffer | null = null;
@@ -70,5 +98,5 @@ export async function fetchAppIdentity(
     const iconResponse = await fetchImpl(sameOrigin(src, origin).toString());
     if (iconResponse.ok) icon = Buffer.from(await iconResponse.arrayBuffer());
   }
-  return { name: manifest.name, url: url.toString(), icon };
+  return { name: manifest.name, url: url.toString(), icon, shareTarget };
 }
