@@ -2815,6 +2815,14 @@ export interface AppConnectionsCapability {
   }): Promise<AppConnectionInvokeResult<T>>;
 }
 
+/** Who has a role in this Rome, as an app may ask. Vocabulary: docs/domains/access.md. */
+export interface Access {
+  /** Every account of the guardian's, the one given to the guardian last
+   *  first, so the first on a platform is the newest there. Empty while
+   *  Rome has no guardian. */
+  guardianAccounts(): Promise<Account[]>;
+}
+
 export interface RomeAppContext {
   app: RomeAppDefinition;
   controller: unknown;
@@ -2823,6 +2831,7 @@ export interface RomeAppContext {
   repositories: AppRuntimeRepositories;
   favors: AppFavorCapability;
   connections: AppConnectionsCapability;
+  access: Access;
   runAction(
     name: string,
     args: Record<string, unknown>,

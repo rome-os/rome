@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { actionExecutionContext } from "./actions/context.js";
 import {
+  type Access,
   type ActionDispatchReceipt,
   ActionInvocationError,
   ActionInvocationEventOverflowError,
@@ -28,6 +29,7 @@ import type { ResolvedApp } from "./state.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { AppFavorRequests } from "./app-favors-port.js";
+import { appAccess } from "./app-access-port.js";
 import { DeniedAppConnections, type AppConnectionsContextFactory } from "./app-connections-port.js";
 
 export interface AppDbContext {
@@ -45,6 +47,7 @@ export interface RomeAppContext {
   repositories: AppRuntimeRepositories;
   favors: AppFavorCapability;
   connections: AppConnectionsCapability;
+  access: Access;
   runAction(
     name: string,
     args: Record<string, unknown>,
@@ -353,6 +356,7 @@ export function createRomeAppContext(
       },
     },
     connections: services.appConnections?.forApp(app.appId) ?? new DeniedAppConnections(),
+    access: appAccess(services.db),
     // Nested calls preserve the Promise<ActionResult> port; detached
     // calls return only main's acceptance receipt for a new root execution.
     runAction,

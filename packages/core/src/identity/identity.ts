@@ -57,6 +57,12 @@ export class Identity {
     return this.sync.accountsOf(personId);
   }
 
+  /** {@link accountsOf}, the account given to the person last first, so the
+   *  first on a platform is the newest the person holds there. */
+  async accountsOfNewestFirst(personId: string): Promise<Account[]> {
+    return this.sync.accountsOfNewestFirst(personId);
+  }
+
   /** Creates a person with `accounts` as theirs. Rejects with
    *  {@link AccountTakenError}, creating nothing, when one of the accounts
    *  belongs to someone. */
@@ -114,6 +120,10 @@ export class SyncIdentity {
 
   accountsOf(personId: string): Account[] {
     return this.repository.accountsOf(personId);
+  }
+
+  accountsOfNewestFirst(personId: string): Account[] {
+    return this.repository.accountsOfNewestFirst(personId);
   }
 
   createPerson(input: { name?: string; avatarUrl?: string; accounts: Account[] }): Person {
