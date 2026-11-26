@@ -25,6 +25,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@rstest/core": "^0.11.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",

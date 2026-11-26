@@ -158,11 +158,19 @@ describe("computer actions over binary frames", () => {
       ok: true,
       result: {
         name: "Test computer",
-        actions: ["system.info", "exec", "fs.list"],
+        actions: expect.arrayContaining(["system.info", "exec", "fs.list"]),
         frameVersion: 1,
         transferVersion: 1,
       },
     });
+    const { actions, usage } = (
+      info.response as {
+        result: { actions: string[]; usage?: Record<string, string> };
+      }
+    ).result;
+    expect(Object.keys(usage ?? {})).toEqual(
+      actions.filter((action) => action.startsWith("computer.")),
+    );
     expect(info.body.byteLength).toBe(0);
     expect((await executeFrame("fs.read", {})).response).toMatchObject({
       ok: false,
@@ -202,8 +210,20 @@ describe("computer actions over binary frames", () => {
       body: new Uint8Array(),
     });
     const slowId = "16fd2706-8baf-433b-82eb-8c7fada847da";
+    const dir = await mkdtemp(join(tmpdir(), "rome-node-output-gate-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const marker = join(dir, "continue");
     const slow = executor.receiveFrame(
-      request(slowId, "setTimeout(()=>process.stdout.write('still running'),500)"),
+      request(
+        slowId,
+        `
+        const timer = setInterval(() => {
+          if (!require("node:fs").existsSync(${JSON.stringify(marker)})) return;
+          clearInterval(timer);
+          process.stdout.write("still running");
+        }, 10);
+      `,
+      ),
     );
     await executor.receiveFrame(
       request(requestId, `process.stdout.write(Buffer.alloc(${MAX_FRAME_BYTES + 1}))`),
@@ -214,6 +234,7 @@ describe("computer actions over binary frames", () => {
       error: { code: "output_too_large", message: expect.stringContaining("rome-node cp") },
     });
     expect(frames[0].body.byteLength).toBe(0);
+    await writeFile(marker, "");
     await slow;
     expect(frames[1]).toMatchObject({ id: slowId });
     expect(Buffer.from(frames[1].body).toString()).toBe("still running");
@@ -347,7 +368,10 @@ describe("computer actions", () => {
   it("reports actual platform and rejects unsupported actions", async () => {
     expect((await execute("system.info")).payload).toMatchObject({
       ok: true,
-      result: { name: "Test computer", actions: ["system.info", "exec", "fs.list"] },
+      result: {
+        name: "Test computer",
+        actions: expect.arrayContaining(["system.info", "exec", "fs.list"]),
+      },
     });
     expect((await execute("fs.read")).payload).toMatchObject({
       ok: false,

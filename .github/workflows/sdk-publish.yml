@@ -29,6 +29,17 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APP_STORE_CONNECT_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: false
+      APP_STORE_CONNECT_P8_CONTENT:
+        required: false
 
 jobs:
   prepare:
@@ -36,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       paths: ${{ steps.compute.outputs.paths }}
+      sdk_paths: ${{ steps.split.outputs.paths }}
     steps:
       - id: compute
         env:
@@ -52,17 +64,115 @@ jobs:
             # dispatch, and one missing from here is reachable only by name.
             # Automatic releases ignore this and take exact paths from
             # release-please.
-            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core"]' >> "$GITHUB_OUTPUT"
+            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core","packages/rome-node-core-darwin-arm64"]' >> "$GITHUB_OUTPUT"
           elif [ -n "${PACKAGE:-}" ]; then
-            echo "paths=[\"$PACKAGE\"]" >> "$GITHUB_OUTPUT"
+            echo "paths=$(jq -cn --arg path "$PACKAGE" '[$path]')" >> "$GITHUB_OUTPUT"
           else
             echo "No npm publish targets provided" >&2
             exit 1
           fi
+      - id: split
+        env:
+          PATHS: ${{ steps.compute.outputs.paths }}
+        run: |
+          paths="$(jq -c '. - ["packages/rome-node-cli", "packages/rome-node-core", "packages/rome-node-core-darwin-arm64"]' <<< "$PATHS")"
+          echo "paths=$paths" >> "$GITHUB_OUTPUT"
+
+  publish-node-helper:
+    name: Publish @rome-os/node-core-darwin-arm64
+    needs: prepare
+    if: contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-core-darwin-arm64')
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: ./.github/actions/build-computer-use
+        with:
+          sign: "true"
+          notarize: "true"
+          certificate: ${{ secrets.CSC_LINK }}
+          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          api-issuer: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          api-key: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
+      - name: Verify the packed signature and notarization ticket
+        working-directory: packages/rome-node-core-darwin-arm64
+        shell: bash
+        run: |
+          npm run prepublishOnly
+          # npm pack preserves the executable mode of the Mach-O inside the bundle.
+          # The prepack verifier's stdout would corrupt the JSON.
+          filename="$(npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP" | jq -er '.[0].filename')"
+          archive="$RUNNER_TEMP/$filename"
+          unpack="$(mktemp -d)"
+          tar -xzf "$archive" -C "$unpack"
+          swift ../rome-node-core/scripts/computer-use.swift verify --release \
+            --app "$unpack/package/dist/native/Rome Computer Use.app"
+          echo "ROME_NODE_HELPER_ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Publish to npm
+        working-directory: packages/rome-node-core-darwin-arm64
+        run: npm publish "$ROME_NODE_HELPER_ARCHIVE" --access public${{ inputs.dry_run && ' --dry-run' || '' }}
+
+  publish-node:
+    name: Publish Rome Node core and CLI
+    needs: [prepare, publish-node-helper]
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
+      (needs.publish-node-helper.result == 'success' || needs.publish-node-helper.result == 'skipped') &&
+      (contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-core') ||
+      contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-cli'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Publish Rome Node Core
+        if: contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-core')
+        working-directory: packages/rome-node-core
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          HELPER_PUBLISHED: ${{ needs.publish-node-helper.result == 'success' }}
+        run: |
+          if [ "$DRY_RUN" != true ] && [ "$HELPER_PUBLISHED" != true ]; then
+            version=$(node -p "require('../rome-node-core-darwin-arm64/package.json').version")
+            test "$(npm view "@rome-os/node-core-darwin-arm64@$version" version)" = "$version"
+          fi
+          pnpm build
+          pnpm publish --access public --no-git-checks${{ inputs.dry_run && ' --dry-run' || '' }}
+      - name: Publish Rome Node CLI
+        if: contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-cli')
+        working-directory: packages/rome-node-cli
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          CORE_SELECTED: ${{ contains(fromJSON(needs.prepare.outputs.paths), 'packages/rome-node-core') }}
+        run: |
+          if [ "$DRY_RUN" != true ] && [ "$CORE_SELECTED" != true ]; then
+            version=$(node -p "require('../rome-node-core/package.json').version")
+            test "$(npm view "@rome-os/node-core@$version" version)" = "$version"
+          fi
+          pnpm build
+          pnpm publish --access public --no-git-checks${{ inputs.dry_run && ' --dry-run' || '' }}
 
   publish:
     name: Publish ${{ matrix.path }}
     needs: prepare
+    if: needs.prepare.outputs.sdk_paths != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -71,7 +181,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        path: ${{ fromJSON(needs.prepare.outputs.paths) }}
+        path: ${{ fromJSON(needs.prepare.outputs.sdk_paths) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

@@ -16,9 +16,6 @@ const UNVERIFIED_EMAIL = "unauthenticated:";
 
 export interface AccountEntryDeps {
   db: DrizzleDb;
-  /** Whether `account` is linked as an agent acting for the guardian
-   *  (docs/domains/people.md#delegate-link). Identity holds no agents yet. */
-  actsForGuardian(account: { platform: string; id: string }): Promise<boolean>;
 }
 
 /** Who an account lets in, or whether Rome knows it at all. */
@@ -31,8 +28,8 @@ const REFUSED: AccountEntry = { kind: "refused" };
 
 /**
  * Answers who `account` lets in, as the actor of the work it starts: the
- * guardian or a member at the moment of the call, and the guardian for an agent
- * acting for them. An account nobody holds is unknown. A person with no role, an
+ * guardian or a member at the moment of the call. An account nobody holds is
+ * unknown. A person with no role, an
  * account not named or verified and, logged, a member whose sign-in cannot be
  * found and an answer that cannot be had are refused.
  */
@@ -41,12 +38,12 @@ export function accountEntry(deps: AccountEntryDeps) {
 
   const profiles = new VisitorProfilesRepository(deps.db);
 
-  /** The guardian, by their own account, or by an agent acting for them: one
-   *  that is not the guardian's own message is not marked as theirs. */
-  const guardian = async (ownAccount: boolean): Promise<AccountEntry> => {
+  /** The guardian, by one of their own accounts. */
+  const guardian = async (): Promise<AccountEntry> => {
     const actor = await guardianActor(deps.db);
-    if (actor?.kind !== "guardian") return REFUSED;
-    return { kind: "entered", person: ownAccount ? { ...actor, via: "account" } : actor };
+    return actor?.kind === "guardian"
+      ? { kind: "entered", person: { ...actor, via: "account" } }
+      : REFUSED;
   };
 
   /** A member as their own sign-in names them. A member adds an account only
@@ -70,9 +67,8 @@ export function accountEntry(deps: AccountEntryDeps) {
     try {
       const person = await members.identity.personOf({ platform, accountId: id });
       const role = person ? await members.access.roleOf(person.id) : null;
-      if (role === "guardian") return await guardian(true);
+      if (role === "guardian") return await guardian();
       if (person && role === "member") return await member(person.id);
-      if (await deps.actsForGuardian(account)) return await guardian(false);
       return person ? REFUSED : { kind: "unknown" };
     } catch (err) {
       log.warn("could not tell who an account is", {

@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { CloudInstance } from "@rome-os/libs/native-auth";
@@ -6,7 +6,10 @@ import type { CloudAccount } from "./cloud/account";
 import type { DeviceStatus } from "./cloud/device-host";
 import { getDb } from "./db/database";
 import { settings } from "./db/schema";
-import { handleFromAppOrInstance, handleTrusted } from "./ipc-trust";
+import { handleFromAppOrInstance, handleTrusted, isInstanceSender } from "./ipc-trust";
+import type { AppShims } from "./app-shims";
+import { requireAppId } from "./app-shims/identity";
+import type { SettingsAccess } from "./app-shims/store";
 import type { RuntimeController } from "./runtime/controller";
 import { pickFolder } from "./pick-folder";
 import { legacyRuntimeDir } from "./runtime/legacy";
@@ -28,6 +31,8 @@ interface IpcHandlerOptions {
     stop(): Promise<void>;
     setEnabled(enabled: boolean): Promise<void>;
   };
+  /** Rome apps on this Mac's Desktop; absent where the app can't make them. */
+  apps?: AppShims;
 }
 
 interface CloudState {
@@ -62,6 +67,9 @@ function writeSetting(key: string, value: string): void {
     })
     .run();
 }
+
+/** The settings table, for modules that keep their own keys in it. */
+export const desktopSettings: SettingsAccess = { read: readSetting, write: writeSetting };
 
 export function readRuntimeTarget(): RuntimeTarget {
   return parseRuntimeTarget(readSetting(RUNTIME_TARGET_KEY));
@@ -162,6 +170,27 @@ export function registerIpcHandlers(
       defaultPath,
     ),
   );
+
+  // The open Rome's dashboard puts one of its apps on the Desktop. The app is
+  // read from that Rome, so the page names only which one.
+  const { apps } = options;
+  if (apps) {
+    const dashboardOrigin = (): string | null => {
+      if (!runtime.isReady()) return null;
+      try {
+        return new URL(runtime.getDashboardUrl()).origin;
+      } catch {
+        return null;
+      }
+    };
+    ipcMain.handle("apps:addToDesktop", (event, appId) => {
+      const origin = dashboardOrigin();
+      if (!origin || !isInstanceSender(event, origin)) {
+        throw new Error("apps:addToDesktop is not available to this page");
+      }
+      return apps.addToDesktop(origin, requireAppId(appId));
+    });
+  }
 
   handleTrusted("cloud:signIn", async () => {
     await cloudAccount.signIn();
