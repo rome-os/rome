@@ -2344,7 +2344,7 @@ async function main() {
   }
 
   // NO channel adapter is constructed here. Every Talk channel
-  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user)
+  // (telegram, whatsapp, discord, feishu, email, telegram_user)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
   // to the channel ports. Webchat is Rome's own channel, built above.
   //

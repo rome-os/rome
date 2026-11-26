@@ -23,7 +23,6 @@ describe("turnAudience", () => {
     "telegram_user",
     "whatsapp",
     "discord",
-    "wechat",
     "linkedin",
     "slack",
     "feishu",

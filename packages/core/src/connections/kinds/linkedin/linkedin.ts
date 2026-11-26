@@ -176,9 +176,8 @@ export class LinkedInInboxPoller {
     this.callbacks = null;
   }
 
-  /** Runtime health beside the unlocked capability (the WeChat pattern):
-   *  non-null while polls are persistently failing without the session being
-   *  signed out. */
+  /** Runtime health beside the unlocked capability: non-null while polls are
+   *  persistently failing without the session being signed out. */
   getRuntimeDegradation(): { reason: string; retryAt?: string } | null {
     if (this.consecutiveFailures < DEGRADE_AFTER_CONSECUTIVE_FAILURES) return null;
     return {

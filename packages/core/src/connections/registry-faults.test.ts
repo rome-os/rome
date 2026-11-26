@@ -497,7 +497,7 @@ describe("registry faults", () => {
 
   // Late faults from a discarded epoch must not touch grant state: transports
   // fire terminal errors from in-flight work while teardown is still draining
-  // (WeChat's poll 401 after stop, Baileys' loggedOut close). Acting on one
+  // (Baileys' loggedOut close). Acting on one
   // would flip a just-revoked grant unauthorized→degraded.
   describe("late fault after epoch discard", () => {
     it("a CredentialRejected fired by the OLD instance after revoke leaves the grant unauthorized", async () => {

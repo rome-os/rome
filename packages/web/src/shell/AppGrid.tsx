@@ -20,7 +20,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
 import {
   ContextMenu,
@@ -36,6 +35,7 @@ import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat
 import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { railChatHref } from "@/lib/chat-list-mode";
+import { addAppToDesktop } from "@/lib/add-to-desktop";
 import { desktopApps, isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
@@ -363,14 +363,6 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     );
   };
 
-  const addToDesktop = (app: InstalledAppCard | CachedApp): void => {
-    if (!desktop) return;
-    desktop.addToDesktop(app.id).then(
-      () => toast.success(tApps("installed.addedToDesktop", { name: app.displayName })),
-      () => toast.error(tApps("installed.addToDesktopFailed", { name: app.displayName })),
-    );
-  };
-
   // A recent app offers Pin where a pinned one offers Unpin. onSelect runs
   // after any item, for a caller that must close its own menu.
   const withAppContextMenu = (
@@ -402,7 +394,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
           {desktop ? (
             <ContextMenuItem
               onSelect={() => {
-                addToDesktop(app);
+                addAppToDesktop(desktop, app, tApps);
                 onSelect?.();
               }}
             >

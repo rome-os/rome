@@ -2,13 +2,8 @@
 // suite (../test/kit/im/adapter-conformance.ts).
 
 import { rs } from "@rstest/core";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { channelOver, describeAdapterConformance } from "./kit/im/adapter-conformance.js";
 import { requestBarrier } from "./kit/im/peer.js";
-import { exemplar, loadCapture } from "./kit/im/capture.js";
-import wechatTextCapture from "./kit/im/captures/wechat-text.capture.json" with { type: "json" };
 import {
   DISCORD_CHANNEL,
   DISCORD_DM,
@@ -35,17 +30,12 @@ import {
   TELEGRAM_TOKEN,
   TelegramPeer,
 } from "./kit/im/telegram.js";
-import { WECHAT_USER, WechatPeer } from "./kit/im/wechat.js";
-
-const wechatCapture = loadCapture(wechatTextCapture);
 
 // What Rome fails today, as each platform's gaps list it.
 const DISCORD_USER_ID =
   "A Discord user id reads like a channel id, so a send to the person's id before Rome has heard them is recorded in a chat of its own, not in the direct message they answer in.";
 const DISCORD_DM_QUOTE =
   "Discord's adapter quotes a message only in a guild channel; a reply in a direct message goes out as a plain message.";
-const WECHAT_NO_QUOTE =
-  "iLink has no reply reference, so a reply cannot quote the message it answers.";
 
 // Feishu: the app hears a person in their p2p chat (`oc_…`), and reaches
 // them there or at their open id (`ou_…`).
@@ -282,52 +272,6 @@ describeAdapterConformance(
     };
   },
   { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: false },
-);
-
-// WeChat: the bot hears a person by their user id and answers there, with the
-// context token their message carried. WeChat has no groups for a bot.
-describeAdapterConformance(
-  "WeChat",
-  async () => {
-    const peer = await WechatPeer.start();
-    rs.stubGlobal("fetch", peer.fetch);
-    const statePath = await mkdtemp(join(tmpdir(), "wechat-conformance-"));
-    const adapter = peer.createAdapter(statePath);
-    const channel = channelOver("wechat", "00000000-0000-4000-8000-000000000004", adapter);
-    await adapter.start();
-    return {
-      account: { platform: "wechat", id: "fixture-bot" },
-      channel,
-      direct: {
-        person: WECHAT_USER,
-        at: WECHAT_USER,
-        personWrites: (text) => peer.emitMessage(text).id,
-      },
-      visible: (at) => peer.visible(at),
-      // iLink refuses a message to a recipient it cannot reach, as recorded.
-      refuseNextSend: () =>
-        peer.server.once({
-          method: "POST",
-          path: "/ilink/bot/sendmessage",
-          respond: { status: 200, body: exemplar(wechatCapture, "send-invalid-recipient") },
-        }),
-      stop: async () => {
-        await adapter.stop();
-        await peer.close();
-        await rm(statePath, { recursive: true, force: true });
-        rs.unstubAllGlobals();
-        peer.server.assertClean();
-      },
-    };
-  },
-  {
-    directMessages: true,
-    romeWritesFirst: false,
-    groups: false,
-    twoAccounts: false,
-    threads: false,
-  },
-  { quote: WECHAT_NO_QUOTE },
 );
 
 // Email: a thread is a group chat, and there are no direct messages. The

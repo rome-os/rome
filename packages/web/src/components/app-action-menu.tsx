@@ -5,6 +5,7 @@ import {
   Info,
   Maximize2,
   MessageCircle,
+  MonitorDown,
   Pin,
   Power,
   Trash2,
@@ -25,6 +26,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { type AppLifecycle, canChatWithApp } from "@/hooks/use-app-lifecycle";
+import { addAppToDesktop } from "@/lib/add-to-desktop";
+import { desktopApps } from "@/lib/electron-shell";
 import { cn } from "@/lib/utils";
 
 // One installed app's actions menu as data, shared by every surface that
@@ -134,6 +137,18 @@ export function getAppActionMenuEntries({
       label: t("installed.openFullTitle"),
       icon: Maximize2,
       to: app.fullHref,
+    });
+  }
+  // The Mac app can put an app with a page on the Desktop as an app of its
+  // own; browsers and older Mac apps can't.
+  const desktop = desktopApps();
+  if (desktop && embeddedHref) {
+    entries.push({
+      type: "action",
+      key: "add-to-desktop",
+      label: t("installed.addToDesktop"),
+      icon: MonitorDown,
+      onSelect: () => addAppToDesktop(desktop, app, t),
     });
   }
   if (embeddedHref) {

@@ -58,8 +58,6 @@ const BULLET_KEYS: Record<string, string[]> = {
   "telegram.bot": ["reply", "start"],
   "telegram.session": ["send", "read", "notice"],
   "whatsapp.bot": ["reply", "start"],
-  "wechat.bot": ["reply", "start"],
-  "wechat.session": ["read", "recap", "search"],
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
@@ -133,7 +131,6 @@ const SUBTITLE_SLOTS = new Set(["telegram.bot", "telegram.session"]);
 /** Slots that carry a `privacyNote` lock box. */
 const PRIVACY_SLOTS = new Set([
   "telegram.session",
-  "wechat.session",
   "github.user",
   "google.user",
   "microsoft.user",
