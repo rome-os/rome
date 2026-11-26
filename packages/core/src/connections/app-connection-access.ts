@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import {
@@ -36,6 +36,9 @@ export interface AppConnectionAccessRecord {
   updatedAt: Date;
 }
 
+export type AppConnectionAccessPolicy = AppConnectionAccessRecord;
+export type AppConnectionAccessAuditEntry = typeof appConnectionAudit.$inferSelect;
+
 export type AppConnectionInvocationRecord = typeof appConnectionInvocations.$inferSelect;
 
 function toAccessRecord(row: typeof appConnectionAccess.$inferSelect): AppConnectionAccessRecord {
@@ -43,6 +46,17 @@ function toAccessRecord(row: typeof appConnectionAccess.$inferSelect): AppConnec
     ...row,
     constraints: row.constraints as AppConnectionResourceConstraint[],
   };
+}
+
+function policyKey(
+  key: Pick<AppConnectionAccessRecord, "appId" | "connectionId" | "identity" | "operation">,
+) {
+  return and(
+    eq(appConnectionAccess.appId, key.appId),
+    eq(appConnectionAccess.connectionId, key.connectionId),
+    eq(appConnectionAccess.identity, key.identity),
+    eq(appConnectionAccess.operation, key.operation),
+  );
 }
 
 function rejectPendingInvocations(
@@ -112,41 +126,40 @@ export class AppConnectionAccessRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   async listActiveForApp(appId: string, now = new Date()): Promise<AppConnectionAccessRecord[]> {
+    return this.activePolicies({ appId }, now);
+  }
+
+  async listActiveForConnectionId(
+    connectionId: string,
+    now = new Date(),
+  ): Promise<AppConnectionAccessPolicy[]> {
+    return this.activePolicies({ connectionId }, now);
+  }
+
+  async listActiveForConnection(appId: string, connectionId: string, now = new Date()) {
+    return this.activePolicies({ appId, connectionId }, now);
+  }
+
+  private async activePolicies(scope: { appId?: string; connectionId?: string }, now: Date) {
     const rows = await this.db
       .select()
       .from(appConnectionAccess)
       .where(
         and(
-          eq(appConnectionAccess.appId, appId),
+          scope.appId === undefined ? undefined : eq(appConnectionAccess.appId, scope.appId),
+          scope.connectionId === undefined
+            ? undefined
+            : eq(appConnectionAccess.connectionId, scope.connectionId),
           isNull(appConnectionAccess.revokedAt),
           or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
         ),
       )
       .orderBy(
+        asc(appConnectionAccess.appId),
         asc(appConnectionAccess.connectionId),
         asc(appConnectionAccess.identity),
         asc(appConnectionAccess.operation),
       );
-    return rows.map(toAccessRecord);
-  }
-
-  async listActiveForConnection(
-    appId: string,
-    connectionId: string,
-    now = new Date(),
-  ): Promise<AppConnectionAccessRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(appConnectionAccess)
-      .where(
-        and(
-          eq(appConnectionAccess.appId, appId),
-          eq(appConnectionAccess.connectionId, connectionId),
-          isNull(appConnectionAccess.revokedAt),
-          or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
-        ),
-      )
-      .orderBy(asc(appConnectionAccess.identity), asc(appConnectionAccess.operation));
     return rows.map(toAccessRecord);
   }
 
@@ -194,14 +207,7 @@ export class AppConnectionAccessRepository {
     const rows = await this.db
       .select()
       .from(appConnectionAccess)
-      .where(
-        and(
-          eq(appConnectionAccess.appId, appId),
-          eq(appConnectionAccess.connectionId, connectionId),
-          eq(appConnectionAccess.identity, identity),
-          eq(appConnectionAccess.operation, operation),
-        ),
-      )
+      .where(policyKey({ appId, connectionId, identity, operation }))
       .limit(1);
     return rows[0] ? toAccessRecord(rows[0]) : null;
   }
@@ -217,65 +223,98 @@ export class AppConnectionAccessRepository {
     grantEpoch: string;
     expiresAt?: Date | null;
   }): Promise<AppConnectionAccessRecord> {
-    return await this.appLifecycle.runExclusive(input.appId, () => this.putUnlocked(input));
+    return await this.appLifecycle.runExclusive(input.appId, () =>
+      this.db.transaction((tx) => this.writePolicy(tx, input, new Date())),
+    );
   }
 
   async putIfAppActive(
-    input: Parameters<AppConnectionAccessRepository["put"]>[0],
+    {
+      expectedRevision,
+      ...input
+    }: Parameters<AppConnectionAccessRepository["put"]>[0] & {
+      expectedRevision?: number;
+    },
     isAppActive: () => boolean,
-  ): Promise<AppConnectionAccessRecord | null> {
-    return await this.appLifecycle.runExclusive(input.appId, async () => {
-      if (!isAppActive()) return null;
-      return await this.putUnlocked(input);
-    });
+    canEditConstraints?: (existing: AppConnectionResourceConstraint[]) => boolean,
+  ): Promise<AppConnectionAccessRecord | "unsupported_constraints" | "policy_conflict" | null> {
+    return await this.appLifecycle.runExclusive(input.appId, () =>
+      this.db.transaction((tx) => {
+        if (!isAppActive()) return null;
+        const now = new Date();
+        // Read under the same write lock as the upsert so concurrent edits see one revision.
+        if (expectedRevision !== undefined || canEditConstraints) {
+          const active = tx
+            .select()
+            .from(appConnectionAccess)
+            .where(
+              and(
+                policyKey(input),
+                isNull(appConnectionAccess.revokedAt),
+                or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
+              ),
+            )
+            .get();
+          if (expectedRevision !== undefined && expectedRevision !== (active?.revision ?? 0))
+            return "policy_conflict";
+          if (
+            canEditConstraints &&
+            !canEditConstraints(active ? toAccessRecord(active).constraints : [])
+          )
+            return "unsupported_constraints";
+        }
+        return this.writePolicy(tx, input, now);
+      }),
+    );
   }
 
-  private putUnlocked(input: Parameters<AppConnectionAccessRepository["put"]>[0]) {
-    const now = new Date();
-    return this.db.transaction((tx) => {
-      const policy = tx
-        .insert(appConnectionAccess)
-        .values({
-          ...input,
+  private writePolicy(
+    tx: DrizzleTx,
+    input: Parameters<AppConnectionAccessRepository["put"]>[0],
+    now: Date,
+  ) {
+    const policy = tx
+      .insert(appConnectionAccess)
+      .values({
+        ...input,
+        expiresAt: input.expiresAt ?? null,
+        revision: 1,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          appConnectionAccess.appId,
+          appConnectionAccess.connectionId,
+          appConnectionAccess.identity,
+          appConnectionAccess.operation,
+        ],
+        set: {
+          sideEffects: input.sideEffects,
+          approval: input.approval,
+          constraints: input.constraints,
+          grantEpoch: input.grantEpoch,
           expiresAt: input.expiresAt ?? null,
-          revision: 1,
+          revision: sql`${appConnectionAccess.revision} + 1`,
           revokedAt: null,
-          createdAt: now,
           updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [
-            appConnectionAccess.appId,
-            appConnectionAccess.connectionId,
-            appConnectionAccess.identity,
-            appConnectionAccess.operation,
-          ],
-          set: {
-            sideEffects: input.sideEffects,
-            approval: input.approval,
-            constraints: input.constraints,
-            grantEpoch: input.grantEpoch,
-            expiresAt: input.expiresAt ?? null,
-            revision: sql`${appConnectionAccess.revision} + 1`,
-            revokedAt: null,
-            updatedAt: now,
-          },
-        })
-        .returning()
-        .get();
-      rejectPendingInvocations(
-        tx,
-        {
-          appId: input.appId,
-          connectionId: input.connectionId,
-          identity: input.identity,
-          operation: input.operation,
-          beforeRevision: policy.revision,
         },
-        now,
-      );
-      return toAccessRecord(policy);
-    });
+      })
+      .returning()
+      .get();
+    rejectPendingInvocations(
+      tx,
+      {
+        appId: input.appId,
+        connectionId: input.connectionId,
+        identity: input.identity,
+        operation: input.operation,
+        beforeRevision: policy.revision,
+      },
+      now,
+    );
+    return toAccessRecord(policy);
   }
 
   async revoke(
@@ -521,6 +560,30 @@ export class AppConnectionAccessRepository {
       .where(and(eq(appConnectionAudit.appId, appId), gt(appConnectionAudit.seq, afterSeq)))
       .orderBy(asc(appConnectionAudit.seq))
       .limit(limit);
+  }
+
+  async listAuditForConnection(
+    connectionId: string,
+    options: { appId?: string; beforeSeq?: number; limit?: number } = {},
+  ): Promise<{ entries: AppConnectionAccessAuditEntry[]; nextBeforeSeq: number | null }> {
+    const requested = options.limit ?? 30;
+    const limit = Number.isNaN(requested) ? 30 : Math.max(1, Math.min(100, Math.trunc(requested)));
+    const rows = await this.db
+      .select()
+      .from(appConnectionAudit)
+      .where(
+        and(
+          eq(appConnectionAudit.connectionId, connectionId),
+          options.appId === undefined ? undefined : eq(appConnectionAudit.appId, options.appId),
+          options.beforeSeq === undefined
+            ? undefined
+            : lt(appConnectionAudit.seq, options.beforeSeq),
+        ),
+      )
+      .orderBy(desc(appConnectionAudit.seq))
+      .limit(limit + 1);
+    const entries = rows.slice(0, limit);
+    return { entries, nextBeforeSeq: rows.length > limit ? entries[limit - 1].seq : null };
   }
 
   async recoverInterruptedInvocations(

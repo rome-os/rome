@@ -1,3 +1,4 @@
+import { ConnectionAppAccess } from "@/components/connections/ConnectionAppAccess";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
 import { DetailPane } from "@/components/connections/detail-pane";
@@ -78,6 +79,11 @@ export function ConnectionDetailBody({
           </div>
         );
       })}
+      {card.slots.map((slot) =>
+        slot.connectionId ? (
+          <ConnectionAppAccess key={slot.connectionId} connectionId={slot.connectionId} />
+        ) : null,
+      )}
       <AccountControls card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
       {chatRuleSlots.map((slot) => (
         <ConnectionChatRules

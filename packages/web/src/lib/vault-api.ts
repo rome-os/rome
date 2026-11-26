@@ -63,8 +63,7 @@ function failure(body: Record<string, unknown> | null, fallback: string): VaultE
   return new VaultError(message, code);
 }
 
-// The dashboard's other calls use `fetchJson`, which throws the message alone.
-// A PIN answer carries a code and a counter the caller needs, so this reads them.
+// A PIN answer carries a code and a counter the caller needs.
 async function vaultFetch<T>(
   url: string,
   options: { method?: string; json?: unknown; fallback: string },

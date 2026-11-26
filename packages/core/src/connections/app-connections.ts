@@ -380,6 +380,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (activePolicy.sideEffects !== sideEffects) {
       return await denied(failure("access_denied", "The operation access classification changed."));
     }
+    if (operation.appAccess!.approvalRequired && activePolicy.approval !== "required") {
+      return await denied(failure("access_denied", "This operation requires approval."));
+    }
     if (sideEffects === "read-only" && activePolicy.approval === "required") {
       return await denied(
         failure("access_denied", "Read operations cannot use deferred approval."),
@@ -637,6 +640,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     const act = connection.act;
     if (!act) return await fail("capability_unavailable");
     const live = act.operations().find((entry) => entry.name === invocation.operation);
+    if (live?.appAccess?.approvalRequired && !expectedApproval) return await fail("access_denied");
     if (!live?.appAccess || live.appAccess.sideEffects !== expectedEffect) {
       return await fail("operation_not_found");
     }
@@ -883,7 +887,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         return failure("invalid_input", "The operation has an invalid input schema.");
       }
     }
-    if (!validator(input)) {
+    if (!validator(input) || (operation.validateInput && !operation.validateInput(input))) {
       return failure("invalid_input", "The input does not satisfy the operation schema.");
     }
     return { ok: true, value: true };
@@ -1009,6 +1013,9 @@ function clip(value: string, limit: number): string {
 
 function previewValue(value: unknown): string {
   if (typeof value === "string") return clip(value, 500);
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return clip(value.join(", "), 500);
+  }
   if (typeof value === "number" || typeof value === "boolean" || value === null) {
     return String(value);
   }
@@ -1019,7 +1026,7 @@ function previewValue(value: unknown): string {
   }
 }
 
-function describeAct(connection: Connection): AppConnectionDescription["act"] {
+export function describeAct(connection: Connection): AppConnectionDescription["act"] {
   const status = connection.status().act;
   if (status.state === "unsupported") return { state: "unsupported" };
   if (status.state === "needs-auth") {

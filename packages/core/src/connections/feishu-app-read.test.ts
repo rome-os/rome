@@ -6,15 +6,16 @@ import { ConnectionRegistry } from "./registry.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { AppConnectionBroker } from "./app-connections.js";
-import { createFeishuDescriptor } from "./kinds/feishu/descriptor.js";
+import { feishu, type FeishuDescriptorDeps } from "./kinds/feishu/index.js";
 const operation = "feishu.document.read";
-function harness() {
+function harness(request?: FeishuDescriptorDeps["request"]) {
   const { db, close } = createTestDb();
   const calls: Array<{ bot: string; documentId: string }> = [];
   let gate: Promise<void> | undefined;
   let entered = () => {};
   let reply: unknown = { code: 0, data: { content: "SYNTHETIC_DOCUMENT_BODY" } };
-  const full = createFeishuDescriptor({
+  const { descriptor: full } = feishu({
+    request,
     chatSettings: {} as never,
     pressed: async () => false,
     listAgents: () => [],
@@ -25,6 +26,7 @@ function harness() {
       return reply;
     },
   });
+  if (!full) throw new Error("Expected Feishu descriptor");
   const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   registry.register({ ...full, capabilities: { actor: full.capabilities.actor } });
   const access = new AppConnectionAccessRepository(db);
@@ -69,6 +71,7 @@ function harness() {
   };
   return {
     db,
+    actions,
     close,
     registry,
     access,
@@ -211,4 +214,58 @@ describe("Feishu document access through the App gateway", () => {
       h.close();
     }
   });
+});
+
+it("executes a constrained Feishu write only after approval and audits the redacted result", async () => {
+  const providerCalls: string[] = [];
+  const h = harness(async (_, endpoint) => {
+    providerCalls.push(endpoint.url);
+    return { code: 0, data: { document_revision_id: 3 } };
+  });
+  try {
+    const connection = await h.connect("cli_writer");
+    const operation = "feishu.document.update";
+    const request = {
+      connectionId: connection.id,
+      identity: "app",
+      operation,
+      requestId: "unique-request",
+      input: { documentId: "Doc1", mode: "append", content: "private paragraphs" },
+    };
+    const policy = {
+      appId: "notes",
+      connectionId: connection.id,
+      identity: "app",
+      operation,
+      sideEffects: "write" as const,
+      constraints: [{ inputPointer: "/documentId", allowedValues: ["Doc1"] }],
+      grantEpoch: (await h.registry.grantOf(connection.id))!.grantEpoch!,
+    };
+    const app = h.broker.forApp("notes");
+    await h.access.put({ ...policy, approval: "not_required" });
+    await expect(app.invoke(request)).rejects.toMatchObject({ detail: { code: "access_denied" } });
+    await h.access.put({ ...policy, approval: "required" });
+    await expect(
+      app.invoke({ ...request, input: { ...request.input, documentId: "Other" } }),
+    ).rejects.toMatchObject({ detail: { code: "resource_denied" } });
+    const pending = await app.invoke(request);
+    expect(pending.status).toBe("pending_approval");
+    expect(providerCalls).toEqual([]);
+    if (pending.status !== "pending_approval") throw new Error("Expected approval");
+    const result = await h.actions
+      .get("core:app_connection_write")!
+      .execute({ invocationId: pending.executionId });
+    expect(result).toMatchObject({ status: "ok", data: { ok: true } });
+    expect(providerCalls).toEqual(["/open-apis/docx/v1/documents/Doc1/blocks/Doc1/children"]);
+    const audit = await h.access.listAuditForConnection(connection.id);
+    expect(audit.entries[0]).toMatchObject({
+      operation,
+      approval: "approved",
+      status: "succeeded",
+    });
+    expect(JSON.stringify(audit)).not.toContain("private paragraphs");
+  } finally {
+    await h.registry.stopAll();
+    h.close();
+  }
 });

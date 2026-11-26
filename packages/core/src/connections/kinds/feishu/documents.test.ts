@@ -1,10 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import {
-  createFeishuDocumentActor,
-  FEISHU_DOCUMENT_OPERATIONS,
-  FEISHU_DOCUMENT_READ,
-  feishuDocumentGuidance,
-} from "./documents.js";
+import { createFeishuActor, FEISHU_OPERATIONS } from "./actor.js";
+import { FEISHU_DOCUMENT_READ, feishuDocumentGuidance } from "./documents.js";
 import { CredentialRejected, ProviderOperationError } from "../../errors.js";
 rs.mock("@larksuiteoapi/node-sdk", () => ({
   Domain: { Feishu: "https://open.feishu.cn", Lark: "https://open.larksuite.com" },
@@ -56,13 +52,17 @@ describe("Feishu document guidance", () => {
 });
 
 describe("Feishu document reads", () => {
-  it("exposes one read-only operation, with no arbitrary transport or write", () => {
-    expect(FEISHU_DOCUMENT_OPERATIONS).toHaveLength(1);
-    expect(FEISHU_DOCUMENT_OPERATIONS[0].appAccess).toEqual({ sideEffects: "read-only" });
+  it("exposes document.read with its bounded schema and document constraint", () => {
+    expect(FEISHU_OPERATIONS.find((op) => op.name === FEISHU_DOCUMENT_READ)?.appAccess).toEqual({
+      sideEffects: "read-only",
+      requiredScopes: ["docx:document:readonly"],
+      requiredScopeGroups: [["docx:document:readonly", "docx:document"]],
+      resourceConstraintKind: "documentIds",
+    });
   });
   it("uses the selected bot and returns only bounded plain text", async () => {
     let seen: unknown;
-    const actor = createFeishuDocumentActor(material, async (credential, id) => {
+    const actor = createFeishuActor(material, async (credential, id) => {
       seen = { appId: credential.appId, id };
       return {
         code: 0,
@@ -80,7 +80,7 @@ describe("Feishu document reads", () => {
   });
   it("rejects URLs, traversal, extra inputs and other operations before the network", async () => {
     let calls = 0;
-    const actor = createFeishuDocumentActor(material, async () => {
+    const actor = createFeishuActor(material, async () => {
       calls++;
       return {};
     });
@@ -102,17 +102,17 @@ describe("Feishu document reads", () => {
       [1770032, "provider_resource_denied"],
       [1770002, "provider_not_found"],
     ] as const) {
-      const actor = createFeishuDocumentActor(material, async () => ({
+      const actor = createFeishuActor(material, async () => ({
         code,
         msg: "SYNTHETIC_PRIVATE_PROVIDER_MESSAGE",
       }));
       await expect(actor.invoke(call)).rejects.toThrow(reason);
     }
-    const refused = createFeishuDocumentActor(material, async () => ({ code: 99991663 }));
+    const refused = createFeishuActor(material, async () => ({ code: 99991663 }));
     await expect(refused.invoke(call)).rejects.toBeInstanceOf(CredentialRejected);
   });
   it("maps the Axios response ceiling to a permanent size failure, not a retryable outage", async () => {
-    const actor = createFeishuDocumentActor(material, async () => {
+    const actor = createFeishuActor(material, async () => {
       throw Object.assign(new Error("maxContentLength size of 262144 exceeded"), {
         code: "ERR_BAD_RESPONSE",
       });
@@ -120,7 +120,7 @@ describe("Feishu document reads", () => {
     await expect(actor.invoke(call)).rejects.toEqual(
       new ProviderOperationError("provider_response_too_large"),
     );
-    const unrelated = createFeishuDocumentActor(material, async () => {
+    const unrelated = createFeishuActor(material, async () => {
       throw Object.assign(new Error("unrelated failure"), { code: "ERR_BAD_RESPONSE" });
     });
     await expect(unrelated.invoke(call)).rejects.toEqual(
@@ -129,10 +129,10 @@ describe("Feishu document reads", () => {
   });
   it("does not degrade the bot for missing document permission, but rejects invalid app tokens", async () => {
     await expect(
-      createFeishuDocumentActor(material, async () => ({ code: 99991679 })).invoke(call),
+      createFeishuActor(material, async () => ({ code: 99991679 })).invoke(call),
     ).rejects.toEqual(new ProviderOperationError("provider_scope_required"));
     await expect(
-      createFeishuDocumentActor(material, async () => ({ code: 99991664 })).invoke(call),
+      createFeishuActor(material, async () => ({ code: 99991664 })).invoke(call),
     ).rejects.toBeInstanceOf(CredentialRejected);
   });
   it("rejects oversized, partial and malformed responses, never claiming a truncated result is complete", async () => {
@@ -141,19 +141,19 @@ describe("Feishu document reads", () => {
       { data: { content: "x" } },
       { code: 0, data: { content: 42 } },
     ]) {
-      await expect(
-        createFeishuDocumentActor(material, async () => value).invoke(call),
-      ).rejects.toThrow("provider_response_invalid");
+      await expect(createFeishuActor(material, async () => value).invoke(call)).rejects.toThrow(
+        "provider_response_invalid",
+      );
     }
     await expect(
-      createFeishuDocumentActor(material, async () => ({
+      createFeishuActor(material, async () => ({
         code: 0,
         data: { content: "界".repeat(50000) },
       })).invoke(call),
     ).rejects.toThrow("provider_response_too_large");
   });
   it("discards thrown request details and stops in-flight reads on revocation", async () => {
-    const unsafe = createFeishuDocumentActor(material, async () => {
+    const unsafe = createFeishuActor(material, async () => {
       throw { config: { headers: { Authorization: "SYNTHETIC_AUTH" } } };
     });
     await expect(unsafe.invoke(call)).rejects.toEqual(
@@ -163,7 +163,7 @@ describe("Feishu document reads", () => {
     const ready = new Promise<void>((resolve) => {
       started = resolve;
     });
-    const actor = createFeishuDocumentActor(material, async (_credential, _id, signal) => {
+    const actor = createFeishuActor(material, async (_credential, _id, signal) => {
       started();
       return await new Promise((_resolve, reject) =>
         signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }),
@@ -177,7 +177,7 @@ describe("Feishu document reads", () => {
   });
   it("uses only the fixed official GET path with bounded transport on both provider domains", async () => {
     for (const domain of ["feishu", "lark"] as const) {
-      const actor = createFeishuDocumentActor({ ...material, domain });
+      const actor = createFeishuActor({ ...material, domain });
       const result = (await actor.invoke(call)) as { content: string };
       expect(JSON.parse(result.content)).toEqual({
         domain: domain === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn",

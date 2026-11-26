@@ -171,32 +171,48 @@ identity for one operation.
 - **Connection setup** — the guardian flow that creates or repairs a provider grant.
   Apps cannot start setup through `ctx.connections`.
 
-### Feishu document reads
+### App access in connection details
 
-A Feishu connection exposes `feishu.document.read` with identity `app`: the
-connected bot, not a user's OAuth identity. The input is `{ documentId }`, a
-Docx ID of at most 128 ASCII letters and digits. URLs, Wiki references, arbitrary
-HTTP paths and CLI arguments are not accepted. The output contains the ID,
-`content`, `format: "plain_text"` and `complete: true`. Content above 128 KiB is
-rejected rather than silently clipped. The transport has a 15-second deadline
-and a 256 KiB response limit.
+Settings → Connections shows **App Connection Access & Audit** in the details
+of each connection that offers operations to apps. **App Access** lists the
+operations by identity and shows which installed apps have grants. The
+guardian can grant or revoke each operation, grant all read operations for
+one identity, or revoke all grants for one app on the connection. A grant
+can last 7 days, 30 days, or until the guardian revokes it. For operations
+that accept a document allowlist, the dashboard accepts Docx IDs and Feishu
+or Lark Docx URLs and saves the IDs. An empty allowlist permits any document
+the connection can access.
 
-The guardian grants an installed app access in Settings → Connections → App
-document access. The screen grants one document for 24 hours and states that it
-replaces the app's document-read rule on that connection. It also lists and
-revokes existing rules. Each app needs its own policy. The backend policy API
-continues to support explicit expiry and resource constraints. The screen does
-not create a parallel permission store.
+Where the provider offers a scope check, the dashboard compares its result
+with the scopes required by the selected app's grants. The check reads the
+provider's scope status. An administrator manages scopes in the provider
+console and gives the bot access to individual resources as needed. **Audit Log**
+shows recent calls newest first and can filter by app.
 
-The bot separately needs `docx:document:readonly` (or a provider permission that
-includes it) and permission to open that document. Core shows the requirement and
-the corresponding developer-console link, but does not query the scope inventory
-or submit a provider permission request. The administrator must configure,
-approve and publish permissions as needed, then give the bot document access.
-The directory says `scopeStatus: "not_checked"`. An authorized connection does
-not prove that its bot has a document scope or a document's ACL.
+### Feishu bot operations
 
-Any independently authorized app uses the same SDK operation:
+Feishu operations run as the connected bot with identity `app`.
+
+| Area | Operations |
+| --- | --- |
+| Documents | Read plain text, create a document, and update a document |
+| Drive | Inspect a file or folder |
+| Wiki | List spaces, get a node, and list child nodes |
+| Base | Read Base details, tables, fields, and records |
+| Sheets | Read spreadsheet details and cell values |
+| Calendar | List, get, search, and create events |
+| Chats | List messages in a chat |
+| Scopes | List the bot's tenant scope grants |
+
+Creating or updating a document and creating a calendar event require guardian
+approval. For `feishu.document.read`, the bot needs a scope that covers
+`docx:document:readonly` and permission to open the document. The SDK input
+`{ documentId }` takes a Docx ID of at most 128 ASCII letters and digits.
+The output contains the ID, `content`, `format: "plain_text"`, and
+`complete: true`. The operation rejects content above 128 KiB.
+
+Feishu API requests time out after 15 seconds and accept responses up to 256 KiB.
+An app with a grant calls the operation through the SDK.
 
 ```typescript
 const result = await ctx.connections.invoke({
@@ -215,10 +231,8 @@ reasons such as `provider_scope_required`, `provider_resource_denied` and
 Apps branch on `reason`, not the human-readable `message`. Provider messages,
 headers and credentials are not forwarded. The audit keeps no document content.
 
-This does not add user OAuth, managed writes, a raw HTTP broker, or automatic
-scope escalation. The local Lark app uses this operation for its explicit managed
-`docs.fetch` path. Its separate independent CLI mode never serves as a fallback
-for a rejected managed connection.
+The local Lark app uses this operation for managed `docs.fetch` calls. An error
+from the managed connection ends the call.
 
 ## Lockfile
 

@@ -169,6 +169,7 @@ export interface OperationDescriptor {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  validateInput?(input: unknown): boolean;
   outputSchema?: Record<string, unknown>;
   /**
    * Opts this operation into the restricted App SDK broker. An absent value
@@ -176,6 +177,10 @@ export interface OperationDescriptor {
    */
   appAccess?: {
     sideEffects: "read-only" | "write";
+    requiredScopes?: string[];
+    requiredScopeGroups?: string[][];
+    resourceConstraintKind?: "documentIds";
+    approvalRequired?: true;
     /** Safe fields Core may show when a guardian approves this operation. A
      * write operation must declare this contract before an App can use it. */
     approvalPreview?: {
@@ -482,6 +487,18 @@ export interface ConnectionDescriptor {
   /** The name of the connection's one grant: the key the dashboard, the setup
    *  routes and the ledger know it by. */
   grant: GrantName;
+  appAccessGuidance?(
+    profile?: ProfileRecord,
+  ): import("@rome/api-types/app-connection-access").AppAccessProviderGuidance;
+  documentAccessGuidance?: {
+    operation: string;
+    guidance(
+      profile?: ProfileRecord,
+    ): Pick<
+      import("@rome/api-types/app-connection-access").DocumentAccessOptions["connections"][number],
+      "scope" | "scopeStatus" | "consoles"
+    >;
+  };
   /** How the guardian gives access. A connection holds one grant
    *  (docs/domains/connections.md#grant). */
   auth: AuthScheme;

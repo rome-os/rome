@@ -14,6 +14,7 @@ import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
+import { FEISHU_OPERATIONS } from "./kinds/feishu/actor.js";
 import { ConnectionRegistry } from "./registry.js";
 import type { ConnectionDescriptor, OperationCall, OperationDescriptor } from "./types.js";
 import {
@@ -227,6 +228,75 @@ async function grant(
 }
 
 describe("App connection broker", () => {
+  it("rejects invalid Feishu times and attendee IDs before approval or execution and previews valid attendees", async () => {
+    const h = harness({ operations: FEISHU_OPERATIONS });
+    try {
+      const { id: connectionId } = await connect(h, "calendar");
+      const appId = "app-a";
+      const facade = h.broker.forApp(appId);
+      const operation = "feishu.calendar.event.create";
+      const target = {
+        connectionId,
+        identity: "account",
+        operation,
+        requestId: "calendar-request",
+      };
+      await grant(h, { appId, connectionId, operation, approval: "required" });
+      const event = {
+        summary: "Meeting",
+        startTime: "2026-01-01T01:00:00.100Z",
+        attendeeOpenIds: ["ou_one", "ou_two"],
+      };
+      for (const endTime of [
+        "invalid",
+        "2026-01-01T00:59:59Z",
+        event.startTime,
+        "2026-01-01T01:00:00.900Z",
+      ]) {
+        await expect(
+          facade.invoke({ ...target, input: { ...event, endTime } }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      for (const [name, input] of [
+        ["feishu.calendar.events.list", { anchorTime: "0", startTime: "0" }],
+        ["feishu.calendar.events.list", { anchorTime: "0", pageToken: "next" }],
+        ["feishu.calendar.events.list", { pageToken: "next", endTime: "0" }],
+        ["feishu.calendar.events.list", { startTime: "100", endTime: "9" }],
+        ["feishu.calendar.events.search", { query: "meeting", startTime: "100", endTime: "9" }],
+        ["feishu.im.messages.list", { chatId: "C", startTime: "100", endTime: "9" }],
+      ] as const) {
+        await grant(h, { appId, connectionId, operation: name });
+        await expect(
+          facade.invoke({ connectionId, identity: "account", operation: name, input }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      const input = { ...event, endTime: "2026-01-01T01:00:01Z" };
+      for (const invalid of ["oc_demo", "u"]) {
+        await expect(
+          facade.invoke({ ...target, input: { ...input, attendeeOpenIds: ["ou_one", invalid] } }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      expect(h.approvalRequests).toHaveLength(0);
+      expect(h.invocations).toHaveLength(0);
+      expect((await facade.invoke({ ...target, input })).status).toBe("pending_approval");
+      expect(h.approvalRequests[0]?.preview).toMatchObject({
+        fields: expect.arrayContaining([{ label: "Attendees", value: "ou_one, ou_two" }]),
+      });
+      const attendeeOpenIds = Array.from({ length: 20 }, (_, i) => `ou_${i}_${"x".repeat(40)}`);
+      await facade.invoke({
+        ...target,
+        requestId: "long-attendee-list",
+        input: { ...input, attendeeOpenIds },
+      });
+      expect(h.approvalRequests[1]?.preview).toMatchObject({
+        fields: expect.arrayContaining([
+          { label: "Attendees", value: attendeeOpenIds.join(", ").slice(0, 499) + "…" },
+        ]),
+      });
+    } finally {
+      h.close();
+    }
+  });
   it("stays unavailable until startup reconciliation succeeds", async () => {
     let ready = false;
     const h = harness({ isReady: () => ready });

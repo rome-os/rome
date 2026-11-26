@@ -1,6 +1,6 @@
 // Feishu and Lark connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Feishu shares a single `app` grant between chat and Docx plain-text reads.
+// Feishu shares a single `app` grant between chat and bot operations.
 // The grant holds the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
 // the SDK long connection, the inbound `Message`, markdown send, and the
@@ -34,11 +34,13 @@ import {
   isFeishuAuthError,
 } from "./feishu.js";
 import { z } from "zod";
+import { createFeishuActor, FEISHU_OPERATIONS } from "./actor.js";
 import {
-  createFeishuDocumentActor,
-  FEISHU_DOCUMENT_OPERATIONS,
-  type FeishuDocumentRequest,
+  FEISHU_DOCUMENT_READ,
+  feishuAppAccessGuidance,
+  feishuDocumentGuidance,
 } from "./documents.js";
+import type { FeishuDocumentRequest, FeishuRequest } from "./transport.js";
 import { CredentialRejected, Disconnected } from "../../errors.js";
 import { credentialsPaste } from "../../schemes.js";
 import type { SetupFn, SetupView } from "../../setup/types.js";
@@ -147,6 +149,7 @@ export interface FeishuDescriptorDeps {
   hasAgent?: (name: string) => boolean;
   createChannel?: CreateLarkChannel;
   documentRequest?: FeishuDocumentRequest;
+  request?: FeishuRequest;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
   probeCredentials?: FeishuSetupDeps["probeCredentials"];
@@ -530,15 +533,18 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,
     link: "own_account",
     grant: "app",
+    appAccessGuidance: feishuAppAccessGuidance,
+    documentAccessGuidance: { operation: FEISHU_DOCUMENT_READ, guidance: feishuDocumentGuidance },
     chatRules: FEISHU_CHAT_RULES,
     auth: appScheme,
     capabilities: {
       actor: {
-        operations: FEISHU_DOCUMENT_OPERATIONS,
+        operations: FEISHU_OPERATIONS,
         build(credential) {
-          return createFeishuDocumentActor(
+          return createFeishuActor(
             credential.material as unknown as FeishuAppMaterial,
             deps.documentRequest,
+            deps.request,
           );
         },
       },

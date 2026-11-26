@@ -172,8 +172,8 @@ const namesIn = (region: HTMLElement) =>
     .queryAllByRole("button", { name: /^(Open|Connect) / })
     .map((card) => card.getAttribute("aria-label"));
 
-describe("App document access visibility", () => {
-  it("hides Feishu-only controls without a configured bot and shows them when one exists", () => {
+describe("Connection app access visibility", () => {
+  it("keeps app access off the connections list even with a configured bot", () => {
     const view = renderSection([
       ...minimalConnections(),
       connection({ connectionKind: "feishu", id: null }),
@@ -188,7 +188,10 @@ describe("App document access visibility", () => {
         async () => null,
       ),
     );
-    expect(screen.getByRole("button", { name: "App document access" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "App document access" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "App Connection Access & Audit" })).toBeNull();
+    const requests = rs.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url));
+    expect(requests.some((url) => url.startsWith("/api/app-connection-access"))).toBe(false);
   });
 });
 

@@ -1,84 +1,10 @@
-// App access contract: docs/concepts/apps.md#connection-access.
 import { z } from "zod";
-import { CredentialRejected, ProviderOperationError } from "../../errors.js";
-import type { Actor, OperationDescriptor, ProfileRecord } from "../../types.js";
-import type { FeishuAppMaterial } from "./descriptor.js";
-
+import type { ProfileRecord } from "../../types.js";
+import { ProviderOperationError } from "../../errors.js";
+import { documentId, operation, token, type RequestData } from "./operation.js";
 export const FEISHU_DOCUMENT_READ = "feishu.document.read";
 export const FEISHU_DOCUMENT_SCOPE = "docx:document:readonly";
 const MAX_CONTENT_BYTES = 128 * 1024;
-const MAX_RESPONSE_BYTES = 256 * 1024;
-const inputSchema = z.object({ documentId: z.string().regex(/^[a-zA-Z0-9]{1,128}$/) }).strict();
-
-export const FEISHU_DOCUMENT_OPERATIONS: readonly OperationDescriptor[] = [
-  {
-    name: FEISHU_DOCUMENT_READ,
-    description:
-      "Read the plain text of one Docx document as the connected bot. Requires docx:document:readonly and access to that document.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["documentId"],
-      properties: { documentId: { type: "string", pattern: "^[a-zA-Z0-9]{1,128}$" } },
-    },
-    appAccess: { sideEffects: "read-only" },
-  },
-];
-
-export type FeishuDocumentRequest = (
-  material: FeishuAppMaterial,
-  documentId: string,
-  signal: AbortSignal,
-) => Promise<unknown>;
-
-function createDocumentRequest(): FeishuDocumentRequest {
-  let cache: import("@larksuiteoapi/node-sdk").DefaultCache | undefined;
-  return async (material, documentId, signal) => {
-    const { Client, Domain, DefaultCache, defaultHttpInstance } = await import(
-      "@larksuiteoapi/node-sdk"
-    );
-    // A grant epoch owns its cache. Concurrent reads need separate cancellation scopes.
-    cache ??= new DefaultCache();
-    const http = defaultHttpInstance.create();
-    http.interceptors.request.use((config) => ({
-      ...config,
-      timeout: 15_000,
-      maxContentLength: MAX_RESPONSE_BYTES,
-      maxRedirects: 0,
-      signal,
-    }));
-    http.interceptors.response.use((response) => {
-      // Classify token business failures before the SDK flattens their code into text.
-      const code = z.object({ code: z.number() }).safeParse(response.data);
-      if (
-        response.config.url?.endsWith("/open-apis/auth/v3/tenant_access_token/internal") &&
-        code.success &&
-        code.data.code !== 0
-      ) {
-        throw responseError(response.data);
-      }
-      return response.data;
-    });
-    const quiet = () => {};
-    const client = new Client({
-      appId: material.appId,
-      appSecret: material.appSecret,
-      domain: material.domain === "lark" ? Domain.Lark : Domain.Feishu,
-      cache,
-      httpInstance: http,
-      logger: { error: quiet, warn: quiet, info: quiet, debug: quiet, trace: quiet },
-    });
-    return client.request({
-      method: "GET",
-      url: `/open-apis/docx/v1/documents/${documentId}/raw_content`,
-      timeout: 15_000,
-      maxContentLength: MAX_RESPONSE_BYTES,
-      maxRedirects: 0,
-      signal,
-    });
-  };
-}
-
 /** Only public profile fields may become provider-console links. */
 export function feishuDocumentGuidance(profile?: ProfileRecord) {
   const appId =
@@ -99,90 +25,180 @@ export function feishuDocumentGuidance(profile?: ProfileRecord) {
   };
 }
 
-function responseError(value: unknown): ProviderOperationError | CredentialRejected {
-  const parsed = z.object({ code: z.number() }).safeParse(value);
-  const code = parsed.success ? parsed.data.code : undefined;
-  if (
-    code === 10003 ||
-    code === 10014 ||
-    code === 99991663 ||
-    code === 99991664 ||
-    code === 99991668 ||
-    code === 99991671
-  ) {
-    return new CredentialRejected({ grant: "app" });
-  }
-  // Document permission failures must not degrade the grant shared with IM.
-  // The Talker classifies transport faults, not document authorization responses.
-  if (code === 99991672 || code === 99991676 || code === 99991679) {
-    return new ProviderOperationError("provider_scope_required");
-  }
-  if (code === 1770032) return new ProviderOperationError("provider_resource_denied");
-  if (code === 1770033) return new ProviderOperationError("provider_response_too_large");
-  if (code === 1770002 || code === 1770003) return new ProviderOperationError("provider_not_found");
-  return new ProviderOperationError("provider_unavailable", true);
-}
-
-/** Uses only the connected app identity; no user OAuth, URL input, or CLI fallback. */
-export function createFeishuDocumentActor(
-  material: FeishuAppMaterial,
-  request: FeishuDocumentRequest = createDocumentRequest(),
-): Actor {
-  const stopped = new AbortController();
+export function feishuAppAccessGuidance(profile?: ProfileRecord) {
+  const { url } = feishuDocumentGuidance(profile).consoles[0];
+  const base = new URL(url).origin;
   return {
-    operations: () => FEISHU_DOCUMENT_OPERATIONS,
-    stop: () => stopped.abort(),
-    async invoke(call) {
-      if (call.operation !== FEISHU_DOCUMENT_READ) throw new Error("operation_not_found");
-      const input = inputSchema.parse(call.input);
-      const signal = AbortSignal.any([stopped.signal, AbortSignal.timeout(15_000)]);
-      signal.throwIfAborted();
-      let raw: unknown;
-      try {
-        let onAbort: (() => void) | undefined;
-        const aborted = new Promise<never>((_resolve, reject) => {
-          onAbort = () => reject(new ProviderOperationError("provider_unavailable", true));
-          signal.addEventListener("abort", onAbort, { once: true });
-        });
-        try {
-          raw = await Promise.race([request(material, input.documentId, signal), aborted]);
-        } finally {
-          if (onAbort) signal.removeEventListener("abort", onAbort);
-        }
-      } catch (error) {
-        if (error instanceof CredentialRejected || error instanceof ProviderOperationError)
-          throw error;
-        // Axios errors can contain request headers. Expose only allowlisted reasons.
-        const sizeFailure = z
-          .object({
-            code: z.literal("ERR_BAD_RESPONSE"),
-            message: z.string().regex(/^maxContentLength size of \d+ exceeded$/),
-          })
-          .safeParse(error);
-        if (sizeFailure.success) throw new ProviderOperationError("provider_response_too_large");
-        const response = z
-          .object({ response: z.object({ status: z.number(), data: z.unknown() }) })
-          .safeParse(error);
-        if (response.success) {
-          if (response.data.response.status === 401) throw new CredentialRejected({ grant: "app" });
-          const mapped = responseError(response.data.response.data);
-          if (mapped instanceof CredentialRejected || mapped.reason !== "provider_unavailable")
-            throw mapped;
-        }
-        throw new ProviderOperationError("provider_unavailable", true);
-      }
-      signal.throwIfAborted();
-      const envelope = z
-        .object({ code: z.number(), data: z.object({ content: z.string() }).optional() })
-        .safeParse(raw);
-      if (!envelope.success) throw new ProviderOperationError("provider_response_invalid");
-      if (envelope.data.code !== 0) throw responseError(envelope.data);
-      if (!envelope.data.data) throw new ProviderOperationError("provider_response_invalid");
-      const content = envelope.data.data.content;
-      if (Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES) {
-        throw new ProviderOperationError("provider_response_too_large");
-      }
-      return { documentId: input.documentId, content, format: "plain_text", complete: true };
-    },
+    consoleUrl: url.replace(/\/auth$/, ""),
+    scopesUrl: url,
+    docsUrl: base + "/document/server-docs/application-scope/introduction",
+    scopeCheckOperation: "feishu.scopes.list",
   };
 }
+
+const docs = "/open-apis/docx/v1/documents";
+const revisionId = z.int().positive();
+const revision = z.object({ document_revision_id: revisionId });
+const content = z.string().max(16_000);
+function paragraphs(content: string) {
+  if (!content) return [];
+  const lines = content.split(/\r\n|\r|\n/);
+  if (lines.length > 100) lines.splice(99, lines.length - 99, lines.slice(99).join("\n"));
+  return lines.map((line) => ({
+    block_type: 2,
+    text: { elements: [{ text_run: { content: line } }] },
+  }));
+}
+
+async function append(
+  request: RequestData,
+  url: string,
+  children: ReturnType<typeof paragraphs>,
+  revisionId?: number,
+) {
+  // Feishu accepts at most 50 children in one insertion.
+  for (let offset = 0; offset < children.length; offset += 50) {
+    const result = await request(
+      {
+        method: "POST",
+        url,
+        data: { children: children.slice(offset, offset + 50), index: -1 },
+        params: { document_revision_id: revisionId },
+      },
+      revision,
+    );
+    revisionId = result.document_revision_id;
+  }
+  return revisionId;
+}
+
+const listedChildren = z.object({
+  items: z.array(z.object({})),
+  has_more: z.boolean(),
+  page_token: z.string().max(4000).optional(),
+});
+async function countChildren(request: RequestData, url: string, revisionId: number) {
+  let count = 0;
+  let pageToken: string | undefined;
+  const tokens = new Set<string>();
+  do {
+    const page = await request(
+      {
+        method: "GET",
+        url,
+        params: { document_revision_id: revisionId, page_size: 500, page_token: pageToken },
+      },
+      listedChildren,
+    );
+    count += page.items.length;
+    if (!page.has_more) break;
+    pageToken = page.page_token;
+    if (!pageToken || tokens.has(pageToken))
+      throw new ProviderOperationError("provider_response_invalid");
+    if (tokens.size >= 100) throw new ProviderOperationError("provider_response_too_large");
+    tokens.add(pageToken);
+  } while (true);
+  return count;
+}
+
+export const documentOperations = [
+  operation(
+    "document.read",
+    "Read the plain text of one Docx document accessible to the connected bot.",
+    z.strictObject({ documentId }),
+    async ({ documentId }, request) => {
+      const { content } = await request(
+        { method: "GET", url: `${docs}/${documentId}/raw_content` },
+        z.object({ content: z.string() }),
+      );
+      if (Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES)
+        throw new ProviderOperationError("provider_response_too_large");
+      return { documentId, content, format: "plain_text", complete: true };
+    },
+    { resourceConstraintKind: "documentIds" },
+  ),
+  operation(
+    "document.create",
+    "Create a Docx document with optional plain-text paragraphs.",
+    z.strictObject({
+      title: z.string().min(1).max(200),
+      content: content.optional(),
+      folderToken: token.optional(),
+    }),
+    async ({ title, content, folderToken }, request) => {
+      const blocks = paragraphs(content ?? "");
+      const { document } = await request(
+        { method: "POST", url: docs, data: { title, folder_token: folderToken } },
+        z.object({
+          document: z.object({
+            document_id: documentId,
+            title: z.string(),
+            revision_id: z.number().optional(),
+          }),
+        }),
+      );
+      const id = document.document_id;
+      const revisionId = blocks.length
+        ? await append(request, `${docs}/${id}/blocks/${id}/children`, blocks, document.revision_id)
+        : document.revision_id;
+      return { documentId: id, title: document.title, revisionId, blockCount: blocks.length };
+    },
+    {
+      sideEffects: "write",
+      approvalRequired: true,
+      approvalPreview: {
+        summary: "Create Feishu document",
+        fields: [
+          { label: "Title", inputPointer: "/title" },
+          { label: "Folder token", inputPointer: "/folderToken" },
+        ],
+      },
+    },
+  ),
+  operation(
+    "document.update",
+    "Append or replace plain-text paragraphs in a Docx document.",
+    z.strictObject({ documentId, mode: z.enum(["append", "overwrite"]), content: content.min(1) }),
+    async ({ documentId, mode, content }, request) => {
+      const blocks = paragraphs(content);
+      const url = `${docs}/${documentId}/blocks/${documentId}/children`;
+      let currentRevision: number | undefined;
+      let existingChildCount = 0;
+      if (mode === "overwrite") {
+        const { document } = await request(
+          { method: "GET", url: `${docs}/${documentId}` },
+          z.object({ document: z.object({ revision_id: revisionId }) }),
+        );
+        currentRevision = document.revision_id;
+        existingChildCount = await countChildren(request, url, currentRevision);
+      }
+      currentRevision = await append(request, url, blocks, currentRevision);
+      // Keep the original prefix until every replacement block is present at the pinned revision.
+      if (existingChildCount > 0) {
+        const result = await request(
+          {
+            method: "DELETE",
+            url: url + "/batch_delete",
+            params: { document_revision_id: currentRevision },
+            data: { start_index: 0, end_index: existingChildCount },
+          },
+          revision,
+        );
+        currentRevision = result.document_revision_id;
+      }
+      return { documentId, mode, revisionId: currentRevision, blocksAdded: blocks.length };
+    },
+    {
+      sideEffects: "write",
+      approvalRequired: true,
+      resourceConstraintKind: "documentIds",
+      approvalPreview: {
+        summary: "Update Feishu document",
+        fields: [
+          { label: "Document ID", inputPointer: "/documentId" },
+          { label: "Mode", inputPointer: "/mode" },
+        ],
+      },
+    },
+  ),
+];
