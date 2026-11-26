@@ -23,8 +23,6 @@ import {
 } from "../../agent/index.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/error-message.js";
-import { currentChatOwner } from "../../access/session-actor.js";
-import { canOpenChat } from "../../webchat/privacy.js";
 import { fetchRomeCredits } from "../../agent/index.js";
 import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
@@ -77,27 +75,9 @@ export function aiToolsRoutes(
     | "providerFailures"
     | "chatProviders"
     | "romeCreditsUsable"
-    | "webchatRepo"
   >,
 ): Hono {
   const app = new Hono();
-
-  // A card or a notice is its chats': only who may open every one of them may
-  // act on it or read it, as on the chats themselves (docs/domains/chats.md#concierge-chat).
-  const mayOpenAll = async (chatIds: readonly string[]) => {
-    if (chatIds.length === 0) return false;
-    const owner = await currentChatOwner();
-    for (const chatId of chatIds) {
-      if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
-        return false;
-      }
-    }
-    return true;
-  };
-  const outageChats = (outage: { noticeChatId: string; chats: Array<{ chatId: string }> }) => [
-    outage.noticeChatId,
-    ...outage.chats.map((chat) => chat.chatId),
-  ];
 
   // The default provider, the providers it can be, the note a logout left,
   // how many chats a change moves, and whether Rome credits could run chats
@@ -202,8 +182,6 @@ export function aiToolsRoutes(
     const change = switchOf(await c.req.json().catch(() => null));
     if (!change) return c.json({ error: "A provider or a model is required" }, 400);
     const messageId = c.req.param("messageId");
-    const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
-    if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
     try {
       const outcome = await deps.providerFailures.switchCard(messageId, change);
       // An option that no longer works wrote a fresh card with those that do.
@@ -217,8 +195,6 @@ export function aiToolsRoutes(
   app.post("/ai-tools/provider-failures/:messageId/continue", async (c) => {
     if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
     const messageId = c.req.param("messageId");
-    const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
-    if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
     try {
       await deps.providerFailures.continueCard(messageId);
       return c.json({ ok: true });
@@ -228,10 +204,7 @@ export function aiToolsRoutes(
   });
 
   app.get("/ai-tools/provider-outages", async (c) => {
-    const outages = [];
-    for (const outage of (await deps.providerFailures?.outages()) ?? []) {
-      if (await mayOpenAll(outageChats(outage))) outages.push(outage);
-    }
+    const outages = (await deps.providerFailures?.outages()) ?? [];
     return c.json({
       outages: outages.map(({ id, provider, reason, until, chats, since }) => ({
         id,

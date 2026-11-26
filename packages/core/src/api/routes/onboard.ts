@@ -41,7 +41,11 @@ export function onboardRoutes(deps: ApiDeps): Hono {
     // owns this instance. Gated on a real guardian session so an anonymous probe
     // can't fan out to Rome Cloud. Fire-and-forget so the probe stays fast; it
     // swallows its own errors and surfaces nothing.
-    if (session) void resolveAndRecordAccount(deps.db);
+    if (session) {
+      void resolveAndRecordAccount(deps.db)
+        .then(() => deps.dashboardAccessState.load(deps.db))
+        .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
+    }
 
     const state = await resolveBootstrapState(deps.db, {
       cloudAuthEnabled: await deps.isCloudAuthEnabled(),

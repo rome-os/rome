@@ -5,12 +5,12 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
-import { ownerOf } from "../../webchat/owner.js";
+import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
-  canOpenChat,
   type ConciergeService,
   isConciergeChat,
+  privateOwnerOf,
   isMainConciergeChat,
   TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
@@ -155,7 +155,7 @@ import type {
   BackendTurnOptions,
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
-import { withReplyContext } from "../../agent/index.js";
+import { currentMessageSection, withReplyContext } from "../../agent/index.js";
 import {
   answersFromQuestionCard,
   parseAskQuestionInput,
@@ -2771,67 +2771,37 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const app = new Hono();
 
-  // A Concierge chat and the task chats it starts are their owner's alone:
-  // to anyone else they do not exist (docs/domains/chats.md#concierge-chat).
-  const callerOwner = currentChatOwner;
-  // Fails closed: only a chat that exists and the caller may open passes.
-  // Two routes share the pattern without naming a chat, and pass through.
-  const privateChatGate: MiddlewareHandler = async (c, next) => {
+  // Only a chat that exists passes. Two routes share the pattern without
+  // naming a chat, and pass through.
+  const chatGate: MiddlewareHandler = async (c, next) => {
     if (/\/chat\/sessions\/search$|\/sessions\/messages\//.test(c.req.path)) return next();
     const sessionId = c.req.param("id") ?? c.req.param("sessionId") ?? "";
-    if (
-      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, await callerOwner()))
-    ) {
+    if (!(await deps.webchatRepo.getSession(sessionId))) {
       return c.json({ error: "Session not found" }, 404);
     }
     await next();
   };
   for (const path of ["/sessions/:id/*", "/chat/sessions/:id", "/chat/sessions/:id/*"]) {
-    app.use(path, privateChatGate);
+    app.use(path, chatGate);
   }
-  // A turn or a message reached by its own id is its chat's, and kept the same
-  // way: refused when any chat it may belong to is one the caller may not open.
-  const privateByIdGate =
-    (openTo: (id: string, owner: string | null) => Promise<boolean>): MiddlewareHandler =>
-    async (c, next) => {
-      const id = c.req.param("id") ?? c.req.param("turnId") ?? "";
-      if (!(await openTo(id, await callerOwner()))) return c.json({ error: "Not found" }, 404);
-      await next();
-    };
-  // Fails closed: open only when the chats found are all ones the caller may
-  // open, and at least one is found.
-  const chatsOpenTo = async (chatIds: (string | null | undefined)[], owner: string | null) => {
-    const found = chatIds.filter((chatId): chatId is string => Boolean(chatId));
-    if (found.length === 0) return false;
-    for (const chatId of found) {
-      if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
-        return false;
-      }
-    }
-    return true;
-  };
   // A turn answers for the chat it runs in: its dashboard stream's, its
   // registered stream's (every one names the chat it is recorded in), else
   // its stored messages'. A turn whose chat is gone, or that names none, is
-  // not found to anyone.
-  const turnOpenTo = async (turnId: string, owner: string | null) => {
+  // not found.
+  app.use("/chat/turns/:turnId/*", async (c, next) => {
+    const turnId = c.req.param("turnId") ?? "";
     const registered = deps.agentTurnStreamRegistry.get(turnId);
-    if (registered && !registered.chatId) return false;
-    return chatsOpenTo(
-      [
-        streamsByTurnId.get(turnId)?.sessionId,
-        registered?.chatId,
-        await deps.webchatRepo.sessionIdOfTurn(turnId),
-      ],
-      owner,
-    );
-  };
-  const messageOpenTo = async (messageId: string, owner: string | null) =>
-    chatsOpenTo([await deps.webchatRepo.sessionIdOfMessage(messageId)], owner);
-  app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
-  app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
-  app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
-  // After the gates: a chat's outputs are as private as the chat.
+    const chatIds = [
+      streamsByTurnId.get(turnId)?.sessionId,
+      registered?.chatId,
+      await deps.webchatRepo.sessionIdOfTurn(turnId),
+    ].filter((chatId) => typeof chatId === "string");
+    const chats = await Promise.all(chatIds.map((id) => deps.webchatRepo.getSession(id)));
+    if ((registered && !registered.chatId) || chats.length === 0 || chats.includes(null)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    await next();
+  });
   app.route("/", chatOutputsRoutes(deps));
 
   app.get("/sessions/:id/messages", async (c) => {
@@ -2898,7 +2868,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const ownerKey =
       c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
-    const sessions = await deps.webchatRepo.listSessions(status, ownerKey, await callerOwner());
+    const sessions = await deps.webchatRepo.listSessions(
+      status,
+      ownerKey,
+      await currentChatOwner(),
+    );
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -2953,11 +2927,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    // Chats the caller may not open are left out before the limit, so all 20
-    // are ones they may open.
+    // Other people's Concierge and task chats are left out before the limit,
+    // so all 20 are ones a list shows the caller.
     const matches = await deps.webchatRepo.searchSessionMessages(query, {
       sessionLimit: 20,
-      visibleTo: await callerOwner(),
+      visibleTo: await currentChatOwner(),
     });
     return c.json(
       matches.map((match) => ({
@@ -3237,7 +3211,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const session = await deps.webchatRepo.markSessionRead(sessionId);
+    // What a Concierge or task chat counts as unread is its owner's.
+    const owner = privateOwnerOf(lookup.session);
+    const session =
+      owner === null || owner === (await currentChatOwner())
+        ? await deps.webchatRepo.markSessionRead(sessionId)
+        : lookup.session;
     if (!session) return c.json({ error: "Session not found" }, 404);
     return c.json({
       sessionId,
@@ -3365,7 +3344,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(sessionResponse(session, messageCount));
   });
 
-  // The checks pending in a chat, which its owner can cancel there.
+  // The checks pending in a chat, which any member can cancel there.
   app.get("/chat/sessions/:id/checks", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
@@ -3605,7 +3584,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // one list of their links. A visitor sees only their own; someone not
   // signed in sees none.
   app.get("/chat/shares", async (c) => {
-    const shares = await deps.webchatRepo.listSharedChatsByOwner(await callerOwner());
+    const shares = await deps.webchatRepo.listSharedChatsByOwner(await currentChatOwner());
     return c.json(
       shares.map((s) => ({
         id: s.id,
@@ -3645,7 +3624,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // A reply chain around a message, or before or after one of its messages
   // (docs/domains/chats.md#chat-thread). Under /chat/sessions/:id, so
-  // privateChatGate applies.
+  // chatGate applies.
   app.get("/chat/sessions/:id/messages/:messageId/thread", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -4371,23 +4350,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
-    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // A Concierge chat holds only people's messages and the Concierge's. A
     // routine, an app or another agent sending into it wakes the Concierge
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
     if (automated && isConciergeChat(session)) {
-      // An action's loopback send stands for the person its turn ran for,
-      // known here only by kind. That person must be able to open the chat,
-      // as on any send into a dashboard chat: a visitor's, of no known
-      // account, opens no one's. A send no person made is Rome's own work.
-      const actorKind = sourceId ? body.automatedActorKind : undefined;
-      if (
-        actorKind === "visitor" ||
-        (actorKind === "guardian" &&
-          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
-      ) {
-        return answer({ error: "Session not found" }, 404);
-      }
       const concierge = deps.concierge;
       const text = body.text?.trim() ?? "";
       // A turn takes only the text: files are refused, not dropped.
@@ -4395,13 +4362,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
       }
       const source = automatedInputSource(automated);
+      // An action's loopback send names its person by kind alone. One made
+      // for someone the chat may not belong to is not its owner's request.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      const anothers =
+        actorKind === "visitor" ||
+        (actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);
       void concierge
         .runSystemTurn(
           sessionId,
           automatedInputPrompt(
             source,
             text,
-            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+            !anothers && fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
           ),
           {
             quiet: true,
@@ -4632,12 +4605,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : [];
     const turnPrompt =
       skippedCardIds.length > 0
-        ? "(The guardian skipped your open card and replied in chat instead. " +
+        ? "(They skipped your open card and replied in chat instead. " +
           `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
     // keeps it.
-    const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    // A message a person writes in a Concierge chat names them, the owner too,
+    // since every member writes there.
+    const sender =
+      isConciergeChat(session) && !saidBy && actor
+        ? (await resolveChatSenders(deps, new Map([["", actor]]))).get("")
+        : undefined;
+    const writer = sender ? { name: sender.name ?? sender.kind } : null;
+    const quotedPrompt = reply
+      ? withReplyContext(turnPrompt, reply.promptLine, writer)
+      : writer
+        ? currentMessageSection(turnPrompt, writer).join("\n")
+        : turnPrompt;
     const repliedPrompt =
       body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
@@ -4655,8 +4639,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const noticedPrompt = automated
       ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
       : contextPrompt;
-    // A Concierge turn opens with the chat it runs in and the person it
-    // serves, on each turn, so a rename reaches a running session (rome-os/rome#1739).
+    // A Concierge turn opens with the chat it runs in and the person whose
+    // chat it is, on each turn, so a rename reaches a running session (rome-os/rome#1739).
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
@@ -5425,8 +5409,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const actingActor = said.taskActor ?? turnActor(actor, saidBy);
+    // A push goes to the chat's owner, so in a private chat only the reply to
+    // the owner's own message pushes.
+    const pushesTo = privateOwnerOf(session);
     const options = {
-      ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      ...(replyPushes(actor, saidBy) && (!pushesTo || pushesTo === sessionOwnerKey(actor))
+        ? { pushLevel: "active" as const }
+        : {}),
       // Who the turn acts for, captured now: its tool calls run as this
       // person however late the model's callback arrives.
       ...(actingActor ? { actor: actingActor } : {}),
@@ -5792,16 +5781,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  // A socket reaches the chats its person's dashboard opens, as the routes' gate allows.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    const owner = await currentChatOwner();
-    if (!owner || !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
-      return "Session not found";
-    }
-    return isConciergeChat(await deps.webchatRepo.getSession(chatId))
-      ? null
-      : "A voice conversation is only for a Concierge chat";
+    const chat = await deps.webchatRepo.getSession(chatId);
+    if (!chat) return "Session not found";
+    return isConciergeChat(chat) ? null : "A voice conversation is only for a Concierge chat";
   };
 
   const runtime: WebchatRuntime = {

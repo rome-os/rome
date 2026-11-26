@@ -1,7 +1,7 @@
 name: Rome Node package
 
 # The unit suites of the packages run in ci.yml. This workflow checks the
-# standalone npm archives, the Web UI bundle budget, and the Docker image.
+# standalone npm archives, the Web UI bundle budget, native helper, and Docker image.
 # release.yml calls it via workflow_call whenever @rome-os/node releases to
 # publish the multi-platform image (version, latest, and commit SHA). A manual
 # run on main can also publish on demand.
@@ -62,6 +62,27 @@ permissions:
   contents: read
 
 jobs:
+  macos-native:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Compile and test the native helper without signing
+        run: |
+          set -euo pipefail
+          script=packages/rome-node-core/scripts/computer-use.swift
+          app="$RUNNER_TEMP/rome-native/Rome Computer Use.app"
+          swift "$script" build --self-test-build --app "$app"
+          swift "$script" test --app "$app"
+          if output=$(swift "$script" verify --release --app "$app" 2>&1); then
+            echo "::error::The release verifier accepted the compile-only helper."
+            exit 1
+          fi
+          printf '%s\n' "$output"
+          [[ "$output" == "A compile-only helper cannot be released or installed." ]]
+
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 15

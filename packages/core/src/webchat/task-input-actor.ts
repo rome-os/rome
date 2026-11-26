@@ -6,7 +6,7 @@ import type { Account } from "@rome-os/app-runtime";
 import type { Audience } from "../agent/index.js";
 import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
 import type { Body } from "../chats/send.js";
-import { isConciergeChat, privateOwnerOf, TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
+import { isConciergeChat, TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
 import type { WebChatRepository } from "./repository.js";
 
 export interface TaskInputSource {
@@ -94,7 +94,7 @@ export function claimTaskInputActor(
   return claim;
 }
 
-/** Only the same person's Concierge may hand an input to its private task chat. */
+/** Only the Concierge chat a task chat reports to may hand it an input. */
 export async function taskInputActor(
   claim: TaskInputClaim,
   repository: Pick<WebChatRepository, "getSession">,
@@ -109,7 +109,7 @@ export async function taskInputActor(
   return actor;
 }
 
-/** Recheck ownership after async setup, before the one permitted admission. */
+/** Recheck the chats after async setup, before the one permitted admission. */
 export async function refreshTaskInputActor(
   claim: TaskInputClaim,
   repository: Pick<WebChatRepository, "getSession">,
@@ -133,19 +133,16 @@ async function checkTaskInputActor(
     repository.getSession(claim.target),
     sourceOfTask(claim.target),
   ]);
-  const owner = sessionOwnerKey(claim.source.actor);
   if (
     !current(claim) ||
-    !owner ||
+    !sessionOwnerKey(claim.source.actor) ||
     !source ||
     !target ||
     origin !== claim.source.chatId ||
     !isConciergeChat(source) ||
     target.triggerKind !== TASK_CHAT_TRIGGER_KIND ||
     source.archivedAt !== null ||
-    target.archivedAt !== null ||
-    privateOwnerOf(source) !== owner ||
-    privateOwnerOf(target) !== owner
+    target.archivedAt !== null
   )
     throw new Error("Task input attribution is unavailable");
   return claim.source.actor;
