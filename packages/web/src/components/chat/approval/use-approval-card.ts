@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchApproval, resolveApproval } from "@/lib/chat-api";
 import { sameApproval } from "@/lib/chat-helpers";
+import { fetchJson } from "@/lib/fetch-json";
 import { grantVaultSecret } from "@/lib/vault-api";
 import { emitSessionsChanged } from "@/lib/session-events";
 import type { ApprovalCardStatus, ApprovalRecord } from "@/lib/chat-types";
@@ -21,10 +22,19 @@ export interface UseApprovalCardArgs {
 
 /** What approving a vault secret sends besides the approval: the grant and the guardian's PIN. */
 interface SecretGrant {
+  kind?: "secret_access";
   names: string[];
   ttlMinutes: number;
   pin: string;
 }
+
+/** What approving an app connection access request sends: optional policy expiration. */
+interface ConnectionAccessGrant {
+  kind: "connection_access";
+  expiresAt: string | null;
+}
+
+type ApprovalGrant = SecretGrant | ConnectionAccessGrant;
 
 export interface UseApprovalCardResult {
   status: ApprovalCardStatus;
@@ -32,8 +42,8 @@ export interface UseApprovalCardResult {
   record: ApprovalRecord | null;
   submitting: Intent | null;
   submitError: string | null;
-  /** With a `grant`, approving goes through the vault, which checks the PIN. */
-  submit: (intent: Intent, grant?: SecretGrant) => Promise<void>;
+  /** With a `grant`, approving routes to the matching specialized grant endpoint. */
+  submit: (intent: Intent, grant?: ApprovalGrant) => Promise<void>;
 }
 
 export function useApprovalCard({
@@ -143,11 +153,20 @@ export function useApprovalCard({
     onResolvedRef.current();
   }, [isTerminal]);
 
-  const submit = async (intent: Intent, grant?: SecretGrant) => {
+  const submit = async (intent: Intent, grant?: ApprovalGrant) => {
     setSubmitting(intent);
     setSubmitError(null);
     try {
-      if (grant) {
+      if (grant?.kind === "connection_access") {
+        await fetchJson<{ ok: true }>(
+          `/api/app-connection-access/approvals/${encodeURIComponent(approvalId)}/approve`,
+          {
+            method: "POST",
+            json: { expiresAt: grant.expiresAt },
+            fallback: t("approvals.errors.approveFallback"),
+          },
+        );
+      } else if (grant) {
         // A failed grant throws an error whose message the guardian reads.
         await grantVaultSecret({ approvalId, ...grant });
       } else {

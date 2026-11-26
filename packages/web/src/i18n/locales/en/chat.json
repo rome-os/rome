@@ -450,6 +450,20 @@
       "rejectFallback": "Failed to reject",
       "approveStatus": "Failed to approve ({{status}})",
       "rejectStatus": "Failed to reject ({{status}})"
+    },
+    "connectionAccess": {
+      "title": "Allow {{appName}} to access {{connectionLabel}}",
+      "readCount": "{{count}} read",
+      "writeCount": "{{count}} write",
+      "writeApprovalNote": "Write actions still ask for your approval each time",
+      "showDetails": "View {{count}} permissions",
+      "hideDetails": "Hide permissions",
+      "readBadge": "Read",
+      "writeBadge": "Write · asks each time",
+      "expiryLabel": "Expires",
+      "allow": "Grant access",
+      "allowed": "Granted {{appName}} access to {{connectionLabel}}",
+      "rejected": "Declined {{appName}} access to {{connectionLabel}}"
     }
   },
   "composer": {

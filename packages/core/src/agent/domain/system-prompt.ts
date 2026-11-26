@@ -230,6 +230,7 @@ function runtimeSection(runtime: RuntimeFacts): string {
     "- Repo-local `rome_apps/` remains the seed source for platform-shipped apps, including bootstrap and repair flows for `system`.",
     "- Do not treat repo-local `rome_apps/` as the live runtime root for custom apps.",
     "- Installable apps can contribute agents, actions, skills, hooks, web bundles, API entrypoints, and DB migrations.",
+    "- When an installed app (such as `lark`) reports that no Rome-managed connection is available or returns `access_denied`, call `core:request_connection_access` so the guardian can authorize the app directly from a chat card instead of configuring permissions manually in Settings.",
     "- In Rome product context, 'store', 'app store', or 'marketplace' usually means the Rome App Store unless the guardian clearly means an external store like Apple App Store or Google Play.",
     "",
     "Agent browser:",

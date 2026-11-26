@@ -429,7 +429,7 @@ import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import type { ResolvedApp } from "./apps/state.js";
+import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import {
@@ -1064,7 +1064,15 @@ async function main() {
     connectionRegistry,
     appConnectionAccessRepo,
     actionEngine,
-    { isReady: () => appConnectionAccessReady },
+    {
+      isReady: () => appConnectionAccessReady,
+      lookupApp: (appId) => {
+        const view = appCatalog.get(appId);
+        return isResolvedApp(view)
+          ? { id: view.appId, displayName: view.displayName, enabled: view.enabled }
+          : null;
+      },
+    },
   );
   appConnections.registerActions(actionRegistry);
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");

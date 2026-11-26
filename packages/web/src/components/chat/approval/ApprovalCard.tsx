@@ -6,16 +6,21 @@ import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
   approvalOutcome,
+  connectionAccessOutcome,
   secretAccessOutcome,
   SettledCard,
 } from "@/components/chat/entries/SettledCard";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
+import { ConnectionAccessCard } from "./ConnectionAccessCard";
 import { SecretAccessCard } from "./SecretAccessCard";
 import { secretNames } from "./secret-names";
 import { useApprovalCard } from "./use-approval-card";
 
 /** The action whose approval draws as a key card. */
 const VAULT_APPLY_ACTION = "system:vault_apply";
+
+/** The action whose approval draws as a connection access card. */
+const REQUEST_CONNECTION_ACCESS_ACTION = "core:request_connection_access";
 
 const STATUS_BADGE_TONES: Record<ApprovalCardStatus, string> = {
   pending: "bg-warning-bg text-warning-fg border-warning-border",
@@ -64,6 +69,10 @@ export function ApprovalCard({
   // as a generic card, with its action name.
   const secretAccess =
     actionName === VAULT_APPLY_ACTION && preview.kind === "secret_access" ? preview : null;
+  const connectionAccess =
+    actionName === REQUEST_CONNECTION_ACCESS_ACTION && preview.kind === "connection_access"
+      ? preview
+      : null;
   const statusLabel = t(`approvals.status.${status}`);
   const headerTitle =
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
@@ -71,18 +80,22 @@ export function ApprovalCard({
   if (settled === "fold" && status !== "pending") {
     return (
       <SettledCard
-        // A secret-access request folds to its one outcome line.
+        // A secret-access or connection-access request folds to its one outcome line.
         title={
-          secretAccess
+          secretAccess || connectionAccess
             ? null
-            : preview.kind === "generic" || preview.kind === "secret_access"
+            : preview.kind === "generic" ||
+                preview.kind === "secret_access" ||
+                preview.kind === "connection_access"
               ? preview.title
               : resolvedActionName
         }
         outcome={
           secretAccess
             ? secretAccessOutcome(t, secretAccess, status, record?.resolvedBy)
-            : approvalOutcome(t, status, record?.resolvedBy)
+            : connectionAccess
+              ? connectionAccessOutcome(t, connectionAccess, status, record?.resolvedBy)
+              : approvalOutcome(t, status, record?.resolvedBy)
         }
         full={
           <ApprovalCard
@@ -118,6 +131,28 @@ export function ApprovalCard({
                   ttlMinutes: secretAccess.ttlMinutes,
                   pin,
                 },
+          )
+        }
+      />
+    );
+  }
+
+  if (connectionAccess) {
+    return (
+      <ConnectionAccessCard
+        preview={connectionAccess}
+        header={header}
+        pending={record !== null && status === "pending"}
+        awaiting={!isTerminal && status === "pending"}
+        failure={status === "failed" ? record?.executionError : null}
+        submitting={submitting}
+        submitError={submitError}
+        submit={(intent, options) =>
+          submit(
+            intent,
+            intent === "approve" && options
+              ? { kind: "connection_access", expiresAt: options.expiresAt }
+              : undefined,
           )
         }
       />

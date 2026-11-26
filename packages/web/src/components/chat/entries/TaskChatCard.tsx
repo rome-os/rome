@@ -14,7 +14,12 @@ import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { QuestionCard } from "./QuestionCard";
 import { WidgetHostContext } from "./widget-ui/turn-fields";
 import { cardWaits } from "../waiting-task-cards";
-import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
+import {
+  answerOutcome,
+  approvalOutcome,
+  connectionAccessOutcome,
+  SettledCard,
+} from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
@@ -127,6 +132,27 @@ const previewSchema = z
       text: z.string(),
       reason: z.string().optional(),
     }),
+    z.object({
+      kind: z.literal("connection_access"),
+      appId: z.string(),
+      appName: z.string(),
+      connectionId: z.string(),
+      connectionKind: z.string(),
+      connectionLabel: z.string(),
+      identity: z.string(),
+      preset: z.enum(["read", "read_and_write", "custom"]),
+      operations: z.array(
+        z.object({
+          name: z.string(),
+          sideEffect: z.enum(["read-only", "write"]),
+          summary: z.string().optional(),
+          approvalRequired: z.boolean().optional(),
+        }),
+      ),
+      reason: z.string(),
+      title: z.string(),
+      summary: z.string(),
+    }),
   ])
   .optional()
   .catch(undefined);
@@ -160,7 +186,12 @@ function FoldedAskCard({ card }: { card: AskedCard }) {
           : t("concierge.ask.waitingBelow");
   } else if (card.kind === "approval") {
     const { status, resolvedBy } = decided(card.outcome);
-    outcome = approvalOutcome(t, status, resolvedBy);
+    const parsedPreview = previewOf(card);
+    outcome =
+      card.actionName === "core:request_connection_access" &&
+      parsedPreview.kind === "connection_access"
+        ? connectionAccessOutcome(t, parsedPreview, status, resolvedBy)
+        : approvalOutcome(t, status, resolvedBy);
   } else {
     outcome = answerOutcome(
       t,

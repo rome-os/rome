@@ -26,6 +26,13 @@ import type {
 import type { GrantValue } from "./grant.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
+import {
+  createRequestConnectionAccessAction,
+  REQUEST_CONNECTION_ACCESS_ACTION,
+  type AppCatalogLookup,
+} from "./request-connection-access.js";
+
+export { REQUEST_CONNECTION_ACCESS_ACTION };
 
 const READ_ACTION = "core:app_connection_read";
 export const APP_CONNECTION_WRITE_ACTION = "core:app_connection_write";
@@ -170,6 +177,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly rateWindowMs: number;
   private readonly now: () => number;
   private readonly isReady: () => boolean;
+  private readonly lookupApp?: AppCatalogLookup;
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -180,12 +188,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       rateWindowMs?: number;
       now?: () => number;
       isReady?: () => boolean;
+      lookupApp?: AppCatalogLookup;
     } = {},
   ) {
     this.invokeLimit = options.invokeLimit ?? DEFAULT_INVOKE_LIMIT;
     this.rateWindowMs = options.rateWindowMs ?? DEFAULT_RATE_WINDOW_MS;
     this.now = options.now ?? Date.now;
     this.isReady = options.isReady ?? (() => true);
+    this.lookupApp = options.lookupApp;
   }
 
   forApp(appId: string): AppConnectionsCapability {
@@ -196,6 +206,16 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     registry.register(this.action(READ_ACTION, "read", false));
     registry.register(this.action(APP_CONNECTION_WRITE_ACTION, "write", true));
     registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
+    if (this.lookupApp) {
+      registry.register(
+        createRequestConnectionAccessAction({
+          registry: this.registry,
+          access: this.access,
+          lookupApp: this.lookupApp,
+          isReady: this.isReady,
+        }),
+      );
+    }
   }
 
   async list(

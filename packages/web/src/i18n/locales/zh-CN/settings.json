@@ -1089,51 +1089,82 @@
     }
   },
   "connectionAppAccess": {
-    "title": "应用连接权限与审计",
-    "access": "应用权限",
-    "audit": "审计日志",
-    "app": "已安装的应用",
+    "title": "应用访问权限",
+    "access": "已授权应用",
+    "audit": "调用记录",
+    "app": "应用",
     "appOption": "{{name}} · {{id}}",
     "identity": "连接身份",
-    "hasGrants": "已有授权",
+    "hasGrants": "已有权限",
     "disabled": "已停用",
-    "grantReads": "授予全部读取权限",
-    "revokeAll": "撤销全部授权",
-    "refresh": "刷新权限",
-    "grant": "授权",
-    "save": "保存更改",
+    "needsAttention": "需检查",
+    "back": "返回",
+    "addApp": "添加应用",
+    "authorizeManually": "手动授权应用",
+    "manualPanelTitle": "为应用授予访问权限",
+    "configureManually": "逐项配置",
+    "presetLabel": "权限范围",
+    "presetRead": "仅只读",
+    "presetReadAndWrite": "只读 + 写入",
+    "presetReadHint": "允许读取文档、云盘、知识库、表格、日历和聊天记录。",
+    "presetReadAndWriteHint": "包含全部只读权限及写入权限；每次写入操作仍会先请你确认。",
+    "grantAndOpen": "一键授权",
+    "cancel": "取消",
+    "close": "收起",
+    "readCount": "{{count}} 项只读",
+    "writeCount": "{{count}} 项写入",
+    "noActiveGrants": "暂无生效权限",
+    "emptyAuthorizedTitle": "暂无已授权应用",
+    "emptyAuthorizedDescription": "当你在对话中让助手使用飞书等应用时，助手会直接发送授权卡片供你一键确认。",
+    "grantReads": "授予全部只读",
+    "revokeAll": "撤销全部",
+    "refresh": "刷新",
+    "grant": "授予权限",
+    "save": "保存设置",
     "revoke": "撤销",
     "retry": "重试",
-    "loadingApps": "正在加载已安装的应用…",
-    "emptyApps": "尚未安装应用。",
-    "emptyOperations": "此身份没有可供应用使用的操作。",
-    "loadFailed": "无法加载应用权限。",
-    "saveFailed": "无法更新应用权限。",
-    "policyConflict": "此权限策略已在别处更改。请核对刷新后的策略，再次保存。",
-    "approvalRequired": "需要守护者批准",
-    "requiredScopes": "所需权限范围 · {{scopes}}",
+    "loadingApps": "正在加载已安装应用…",
+    "emptyApps": "当前尚未安装任何应用。",
+    "emptyOperations": "此连接身份暂无可授予应用的操作。",
+    "loadFailed": "无法加载应用访问权限。",
+    "saveFailed": "无法更新应用访问权限。",
+    "policyConflict": "此权限策略已在别处更新，已为你刷新最新内容，请确认后再保存。",
+    "approvalRequired": "需守护者批准",
+    "approvalRequiredShort": "写入需审批",
+    "configureOperation": "配置「{{name}}」的高级选项",
+    "expiresShort": "至 {{date}}",
+    "restrictedDocsShort": "限定 {{count}} 篇文档",
+    "noAllowedDocumentsShort": "当前无允许文档",
+    "requiredScopes": "所需服务商权限 · {{scopes}}",
     "documentIds": "允许访问的文档",
-    "noAllowedDocuments": "当前规则不允许访问任何文档。输入 Docx ID 或链接可更改访问范围。",
-    "documentHelp": "输入 Docx ID、飞书或 Lark Docx 链接，用逗号或换行分隔。留空时允许访问机器人可访问的所有文档。",
-    "invalidDocuments": "请输入最多 100 个有效的 Docx ID、飞书或 Lark Docx 链接。",
-    "expiry": "到期时间",
-    "keepExpiry": "保留到期时间 · {{date}}",
+    "noAllowedDocuments": "当前规则不允许访问任何文档。请输入文档 ID 或链接以修改权限。",
+    "documentHelp": "输入 Docx 文档 ID 或飞书/Lark 文档链接，用逗号或换行分隔；留空表示允许机器人可访问的全部文档。",
+    "invalidDocuments": "最多可输入 100 个有效的 Docx 文档 ID 或飞书/Lark 文档链接。",
+    "expiry": "有效期",
+    "keepExpiry": "保持现有期限 · {{date}}",
     "never": "永不过期",
-    "sevenDays": "7 天后",
-    "thirtyDays": "30 天后",
-    "providerConsole": "服务商控制台",
-    "providerPermissions": "服务商权限",
-    "providerDocs": "服务商文档",
-    "checkScopes": "检查服务商权限范围",
-    "checkingScopes": "正在检查服务商权限范围…",
-    "checkedAt": "检查时间 · {{date}}",
+    "sevenDays": "7 天后过期",
+    "thirtyDays": "30 天后过期",
+    "providerScopesTitle": "服务商权限状态",
+    "providerScopesSubtitle": "核对已授权功能所需的服务商后台权限是否已开通",
+    "providerScopesAllGranted": "所需的 {{total}} 项服务商权限已全部开通",
+    "providerScopesMissingSummary": "缺少 {{missing}} 项服务商权限（共 {{total}} 项）",
+    "providerConsole": "开发者后台",
+    "providerPermissions": "权限后台",
+    "providerDocs": "权限文档",
+    "checkScopes": "检查权限",
+    "checkingScopes": "检查中…",
+    "checkedAt": "检查于 {{date}}",
     "scopeGranted": "已开通",
     "scopeMissing": "未开通",
-    "noRequiredScopes": "所选应用在此身份下的有效授权无需服务商权限范围。",
-    "auditApp": "按应用筛选",
+    "scopeOr": "或",
+    "expandDetails": "展开详情",
+    "collapseDetails": "收起详情",
+    "noRequiredScopes": "当前生效授权无需额外检查服务商权限范围。",
+    "auditApp": "应用",
     "allApps": "全部应用",
-    "loadingAudit": "正在加载审计日志…",
-    "auditFailed": "无法加载审计日志。",
+    "loadingAudit": "正在加载调用记录…",
+    "auditFailed": "无法加载调用记录。",
     "emptyAudit": "暂无调用记录。",
     "loadMore": "加载更多",
     "auditError": "错误码 · {{code}}",
@@ -1151,25 +1182,103 @@
       "scopes": "权限范围",
       "other": "其他操作"
     },
+    "operations": {
+      "feishu_scopes_list": {
+        "title": "查询机器人权限",
+        "description": "检查当前飞书机器人已开通的服务商权限列表"
+      },
+      "feishu_document_read": {
+        "title": "读取文档",
+        "description": "读取云文档的标题与正文内容"
+      },
+      "feishu_document_create": {
+        "title": "创建文档",
+        "description": "新建空白或带初始内容的云文档"
+      },
+      "feishu_document_update": {
+        "title": "修改文档",
+        "description": "向云文档追加或覆盖写入内容"
+      },
+      "feishu_drive_inspect": {
+        "title": "查看云盘元数据",
+        "description": "解析飞书链接并读取文件或文档的基础信息"
+      },
+      "feishu_wiki_spaces": {
+        "title": "列出知识空间",
+        "description": "查看机器人可访问的飞书知识库空间列表"
+      },
+      "feishu_wiki_node_get": {
+        "title": "读取知识库节点",
+        "description": "解析知识库页面节点及其关联的文档或表格"
+      },
+      "feishu_wiki_nodes_list": {
+        "title": "列出知识库目录",
+        "description": "浏览知识空间或父节点下的子页面列表"
+      },
+      "feishu_base_get": {
+        "title": "读取多维表格信息",
+        "description": "获取多维表格应用名称与基础元数据"
+      },
+      "feishu_base_tables_list": {
+        "title": "列出数据表",
+        "description": "查看多维表格中的所有数据表"
+      },
+      "feishu_base_fields_list": {
+        "title": "列出表格字段",
+        "description": "读取指定数据表的列定义与字段类型"
+      },
+      "feishu_base_records_list": {
+        "title": "读取表格记录",
+        "description": "分页查询数据表中的行记录"
+      },
+      "feishu_sheets_info": {
+        "title": "读取电子表格信息",
+        "description": "获取电子表格元数据与工作表列表"
+      },
+      "feishu_sheets_cells_read": {
+        "title": "读取单元格数据",
+        "description": "按范围读取电子表格中的单元格内容"
+      },
+      "feishu_calendar_events_list": {
+        "title": "列出日程",
+        "description": "按时间范围读取机器人可访问的日历日程"
+      },
+      "feishu_calendar_event_get": {
+        "title": "读取日程详情",
+        "description": "查看单条日程的完整时间、地点与说明"
+      },
+      "feishu_calendar_events_search": {
+        "title": "搜索日程",
+        "description": "按关键词检索日历中的日程安排"
+      },
+      "feishu_calendar_event_create": {
+        "title": "创建日程",
+        "description": "在日历中新建日程并可邀请参会人"
+      },
+      "feishu_im_messages_list": {
+        "title": "读取聊天记录",
+        "description": "获取指定会话中的历史消息记录"
+      }
+    },
     "sideEffect": {
       "read-only": "只读",
       "write": "写入",
-      "unknown": "操作类型未知"
+      "unknown": "类型未知"
     },
     "grantStatus": {
       "current": "已授权",
-      "authorization_required": "连接需要授权",
+      "authorization_required": "连接需重新授权",
       "replaced": "连接授权已更换",
       "unavailable": "授权不可用"
     },
     "identityState": {
-      "needs_authorization": "请先为连接授权，再授予应用权限。",
-      "unhealthy": "请先修复连接，再授予应用权限。",
-      "unsupported": "此连接身份无法执行应用操作。"
+      "needs_authorization": "请先完成连接授权，再管理应用访问权限。",
+      "unhealthy": "请先修复连接异常，再管理应用访问权限。",
+      "unsupported": "此连接身份暂不支持应用访问操作。"
     },
     "scopeStatus": {
-      "checked": "已检查服务商权限范围。",
-      "unsupported": "此服务商不支持检查权限范围。",
+      "checked": "已完成服务商权限检查。",
+      "unsupported": "此服务商不支持在线检查权限范围。",
       "unavailable": "连接当前不可用，无法检查权限范围。",
       "error": "无法检查服务商权限范围。"
     },

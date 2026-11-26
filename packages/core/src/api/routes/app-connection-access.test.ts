@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { createTestDb } from "../../test/db.js";
 import { AppConnectionAccessRepository } from "../../connections/app-connection-access.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
+import { entryStep } from "../../test/entry-step.js";
 import type { ApiDeps } from "../deps.js";
 import { appConnectionAccessRoutes } from "./app-connection-access.js";
 
@@ -25,6 +26,8 @@ function makeApp(
       grantedAt: Date;
       grantEpoch: string;
     }>;
+    approvalsRepo?: Record<string, unknown>;
+    approvalHandler?: Record<string, unknown>;
   } = {},
 ) {
   const { db, close } = createTestDb();
@@ -123,6 +126,7 @@ function makeApp(
         appId === "notes" || appId === "@acme/notes"
           ? {
               appId,
+              displayName: "Notes",
               enabled: options.appEnabled?.() ?? true,
               state: "installed",
               manifest: {},
@@ -142,8 +146,11 @@ function makeApp(
         })),
     },
     appConnectionAccessRepo: access,
+    approvalsRepo: options.approvalsRepo,
+    approvalHandler: options.approvalHandler,
   } as unknown as ApiDeps;
   const app = new Hono();
+  app.use("*", entryStep());
   app.route("/", appConnectionAccessRoutes(deps));
   const request = (
     path: string,
@@ -696,6 +703,96 @@ describe("Connection-scoped App access", () => {
       );
       expect((await h.request(path + "/audit?limit=101")).status).toBe(400);
       expect((await h.request(path + "/audit?beforeSeq=-1")).status).toBe(400);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("approves pending connection access requests with optional expiry and enforces origin and state", async () => {
+    const onApproved = rs.fn(async () => {});
+    const pendingApproval = {
+      id: "appr-conn-1",
+      type: "action_execution",
+      status: "pending",
+      payload: {
+        actionName: "core:request_connection_access",
+        args: {
+          appId: "notes",
+          connectionKind: "fake-docs",
+          preset: "read_and_write",
+          reason: "Read and create notes",
+        },
+      },
+    };
+    let currentApproval: typeof pendingApproval | null = pendingApproval;
+    const h = makeApp({
+      approvalsRepo: {
+        findById: async (id: string) => (id === "appr-conn-1" ? currentApproval : null),
+        resolvePending: async (id: string, action: string) => ({
+          outcome: "resolved",
+          approval: {
+            ...pendingApproval,
+            id,
+            status: action === "approve" ? "approved" : "rejected",
+          },
+        }),
+      },
+      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
+    });
+    try {
+      // Cross-origin rejected
+      expect(
+        (
+          await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({}),
+          })
+        ).status,
+      ).toBe(403);
+
+      // Past expiry rejected
+      expect(
+        (
+          await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
+            method: "POST",
+            headers: sameOrigin,
+            body: JSON.stringify({ expiresAt: "2020-01-01T00:00:00.000Z" }),
+          })
+        ).status,
+      ).toBe(400);
+
+      // Valid approval grants operations with requested expiresAt and resolves approval
+      const expiresAt = new Date(
+        Math.floor(Date.now() / 1000) * 1000 + 7 * 86_400_000,
+      ).toISOString();
+      const res = await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({ expiresAt }),
+      });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({
+        ok: true,
+        grantedOperations: ["documents.get", "documents.create"],
+      });
+      expect(onApproved).toHaveBeenCalledWith("appr-conn-1");
+
+      const policies = await h.access.listActiveForConnection("notes", "connection-1");
+      expect(policies.map((p) => [p.operation, p.approval, p.expiresAt?.toISOString()])).toEqual([
+        ["documents.create", "required", expiresAt],
+        ["documents.get", "not_required", expiresAt],
+      ]);
+
+      // Already-resolved approval returns 409 stale_request
+      currentApproval = { ...pendingApproval, status: "approved" };
+      const stale = await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({}),
+      });
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ code: "stale_request" });
     } finally {
       h.close();
     }

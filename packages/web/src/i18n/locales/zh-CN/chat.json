@@ -450,6 +450,20 @@
       "rejectFallback": "拒绝失败",
       "approveStatus": "批准失败({{status}})",
       "rejectStatus": "拒绝失败({{status}})"
+    },
+    "connectionAccess": {
+      "title": "允许 {{appName}} 访问 {{connectionLabel}}",
+      "readCount": "{{count}} 项只读",
+      "writeCount": "{{count}} 项写入",
+      "writeApprovalNote": "写入操作每次仍会先请你确认",
+      "showDetails": "查看 {{count}} 项权限明细",
+      "hideDetails": "收起权限明细",
+      "readBadge": "只读",
+      "writeBadge": "写入 · 需确认",
+      "expiryLabel": "有效期",
+      "allow": "授权访问",
+      "allowed": "已授权 {{appName}} 访问 {{connectionLabel}}",
+      "rejected": "已拒绝 {{appName}} 访问 {{connectionLabel}}"
     }
   },
   "composer": {

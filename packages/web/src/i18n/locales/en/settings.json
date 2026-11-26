@@ -1089,15 +1089,34 @@
     }
   },
   "connectionAppAccess": {
-    "title": "App Connection Access & Audit",
-    "access": "App Access",
-    "audit": "Audit Log",
-    "app": "Installed app",
+    "title": "App Access",
+    "access": "Authorized apps",
+    "audit": "Activity",
+    "app": "App",
     "appOption": "{{name}} · {{id}}",
     "identity": "Connection identity",
     "hasGrants": "Has grants",
     "disabled": "Disabled",
-    "grantReads": "Grant all read operations",
+    "needsAttention": "Needs attention",
+    "back": "Back",
+    "addApp": "Add app",
+    "authorizeManually": "Authorize an app",
+    "manualPanelTitle": "Authorize an app",
+    "configureManually": "Configure individually",
+    "presetLabel": "Access level",
+    "presetRead": "Read-only",
+    "presetReadAndWrite": "Read & write",
+    "presetReadHint": "Allows reading documents, Drive metadata, Wiki, Base, Sheets, Calendar, and chats.",
+    "presetReadAndWriteHint": "Includes all read-only and write operations. Every write still asks for your approval.",
+    "grantAndOpen": "Grant access",
+    "cancel": "Cancel",
+    "close": "Done",
+    "readCount": "{{count}} read",
+    "writeCount": "{{count}} write",
+    "noActiveGrants": "No active grants",
+    "emptyAuthorizedTitle": "No authorized apps yet",
+    "emptyAuthorizedDescription": "When an agent needs an app to use this connection, it will send an authorization card in chat for one-click approval.",
+    "grantReads": "Grant all reads",
     "revokeAll": "Revoke all",
     "refresh": "Refresh access",
     "grant": "Grant",
@@ -1111,6 +1130,11 @@
     "saveFailed": "Could not update app access.",
     "policyConflict": "This access policy changed elsewhere. Review the refreshed policy before saving again.",
     "approvalRequired": "Guardian approval required",
+    "approvalRequiredShort": "Requires approval",
+    "configureOperation": "Configure {{name}}",
+    "expiresShort": "Until {{date}}",
+    "restrictedDocsShort": "{{count}} docs allowed",
+    "noAllowedDocumentsShort": "No docs allowed",
     "requiredScopes": "Required scopes · {{scopes}}",
     "documentIds": "Allowed documents",
     "noAllowedDocuments": "The current rules allow no documents. Enter Docx IDs or links to change access.",
@@ -1121,18 +1145,25 @@
     "never": "Never",
     "sevenDays": "In 7 days",
     "thirtyDays": "In 30 days",
-    "providerConsole": "Provider console",
-    "providerPermissions": "Provider permissions",
-    "providerDocs": "Provider docs",
-    "checkScopes": "Check provider scopes",
-    "checkingScopes": "Checking provider scopes…",
+    "providerScopesTitle": "Provider permissions",
+    "providerScopesSubtitle": "Verify that required scopes are enabled in the provider console",
+    "providerScopesAllGranted": "All {{total}} required scopes are enabled",
+    "providerScopesMissingSummary": "{{missing}} of {{total}} required scopes missing",
+    "providerConsole": "Developer console",
+    "providerPermissions": "Permissions console",
+    "providerDocs": "Scope docs",
+    "checkScopes": "Check scopes",
+    "checkingScopes": "Checking…",
     "checkedAt": "Checked at {{date}}",
     "scopeGranted": "Granted",
     "scopeMissing": "Missing",
-    "noRequiredScopes": "The selected app has no current grants that require provider scopes for this identity.",
-    "auditApp": "Filter by app",
+    "scopeOr": "or",
+    "expandDetails": "Show details",
+    "collapseDetails": "Hide details",
+    "noRequiredScopes": "Current grants require no provider scopes to verify for this identity.",
+    "auditApp": "App",
     "allApps": "All apps",
-    "loadingAudit": "Loading audit log…",
+    "loadingAudit": "Loading activity…",
     "auditFailed": "Could not load the audit log.",
     "emptyAudit": "No calls recorded.",
     "loadMore": "Load more",
@@ -1151,10 +1182,88 @@
       "scopes": "Scopes",
       "other": "Other operations"
     },
+    "operations": {
+      "feishu_scopes_list": {
+        "title": "List bot scopes",
+        "description": "Check which Feishu scopes are enabled on this bot"
+      },
+      "feishu_document_read": {
+        "title": "Read documents",
+        "description": "Read document titles and content blocks"
+      },
+      "feishu_document_create": {
+        "title": "Create documents",
+        "description": "Create new cloud documents with optional initial content"
+      },
+      "feishu_document_update": {
+        "title": "Update documents",
+        "description": "Append to or overwrite existing cloud documents"
+      },
+      "feishu_drive_inspect": {
+        "title": "Inspect Drive metadata",
+        "description": "Resolve Feishu URLs and inspect file metadata"
+      },
+      "feishu_wiki_spaces": {
+        "title": "List Wiki spaces",
+        "description": "Browse accessible Feishu Wiki spaces"
+      },
+      "feishu_wiki_node_get": {
+        "title": "Read Wiki node",
+        "description": "Resolve a Wiki page node and its backing object"
+      },
+      "feishu_wiki_nodes_list": {
+        "title": "List Wiki pages",
+        "description": "Browse child pages within a Wiki space or node"
+      },
+      "feishu_base_get": {
+        "title": "Read Base info",
+        "description": "Inspect a Bitable app name and metadata"
+      },
+      "feishu_base_tables_list": {
+        "title": "List Base tables",
+        "description": "List tables inside a Bitable app"
+      },
+      "feishu_base_fields_list": {
+        "title": "List table fields",
+        "description": "Read column schemas for a Bitable table"
+      },
+      "feishu_base_records_list": {
+        "title": "Read table records",
+        "description": "Query rows from a Bitable table"
+      },
+      "feishu_sheets_info": {
+        "title": "Read spreadsheet info",
+        "description": "Read spreadsheet metadata and sheet list"
+      },
+      "feishu_sheets_cells_read": {
+        "title": "Read spreadsheet cells",
+        "description": "Read cell values from a spreadsheet range"
+      },
+      "feishu_calendar_events_list": {
+        "title": "List calendar events",
+        "description": "List events in a time range"
+      },
+      "feishu_calendar_event_get": {
+        "title": "Read event details",
+        "description": "Read full details for a single calendar event"
+      },
+      "feishu_calendar_events_search": {
+        "title": "Search calendar events",
+        "description": "Search calendar events by keyword"
+      },
+      "feishu_calendar_event_create": {
+        "title": "Create calendar events",
+        "description": "Create a new calendar event and optionally invite attendees"
+      },
+      "feishu_im_messages_list": {
+        "title": "Read chat messages",
+        "description": "List message history in a chat conversation"
+      }
+    },
     "sideEffect": {
       "read-only": "Read-only",
       "write": "Write",
-      "unknown": "Operation type unknown"
+      "unknown": "Unknown"
     },
     "grantStatus": {
       "current": "Granted",
@@ -1163,8 +1272,8 @@
       "unavailable": "Grant unavailable"
     },
     "identityState": {
-      "needs_authorization": "Authorize the connection to grant app access.",
-      "unhealthy": "Repair the connection to grant app access.",
+      "needs_authorization": "Authorize the connection before managing app access.",
+      "unhealthy": "Repair the connection before managing app access.",
       "unsupported": "This connection identity cannot run app operations."
     },
     "scopeStatus": {

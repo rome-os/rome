@@ -628,22 +628,24 @@ describe("ConnectionDetailBody — App Connection Access & Audit", () => {
     });
     const user = userEvent.setup();
     renderBody(card);
-    const section = await screen.findByRole("region", { name: "App Connection Access & Audit" });
-    expect(await within(section).findByText("github.issue.get")).toBeTruthy();
-    await user.click(within(section).getByRole("tab", { name: "Audit Log" }));
-    const audit = within(within(section).getByRole("tabpanel", { name: "Audit Log" }));
-    expect(await audit.findByText("app-a · github.issue.get")).toBeTruthy();
+    const section = await screen.findByRole("region", { name: "App Access" });
+    expect(await within(section).findByText("No authorized apps yet")).toBeTruthy();
+    await user.click(within(section).getByRole("radio", { name: "Activity" }));
+    const audit = within(section);
+    const firstRow = await audit.findByRole("button", { name: /App A · github\.issue\.get/ });
     expect(audit.getByText("Read-only")).toBeTruthy();
+    await user.click(firstRow);
     expect(audit.getByText("Error code · provider_error")).toBeTruthy();
     await user.click(audit.getByRole("button", { name: "Load more" }));
-    expect(await audit.findByText("app-b · retired.operation")).toBeTruthy();
-    expect(audit.getByText("Operation type unknown")).toBeTruthy();
+    const secondRow = await audit.findByRole("button", { name: /app-b · retired\.operation/ });
+    expect(audit.getByText("Unknown")).toBeTruthy();
+    await user.click(secondRow);
     expect(audit.getByText(/Request hash · hash-9/)).toBeTruthy();
     expect(audit.queryByRole("button", { name: "Load more" })).toBeNull();
-    audit.getByRole("combobox", { name: "Filter by app" }).focus();
+    audit.getByRole("combobox", { name: "App" }).focus();
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-    await waitFor(() => expect(audit.queryByText("app-b · retired.operation")).toBeNull());
-    expect(await audit.findByText("app-a · github.issue.get")).toBeTruthy();
+    await waitFor(() => expect(audit.queryByText(/app-b · retired\.operation/)).toBeNull());
+    expect(await audit.findByText(/App A · github\.issue\.get/)).toBeTruthy();
     expect(rs.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url))).toContain(
       `${endpoint}/audit?appId=app-a`,
     );

@@ -97,9 +97,10 @@ const installedApps = [
 function currentPolicy(
   operation: string,
   constraints: AppConnectionAccessPolicyDto["constraints"] = [],
+  appId = "@a/app-a",
 ): AppConnectionAccessPolicyDto {
   return {
-    appId: "@a/app-a",
+    appId,
     connectionId: "bot-a",
     identity: "app",
     operation,
@@ -191,17 +192,33 @@ function setup({
   return { puts, deletes, requests, client };
 }
 
-function row(operation: string) {
-  return within(screen.getByText(operation).closest("li")!);
+function opRow(operation: string) {
+  const el = document.querySelector<HTMLLIElement>(`li[data-operation="${operation}"]`);
+  if (!el) throw new Error(`Operation row not found: ${operation}`);
+  return within(el);
+}
+
+async function openManualApp(appId: string) {
+  await userEvent.click(await screen.findByRole("button", { name: "Authorize an app" }));
+  fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: appId } });
+  await userEvent.click(screen.getByRole("button", { name: "Configure individually" }));
+}
+
+async function openAuthorizedApp(name: string) {
+  const btn = await screen.findByRole("button", { name: new RegExp(name) });
+  await userEvent.click(btn);
 }
 
 describe("ConnectionAppAccess", () => {
-  it("refreshes only the connection and app list and keeps audit deferred until opened", async () => {
-    const { requests } = setup();
-    await screen.findByText("App A · @a/app-a");
+  it("shows authorized-apps-first overview, defers audit until opened, and refreshes cleanly", async () => {
+    const { requests } = setup({
+      data: { ...detail, policies: [currentPolicy(read)] },
+    });
+    expect(await screen.findByText("App A")).toBeTruthy();
+    expect(screen.queryByText("App B")).toBeNull();
     expect(requests).toEqual([endpoint, "/api/apps"]);
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "app-b" } });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh access" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh access" }));
     await waitFor(() => expect(requests.filter((url) => url === "/api/apps")).toHaveLength(2));
     expect(requests.filter((url) => url === endpoint)).toHaveLength(2);
     expect(requests).toHaveLength(4);
@@ -211,11 +228,11 @@ describe("ConnectionAppAccess", () => {
   it("hides unsupported connections without loading apps and handles an empty catalog", async () => {
     const { requests } = setup({ data: { ...detail, identities: [] } });
     await waitFor(() => expect(requests).toEqual([endpoint]));
-    expect(screen.queryByText("App Connection Access & Audit")).toBeNull();
+    expect(screen.queryByText("App Access")).toBeNull();
     cleanup();
     setup({ apps: [] });
     expect(await screen.findByText("No apps are installed.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Grant" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Authorize an app" })).toBeNull();
   });
 
   it("shows a localized load error and retries the connection before loading apps", async () => {
@@ -223,7 +240,7 @@ describe("ConnectionAppAccess", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("Could not load app access.");
     expect(requests).toEqual([endpoint]);
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await screen.findByText(read);
+    await screen.findByText("No authorized apps yet");
     expect(requests).toEqual([endpoint, endpoint, "/api/apps"]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -236,19 +253,36 @@ describe("ConnectionAppAccess", () => {
     expect(requests).toEqual([endpoint]);
   });
 
-  it("grants, updates, and revokes only the selected app's document access", async () => {
-    const { puts, deletes } = setup();
-    await screen.findByText(read);
+  it("supports quick manual preset authorization from the overview", async () => {
+    const { puts } = setup();
+    await userEvent.click(await screen.findByRole("button", { name: "Authorize an app" }));
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "app-b" } });
-    const input = row(read).getByRole("textbox", { name: "Allowed documents" });
+    await userEvent.click(screen.getByRole("button", { name: "Grant access" }));
+
+    await waitFor(() => expect(puts.map((p) => p.operation)).toEqual([read, spaces]));
+    expect(puts.every((p) => p.appId === "app-b")).toBe(true);
+    // Drills straight into the newly authorized app
+    expect(await screen.findByText("App B")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("button", { name: /App B/ })).toBeTruthy();
+  });
+
+  it("grants, updates, and revokes only the selected app's document access via the inline config tray", async () => {
+    const { puts, deletes } = setup();
+    await openManualApp("app-b");
+
+    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
+    const input = opRow(read).getByRole("textbox", { name: "Allowed documents" });
     fireEvent.change(input, { target: { value: "https://other.test/docx/DocumentA" } });
-    expect(row(read).getByRole<HTMLButtonElement>("button", { name: "Grant" }).disabled).toBe(true);
+    expect(opRow(read).getByRole<HTMLButtonElement>("button", { name: "Grant" }).disabled).toBe(
+      true,
+    );
 
     fireEvent.change(input, {
       target: { value: "DocumentA, https://demo.feishu.cn/docx/DocumentB?from=share\nDocumentA" },
     });
-    fireEvent.change(row(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(row(read).getByRole("button", { name: "Grant" }));
+    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
+    fireEvent.click(opRow(read).getByRole("button", { name: "Grant" }));
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]).toMatchObject({
       appId: "app-b",
@@ -258,9 +292,10 @@ describe("ConnectionAppAccess", () => {
       constraints: [{ inputPointer: "/documentId", allowedValues: ["DocumentA", "DocumentB"] }],
     });
     expect(Date.parse(puts[0].expiresAt!) - Date.now()).toBeGreaterThan(7 * 86_400_000 - 60_000);
-    expect(await screen.findByText("App B · app-b · Has grants")).toBeTruthy();
-    fireEvent.change(row(read).getByRole("textbox"), { target: { value: "" } });
-    fireEvent.click(row(read).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(opRow(read).getByText("2 docs allowed")).toBeTruthy());
+    fireEvent.change(opRow(read).getByRole("textbox"), { target: { value: "" } });
+    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(puts[1]).toMatchObject({
         expectedRevision: 1,
@@ -268,40 +303,42 @@ describe("ConnectionAppAccess", () => {
         expiresAt: puts[0].expiresAt,
       }),
     );
-    await waitFor(() =>
-      expect(row(read).getByRole<HTMLButtonElement>("button", { name: "Revoke" }).disabled).toBe(
-        false,
-      ),
-    );
-    fireEvent.click(row(read).getByRole("button", { name: "Revoke" }));
+
+    // Toggle switch OFF revokes immediately
+    const toggle = opRow(read).getByRole("switch", { name: "Read documents" });
+    await waitFor(() => expect(toggle.getAttribute("data-state")).toBe("checked"));
+    await userEvent.click(toggle);
     await waitFor(() => expect(deletes).toEqual([`${endpoint}/policies/app-b/app/${read}`]));
   });
 
-  it("grants only missing reads and revokes all of the app's grants across identities", async () => {
+  it("toggles operations with Switch, grants missing reads, and revokes all grants across identities", async () => {
     const { puts, deletes } = setup();
-    await screen.findByText(read);
-    expect(row(write).getByText("Guardian approval required")).toBeTruthy();
-    fireEvent.click(row(write).getByRole("button", { name: "Grant" }));
+    await openManualApp("@a/app-a");
+    expect(opRow(write).getByText("Requires approval")).toBeTruthy();
+
+    await userEvent.click(opRow(write).getByRole("switch", { name: "Update documents" }));
     await waitFor(() =>
       expect(puts[0]).toMatchObject({ operation: write, approvalMode: "required" }),
     );
-    const batch = screen.getByRole<HTMLButtonElement>("button", {
-      name: "Grant all read operations",
+
+    const batch = await screen.findByRole<HTMLButtonElement>("button", {
+      name: "Grant all reads",
     });
     await waitFor(() => expect(batch.disabled).toBe(false));
     fireEvent.click(batch);
     await waitFor(() =>
       expect(puts.slice(1).map((item) => item.operation)).toEqual([read, spaces]),
     );
-    await waitFor(() => expect(screen.getByText("App A · @a/app-a · Has grants")).toBeTruthy());
+
     await waitFor(() =>
-      expect(screen.getAllByRole<HTMLSelectElement>("combobox")[1].disabled).toBe(false),
+      expect(screen.getAllByRole<HTMLSelectElement>("combobox")[0].disabled).toBe(false),
     );
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "assistant" } });
-    fireEvent.click(screen.getByRole("button", { name: "Grant all read operations" }));
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "assistant" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Grant all reads" }));
     await waitFor(() =>
       expect(puts[3]).toMatchObject({ operation: "wiki.read", identity: "assistant" }),
     );
+
     const revokeAll = screen.getByRole<HTMLButtonElement>("button", { name: "Revoke all" });
     await waitFor(() => expect(revokeAll.disabled).toBe(false));
     fireEvent.click(revokeAll);
@@ -323,18 +360,20 @@ describe("ConnectionAppAccess", () => {
       { inputPointer: "/documentId", allowedValues: ["A"] },
     ];
     const { puts } = setup({ data: { ...detail, policies: [currentPolicy(read, constraints)] } });
-    await screen.findByText(read);
-    expect(row(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
-    fireEvent.change(row(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(row(read).getByRole("button", { name: "Save changes" }));
+    await openAuthorizedApp("App A");
+    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
+
+    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
+    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
+    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].constraints).toEqual(constraints);
     expect(Date.parse(puts[0].expiresAt!)).toBeGreaterThan(Date.now());
     await waitFor(() =>
-      expect(row(read).getByRole<HTMLSelectElement>("combobox").value).toBe("keep"),
+      expect(opRow(read).getByRole<HTMLSelectElement>("combobox").value).toBe("keep"),
     );
-    fireEvent.change(row(read).getByRole("textbox"), { target: { value: "C" } });
-    fireEvent.click(row(read).getByRole("button", { name: "Save changes" }));
+    fireEvent.change(opRow(read).getByRole("textbox"), { target: { value: "C" } });
+    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(puts[1]?.constraints).toEqual([
         extra,
@@ -346,8 +385,11 @@ describe("ConnectionAppAccess", () => {
   it("keeps a disjoint document policy closed when its empty draft is saved", async () => {
     const rules = ["A", "B"].map((id) => ({ inputPointer: "/documentId", allowedValues: [id] }));
     const { puts } = setup({ data: { ...detail, policies: [currentPolicy(read, rules)] } });
-    await screen.findByText(/current rules allow no documents/);
-    fireEvent.click(row(read).getByRole("button", { name: "Save changes" }));
+    await openAuthorizedApp("App A");
+    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
+
+    expect(await screen.findByText(/current rules allow no documents/)).toBeTruthy();
+    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(puts[0]?.constraints).toEqual(rules));
   });
 
@@ -363,14 +405,16 @@ describe("ConnectionAppAccess", () => {
       detailResponses: [Response.json({ ...detail, policies: [previous] })],
       data: { ...detail, policies: [current] },
     });
-    await screen.findByText(read);
-    expect(row(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A\nB");
+    await openAuthorizedApp("App A");
+    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
+
+    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A\nB");
     const fetch = rs.mocked(globalThis.fetch);
     fetch.mockResolvedValueOnce(
       Response.json({ error: "policy_conflict", message: "Revision mismatch" }, { status: 409 }),
     );
-    fireEvent.change(row(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(row(read).getByRole("button", { name: "Save changes" }));
+    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
+    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
     const feedback = await screen.findByRole("alert");
     expect(feedback.textContent).toBe(
       "This access policy changed elsewhere. Review the refreshed policy before saving again.",
@@ -383,7 +427,7 @@ describe("ConnectionAppAccess", () => {
       constraints: previous.constraints,
     });
     expect(requests.filter((url) => url === endpoint)).toHaveLength(2);
-    expect(row(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
+    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
   });
 
   it("keeps standalone scopes alongside granted alternatives", async () => {
@@ -407,13 +451,13 @@ describe("ConnectionAppAccess", () => {
         },
       ],
     });
-    await userEvent.click(await screen.findByRole("button", { name: "Check provider scopes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Check scopes" }));
     const status = within(await screen.findByRole("status"));
     expect(
       within(status.getByText("tenant.read").closest("li")!).getByText("Missing"),
     ).toBeTruthy();
     expect(
-      within(status.getByText(/calendar:calendar.event:read/).closest("li")!).getByText("Granted"),
+      within(status.getByText("calendar:calendar.event:read").closest("li")!).getByText("Granted"),
     ).toBeTruthy();
   });
 
@@ -432,7 +476,7 @@ describe("ConnectionAppAccess", () => {
         },
       ],
     });
-    await userEvent.click(await screen.findByRole("button", { name: "Check provider scopes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Check scopes" }));
     await screen.findByText("Provider scopes checked.");
     const status = within(screen.getByRole("status"));
     expect(within(status.getByText("docx:read").closest("li")!).getByText("Missing")).toBeTruthy();
@@ -440,7 +484,7 @@ describe("ConnectionAppAccess", () => {
       within(status.getByText("docx:metadata").closest("li")!).getByText("Granted"),
     ).toBeTruthy();
     expect(
-      within(status.getByText(/wiki:space:retrieve/).closest("li")!).getByText("Granted"),
+      within(status.getByText("wiki:space:retrieve").closest("li")!).getByText("Granted"),
     ).toBeTruthy();
     expect(status.getAllByText("Missing")).toHaveLength(1);
   });
@@ -478,24 +522,24 @@ describe("ConnectionAppAccess", () => {
         scopes: granted.map((scopeName) => ({ scopeName, grantStatus: 1 })),
       })),
     });
-    await screen.findByText(operations[0].name);
+    await screen.findByText("App A");
     for (const { expected } of cases) {
-      await userEvent.click(screen.getByRole("button", { name: "Check provider scopes" }));
+      await userEvent.click(screen.getByRole("button", { name: "Check scopes" }));
       await waitFor(() => {
         const status = within(screen.getByRole("status"));
-        for (const [index, label] of [
-          /im:message:readonly/,
-          /drive:drive.metadata:readonly/,
+        for (const [index, scopeText] of [
+          "im:message:readonly",
+          "drive:drive.metadata:readonly",
         ].entries()) {
           expect(
-            within(status.getByText(label).closest("li")!).getByText(expected[index]),
+            within(status.getByText(scopeText).closest("li")!).getByText(expected[index]),
           ).toBeTruthy();
         }
       });
     }
   });
 
-  it("warns against retrying writes with an unknown outcome in the audit log", async () => {
+  it("warns against retrying writes with an unknown outcome in the activity log", async () => {
     setup({
       audit: [
         {
@@ -513,7 +557,7 @@ describe("ConnectionAppAccess", () => {
         },
       ],
     });
-    await userEvent.click(await screen.findByRole("tab", { name: "Audit Log" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "Activity" }));
     const badge = await screen.findByText("Outcome unknown — do not retry");
     expect(badge.className).toContain("bg-warning-bg");
     expect(screen.queryByText("Failed")).toBeNull();
@@ -537,12 +581,18 @@ describe("ConnectionAppAccess", () => {
     });
     const user = userEvent.setup();
     expect(
-      (await screen.findByRole("link", { name: "Provider console" })).getAttribute("href"),
+      (await screen.findByRole("link", { name: "Developer console" })).getAttribute("href"),
     ).toBe("https://open.feishu.cn/app/cli_test");
-    await screen.findByText(read);
-    fireEvent.click(row(read).getByRole("button", { name: "Grant" }));
-    await waitFor(() => expect(row(read).getByText("Granted")).toBeTruthy());
-    const check = () => user.click(screen.getByRole("button", { name: "Check provider scopes" }));
+
+    await openManualApp("@a/app-a");
+    await user.click(opRow(read).getByRole("switch", { name: "Read documents" }));
+    await waitFor(() =>
+      expect(
+        opRow(read).getByRole("switch", { name: "Read documents" }).getAttribute("data-state"),
+      ).toBe("checked"),
+    );
+
+    const check = () => user.click(screen.getByRole("button", { name: "Check scopes" }));
     await check();
     await screen.findByText("Provider scopes checked.");
     expect(within(screen.getByRole("status")).getByText("Granted")).toBeTruthy();

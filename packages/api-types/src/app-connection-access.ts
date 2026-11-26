@@ -76,6 +76,12 @@ export interface PutAppConnectionAccessPolicy {
   expiresAt?: string | null;
 }
 
+export type ConnectionAccessPreset = "read" | "read_and_write" | "custom";
+
+export interface ApproveConnectionAccessRequest {
+  expiresAt?: string | null;
+}
+
 export interface AppConnectionAccessAuditEntryDto {
   seq: number;
   appId: string;

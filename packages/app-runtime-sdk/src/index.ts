@@ -255,6 +255,27 @@ export type PreviewPayload =
       reason: string;
       title: string;
       summary: string;
+    }
+  | {
+      /** Request to grant an installed App access to operations on a Rome-managed
+       * connection. `title` and `summary` provide the plain-text fallback. */
+      kind: "connection_access";
+      appId: string;
+      appName: string;
+      connectionId: string;
+      connectionKind: string;
+      connectionLabel: string;
+      identity: string;
+      preset: "read" | "read_and_write" | "custom";
+      operations: {
+        name: string;
+        sideEffect: "read-only" | "write";
+        summary?: string;
+        approvalRequired?: boolean;
+      }[];
+      reason: string;
+      title: string;
+      summary: string;
     };
 
 /** Execution was suspended pending guardian approval; the action body has NOT

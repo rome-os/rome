@@ -14,8 +14,15 @@ import { CredentialRejected, ProviderOperationError } from "../../connections/er
 import type { GrantValue } from "../../connections/grant.js";
 import type { OperationDescriptor } from "../../connections/types.js";
 import { appAccessibleOperations, describeAct } from "../../connections/app-connections.js";
+import {
+  grantConnectionAccessOperations,
+  REQUEST_CONNECTION_ACCESS_ACTION,
+  resolveConnectionAccessRequest,
+} from "../../connections/request-connection-access.js";
+import { enteredPerson } from "../../access/require-entry.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { approvalCall, resolveApproval, resolverOf } from "./approvals.js";
 
 const ConstraintSchema = z
   .object({
@@ -314,6 +321,61 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
     "/app-connection-access/connections/:connectionId/policies/:appId/:identity/:operation",
     (c) => revoke(c, c.req.param()),
   );
+
+  app.post("/app-connection-access/approvals/:id/approve", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = z
+      .object({ expiresAt: z.string().datetime().nullable().optional() })
+      .strict()
+      .safeParse(body ?? {});
+    if (!parsed.success) return c.json({ error: "Invalid approval options." }, 400);
+    const expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
+    if (expiresAt && expiresAt <= new Date()) {
+      return c.json({ error: "expiresAt must be in the future." }, 400);
+    }
+    const approvalId = c.req.param("id");
+    const approval = await deps.approvalsRepo.findById(approvalId);
+    const { actionName, args } = approvalCall(approval);
+    if (
+      approval?.status !== "pending" ||
+      approval.type !== "action_execution" ||
+      actionName !== REQUEST_CONNECTION_ACCESS_ACTION ||
+      !args
+    ) {
+      return c.json(
+        { error: "This request changed or was already answered.", code: "stale_request" },
+        409,
+      );
+    }
+    const registry = deps.connectionRegistry;
+    if (!registry) return c.json({ error: "Connections are unavailable." }, 503);
+    const requestDeps = {
+      registry,
+      access: repo,
+      lookupApp: (appId: string) => {
+        const view = deps.appCatalog.get(appId);
+        return isResolvedApp(view)
+          ? { id: view.appId, displayName: view.displayName, enabled: view.enabled }
+          : null;
+      },
+    };
+    const resolvedRequest = await resolveConnectionAccessRequest(requestDeps, args);
+    if (!resolvedRequest.ok) return c.json({ error: resolvedRequest.error }, 409);
+    const granted = await grantConnectionAccessOperations(requestDeps, resolvedRequest.value, {
+      expiresAt,
+    });
+    if (!granted.ok) return c.json({ error: granted.error }, 409);
+    const resolved = await resolveApproval(
+      deps,
+      approvalId,
+      "approve",
+      resolverOf(enteredPerson(c)),
+    );
+    return resolved.status === 202
+      ? c.json({ ok: true, grantedOperations: granted.grantedOperations }, 202)
+      : c.json(resolved.body, resolved.status);
+  });
 
   return app;
 }
