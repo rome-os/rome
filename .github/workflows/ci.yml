@@ -101,6 +101,7 @@ jobs:
       - run: pnpm lint:agents
       - run: pnpm lint:agent-tools
       - run: pnpm lint:imports
+      - run: pnpm lint:inside-checks
 
       # Dead-code analysis. Knip resolves the import graph across every
       # workspace, so it needs the full install above and cannot move to a
