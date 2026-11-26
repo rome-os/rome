@@ -26,6 +26,7 @@ describe("the Concierge on a connection", () => {
     });
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
     expect(CONCIERGE_CHAT_ACTIONS).not.toContain("core:set_agent_name");
+    expect(CONNECTION_PROMPT).toContain("To change your own name, call `core:set_agent_name`.");
     // A shown file links to the dashboard's assets, which a bot chat cannot open.
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:show_file");
     // Listing routines shows every routine and its arguments, for the guardian alone.
