@@ -2230,10 +2230,10 @@ export interface SaidInboundEvent extends InboundEvent {
     readonly messageId: string;
   };
   /**
-   * Who said the message: People's answer for the account it came from, the
-   * same answer Rome's own turns read. The name the message showed stays on
-   * {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
-   * host that predates it, and when People could not be asked.
+   * Who said the message: the person the account it came from belongs to,
+   * the same answer Rome's own turns read. The name the message showed stays
+   * on {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
+   * host that predates it, and when the host could not be asked.
    */
   readonly sender?: SaidSender;
 }
@@ -2241,20 +2241,21 @@ export interface SaidInboundEvent extends InboundEvent {
 /** How close a person is to the guardian. */
 export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
 
-/** Who said a message, as People answers for the account it came from. */
+/** Who said a message: the person the account it came from belongs to. */
 export interface SaidSender {
-  /** The person linked to the account, or null when it is linked to nobody:
-   *  a stranger, or an account the guardian dismissed. */
+  /** The guardian or a member the account belongs to, or null when it
+   *  belongs to nobody with a role. `bondLevel` is `guardian` for the
+   *  guardian and `other` for a member. */
   readonly person: {
     readonly id: string;
     readonly name: string;
     readonly bondLevel: BondLevel;
   } | null;
-  /** The account is an agent's, acting for `person` (a delegate link), so
-   *  the message comes from that person's agent, not from the person. */
+  /** Always false. An agent's account in the guardian's Rome Cloud account
+   *  is the guardian's, and its message is named as the guardian's. */
   readonly delegate: boolean;
-  /** The answer as Rome's own turns read it, such as "Ana Lopez, inner
-   *  circle", "agent acting for Ana Lopez, inner circle" or "not linked". */
+  /** The answer as Rome's own turns read it, such as "Ana Lopez, guardian",
+   *  "ana@example.com, member" or "not linked". */
   readonly label: string;
 }
 
