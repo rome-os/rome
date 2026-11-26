@@ -1,7 +1,8 @@
-// The commands the guardian and members run in a chat to read and change its chat rules,
-// and `/stop`. A connection that offers commands puts these on its platform
-// and reports each one run. The entrance (participation/entrance.ts) decides
-// who may run one; this file decides what it does and what the answer says. Vocabulary: docs/domains/chats.md#chat-rule,
+// The commands the guardian and members run in a chat to read and change its
+// chat rules, and `/stop`. A connection that offers commands puts these on its
+// platform and reports each one run. The entrance (participation/entrance.ts)
+// decides who may run one; this file decides what it does and what the answer
+// says. Vocabulary: docs/domains/chats.md#chat-rule,
 // docs/domains/connections.md#command.
 
 import {
@@ -11,6 +12,7 @@ import {
   type ChatStopHandler,
   chatStopReceipt,
   type PartialChatSettings,
+  type SettingsActor,
 } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import {
@@ -20,8 +22,23 @@ import {
 } from "../chats/connected-accounts/account-agents.js";
 import type { Command, CommandSpec, Commands } from "../connections/index.js";
 
-/** The settings a chat's commands are written by. */
-const ACTOR = { kind: "guardian", id: "discord-slash" } as const;
+/** Whom a command was let in as: the guardian, or a member signed in as a
+ *  visitor. */
+export interface RanBy {
+  readonly kind: "guardian" | "visitor";
+}
+
+/** How a chat's settings record whoever ran the command that wrote them. */
+const SETTINGS_KIND = { guardian: "guardian", visitor: "member" } as const;
+
+function actorOf(by: RanBy): SettingsActor {
+  return { kind: SETTINGS_KIND[by.kind], id: "discord-slash" };
+}
+
+/** The commands, each run told whom it was let in as. */
+export type ChatCommands = Omit<Commands, "ran"> & {
+  ran(command: Command, by: RanBy): Promise<string>;
+};
 
 /** Most suggestions a platform shows for one option. */
 const MAX_SUGGESTIONS = 25;
@@ -161,15 +178,15 @@ const HELP = [
 ].join("\n");
 
 /** The chat commands run on Connection `deps.connectionId`. */
-export function chatCommands(deps: ChatCommandsDeps): Commands {
+export function chatCommands(deps: ChatCommandsDeps): ChatCommands {
   return {
     list: CHAT_COMMANDS,
-    async ran(command) {
+    async ran(command, by) {
       const [name, sub] = command.path;
       if (name === "stop") return stop(deps, command);
       if (name === "help") return HELP;
       if (name === "bot" && sub === "status") return botStatus(deps);
-      if (name === "channel") return channel(deps, command);
+      if (name === "channel") return channel(deps, command, actorOf(by));
       return "Unknown command";
     },
     async suggest(command, option, typed) {
@@ -203,7 +220,11 @@ async function botStatus(deps: ChatCommandsDeps): Promise<string> {
     : `**Rome Bot Status**\n\n${changed.length} conversation(s) have explicit overrides. Manage them on the Discord connection's page in Settings → Connections.`;
 }
 
-async function channel(deps: ChatCommandsDeps, command: Command): Promise<string> {
+async function channel(
+  deps: ChatCommandsDeps,
+  command: Command,
+  actor: SettingsActor,
+): Promise<string> {
   const [, sub, agentSub] = command.path;
   const { where } = command;
   const ref = { connectionId: deps.connectionId, chatId: where.chatId };
@@ -224,12 +245,12 @@ async function channel(deps: ChatCommandsDeps, command: Command): Promise<string
     return "This thread follows the settings of the channel it was opened in. Run the command there to change them.";
   }
   if (sub === "reset") {
-    await deps.settings.reset({ ref, actor: ACTOR });
+    await deps.settings.reset({ ref, actor });
     return `✓ ${named} configuration cleared\nRestored all defaults (require @mention, ignore other bots, auto-thread on)`;
   }
 
   const change = (set: PartialChatSettings, clear: ChatSettingField[] = []) =>
-    deps.settings.update({ ref, set, clear, actor: ACTOR });
+    deps.settings.update({ ref, set, clear, actor });
   const option = (name: string) => command.options[name] ?? "";
 
   switch (sub) {
