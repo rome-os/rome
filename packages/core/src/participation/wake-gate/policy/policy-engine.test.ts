@@ -108,14 +108,10 @@ describe("PolicyEngine", () => {
     expect(result).toEqual({ action: "block" });
   });
 
-  it('evaluate() returns "allow" when no policies match and the sender is the guardian', async () => {
-    const result = await engine.evaluate(makeContext({ bondLevel: "guardian" }));
-    expect(result).toEqual({ action: "allow" });
-  });
-
-  it('evaluate() defaults non-guardian bond levels to "sentinel_review"', async () => {
-    const result = await engine.evaluate(makeContext({ bondLevel: "inner-circle" }));
-    expect(result).toEqual({ action: "sentinel_review" });
+  it('evaluate() returns "allow" when no policies match, whatever the bond level', async () => {
+    for (const bondLevel of ["guardian", "inner-circle"]) {
+      expect(await engine.evaluate(makeContext({ bondLevel }))).toEqual({ action: "allow" });
+    }
   });
 
   it("evaluate() lets scope specificity beat higher-priority broader scopes", async () => {
