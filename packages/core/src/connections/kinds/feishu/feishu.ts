@@ -56,12 +56,12 @@ export interface FeishuConfig {
     observe?(descriptor: ChatDescriptor): void;
   };
   /** Reports that `presser` pressed a card or asked for one. Rome runs `answer`,
-   *  told what a change they make is recorded as, when they are let in. Absent,
-   *  nothing is answered. */
+   *  told what a change they make is recorded as, when they are let in, and
+   *  answers whether it ran. Absent, nothing is answered. */
   pressed?: (
     presser: { platform: string; id: string },
     answer: (by: SettingsActor["kind"]) => Promise<void>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
@@ -206,7 +206,7 @@ export class FeishuAdapter {
     this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.pressed = config.pressed ?? (async () => {});
+    this.pressed = config.pressed ?? (async () => false);
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
@@ -321,10 +321,11 @@ export class FeishuAdapter {
 
     if (threadType === "group") {
       if (isSettingsRequest(text) && m.mentionedBot) {
-        await this.pressed({ platform: this.platform, id: m.senderId }, () =>
+        const answered = await this.pressed({ platform: this.platform, id: m.senderId }, () =>
           this.sendGroupConfigCard(m.chatId, m.messageId),
         );
-        return;
+        // An ask from anyone else is a message like any other of theirs.
+        if (answered) return;
       }
       // Whether Rome keeps the message, in a group switched off too, is
       // Rome's call, and whether it wakes the agent the wake gate's.
