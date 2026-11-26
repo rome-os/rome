@@ -877,13 +877,7 @@ export function startConciergeEvents(
     // The messages the turn took settle as on the dashboard: done, failed or
     // stopped, which their status on the platform follows.
     const silent = await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
-    // A reminder runs as Rome's own turn, which may use the task tools: only a
-    // turn the guardian started, or one no person started, such as a task's
-    // report, gets one.
-    const othersTurn =
-      thread.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian";
     if (
-      !othersTurn &&
       shouldNudge({
         status: event.status,
         text: event.output.text,
