@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
+import { computerUseAuditFields } from "./computer-use/audit-fields.js";
 import type { ConnectionStatus } from "./client.js";
 import { ObserveStore, QueryError, type ActionEnd, type ActionStart } from "./observe.js";
 import type { LogQuery, LogStatsQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
@@ -73,7 +74,10 @@ function actionStart(
 ): ActionStart {
   const exec = action === "exec" && isRecord(args) && typeof args.command === "string";
   let text: string | null = null;
-  if (!exec)
+  if (action.startsWith("computer.")) {
+    const metadata = computerUseAuditFields(action, args);
+    if (metadata.actionId) text = JSON.stringify(metadata);
+  } else if (!exec)
     try {
       text = JSON.stringify(args ?? {});
     } catch {}
@@ -95,7 +99,11 @@ function actionEnd(response: ActionResponse, stdoutBytes?: number): ActionEnd {
     const code = response.error.code;
     return {
       outcome:
-        code === "unknown_outcome" ? "unknown_outcome" : code === "canceled" ? "aborted" : "error",
+        code === "unknown_outcome" || code === "action_outcome_unknown"
+          ? "unknown_outcome"
+          : code === "canceled"
+            ? "aborted"
+            : "error",
       errorCode: code,
     };
   }

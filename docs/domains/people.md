@@ -54,6 +54,7 @@ A link that says the account is an agent's, acting on behalf of the person it is
 - An agent's account belongs to the person who delegated the agent, never to the agent itself.
 - The link says it is a delegate, so whoever reads it knows they are talking to someone's agent and not to the person.
 - Rome makes this link itself when the platform says the agent is the guardian's. Rome Cloud says so for the guardian's own agents on other Romes.
+- A delegate link to the guardian makes the account the guardian's in [Identity](identity.md), as any link to the guardian does. Identity does not record that it is a delegate; People still does.
 
 ## Stranger
 

@@ -12,12 +12,20 @@ export type { HostCredential, HostEvent };
 export interface HostOptions extends HostConnectionOptions {
   /** Every remote request is recorded here before it runs. An unavailable log refuses them. */
   audit: HostAudit;
+  computerUseHelperPath?: string;
 }
 
 /** Runs until aborted or authorization ends. The caller owns interaction and credential storage. */
 export function connectHost(options: HostOptions): Promise<void> {
   return runHostConnection(options, (session, send, sendFrame, secrets) =>
-    createExecutor(session.name, options.audit, send, secrets, sendFrame),
+    createExecutor(
+      session.name,
+      options.audit,
+      send,
+      secrets,
+      sendFrame,
+      options.computerUseHelperPath,
+    ),
   );
 }
 
