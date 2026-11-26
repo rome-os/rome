@@ -550,6 +550,12 @@ describe("Webchat API", () => {
       "No dashboard chat",
     );
     await expect(send(visitor, "visitor-plain", "visitor-main")).resolves.toBeTruthy();
+    // An app's own work, such as its endpoint for another service's webhook.
+    await expect(
+      webchatCaller.run({ actor: { kind: "anonymous" }, chatId: null }, () =>
+        channel.send!.send("concierge" as never, { text: "hi" }),
+      ),
+    ).resolves.toBeTruthy();
     await expect(channel.send!.send("concierge" as never, { text: "hi" })).resolves.toBeTruthy();
   });
 

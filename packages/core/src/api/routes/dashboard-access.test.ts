@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { dashboardAccessRoutes } from "./dashboard-access.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import {
+  guardianSeatCreated,
+  inviteMember,
+  listMembers,
+  memberContext,
+} from "../../access/application/members.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { SettingsRepository } from "../../db/repositories/settings.js";
+import { createCloudGuardian } from "../../access/guardian-auth-state.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -29,14 +38,36 @@ describe("Dashboard-access API", () => {
     expect(await res.json()).toEqual({ cloudEmailAccess: [] });
   });
 
-  it("returns the normalized config when a row exists", async () => {
-    await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
-      cloudEmailAccess: ["Ada@Example.com", "bad email", "ada@example.com"],
-    });
+  it("returns the members' emails, normalized", async () => {
+    await inviteMember(memberContext(testDb.db), "Ada@Example.com");
 
     const res = await app.request("/dashboard-access");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ cloudEmailAccess: ["ada@example.com"] });
+  });
+
+  it("shows the list an older build saved last while the members do not hold it, and a save lets members in", async () => {
+    await inviteMember(memberContext(testDb.db), "ada@example.com");
+    await inviteMember(memberContext(testDb.db), "lin@example.com");
+    // An older build removed ada, its update of the members failed, and the
+    // startup import did not read the list.
+    await new SettingsRepository(testDb.db).set(DASHBOARD_ACCESS_SETTING_KEY, {
+      cloudEmailAccess: ["lin@example.com"],
+      revision: 4,
+    });
+    await dashboardAccessState.load(testDb.db);
+    expect(dashboardAccessState.isCloudEmailAllowed("lin@example.com")).toBe(false);
+
+    const getRes = await app.request("/dashboard-access");
+    expect(await getRes.json()).toEqual({ cloudEmailAccess: ["lin@example.com"] });
+
+    await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com"] }),
+    });
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("ada@example.com")).toBe(false);
   });
 
   it("persists the normalized config and refreshes the auth-edge snapshot", async () => {
@@ -83,6 +114,116 @@ describe("Dashboard-access API", () => {
     });
     const getRes = await app.request("/dashboard-access");
     expect(await getRes.json()).toEqual({ cloudEmailAccess: [] });
+  });
+
+  it("saves the members, then hands the snapshot and Rome Cloud the same emails, the guardian's left out", async () => {
+    const ctx = memberContext(testDb.db);
+    await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
+    await guardianSeatCreated(ctx, {
+      accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
+    });
+    const pushed: Array<{ emails: readonly string[]; revision: number }> = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com", "Owner@Example.com"] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(
+      (await listMembers(ctx)).map((m) => ({
+        role: m.role,
+        emails: m.accounts.map((a) => a.accountId),
+      })),
+    ).toEqual([
+      { role: "guardian", emails: ["owner@example.com"] },
+      { role: "member", emails: ["lin@example.com"] },
+    ]);
+    // A sign-in with the guardian's email is the guardian's person, so the
+    // snapshot lets it in, but the list stays the members'.
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["lin@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("owner@example.com")).toBe(true);
+    expect(pushed).toEqual([{ emails: ["lin@example.com"], revision: 1 }]);
+    const getRes = await app.request("/dashboard-access");
+    expect(await getRes.json()).toEqual({ cloudEmailAccess: ["lin@example.com"] });
+  });
+
+  it("fails the save when the members cannot be written, and tells neither the snapshot nor Rome Cloud", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
+    const pushed: unknown[] = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+    testDb.db.run(
+      sql`CREATE TRIGGER members_down BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'members down'); END`,
+    );
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }),
+    });
+
+    expect(res.status).toBe(500);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);
+    expect(pushed).toEqual([]);
+    expect(await deps.dashboardAccessStore.read()).toEqual({
+      emails: ["ada@example.com"],
+      revision: 1,
+    });
+  });
+
+  it("fails the save when the settings record cannot be written, and changes no member, no snapshot and nothing Rome Cloud hears", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    await dashboardAccessState.load(testDb.db);
+    const pushed: unknown[] = [];
+    deps.visitorAllowListSync.push = (list) => void pushed.push(list);
+    testDb.db.run(
+      sql`CREATE TRIGGER settings_down BEFORE UPDATE ON settings WHEN NEW.key = 'dashboardAccess' BEGIN SELECT RAISE(ABORT, 'settings down'); END`,
+    );
+
+    const res = await app.request("/dashboard-access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cloudEmailAccess: ["lin@example.com"] }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(
+      (await listMembers(memberContext(testDb.db))).flatMap((m) =>
+        m.accounts.map((a) => a.accountId),
+      ),
+    ).toEqual(["ada@example.com"]);
+    expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);
+    expect(dashboardAccessState.isCloudEmailAllowed("ada@example.com")).toBe(true);
+    expect(pushed).toEqual([]);
+    expect(await deps.dashboardAccessStore.read()).toEqual({
+      emails: ["ada@example.com"],
+      revision: 1,
+    });
+  });
+
+  it("keeps another request's write made while a failing save runs", async () => {
+    await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
+    testDb.db.run(
+      sql`CREATE TRIGGER members_down BEFORE INSERT ON members BEGIN SELECT RAISE(ABORT, 'members down'); END`,
+    );
+    const settingsRepo = new SettingsRepository(testDb.db);
+    // Each write starts a few turns later than the one before, so some land
+    // while the save is running whichever turn its transaction opens on.
+    const writes = Array.from({ length: 20 }, async (_, i) => {
+      for (let turn = 0; turn < i; turn++) await Promise.resolve();
+      await settingsRepo.set(`unrelated.${i}`, i);
+    });
+
+    const saving = deps.dashboardAccessStore.save({
+      cloudEmailAccess: ["ada@example.com", "lin@example.com"],
+    });
+
+    await expect(saving).rejects.toThrow();
+    await Promise.all(writes);
+    for (let i = 0; i < 20; i++) expect(await settingsRepo.get(`unrelated.${i}`)).toBe(i);
   });
 
   it("refuses a list past the limits and keeps the saved one", async () => {

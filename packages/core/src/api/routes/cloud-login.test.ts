@@ -578,6 +578,41 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
     expect(row.avatarUrl).toBe("https://example.com/avatar.png");
   });
 
+  it("lets in the new seat email and no longer the old one after a sign-in rebinds the seat", async () => {
+    insertGuardian({ accountId: "A", email: "old@example.com" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
+    expect(dashboardAccessState.isCloudEmailAllowed("old@example.com")).toBe(true);
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce, email: "new@example.com" }),
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, { dashboardAccessState });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(dashboardAccessState.isCloudEmailAllowed("old@example.com")).toBe(false);
+    expect(dashboardAccessState.isCloudEmailAllowed("new@example.com")).toBe(true);
+  });
+
+  it("lets in the email of a freshly created seat", async () => {
+    const dashboardAccessState = new DashboardAccessState();
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce, email: "owner@example.com" }),
+      instance_token: "romeinst_new",
+      instance_id: "inst-1",
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, { dashboardAccessState });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(dashboardAccessState.isCloudEmailAllowed("owner@example.com")).toBe(true);
+  });
+
   it("keeps a recorded profile when the id_token omits optional profile claims", async () => {
     insertGuardian({
       accountId: "A",
@@ -1083,14 +1118,15 @@ describe("/api/auth/cloud — request guards", () => {
 // Rome Cloud refuses to mint a code for a signed-in account that doesn't own the
 // instance and redirects back with `error=access_denied` (+ state + iss). The
 // login page has a single Rome Cloud button, so the cloud callback owns the
-// fork: with a dashboard allow-list, re-route into the visitor attestation
-// flow; without one, surface not_owner. Never a guardian session either way.
+// fork: with a member invited, re-route into the visitor attestation flow;
+// without one, surface not_owner. Never a guardian session either way.
 describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
   // Mount the cloud and visitor routers together so the dispatch can be
   // followed end-to-end: the pending entry the dispatch mints must be
   // redeemable at the visitor callback.
   async function buildApps(opts: { emails?: string[]; accountEmail?: string } = {}): Promise<Hono> {
     const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
     dashboardAccessState.setCloudEmailAccess(opts.emails ?? []);
     const deps = {
       ...(await buildTestDeps(testDb.db)),
@@ -1170,8 +1206,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     expect(done.headers.get("set-cookie")).toBeNull();
   });
 
-  it("surfaces not_owner when no dashboard allow-list exists", async () => {
-    insertGuardian({ accountId: "OWNER" });
+  it("surfaces not_owner when no member is invited, though the seat has an email", async () => {
+    insertGuardian({ accountId: "OWNER", email: "owner@example.com" });
     setInstanceTokenInMemory("romeinst_existing");
     const app = await buildApps();
 
@@ -1229,14 +1265,17 @@ describe("/api/auth/cloud/native/complete — guardian seat", () => {
 
   // One native round trip: start, have the fake Rome Cloud sign `token`, then
   // complete with the code.
-  async function nativeSignIn(token: {
-    sub: string;
-    email?: string;
-    claims?: Record<string, unknown>;
-  }): Promise<{ res: Response; body: NativeBody }> {
+  async function nativeSignIn(
+    token: {
+      sub: string;
+      email?: string;
+      claims?: Record<string, unknown>;
+    },
+    overrides: Partial<TestDeps> = {},
+  ): Promise<{ res: Response; body: NativeBody }> {
     setInstanceTokenInMemory("romeinst_existing");
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ ...token, nonce }) }));
-    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, overrides);
     const { state, nonce } = await nativeStart(app);
     romeCloud.setNonce(nonce);
     const res = await app.request("/api/auth/cloud/native/complete", {
@@ -1259,6 +1298,21 @@ describe("/api/auth/cloud/native/complete — guardian seat", () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ cookie_name: COOKIE_NAME, role: "owner" });
     expect(verifySession(body.session_token as string)).toEqual({ userId: "A" });
+  });
+
+  it("lets in the new seat email and no longer the old one after a sign-in rebinds the seat", async () => {
+    insertGuardian({ accountId: "A", email: "old@example.com" });
+    const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
+
+    const { res } = await nativeSignIn(
+      { sub: "A", email: "new@example.com" },
+      { dashboardAccessState },
+    );
+
+    expect(res.status).toBe(200);
+    expect(dashboardAccessState.isCloudEmailAllowed("old@example.com")).toBe(false);
+    expect(dashboardAccessState.isCloudEmailAllowed("new@example.com")).toBe(true);
   });
 
   it("refuses another account and leaves the seat bound as it was", async () => {

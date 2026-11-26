@@ -75,6 +75,16 @@ describe("speaker source", () => {
     expect(fake.received[0]).toMatchObject({ model: "tts-rt-v2", voice: "Bryce" });
   });
 
+  it("speaks in the voice and at the speed picked, in place of the credential's voice", async () => {
+    const source = createSpeakerSource({ credentials: granted() });
+    const outcome = await source.open(listener, { voice: "Reid", speed: 1.2 });
+    if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
+    opened.push(outcome.session);
+    outcome.session.say("a", "你好。");
+    await until(() => fake.received.some((m) => "text" in m));
+    expect(fake.received[0]).toMatchObject({ voice: "Reid", speed: 1.2 });
+  });
+
   it("says plainly that nothing is set up while there is no credential source", async () => {
     const source = createSpeakerSource({
       credentials: NO_SPEECH_CREDENTIALS,

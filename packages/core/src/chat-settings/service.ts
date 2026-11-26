@@ -127,9 +127,15 @@ function normalizeOverrides(value: ChatSettingsOverrides): ChatSettingsOverrides
   return result;
 }
 
+const ACTOR_KINDS: ReadonlySet<unknown> = new Set<SettingsActor["kind"]>([
+  "guardian",
+  "member",
+  "system",
+]);
+
 function assertActor(actor: SettingsActor): void {
-  if (actor.kind !== "guardian" && actor.kind !== "system") {
-    throw new Error("Conversation settings require a guardian or system actor");
+  if (!ACTOR_KINDS.has(actor.kind)) {
+    throw new Error("Conversation settings require a guardian, member or system actor");
   }
 }
 

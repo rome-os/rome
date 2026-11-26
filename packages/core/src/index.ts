@@ -1,7 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
-import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
+import { conciergeOpenTasks } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import {
   startUsageLimitContinuation,
@@ -172,9 +172,9 @@ import {
 } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { invitedEmailsSaved, memberContext } from "./access/application/members.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -266,7 +266,6 @@ import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
 import { GMAIL_SEND_ACTION, registerGmailActions } from "./connections/gmail/actions.js";
 import { OUTLOOK_SEND_ACTION, registerOutlookActions } from "./connections/outlook/actions.js";
-import { whoMayAsk } from "./apps/actions/who-may-ask.js";
 import { registerDeviceActions } from "./connections/device/actions.js";
 import { createLiveRoutes } from "./connections/device/live-route.js";
 import { withDeviceLifecycle } from "./connections/device/lifecycle.js";
@@ -536,9 +535,6 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  // The members as persons with a role (docs/domains/access.md), on top of
-  // Identity. Kept beside the allow-list and the seat, and nothing reads them yet.
-  const memberSteps = memberContext(db);
   const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -667,8 +663,8 @@ async function main() {
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   // Made here so the Concierge can tell whether a visitor is still served,
-  // and who can read a dashboard chat; it is loaded with the other access
-  // settings further down.
+  // and who can read a dashboard chat; it is loaded from the members further
+  // down, after their backfill.
   const dashboardAccessState = new DashboardAccessState();
   // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
   const chatAudience = placeAudience({
@@ -1675,10 +1671,14 @@ async function main() {
             limit,
             before: before as MessagePageCursor | undefined,
           });
-          return { rows: page.rows, next: page.nextCursor };
+          const actors = await webchatRepo.getUserMessageActors(
+            chatId,
+            page.rows.flatMap((row) => (row.role === "user" ? [row.id] : [])),
+          );
+          const rows = page.rows.map((row) => ({ ...row, actor: actors.get(row.id) }));
+          return { rows, next: page.nextCursor };
         },
         openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
-        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
         tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
       }),
     },
@@ -1958,16 +1958,10 @@ async function main() {
   registerDeviceActions(actionRegistry, {
     connections: deviceConnectionsRepo,
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
-    // The check system:read_devices and system:run_on_device pass, so the
-    // older names let in the same turns.
-    whoMayAsk: whoMayAsk((chatId) => concierge.ownerOfChat(chatId)),
   });
   registerTaskRunAction(actionRegistry, concierge);
-  registerReadPersonAction(actionRegistry, {
-    people: peopleRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
-  });
-  registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+  registerReadPersonAction(actionRegistry, { people: peopleRepo });
+  registerAgentTools(actionRegistry, {
     // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {
       routines: routinesRepo,
@@ -2734,11 +2728,15 @@ async function main() {
   // Question cards stored before cards were described as data get their
   // description (src/webchat/question-card-backfill.ts).
   backfillQuestionCards(db);
-  // The members learn the guardian's seat and the allow-list. Nothing reads
-  // them yet, so a failure is logged and Rome starts
-  // (src/access/application/backfill-members.ts).
+  // The members learn the guardian's seat, and on the first run the invited
+  // emails, before the dashboard snapshot below is loaded from them. A failure
+  // is logged and Rome starts, so the guardian can still sign in. Until a run
+  // or a save of the invited emails succeeds, Rome Cloud is not sent the list,
+  // and when an older build saved a list the run did not read, no member gets
+  // in (src/access/application/backfill-members.ts). The run is retried only at
+  // the next start.
   await backfillMembers(db).catch((err: unknown) => {
-    log.warn("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
+    log.error("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
   });
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
@@ -2879,16 +2877,14 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, (emails) =>
-    invitedEmailsSaved(memberSteps, emails),
-  );
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo, db);
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
   });
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
-    log.warn("Failed to load dashboardAccess settings; starting with empty allow-list", {
+    log.warn("Failed to load the members' emails; starting with an empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -3052,9 +3048,7 @@ async function main() {
     };
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
-    apiDeps.features = [
-      phoneBook({ ...apiDeps, ownerOfChat: (chatId) => concierge.ownerOfChat(chatId) }),
-    ];
+    apiDeps.features = [phoneBook(apiDeps)];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);
     }
@@ -3258,6 +3252,11 @@ async function main() {
   void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // The seat may have gained or changed its email, and the dashboard
+      // snapshot holds it.
+      await dashboardAccessState
+        .load(db)
+        .catch(logStepFailure("dashboard snapshot not reloaded after the seat changed"));
       // Signer mode links the instance during this check, so provisioning waits for it.
       await provisionAfterLink();
       if (identity.status !== "ok") return;
