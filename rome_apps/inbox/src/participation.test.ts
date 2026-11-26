@@ -194,7 +194,7 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
           place: "group",
           threadName: "Dev Chat",
         },
-        { person: { id: "person-inner-circle", bondLevel: "inner-circle" } },
+        { person: { id: "person-inner-circle" } },
       ],
     ]);
     expect(stranger.wakeRequests).toEqual([[expect.anything(), { person: null }]]);
