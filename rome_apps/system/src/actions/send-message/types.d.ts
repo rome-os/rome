@@ -45,7 +45,6 @@ export type ChatChannel =
   | "telegram"
   | "telegram_user"
   | "whatsapp"
-  | "wechat"
   | "discord"
   | "webchat"
   | "feishu"

@@ -76,13 +76,13 @@ describe("buildConnectionCards — runtime degradation", () => {
   it("projects an unlocked capability degradation onto its connection card", () => {
     const cards = buildConnectionCards([
       conn({
-        connectionKind: "wechat",
-        grants: { account: "authorized" },
+        connectionKind: "linkedin",
+        grants: { session: "authorized" },
         capabilities: {
           chat: {
             state: "unlocked",
             degradation: {
-              reason: "WeChat reported a stale session.",
+              reason: "LinkedIn reported a stale session.",
               retryAt: "2026-07-20T12:00:00.000Z",
             },
           },
@@ -93,7 +93,7 @@ describe("buildConnectionCards — runtime degradation", () => {
     ]);
 
     expect(cards[0].degradation).toEqual({
-      reason: "WeChat reported a stale session.",
+      reason: "LinkedIn reported a stale session.",
       retryAt: "2026-07-20T12:00:00.000Z",
     });
     expect(cards[0].slots[0].state).toBe("working");
@@ -256,14 +256,12 @@ describe("buildConnectionCards — ordering", () => {
       conn({ connectionKind: "email" }),
       conn({ connectionKind: "discord" }),
       conn({ connectionKind: "feishu" }),
-      conn({ connectionKind: "wechat" }),
       conn({ connectionKind: "whatsapp" }),
       conn({ connectionKind: "telegram" }),
     ]);
     expect(cards.map((c) => c.service)).toEqual([
       "telegram",
       "whatsapp",
-      "wechat",
       "discord",
       "email",
       "feishu",
@@ -296,7 +294,6 @@ describe("buildConnectionCards — ordering", () => {
 describe("buildConnectionCards — slot mapping", () => {
   it("maps each channel's Talk grant onto the bot slot whatever the grant is named", () => {
     const cards = buildConnectionCards([
-      conn({ connectionKind: "wechat", grants: { account: "authorized" } }),
       conn({ connectionKind: "whatsapp", grants: { session: "unauthorized" } }),
       conn({ connectionKind: "email", grants: { inbox: "authorized" } }),
     ]);
@@ -305,7 +302,7 @@ describe("buildConnectionCards — slot mapping", () => {
       expect(card.slots[0].key, `${card.service} grant should render as bot`).toBe("bot");
     }
     // The revoke target stays the registry grant name, not the slot key.
-    expect(cards.find((c) => c.service === "wechat")?.slots[0].grant).toBe("account");
+    expect(cards.find((c) => c.service === "whatsapp")?.slots[0].grant).toBe("session");
   });
 
   it("maps OAuth grants onto the user slot, Shopify's store grant included", () => {
@@ -381,12 +378,12 @@ describe("buildConnectionCards — kind and labels", () => {
   it("uses brand labels for known services and capitalizes unknown ones", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "github" }),
-      conn({ connectionKind: "wechat" }),
+      conn({ connectionKind: "whatsapp" }),
       conn({ connectionKind: "zulip" }),
     ]);
     const labelOf = (service: string) => cards.find((c) => c.service === service)?.label;
     expect(labelOf("github")).toBe("GitHub");
-    expect(labelOf("wechat")).toBe("WeChat");
+    expect(labelOf("whatsapp")).toBe("WhatsApp");
     expect(labelOf("zulip")).toBe("Zulip");
   });
 

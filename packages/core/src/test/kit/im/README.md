@@ -23,7 +23,6 @@ A case no capture covers yet answers with `source: "synthetic"`, and the peer's 
 | Peer | Client | Recorded | Synthetic |
 |---|---|---|---|
 | `TelegramPeer` | grammy 1.40.0 | send, edit, reply, edit of a missing message | `getMe`, `getUpdates`, `deleteWebhook`, `sendChatAction`; every HTML send and edit, parsed as Telegram parses it; send to an unknown chat; empty or too-long text; reply to a missing message; edit with unchanged text; edit of a user's message |
-| `WechatPeer` | Rome's iLink adapter | send, send with a substituted context token, send to an unknown recipient | `getupdates` |
 | `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, a user's id read as an unknown channel, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message; a create whose enforced nonce made a message already; whitespace dropped from a message's edges |
 | `FeishuPeer` | @larksuiteoapi/node-sdk 1.68.0 | post create, reply that opens a thread, edit, a post with one Markdown element, read of a missing message, all in a group | the tenant token, and a refused one; a request without the token; reply to a recalled message; edit of a user's message; an edit past the 20th; content over 30 KB; the long connection's endpoint, the bot's identity, its frames and pushed events; a send to a person's open id |
 
@@ -44,7 +43,7 @@ A peer is stricter than the platform, never looser, so a wrong id or reference f
 - A request no route models is answered 418, which no platform uses and no SDK retries, and recorded in `server.errors`. `server.assertClean()` throws on it.
 - A reply must point at a message in the same conversation. An edit must name an existing message.
 - `DiscordPeer` opens a DM only with the one user it models. A DM with anyone else is unmodeled, so a wrong recipient fails the test.
-- `PeerServer.fetch` reaches only the peer's own origin. `WechatPeer.fetch` maps the iLink origin to the peer and refuses every other origin.
+- `PeerServer.fetch` reaches only the peer's own origin.
 
 ## Faults
 
@@ -54,7 +53,7 @@ A peer is stricter than the platform, never looser, so a wrong id or reference f
 - `dropAfterAccept` runs the route and then cuts the socket. The platform shows the message, but the client cannot know it.
 - `before` holds the request until a promise resolves. Pair it with `requestBarrier()` to order a race without sleeping.
 
-A response the platform sends, such as iLink's `ret: -3`, belongs in a capture, and a test passes it to `respond` through `exemplar(capture, label)`. A transport failure, such as a dropped socket or a delay, is a fault and needs no capture.
+A response the platform sends, such as Telegram's answer to an edit of a missing message, belongs in a capture, and a test passes it to `respond` through `exemplar(capture, label)`. A transport failure, such as a dropped socket or a delay, is a fault and needs no capture.
 
 ## What a test reads
 

@@ -75,7 +75,7 @@ The September 15, 2026 sample contains:
 - Fitness Tracker 0.2.0: one weekly plan and its 14 referenced exercise videos. Exercise copy is English in both locale fields. No workout history is included.
 - Stock Daily 0.6.0: two completed market reports dated September 11 and September 10, 2026, with full Markdown content, source links, and a sample weekday schedule. PDF attachments are omitted.
 - Chat: an edited [shared Issue Triage app-building conversation](https://ray.romeos.cc/share/-q8lq717jOt4qRT5jdhfGOWB5BtayzkLhnwciNGJz-0), preserving its request, answered design questions, and delivery summary. Three authored scenarios show video learning, workout planning, and scheduled market recaps. All use English, local app links, and demo timestamps. Private account details and execution logs are omitted. The authored scenarios describe sample outcomes, with no live generation or email delivery.
-- Settings: Claude Max connected, ChatGPT disconnected, and sample GitHub, Email, WeChat, Feishu, and Composio connections. Account identifiers are synthetic.
+- Settings: Claude Max connected, ChatGPT disconnected, and sample GitHub, Email, Feishu, and Composio connections. Account identifiers are synthetic.
 
 The data was selected from an authenticated Edge session on `ray.romeos.cc`. It is a subset, with review counts recalculated from the selected records.
 The fixtures retain the existing channel samples used by the people and account reads. Quota reset times remain relative to page load.

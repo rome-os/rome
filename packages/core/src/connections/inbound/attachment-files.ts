@@ -41,7 +41,6 @@ export class AttachmentTooLargeError extends Error {
 const ALLOWED_ATTACHMENT_URLS: { hostname: string; pathnamePrefixes?: string[] }[] = [
   { hostname: "cdn.discordapp.com", pathnamePrefixes: ["/attachments/"] },
   { hostname: "media.discordapp.net", pathnamePrefixes: ["/attachments/"] },
-  { hostname: "novac2c.cdn.weixin.qq.com", pathnamePrefixes: ["/c2c/"] },
   { hostname: "mmg.whatsapp.net" },
   { hostname: "api.telegram.org", pathnamePrefixes: ["/file/bot"] },
 ];

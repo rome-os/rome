@@ -1,6 +1,6 @@
 // A Connection of a Slack kind Rome no longer offers stays in the store, with
-// its grant, channel record and connected account, as the WeChat removal left
-// its own. The registry skips a stored Connection whose kind is not
+// its grant, channel record and connected account, as the personal WeChat
+// removal left its own. The registry skips a stored Connection whose kind is not
 // registered, and every other surface reads Connections through the registry,
 // so such a row is ignored everywhere: boot passes it, nothing lists, starts,
 // renews or sends through it, and Slack counts as connected only through
