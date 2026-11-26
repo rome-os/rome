@@ -69,12 +69,6 @@ export function automatedInputPrompt(
 /** What the guard needs from Rome: which chats are Concierge chats, who an agent is, and a system turn. */
 export interface ConciergeChatGuardDeps {
   isConciergeChat: (chatId: string) => Promise<boolean>;
-  /**
-   * Throws when the calling action's person or chat may not write into
-   * `chatId`, as the webchat channel does for any send. Checked before a
-   * send turns into a turn, so a chat its caller may not open stays closed.
-   */
-  refuseAnotherOwnersChat: (chatId: string) => Promise<void>;
   /** The sender an agent's account names, by agent id; anonymous when no agent sent it. */
   senderOf: (agentName: string | undefined) => Promise<AutomatedInputSender>;
   runSystemTurn: (
@@ -114,7 +108,6 @@ export function conciergeChatGuard(deps: ConciergeChatGuardDeps) {
         .flatMap((part) => (part.type === "text" ? [part.content] : []))
         .join("\n\n")
         .trim();
-    await deps.refuseAnotherOwnersChat(chatId);
     // A turn takes only the text: a file or a card is refused, not dropped.
     const more =
       (message.attachments?.length ?? 0) > 0 ||

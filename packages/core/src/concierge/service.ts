@@ -58,7 +58,6 @@ import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/c
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
-  canOpenChat,
   isConciergeAgent,
   isConciergeChat,
   privateOwnerOf,
@@ -112,7 +111,6 @@ export const POSTPONED_CHECKS = 3;
 export { CONCIERGE_CHAT_ID };
 export {
   CONCIERGE_AGENT_ID,
-  canOpenChat,
   isConciergeAgent,
   isConciergeChat,
   isMainConciergeChat,

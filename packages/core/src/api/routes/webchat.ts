@@ -5,10 +5,9 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
-import { ownerOf } from "../../webchat/owner.js";
+import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
-  canOpenChat,
   type ConciergeService,
   isConciergeChat,
   privateOwnerOf,
@@ -4356,18 +4355,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // with a quiet system turn instead: the text stays in the turn's trace and
     // the chat shows a faint line naming who sent it.
     if (automated && isConciergeChat(session)) {
-      // An action's loopback send stands for the person its turn ran for,
-      // known here only by kind. That person must be able to open the chat,
-      // as on any send into a dashboard chat: a visitor's, of no known
-      // account, opens no one's. A send no person made is Rome's own work.
-      const actorKind = sourceId ? body.automatedActorKind : undefined;
-      if (
-        actorKind === "visitor" ||
-        (actorKind === "guardian" &&
-          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
-      ) {
-        return answer({ error: "Session not found" }, 404);
-      }
       const concierge = deps.concierge;
       const text = body.text?.trim() ?? "";
       // A turn takes only the text: files are refused, not dropped.
@@ -4375,13 +4362,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
       }
       const source = automatedInputSource(automated);
+      // An action's loopback send names its person by kind alone. One made
+      // for someone the chat may not belong to is not its owner's request.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      const anothers =
+        actorKind === "visitor" ||
+        (actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);
       void concierge
         .runSystemTurn(
           sessionId,
           automatedInputPrompt(
             source,
             text,
-            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+            !anothers && fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
           ),
           {
             quiet: true,

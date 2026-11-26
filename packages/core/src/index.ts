@@ -147,12 +147,7 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import {
-  refuseAnotherOwnersChat,
-  WEBCHAT_CHANNEL,
-  WEBCHAT_SURFACE,
-  webchatChannel,
-} from "./webchat/dashboard-account.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
 import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -2074,7 +2069,6 @@ async function main() {
   // a quiet system turn instead (docs/architecture/concierge.md).
   const intoConciergeChat = conciergeChatGuard({
     isConciergeChat: async (chatId) => isConciergeChat(await webchatRepo.getSession(chatId)),
-    refuseAnotherOwnersChat: (chatId) => refuseAnotherOwnersChat(webchatRepo, chatId),
     senderOf: async (agentName) =>
       (agentName
         ? await resolveAutomatedSender({ agentLoader, appCatalog, settingsRepo }, agentName)
