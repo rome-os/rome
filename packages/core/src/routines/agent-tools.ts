@@ -12,7 +12,7 @@ import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.
 import { type CreateRoutineDeps, createRoutineInputSchema } from "./create.js";
 import type { RoutineEngine } from "./engine.js";
 import { listRoutinesWithLastRun } from "./list.js";
-import { startRoutineRun } from "./run-now.js";
+import { insideRoutineRun, startRoutineRun } from "./run-now.js";
 import { type ActionTraceNode, listRoutineRuns, readRoutineRun } from "./runs.js";
 import { changeRoutine, updateRoutine } from "./update.js";
 
@@ -189,6 +189,9 @@ export const runRoutine = agentTool({
     const id = input.routineId.trim();
     const row = id ? await deps.routines.findById(id) : null;
     if (!row) return toolError(notFound(id));
+    if (insideRoutineRun()) {
+      return toolError("A routine's run cannot start a routine run. Nothing was run.");
+    }
     const runId = await startRoutineRun(deps.engine, id, input.input ?? {});
     return { routineId: id, name: row.name, runId, started: true };
   },
