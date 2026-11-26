@@ -40,6 +40,17 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 - Enroll each tool in `whoMayAskSuite` in the page's test file. Test the operation through `callTool`, as the guardian.
 - Never rename a tool. Agents, agent prompts and saved routines call it by its name.
 
+**Names:**
+
+A tool's name is `system:<verb>_<thing>`, in lower-case words joined by `_`. The test of the tool list ([`wiring/agent-tools.test.ts`](../../packages/core/src/wiring/agent-tools.test.ts)) checks that shape and the verb. The other rules stay with the reader.
+
+- Put the verb first, then the thing, in the words the guardian uses for the request: `system:pause_routine`, `system:disconnect_service`. Name the request, not the button or the step behind it.
+- Name the read of a page `read_<page>`, such as `system:read_connections`. One read answers what the page shows, so a page has no `list_` or `get_` tool beside it.
+- Use one word for one thing everywhere. When the page says "AI tool", the tool says `ai_tool`, never `provider`.
+- Name exactly the thing the tool acts on. A tool that stops a run is `system:stop_routine_run`, not `system:stop_routine`.
+- Give `core:` no new names. Everything core offers an agent carries `system:`.
+- Keep an older name that breaks these rules beside the name that replaces it. The test lists each one its check refuses.
+
 **Example:**
 
 ```ts

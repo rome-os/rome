@@ -4,12 +4,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { vaultRoutes } from "./vault.js";
+import { entryStep } from "../../test/entry-step.js";
 
 const guardian: SessionActor = { kind: "guardian", userId: "owner", via: "cookie" };
 const loopback: SessionActor = { kind: "guardian", userId: "owner", via: "loopback" };
@@ -57,17 +57,14 @@ async function startSignerDouble(answers: Record<string, { status: number; body:
 let testDb: TestDb;
 let approvalHandler: ApprovalHandler;
 
-function appFor(actor: SessionActor | null, team: string[] = []): Hono {
-  const dashboardAccessState = new DashboardAccessState();
-  dashboardAccessState.setCloudEmailAccess(team);
+function appFor(actor: SessionActor, team: string[] = []): Hono {
   const app = new Hono();
-  app.use("*", (_c, next) => (actor ? runWithSessionActor(actor, next) : next()));
+  app.use("*", (_c, next) => runWithSessionActor(actor, next), entryStep(team));
   app.route(
     "/",
     vaultRoutes({
       approvalsRepo: new ApprovalsRepository(testDb.db),
       approvalHandler,
-      dashboardAccessState,
     }),
   );
   return app;
@@ -166,27 +163,6 @@ describe("vaultRoutes", () => {
       headers: SAME_ORIGIN,
     });
     expect(response.status).toBe(404);
-  });
-
-  it.each([
-    ["a visitor", visitor],
-    ["an anonymous caller", { kind: "anonymous" } as SessionActor],
-    ["no session", null],
-  ])("rejects %s on every route without reaching the signer", async (_label, actor) => {
-    const app = appFor(actor);
-    expect((await app.request("/vault")).status).toBe(403);
-    for (const [method, body] of [
-      ["PUT", JSON.stringify({ value: "v" })],
-      ["DELETE", undefined],
-    ] as const) {
-      const response = await app.request("/vault/GITHUB_TOKEN", {
-        method,
-        headers: SAME_ORIGIN,
-        body,
-      });
-      expect(response.status).toBe(403);
-    }
-    expect(signer.calls).toEqual([]);
   });
 
   it("lets a dashboard admin use the vault but not reset it", async () => {

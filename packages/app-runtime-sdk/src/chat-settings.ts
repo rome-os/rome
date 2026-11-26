@@ -39,8 +39,9 @@ export interface ChatSettingsOverrides {
 
 export type PartialChatSettings = ChatSettingsOverrides;
 
+/** Who set a chat's settings. A host that predates `member` records a member as `guardian`. */
 export interface SettingsActor {
-  kind: "guardian" | "system";
+  kind: "guardian" | "member" | "system";
   id?: string;
   displayName?: string;
 }

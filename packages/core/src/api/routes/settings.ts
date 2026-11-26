@@ -17,6 +17,7 @@ import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
+import { VOICE_SPEAKING_SETTING_KEY } from "../../voice-output/speaking-settings.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
@@ -24,6 +25,7 @@ import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speec
 const DEDICATED_ROUTE_KEYS: Record<string, string> = {
   [APP_PERMISSIONS_SETTING_KEY]: "/api/public-access",
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
+  [VOICE_SPEAKING_SETTING_KEY]: "/api/voice-conversation/settings",
 };
 
 // Each person's Concierge state: their follows, rules and time zone. Only

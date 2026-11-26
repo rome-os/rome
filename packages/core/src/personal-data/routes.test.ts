@@ -1,4 +1,12 @@
+import { Hono } from "hono";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { requireEntry } from "../access/require-entry.js";
+import {
+  runWithSessionActor,
+  type SessionActor,
+  sessionActorMiddleware,
+} from "../access/session-actor.js";
+import { entryStep } from "../test/entry-step.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   COOKIE_NAME,
@@ -18,18 +26,25 @@ const ADMIN_COOKIE = `${VISITOR_COOKIE_NAME}=${createVisitorSession("ada", "ada@
 
 describe("/personal-data routes", () => {
   let testDb: TestDb;
-  let app: ReturnType<typeof personalDataRoutes>;
+  let app: Hono;
   let dashboardAccess: DashboardAccessState;
 
   beforeEach(() => {
     testDb = createTestDb();
     dashboardAccess = new DashboardAccessState();
-    app = personalDataRoutes({
-      db: testDb.db,
-      dashboardAccessState: dashboardAccess,
-      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      now: () => NOV_10 + 86_400_000,
-    });
+    app = new Hono()
+      .use(
+        "*",
+        sessionActorMiddleware(testDb.db),
+        requireEntry(dashboardAccess, () => false),
+      )
+      .route(
+        "/",
+        personalDataRoutes({
+          personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+          now: () => NOV_10 + 86_400_000,
+        }),
+      );
   });
   afterEach(() => testDb.close());
 
@@ -45,27 +60,27 @@ describe("/personal-data routes", () => {
   const ingest = (body: unknown, cookie?: string | null) =>
     send("/personal-data/ingest", { method: "POST", body: JSON.stringify(body) }, cookie);
 
-  it("refuses a caller without the guardian's session, a loopback agent included", async () => {
-    expect((await ingest(batch("b-1"), null)).status).toBe(403);
-    expect((await send("/personal-data/sources", {}, null)).status).toBe(403);
-    expect((await send("/personal-data/sources", {}, `${COOKIE_NAME}=forged`)).status).toBe(403);
+  it("refuses a caller without a session", async () => {
+    expect((await ingest(batch("b-1"), null)).status).toBe(401);
+    expect((await send("/personal-data/sources", {}, null)).status).toBe(401);
+    expect((await send("/personal-data/sources", {}, `${COOKIE_NAME}=forged`)).status).toBe(401);
   });
 
   it("refuses the guardian's loopback session, which an agent's shell has", async () => {
-    const loopback = personalDataRoutes({
-      db: testDb.db,
-      dashboardAccessState: new DashboardAccessState(),
-      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
-    });
-    expect((await loopback.request("/personal-data/sources")).status).toBe(403);
-    const cookie = personalDataRoutes({
-      db: testDb.db,
-      dashboardAccessState: new DashboardAccessState(),
-      personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
-      sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "cookie" }),
-    });
-    expect((await cookie.request("/personal-data/sources")).status).toBe(200);
+    const as = (via: "loopback" | "cookie") => {
+      const actor: SessionActor = { kind: "guardian", userId: "guardian-seat", via };
+      return new Hono()
+        .use("*", (_c, next) => runWithSessionActor(actor, next), entryStep())
+        .route(
+          "/",
+          personalDataRoutes({
+            personalData: new PersonalDataRepository(testDb.db, PERSONAL_DATA_SOURCES),
+          }),
+        )
+        .request("/personal-data/sources");
+    };
+    expect((await as("loopback")).status).toBe(403);
+    expect((await as("cookie")).status).toBe(200);
   });
 
   it("lets a dashboard admin read the guardian's personal data, never write it", async () => {
