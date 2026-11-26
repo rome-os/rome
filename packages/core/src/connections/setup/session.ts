@@ -264,24 +264,6 @@ function raceAbort<T>(signal: AbortSignal, fn: (signal: AbortSignal) => Promise<
   });
 }
 
-/** Resolve after `ms`, or reject with `SetupAbortError` the moment the signal
- *  aborts — the sleep primitive for polling setup coroutines, so a cancel
- *  interrupts the wait instead of letting the loop sleep it out. */
-export function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new SetupAbortError());
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(new SetupAbortError());
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
