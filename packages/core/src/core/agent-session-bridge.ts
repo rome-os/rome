@@ -399,7 +399,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             threadId: thread?.threadId,
             chatId: romeSessionId,
             ...(req.platformMessageId ? { messageKey: req.platformMessageId } : {}),
-            ...(thread?.senderBondLevel ? { senderBondLevel: thread.senderBondLevel } : {}),
             initiatedBy: req.platformMessageId ? "user" : "system",
             // Read at the turn's first event, once the session has its provider.
             providerId: () => session.providerId,

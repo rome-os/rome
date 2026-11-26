@@ -1693,7 +1693,7 @@ async function main() {
             Promise.resolve();
         },
       }),
-      // The status of the guardian's message a Concierge turn there works on.
+      // The status of the message a Concierge turn there works on.
       (turn) => concierge.observeConnectionTurn(turn),
     ),
     isTextPrivate,
