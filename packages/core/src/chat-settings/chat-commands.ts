@@ -21,23 +21,11 @@ import {
   storedAgentChoice,
 } from "../chats/connected-accounts/account-agents.js";
 import type { Command, CommandSpec, Commands } from "../connections/index.js";
-
-/** Whom a command was let in as: the guardian, or a member signed in as a
- *  visitor. */
-export interface RanBy {
-  readonly kind: "guardian" | "visitor";
-}
-
-/** How a chat's settings record whoever ran the command that wrote them. */
-const SETTINGS_KIND = { guardian: "guardian", visitor: "member" } as const;
-
-function actorOf(by: RanBy): SettingsActor {
-  return { kind: SETTINGS_KIND[by.kind], id: "discord-slash" };
-}
+import { type LetInAs, settingsActorOf } from "./settings-actor.js";
 
 /** The commands, each run told whom it was let in as. */
 export type ChatCommands = Omit<Commands, "ran"> & {
-  ran(command: Command, by: RanBy): Promise<string>;
+  ran(command: Command, by: LetInAs): Promise<string>;
 };
 
 /** Most suggestions a platform shows for one option. */
@@ -186,7 +174,7 @@ export function chatCommands(deps: ChatCommandsDeps): ChatCommands {
       if (name === "stop") return stop(deps, command);
       if (name === "help") return HELP;
       if (name === "bot" && sub === "status") return botStatus(deps);
-      if (name === "channel") return channel(deps, command, actorOf(by));
+      if (name === "channel") return channel(deps, command, settingsActorOf(by, "discord-slash"));
       return "Unknown command";
     },
     async suggest(command, option, typed) {

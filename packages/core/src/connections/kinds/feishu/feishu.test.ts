@@ -8,6 +8,7 @@ import type {
   ChatSettingsControl,
   ChatSettingsOverrides,
   ChatSettingsSnapshot,
+  SettingsActor,
 } from "@rome-os/app-runtime";
 import type {
   CardActionEvent,
@@ -17,7 +18,7 @@ import type {
   SendOptions,
 } from "@larksuiteoapi/node-sdk";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
-import { FeishuAdapter, isFeishuAuthError, type PressedBy, resolveMentions } from "./feishu.js";
+import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
 
 // The official SDK's LarkChannel is the process edge here, played by a fake
 // through the adapter's createChannel seam. The fake captures the registered
@@ -213,10 +214,10 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
 }
 
 /** As Rome takes a press while only `openId` is let in, as `by`. */
-function pressedWith(openId: string, by: PressedBy = { kind: "guardian" }) {
+function pressedWith(openId: string, by: SettingsActor["kind"] = "guardian") {
   return async (
     presser: { platform: string; id: string },
-    answer: (by: PressedBy) => Promise<void>,
+    answer: (by: SettingsActor["kind"]) => Promise<void>,
   ) => {
     if (presser.platform === "feishu" && presser.id === openId) await answer(by);
   };
@@ -1083,7 +1084,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        pressed: pressedWith("ou_alice", { kind: "visitor" }),
+        pressed: pressedWith("ou_alice", "member"),
       },
       () => channel as unknown as LarkChannel,
     );
