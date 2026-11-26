@@ -5,8 +5,6 @@ import {
 } from "@rome/api-types/dashboard-access";
 import { Hono } from "hono";
 import {
-  DASHBOARD_ACCESS_SETTING_KEY,
-  DEFAULT_DASHBOARD_ACCESS_CONFIG,
   normalizeDashboardAccessConfig,
   type DashboardAccessConfig,
 } from "../../access/dashboard-access-config.js";
@@ -16,10 +14,9 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   app.get("/dashboard-access", async (c) => {
-    const stored = await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
-    const config = stored
-      ? normalizeDashboardAccessConfig(stored)
-      : DEFAULT_DASHBOARD_ACCESS_CONFIG;
+    const config: DashboardAccessConfig = {
+      cloudEmailAccess: await deps.dashboardAccessStore.shownEmails(),
+    };
     return c.json(config);
   });
 
@@ -41,8 +38,10 @@ export function dashboardAccessRoutes(deps: ApiDeps): Hono {
     }
     const config: DashboardAccessConfig = normalizeDashboardAccessConfig(body);
 
+    // A save that cannot be written changes nothing and fails the request
+    // before the snapshot or Rome Cloud hears of the list.
     const saved = await deps.dashboardAccessStore.save(config);
-    deps.dashboardAccessState.setConfig(config);
+    await deps.dashboardAccessState.load(deps.db);
     // The sync drops a revision older than one it already holds, so two saves
     // that finish out of order still send the newer list.
     deps.visitorAllowListSync.push(saved);

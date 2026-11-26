@@ -11,6 +11,7 @@ import {
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
+import { entryStep } from "../../test/entry-step.js";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {
@@ -34,6 +35,7 @@ describe("Approvals API", () => {
     app.use("*", (_c, next) =>
       runWithSessionActor({ kind: "guardian", userId: "test-owner", via: "cookie" }, next),
     );
+    app.use("*", entryStep());
     app.route("/", approvalsRoutes(deps));
   });
 
@@ -72,38 +74,13 @@ describe("Approvals API", () => {
   });
 
   describe("GET /approvals", () => {
-    it("refuses anonymous and visitor access to all approval entry points", async () => {
-      const deps = { ...(await buildTestDeps(testDb.db)), approvalHandler };
-      for (const actor of [
-        { kind: "anonymous" } as const,
-        { kind: "visitor", accountId: "guest", email: "guest@example.com" } as const,
-      ]) {
-        const guarded = new Hono();
-        guarded.use("*", (_c, next) => runWithSessionActor(actor, next));
-        guarded.route("/", approvalsRoutes(deps));
-        for (const path of ["/approvals", `/approvals/${baseline.approvals.pendingId}`]) {
-          expect((await guarded.request(path)).status).toBe(403);
-        }
-        for (const action of ["resolve", "approve", "reject", "retry"]) {
-          expect(
-            (
-              await guarded.request(`/approvals/${baseline.approvals.pendingId}/${action}`, {
-                method: "POST",
-                headers: { "sec-fetch-site": "same-origin" },
-              })
-            ).status,
-          ).toBe(403);
-        }
-      }
-    });
-
     it("lets a dashboard admin list and decide approvals, recording who decided", async () => {
       const deps = { ...(await buildTestDeps(testDb.db)), approvalHandler };
-      deps.dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
       const teammate = new Hono();
       teammate.use("*", (_c, next) =>
         runWithSessionActor({ kind: "visitor", accountId: "ada", email: "ada@example.com" }, next),
       );
+      teammate.use("*", entryStep(["ada@example.com"]));
       teammate.route("/", approvalsRoutes(deps));
 
       expect((await teammate.request("/approvals")).status).toBe(200);

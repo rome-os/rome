@@ -50,8 +50,8 @@ type Unsubscribe = () => void;
 /** The event sources behind each topic. Subscribing replays any snapshot synchronously. */
 export interface LiveEventSources {
   subscribeChatStatus(emit: LiveEventEmit): Unsubscribe;
-  /** Resolves false when the id names no stored webchat session, or one private to another owner. */
-  hasChatSession(sessionId: string, owner: string): Promise<boolean>;
+  /** Resolves false when the id names no stored webchat session. */
+  hasChatSession(sessionId: string): Promise<boolean>;
   subscribeChatSession(sessionId: string, emit: LiveEventEmit): Unsubscribe;
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
   /** Emits `concierge_activity` for each of one owner's Concierge chats, then for every change. */
@@ -154,7 +154,7 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    // Whose Concierge todo list and private chats this socket may read.
+    // Whose Concierge activity this socket hears.
     const owner = actor.kind === "guardian" ? "guardian" : `visitor:${actor.accountId}`;
     // A dashboard holds back only its own person's pushes; a phone's
     // activity frames count for nothing.
@@ -163,7 +163,7 @@ export function attachLiveEventsServer(
       topic.kind === "chat.tasks"
         ? sources.hasChatTasks(topic.sessionId, owner)
         : topic.kind === "chat.session" || topic.kind === "chat.watch"
-          ? sources.hasChatSession(topic.sessionId, owner)
+          ? sources.hasChatSession(topic.sessionId)
           : true;
 
     const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
