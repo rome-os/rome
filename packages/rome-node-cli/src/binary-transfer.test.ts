@@ -273,7 +273,7 @@ registerHooks({ load(url, context, next) {
     import { canAutoInstallHelper, discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
     export { canAutoInstallHelper };
     export function discoverHelper() {
-      return discover({ platform: "darwin", arch: "arm64" });
+      return discover({ platform: "darwin" });
     }
   \` };
 }});

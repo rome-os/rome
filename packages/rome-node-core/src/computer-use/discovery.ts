@@ -21,12 +21,10 @@ export function canAutoInstallHelper({
 
 export async function discoverHelper({
   platform = process.platform,
-  arch = process.arch,
   applications = ["/Applications", join(homedir(), "Applications")],
   envPath = process.env.ROME_NODE_COMPUTER_USE_HELPER,
-}: Partial<DiscoveryOptions> = {}): Promise<string> {
-  if (platform !== "darwin" || arch !== "arm64")
-    throw new ComputerUseError("computer_use_unsupported_platform");
+}: Partial<Omit<DiscoveryOptions, "arch">> = {}): Promise<string> {
+  if (platform !== "darwin") throw new ComputerUseError("computer_use_unsupported_platform");
 
   async function installed(path: string): Promise<string | undefined> {
     if (!isAbsolute(path) || path.includes("\0")) {

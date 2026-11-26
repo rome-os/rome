@@ -190,12 +190,17 @@ func applicationIdentifier(in profile: [String: Any]) throws -> String {
     return appID[...separator] + bundleID
 }
 
-func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?, iconPath: String?) throws {
+func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?, iconPath: String?, version: String?) throws {
     guard selfTest ? identity == nil && profile == nil : identity != nil && identity != "-" && identity != "" else {
         throw BuildError("Choose either --self-test-build or an Apple code-signing --identity.")
     }
     let icon = iconPath.map { URL(fileURLWithPath: $0) } ??
         repository.appendingPathComponent("packages/desktop/build/icon.icns")
+    let shortVersion = version.map { String($0.prefix { $0 != "-" && $0 != "+" }) }
+    if let shortVersion,
+       shortVersion.wholeMatch(of: #/[0-9]+\.[0-9]+\.[0-9]+/#) == nil {
+        throw BuildError("The bundle version must start with major.minor.patch.")
+    }
     try validateIcon(icon)
     try withPublication(output) { app in
         try files.createDirectory(at: executable(app).deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -203,6 +208,7 @@ func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?, i
         try files.copyItem(at: icon, to: bundleIcon(app))
         var info = try plist(native.appendingPathComponent("Info.plist"))
         info[testKey] = selfTest
+        if let version { info["RomeNodeCoreVersion"] = version }
         let metadata = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
         try metadata.write(to: infoPlist(app), options: .atomic)
 
@@ -211,6 +217,9 @@ func build(_ output: URL, selfTest: Bool, identity: String?, profile: String?, i
         var args = ["swiftc", "-O", "-swift-version", "5", "-target", "arm64-apple-macosx14.0"]
         if selfTest { args += ["-D", "SELF_TEST_BUILD"] }
         try run("/usr/bin/xcrun", args + sources + ["-o", executable(app).path])
+        if let shortVersion {
+            try run("/usr/bin/plutil", ["-replace", "CFBundleShortVersionString", "-string", shortVersion, infoPlist(app).path])
+        }
         if let identity {
             var signing = ["--force", "--options", "runtime", "--timestamp", "--sign", identity]
             if let profile {
@@ -373,7 +382,7 @@ func main() throws {
     while let option = args.first {
         args.removeFirst()
         if ["--self-test-build", "--release"].contains(option), flags.insert(option).inserted { continue }
-        guard ["--app", "--source", "--identity", "--provisioning-profile", "--icon"].contains(option), options[option] == nil,
+        guard ["--app", "--source", "--identity", "--provisioning-profile", "--icon", "--version"].contains(option), options[option] == nil,
               let value = args.first, !value.hasPrefix("--") else { throw BuildError("Invalid option \(option).") }
         options[option] = value
         args.removeFirst()
@@ -382,10 +391,10 @@ func main() throws {
         repository.appendingPathComponent(".scratch/rome-node-native/\(appName)", isDirectory: true)
     let buildOptions = Set(options.keys).subtracting(["--app"])
     switch command {
-    case "build" where buildOptions.isSubset(of: ["--identity", "--provisioning-profile", "--icon"]) &&
+    case "build" where buildOptions.isSubset(of: ["--identity", "--provisioning-profile", "--icon", "--version"]) &&
         flags.isSubset(of: ["--self-test-build"]):
         try build(output, selfTest: flags.contains("--self-test-build"), identity: options["--identity"],
-                  profile: options["--provisioning-profile"], iconPath: options["--icon"])
+                  profile: options["--provisioning-profile"], iconPath: options["--icon"], version: options["--version"])
         print(output.path)
     case "verify" where buildOptions.isEmpty && flags.isSubset(of: ["--release"]):
         try validate(output, release: flags.contains("--release"))

@@ -34,7 +34,7 @@ function errorCode(cause: unknown): ComputerUseError["code"] {
 }
 
 const errorMessages: Partial<Record<ComputerUseError["code"], string>> = {
-  computer_use_unsupported_platform: "The Computer Use Helper requires macOS on Apple silicon.",
+  computer_use_unsupported_platform: "The Computer Use Helper requires macOS.",
   computer_use_helper_missing: "The Computer Use Helper is missing from this Mac.",
   computer_use_helper_install_failed:
     "Could not download, verify, or install the official Computer Use Helper in ~/Applications.",

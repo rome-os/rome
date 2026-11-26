@@ -1,18 +1,7 @@
 import { afterEach, beforeEach, expect, rs, test } from "@rstest/core";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  cp,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -68,19 +57,16 @@ async function makeApp(app: string, contents = "fixture") {
 }
 
 const fakeMac: Command = async (tool, args) => {
-  if (tool === "/usr/bin/ditto" && args[0] === "-x") {
+  if (tool === "/usr/bin/ditto") {
     const [, , archive, stage] = args as [string, string, string, string];
-    expect((await lstat(dirname(stage))).mode & 0o777).toBe(0o700);
+    expect(args.slice(0, 2)).toEqual(["-x", "-k"]);
+    expect(dirname(stage)).toBe(dirname(destination));
+    expect((await lstat(stage)).mode & 0o777).toBe(0o700);
+    expect((await lstat(dirname(archive))).mode & 0o777).toBe(0o700);
     expect((await lstat(archive)).mode & 0o777).toBe(0o600);
     expect(await readFile(archive)).toEqual(payload);
     await makeApp(join(stage, APP_NAME));
-  } else if (tool === "/usr/bin/ditto") {
-    await cp(args[0]!, args[1]!, { recursive: true });
-  } else if (tool === "/usr/bin/osascript") {
-    await rename(args.at(-2)!, args.at(-1)!);
-    return "0\n";
   }
-  return "";
 };
 
 function install(
@@ -90,7 +76,7 @@ function install(
   return installHelper(signal, { home, temp, version, fetch: assets(), run: fakeMac, ...deps });
 }
 
-it("downloads the pinned assets, verifies the digest and verifies both staged bundles", async () => {
+it("downloads the pinned assets and verifies the staged bundle with macOS codesign alone", async () => {
   const fetch = assets();
   const run = rs.fn(fakeMac);
   await expect(install({ fetch, run })).resolves.toBe(destination);
@@ -101,23 +87,29 @@ it("downloads the pinned assets, verifies the digest and verifies both staged bu
       credentials: "omit",
       signal: expect.any(AbortSignal),
     });
-  const signed = run.mock.calls.filter(([tool]) => tool === "/usr/bin/codesign");
-  expect(signed).toHaveLength(2);
-  for (const [, args] of signed)
-    expect(args).toEqual([
-      "--verify",
-      "--deep",
-      "--strict",
-      `-R=${RELEASE_SIGNING_REQUIREMENT}`,
-      expect.stringContaining(APP_NAME),
-    ]);
-  expect(
-    run.mock.calls.filter(([tool]) => tool === "/usr/bin/xcrun").map(([, args]) => args),
-  ).toEqual(signed.map(([, args]) => ["stapler", "validate", args.at(-1)]));
+  expect(run.mock.calls.map(([tool]) => tool)).toEqual(["/usr/bin/ditto", "/usr/bin/codesign"]);
+  const staging = run.mock.calls[0]![1][3]!;
+  expect(run).toHaveBeenNthCalledWith(
+    2,
+    "/usr/bin/codesign",
+    verification(join(staging, APP_NAME)),
+    expect.any(AbortSignal),
+  );
   expect(await readFile(join(destination, EXECUTABLE), "utf8")).toBe("fixture");
   expect(await readdir(temp)).toEqual([]);
   expect(await readdir(dirname(destination))).toEqual([APP_NAME]);
 });
+
+function verification(app: string) {
+  return [
+    "--verify",
+    "--deep",
+    "--strict",
+    "--check-notarization",
+    `-R=${RELEASE_SIGNING_REQUIREMENT} and notarized`,
+    app,
+  ];
+}
 
 it.each([
   "",
@@ -212,13 +204,9 @@ it("rejects an invalid checksum file or mismatched archive before running ditto"
   expect(await readdir(temp)).toEqual([]);
 });
 
-it.each([
-  "/usr/bin/codesign",
-  "/usr/bin/xcrun",
-])("cleans both stages after %s fails verification", async (rejectTool) => {
+it("cleans the archive and staging directory when codesign rejects the Helper", async () => {
   const run: Command = (tool, args, signal) => {
-    if (tool === rejectTool && args.at(-1)?.startsWith(dirname(destination)))
-      return Promise.reject(new Error("Verification rejected"));
+    if (tool === "/usr/bin/codesign") return Promise.reject(new Error("Verification rejected"));
     return fakeMac(tool, args, signal);
   };
   await expect(install({ run })).rejects.toThrow("Verification rejected");
@@ -237,7 +225,6 @@ it.each(["bundle", "executable"])("rejects a symlink at the extracted %s", async
       await mkdir(dirname(executable), { recursive: true });
       await symlink(join(realApp, EXECUTABLE), executable);
     }
-    return "";
   });
   await expect(install({ run })).rejects.toThrow(/Unsafe Helper bundle|Missing Helper executable/);
   expect(run).toHaveBeenCalledTimes(1);
@@ -254,27 +241,26 @@ it("rejects a symlinked Applications directory and leaves its target alone", asy
 });
 
 it.each([
-  true,
-  false,
-])("leaves a concurrent destination intact and verifies it (valid: %s)", async (valid) => {
+  "pre-existing",
+  "concurrent",
+  "invalid",
+])("verifies a %s destination after rename collides", async (kind) => {
+  if (kind !== "concurrent") await makeApp(destination, "other installer");
   const run = rs.fn<Command>(async (tool, args, signal) => {
-    if (tool !== "/usr/bin/osascript") return fakeMac(tool, args, signal);
-    if (valid) await makeApp(destination, "other installer");
-    else await mkdir(destination);
-    return "-1\n";
+    if (tool !== "/usr/bin/codesign") return fakeMac(tool, args, signal);
+    if (kind === "concurrent" && args.at(-1) !== destination)
+      await makeApp(destination, "other installer");
+    if (kind === "invalid" && args.at(-1) === destination) throw new Error("Verification rejected");
   });
-  if (valid) {
-    await expect(install({ run })).resolves.toBe(destination);
-    expect(await readFile(join(destination, EXECUTABLE), "utf8")).toBe("other installer");
-    expect(run).toHaveBeenCalledWith(
-      "/usr/bin/xcrun",
-      ["stapler", "validate", destination],
-      expect.any(AbortSignal),
-    );
-  } else {
-    await expect(install({ run })).rejects.toThrow();
-    expect(await readdir(destination)).toEqual([]);
-  }
+  if (kind === "invalid") await expect(install({ run })).rejects.toThrow("Verification rejected");
+  else await expect(install({ run })).resolves.toBe(destination);
+  expect(run).toHaveBeenNthCalledWith(
+    3,
+    "/usr/bin/codesign",
+    verification(destination),
+    expect.any(AbortSignal),
+  );
+  expect(await readFile(join(destination, EXECUTABLE), "utf8")).toBe("other installer");
   expect(await readdir(temp)).toEqual([]);
   expect(await readdir(dirname(destination))).toEqual([APP_NAME]);
 });
@@ -320,6 +306,7 @@ it("cleans the extraction directory when the extraction command is aborted", asy
   controller.abort();
   await failed;
   expect(await readdir(temp)).toEqual([]);
+  expect(await readdir(dirname(destination))).toEqual([]);
 });
 
 test.skipIf(process.platform !== "darwin")(
@@ -331,9 +318,7 @@ test.skipIf(process.platform !== "darwin")(
     await native("/usr/bin/ditto", ["-c", "-k", "--keepParent", fixture, zip]);
     const fetch = assets(await readFile(zip));
     const run = rs.fn<Command>(async (tool, args, signal) => {
-      if (tool === "/usr/bin/ditto" || tool === "/usr/bin/osascript")
-        return (await native(tool, args, { signal })).stdout;
-      return "";
+      if (tool === "/usr/bin/ditto") await native(tool, args, { signal });
     });
     expect(await Promise.all([install({ fetch, run }), install({ fetch, run })])).toEqual([
       destination,
@@ -342,8 +327,8 @@ test.skipIf(process.platform !== "darwin")(
     expect(await readFile(join(destination, EXECUTABLE), "utf8")).toBe("fixture");
     expect((await lstat(join(destination, EXECUTABLE))).mode & 0o111).toBe(0o100);
     expect(run).toHaveBeenCalledWith(
-      "/usr/bin/xcrun",
-      ["stapler", "validate", destination],
+      "/usr/bin/codesign",
+      verification(destination),
       expect.any(AbortSignal),
     );
     expect(await readdir(dirname(destination))).toEqual([APP_NAME]);

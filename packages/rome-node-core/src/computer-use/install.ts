@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -15,12 +15,12 @@ const SEMVER =
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const run = promisify(execFile);
 
-async function runCommand(file: string, args: string[], signal: AbortSignal): Promise<string> {
+async function runCommand(file: string, args: string[], signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   const command = run(file, args, { signal, killSignal: "SIGKILL" });
   const closed = new Promise<void>((resolve) => command.child.once("close", resolve));
   try {
-    return (await command).stdout;
+    await command;
   } finally {
     await closed;
   }
@@ -84,10 +84,16 @@ async function verifyApp(app: string, command: typeof runCommand, signal: AbortS
   await access(executable, constants.X_OK);
   await command(
     "/usr/bin/codesign",
-    ["--verify", "--deep", "--strict", `-R=${RELEASE_SIGNING_REQUIREMENT}`, app],
+    [
+      "--verify",
+      "--deep",
+      "--strict",
+      "--check-notarization",
+      `-R=${RELEASE_SIGNING_REQUIREMENT} and notarized`,
+      app,
+    ],
     signal,
   );
-  await command("/usr/bin/xcrun", ["stapler", "validate", app], signal);
 }
 
 async function checkedApplications(path: string) {
@@ -97,14 +103,8 @@ async function checkedApplications(path: string) {
   return info;
 }
 
-// RENAME_EXCL also protects an empty destination directory, which rename() can replace.
-const RENAME_EXCLUSIVE = `function run(args) {
-  ObjC.bindFunction("renamex_np", ["int", ["char *", "char *", "unsigned int"]]);
-  return $.renamex_np(args[0], args[1], 4);
-}`;
-
 async function installApp(
-  extracted: string,
+  zip: string,
   applications: string,
   command: typeof runCommand,
   signal: AbortSignal,
@@ -118,17 +118,19 @@ async function installApp(
   const staging = await mkdtemp(join(applications, ".rome-computer-use-"));
   try {
     const candidate = join(staging, APP_NAME);
-    await command("/usr/bin/ditto", [extracted, candidate], signal);
+    await command("/usr/bin/ditto", ["-x", "-k", zip, staging], signal);
     await verifyApp(candidate, command, signal);
     const current = await checkedApplications(applications);
     if (current.dev !== parent.dev || current.ino !== parent.ino)
       throw new Error("The ~/Applications directory changed during installation.");
-    const result = await command(
-      "/usr/bin/osascript",
-      ["-l", "JavaScript", "-e", RENAME_EXCLUSIVE, candidate, destination],
-      signal,
-    );
-    if (result.trim() !== "0") await verifyApp(destination, command, signal);
+    signal.throwIfAborted();
+    try {
+      await rename(candidate, destination);
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "ENOTEMPTY" && code !== "EISDIR") throw cause;
+      await verifyApp(destination, command, signal);
+    }
     return destination;
   } finally {
     await rm(staging, { recursive: true, force: true });
@@ -161,14 +163,13 @@ export async function installHelper(cancel: AbortSignal, deps: InstallDeps = {})
   const scratch = await mkdtemp(join(deps.temp ?? tmpdir(), "rome-computer-use-"));
   try {
     const zip = join(scratch, ARCHIVE);
-    const stage = join(scratch, "extracted");
-    const app = join(stage, APP_NAME);
-    const command = deps.run ?? runCommand;
     await writeFile(zip, archive, { mode: 0o600, signal });
-    await mkdir(stage, { mode: 0o700 });
-    await command("/usr/bin/ditto", ["-x", "-k", zip, stage], signal);
-    await verifyApp(app, command, signal);
-    return await installApp(app, join(deps.home ?? homedir(), "Applications"), command, signal);
+    return await installApp(
+      zip,
+      join(deps.home ?? homedir(), "Applications"),
+      deps.run ?? runCommand,
+      signal,
+    );
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

@@ -176,7 +176,6 @@ it("discovers paths without signature verification and stops at an invalid expli
   await mkdir(preferred, { recursive: true });
   const env = {
     platform: "darwin" as const,
-    arch: "arm64" as const,
     applications: [join(root, "preferred"), root],
     envPath: app,
   };
@@ -202,8 +201,31 @@ it("discovers paths without signature verification and stops at an invalid expli
   ).resolves.toBe(app);
 });
 
+it("finds and launches an installed Helper under Rosetta without auto-installing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rome-cu-rosetta-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const app = join(root, "Rome Computer Use.app");
+  await mkdir(app);
+  const options = { platform: "darwin" as const, arch: "x64" as const, applications: [root] };
+  await expect(discovery.discoverHelper(options)).resolves.toBe(app);
+  expect(discovery.canAutoInstallHelper(options)).toBe(false);
+  mock.discover.mockImplementation(() => discovery.discoverHelper(options));
+  mock.canAutoInstall.mockImplementation(() => discovery.canAutoInstallHelper(options));
+  mock.launch.mockResolvedValue(fakeHelper());
+  const f = executor();
+  expect(await f.json("system.info")).toMatchObject({
+    result: {
+      actions: expect.arrayContaining(["computer.windows"]),
+      capabilities: [{ state: "needs_permission" }],
+    },
+  });
+  expect(await f.json("computer.windows")).toMatchObject({ ok: true });
+  expect(mock.launch).toHaveBeenCalledWith(expect.objectContaining({ appPath: app }));
+  expect(mock.install).not.toHaveBeenCalled();
+});
+
 it.each([
-  { platform: "darwin", arch: "x64", code: "computer_use_unsupported_platform" },
+  { platform: "darwin", arch: "x64", code: "computer_use_helper_missing" },
   { platform: "linux", arch: "arm64", code: "computer_use_unsupported_platform" },
   {
     platform: "darwin",

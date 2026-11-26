@@ -93,7 +93,9 @@ jobs:
           set -euo pipefail
           script=packages/rome-node-core/scripts/computer-use.swift
           app="$RUNNER_TEMP/rome-native/Rome Computer Use.app"
-          swift "$script" build --self-test-build --app "$app"
+          swift "$script" build --self-test-build --version '2.3.4-rc.1' --app "$app"
+          [[ "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")" == '2.3.4' ]]
+          [[ "$(plutil -extract RomeNodeCoreVersion raw -o - "$app/Contents/Info.plist")" == '2.3.4-rc.1' ]]
           swift "$script" test --app "$app"
           if output=$(swift "$script" verify --release --app "$app" 2>&1); then
             echo "::error::The release verifier accepted the compile-only helper."
@@ -373,6 +375,7 @@ jobs:
             [[ "$(jq -er '.version' packages/rome-node-core/package.json)" == "$version" ]]
           fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Import the Rome Developer ID signing identity
         env:
@@ -426,7 +429,7 @@ jobs:
           notary_zip="$RUNNER_TEMP/rome-computer-use-notary.zip"
           dist="$RUNNER_TEMP/rome-computer-use-dist"
           mkdir "$dist"
-          swift "$script" build --identity "$SIGNING_IDENTITY" --app "$app"
+          swift "$script" build --identity "$SIGNING_IDENTITY" --version "$RELEASE_VERSION" --app "$app"
           /usr/bin/ditto -c -k --keepParent "$app" "$notary_zip"
           xcrun notarytool submit "$notary_zip" --key "$key_path" \
             --key-id "$APP_STORE_CONNECT_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID" \

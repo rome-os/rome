@@ -1043,24 +1043,29 @@ replacement connection.
 Full Rome Node hosts register the `computer.*` actions for window control.
 A limited host refuses remote actions with `computer_use_off`.
 
-On Apple silicon Macs running arm64 Node.js, the host looks for
-`Rome Computer Use.app` in `/Applications` and `~/Applications`, in that order.
-If neither location has the Helper, the first `computer.windows` or
-`computer.bind` request downloads it and installs it into
-`~/Applications/Rome Computer Use.app`. Setting `ROME_NODE_COMPUTER_USE_HELPER`
-makes the host use only that path. If the bundle is missing at that path, the
-request returns `computer_use_helper_missing`.
+On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
+`~/Applications`, in that order. Node.js running under Rosetta can use an
+installed Helper. With arm64 Node.js on Apple silicon and no installed Helper,
+the first `computer.windows` or `computer.bind` request downloads it and installs
+it into `~/Applications/Rome Computer Use.app`. Setting
+`ROME_NODE_COMPUTER_USE_HELPER` makes the host use only that path. If the bundle
+is missing at that path, the request returns `computer_use_helper_missing`.
 
 The [release workflow](../.github/workflows/release.yml) attaches
 `Rome-Computer-Use-darwin-arm64.zip` and its `.sha256` file to each
-`node-core-v<version>` GitHub Release. It signs the Helper with Rome's Developer
-ID Application certificate, notarizes it with Apple, and staples the ticket before
-packaging. The host downloads from the release matching its installed
-`@rome-os/node-core` version. It checks the SHA-256 digest before extracting the
-archive and verifies the Rome signature and notarization ticket before installing
-the Helper. Ticket verification requires the Apple command-line developer tools
-that provide `xcrun stapler`. The workflow refuses to replace either asset on an
-existing release.
+`node-core-v<version>` GitHub Release. It records the Node Core version in the
+bundle before signing with Rome's Developer ID Application certificate. It
+notarizes the Helper with Apple and staples the ticket before packaging. The
+workflow refuses to replace either asset on an existing release.
+
+The host downloads from the release matching its installed `@rome-os/node-core`
+version. It checks the SHA-256 digest before extracting the archive and uses
+macOS `codesign` to verify the Rome signature and notarization before installing
+the Helper.
+
+A Node Core upgrade keeps the installed Helper. Automatic Helper upgrades are
+planned separately. To reinstall an automatic copy, delete
+`~/Applications/Rome Computer Use.app` and make another window list or bind request.
 
 The host verifies the Helper's signature at launch before asking for local
 session approval. The Helper may also need Accessibility and Screen Recording
