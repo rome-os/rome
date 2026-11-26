@@ -21,9 +21,47 @@ const NAMES = [
   "system:remove_device",
 ];
 
+// The verbs a tool's name opens with. A new verb joins the list with the first
+// tool that uses it. The naming rules: docs/concepts/actions.md#core-agent-tools.
+const VERBS = [
+  "read",
+  "change",
+  "pause",
+  "resume",
+  "run",
+  "stop",
+  "rename",
+  "remove",
+  "disconnect",
+];
+
+// Names that break the naming rules and stay, since a tool is never renamed.
+// Add none.
+const OLDER_NAMES = ["system:list_routine_runs"];
+
+function namingProblem(name: string): string | null {
+  const words = /^system:([a-z]+)(?:_[a-z]+)+$/.exec(name);
+  if (!words) return `${name} is not system:<verb>_<thing> in lower-case words joined by "_"`;
+  if (!VERBS.includes(words[1])) return `${name} opens with "${words[1]}", which is not in VERBS`;
+  return null;
+}
+
 describe("core's agent tools", () => {
   it("lists every tool under the name agents and saved routines call it by", () => {
     expect([...agentToolNames].sort()).toEqual([...NAMES].sort());
+  });
+
+  it("names every tool as docs/concepts/actions.md#core-agent-tools says", () => {
+    const checked = [...agentToolNames].filter((name) => !OLDER_NAMES.includes(name));
+
+    expect(checked.map(namingProblem).filter(Boolean)).toEqual([]);
+  });
+
+  it("excuses only names that are still tools and still break the naming rules", () => {
+    for (const name of OLDER_NAMES) {
+      expect(agentToolNames.has(name)).toBe(true);
+      expect(namingProblem(name)).not.toBeNull();
+    }
   });
 
   it("registers every tool it lists as an action an agent can call, owned by core", () => {
