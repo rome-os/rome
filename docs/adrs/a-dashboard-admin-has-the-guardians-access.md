@@ -20,12 +20,13 @@ Four things stay the guardian's alone:
 - Removing or replacing the guardian's seat or its credentials. A dashboard admin uses the vault, but never resets it, because a reset deletes every secret and replaces the PIN.
 - What is the guardian's own person: their personal data, their device connections, their detected time zone, and making an account theirs. A dashboard admin reads the guardian's personal data and device connections. A dashboard admin never pushes personal data, pauses or deletes a personal-data origin, registers a device connection, reports the detected time zone, or links an outside account to the guardian.
 
-Each person's Concierge chats stay private to that person.
+Every Concierge chat and task chat opens to the guardian and every dashboard admin and takes their messages, like any other chat. The chat list shows a person their own, and the owner stays on the chat as a record: whose Concierge it is, and whose phone a notice goes to.
 
 ## Alternatives
 
 - **Roles, with a permission per route.** Rejected because the guardian would have to learn a model to answer one question, whether a person may use this Rome, and every new route would need a role decision.
 - **Keep approvals with the guardian.** Rejected because a dashboard admin then waits on the guardian for every action an agent asks to run, which is the work the guardian invited them to share.
+- **Concierge chats private to each person.** Rejected because who may use this Rome is one question, asked once, and a chat with a rule of its own has to ask again on every path that reads or writes a chat.
 
 ## Consequences
 

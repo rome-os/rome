@@ -48,6 +48,7 @@ import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./instance/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
+import { guardianAuth } from "./db/schema.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
 import { createRomeCloudAgentsClient } from "./connections/integrations/rome-cloud-agents.js";
@@ -146,12 +147,7 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import {
-  refuseAnotherOwnersChat,
-  WEBCHAT_CHANNEL,
-  WEBCHAT_SURFACE,
-  webchatChannel,
-} from "./webchat/dashboard-account.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
 import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -347,6 +343,7 @@ import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
+import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
@@ -1400,7 +1397,7 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
-  // A chat private to one person rings them when an action in it notifies.
+  // A chat private to one person rings them when a turn that acts for no one notifies.
   const privateOwnerOfChat = async (chatId: string) =>
     privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
@@ -1512,6 +1509,8 @@ async function main() {
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
+      guardianEmail: async () =>
+        (await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1))[0]?.email,
     }),
     webchatRepo,
     sessionRepository,
@@ -2071,7 +2070,6 @@ async function main() {
   // a quiet system turn instead (docs/architecture/concierge.md).
   const intoConciergeChat = conciergeChatGuard({
     isConciergeChat: async (chatId) => isConciergeChat(await webchatRepo.getSession(chatId)),
-    refuseAnotherOwnersChat: (chatId) => refuseAnotherOwnersChat(webchatRepo, chatId),
     senderOf: async (agentName) =>
       (agentName
         ? await resolveAutomatedSender({ agentLoader, appCatalog, settingsRepo }, agentName)
@@ -2574,10 +2572,12 @@ async function main() {
         chatsWired.links.wakeUndecided(messageId);
         return () => chatsWired.links.wakeDecided(messageId);
       },
-      // Nobody is told yet. Answering such a sender with the way to connect
-      // their account passes `tell` here.
       onRecord: unknownSenders({
         heardForMs: HEARD_FOR_MS,
+        tell: answerUnknownSenders({
+          registry: connectionRegistry,
+          publicOrigin: () => getConfiguredInstanceOrigin(),
+        }),
         isRomes: (account) =>
           connectedAccounts.get({ platform: account.platform, accountId: account.id }) !== null,
         isOwnAccount: (connectionId) => {

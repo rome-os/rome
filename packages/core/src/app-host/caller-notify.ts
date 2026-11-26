@@ -1,5 +1,5 @@
-// Whose phone `system:send_notification` rings: the owner of a private chat, else the
-// one person the turn acts for. In a shared chat with no such person it sends
+// Whose phone `system:send_notification` rings: the one person the turn acts
+// for, else the owner of a private chat. In a shared chat with no such person it sends
 // nothing. A visitor's call never reaches the guardian:
 // docs/architecture/notification-delivery.md.
 import type { SessionActor } from "../access/session-actor.js";
@@ -34,22 +34,21 @@ export function actionCaller(
 export type NotifyTarget = { recipient?: string } | "unknown";
 
 /**
- * Whom a call's push goes to. A chat private to one person (a Concierge chat,
- * its task chats) rings that person. Otherwise the one person the turn acts
- * for, whoever owns the chat: a visitor in a chat they share with the
- * guardian or another visitor rings only themselves. A call in a shared chat
- * with no such person (no one acted, or more than one person's input is in
- * the turn) is `"unknown"` and sends nothing: it never falls back to the
- * chat's owner or the guardian. A call with no chat rings the guardian.
+ * Whom a call's push goes to: the one person the turn acts for, whoever owns
+ * the chat, so a visitor rings only themselves. With no such person (no one
+ * acted, or more than one person's input is in the turn), a chat private to
+ * one person (a Concierge chat, its task chats) rings that person, and a call
+ * in a shared chat is `"unknown"` and sends nothing: it never falls back to
+ * the chat's owner or the guardian. A call with no chat rings the guardian.
  */
 export async function notifyRecipient(
   caller: ActionCaller,
   privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>,
 ): Promise<NotifyTarget> {
-  const owner = caller.chatId ? await privateOwnerOf(caller.chatId) : null;
-  if (owner) return { recipient: recipientOf(owner) };
   if (caller.actor?.kind === "visitor") return { recipient: caller.actor.accountId };
   if (caller.actor?.kind === "guardian") return { recipient: recipientOf(GUARDIAN_OWNER) };
+  const owner = caller.chatId ? await privateOwnerOf(caller.chatId) : null;
+  if (owner) return { recipient: recipientOf(owner) };
   return caller.chatId ? "unknown" : { recipient: recipientOf(GUARDIAN_OWNER) };
 }
 

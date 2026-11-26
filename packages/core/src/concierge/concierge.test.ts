@@ -92,6 +92,7 @@ interface Row {
   role: string;
   content: string;
   senderId?: string;
+  senderName?: string;
   /** Unset rows belong to every turn. */
   turnId?: string;
   /** The row it replies to, and the root of its chat thread: the root's key, or unset for its own. */
@@ -137,6 +138,8 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
       at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
       ...(card ? { card } : {}),
       ...(row.turnId ? { turnId: row.turnId } : {}),
+      ...(row.senderName ? { senderName: row.senderName } : {}),
+      ...(row.senderId ? { saidBy: { account: { platform: "webchat", id: row.senderId } } } : {}),
     };
   });
   return {
@@ -2298,7 +2301,12 @@ describe("Concierge tools", () => {
   it("chat_read reads another Concierge chat, and refuses a chat that is neither kind", async () => {
     const s = setup();
     s.messages.set(TOPIC_CHAT, [
-      { role: "user", content: JSON.stringify([{ type: "text", content: "only interviews" }]) },
+      {
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "only interviews" }]),
+        senderName: "ann@example.com",
+      },
+      { role: "user", content: textContent("and calls"), senderId: "guardian" },
     ]);
     const read = await s.tool("chat_read", { chatId: TOPIC_CHAT });
     expect(read.isError).toBeFalsy();
@@ -2306,7 +2314,10 @@ describe("Concierge tools", () => {
       chatId: TOPIC_CHAT,
       title: "Calendar",
       kind: "topic chat",
-      messages: [{ role: "user", text: "only interviews" }],
+      messages: [
+        { role: "user", from: "ann@example.com", text: "only interviews" },
+        { role: "user", from: "guardian", text: "and calls" },
+      ],
     });
     s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });
     const refused = await s.tool("chat_read", { chatId: "plain" });
@@ -4467,6 +4478,15 @@ describe("Concierge chat", () => {
               : [],
           ),
       },
+    });
+    const unnamed = createConciergeOwners({
+      settingsRepo: { get: async () => null },
+      visitorProfiles: { getMany: async () => new Map() },
+      guardianEmail: async () => "eric@example.com",
+    });
+    expect(await unnamed.profileOf("guardian")).toEqual({
+      role: "guardian",
+      email: "eric@example.com",
     });
     const annMain = mainChatIdOf("visitor:acct-ann");
     const service = new ConciergeService({
