@@ -3,12 +3,12 @@ import type { PersonMappingRepository } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
 import type { PeopleRepository } from "./model/people-repository.js";
-import { appPersonMapping } from "./app-person-mapping.js";
+import { type AppPersonMapping, appPersonMapping } from "./app-person-mapping.js";
 
 describe("appPersonMapping", () => {
   let testDb: TestDb;
   let people: PeopleRepository;
-  let app: PersonMappingRepository;
+  let app: AppPersonMapping;
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -88,27 +88,13 @@ describe("appPersonMapping", () => {
   });
 
   it("refuses every link an app asks for, so only the guardian links an account", async () => {
-    const id = await app.create({ displayName: "Bob", bondLevel: "acquaintance" });
+    const id = await people.create({ displayName: "Bob", bondLevel: "acquaintance", links: [] });
     const other = await people.create({
       displayName: "Carol",
       bondLevel: "acquaintance",
       links: [{ platform: "telegram", id: "tg-carol" }],
     });
 
-    await expect(
-      app.create({
-        displayName: "Dana",
-        bondLevel: "acquaintance",
-        channelMappings: [{ channel: "telegram", channelUserId: "tg-dana" }],
-      }),
-    ).rejects.toThrow(/only the guardian/i);
-    await expect(
-      app.create({
-        displayName: "Dana",
-        bondLevel: "acquaintance",
-        accounts: [{ platform: "telegram", id: "tg-dana" }],
-      }),
-    ).rejects.toThrow(/only the guardian/i);
     await expect(app.addChannelMapping(id, "telegram", "tg-carol")).rejects.toThrow(
       /only the guardian/i,
     );
@@ -116,9 +102,15 @@ describe("appPersonMapping", () => {
       /only the guardian/i,
     );
 
-    // Nothing moved, and the refused create made no person.
     expect((await app.findByChannelUser("telegram", "tg-carol"))?.id).toBe(other);
-    expect(await app.findByName("Dana")).toEqual([]);
-    expect((await app.findByName("Bob")).map((person) => person.id)).toEqual([id]);
+  });
+
+  it("adds no person when an app built against the SDK type calls create", async () => {
+    const sdkShaped = app as unknown as PersonMappingRepository;
+
+    await expect(
+      (async () => sdkShaped.create({ displayName: "Dana", bondLevel: "acquaintance" }))(),
+    ).rejects.toThrow(TypeError);
+    expect(await people.all()).toEqual([]);
   });
 });

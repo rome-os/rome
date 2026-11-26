@@ -34,12 +34,17 @@ function refuseLink(): never {
   throw new Error("Apps cannot link accounts to persons. Only the guardian links an account.");
 }
 
+/** The SDK repository less `create`. Apps add no person to People
+ *  (rome-os/rome#2721, D17), so the host leaves `create` out. The SDK type
+ *  keeps it, since dropping it would break apps that compile against it. */
+export type AppPersonMapping = Omit<PersonMappingRepository, "create">;
+
 /** `platformOfChannel` reads a channel an app names as its platform. Absent,
  *  the platform of the connection kind a channel is named after. */
 export function appPersonMapping(
   people: PeopleRepository,
   platformOfChannel: PlatformOfChannel = platformOf,
-): PersonMappingRepository {
+): AppPersonMapping {
   const accountOn = (channel: string, channelUserId: string) => ({
     platform: platformOfChannel(channel),
     id: channelUserId,
@@ -62,10 +67,6 @@ export function appPersonMapping(
     async findByAccount({ platform, id }) {
       const person = await people.byAccount({ platform, id });
       return person && toRecord(person);
-    },
-    async create({ channelMappings, accounts, ...person }) {
-      if ((channelMappings?.length ?? 0) + (accounts?.length ?? 0) > 0) refuseLink();
-      return people.create({ ...person, links: [] });
     },
     async addChannelMapping() {
       refuseLink();
