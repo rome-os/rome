@@ -80,7 +80,7 @@ Personal data is data about the guardian that only they should see, which their 
 - **Type**: one kind of reading or entry inside a source, such as `stepCount` or calendar `events`, with one shape: bucket, sample, record or entry.
 - **Sync**: one run on the device that reads changes and sends them.
 - **Ingest**: one batch as the server received it.
-- **Personal-data action**: an action that reads the store. It runs only in a private turn, and is refused in a shared one.
+- **Personal-data action**: an action that reads the store. Any turn may run it.
 
 **Contracts:**
 
