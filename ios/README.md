@@ -124,6 +124,12 @@ While the app is open the push shows no banner; the chat updates from live event
 
 Device and TestFlight builds sign the widget as `<bundle id>.widget` with the App Group on both IDs, so both must exist on Rome's team. The Simulator needs neither. To try it there, run with `ROME_DEMO=1`, go home, long-press, then choose Edit → Add Widget → Rome Dev.
 
+## Voice conversation Live Activity
+
+While a voice conversation runs, the Lock Screen and the Dynamic Island show Rome's mascot and a still wave (`RomeWidget/VoiceConversationLiveActivity.swift`). It says only that a conversation runs: it holds no words, does not follow the voice and never updates. The app starts it as the conversation starts and ends it as the conversation ends, however it ends (`VoiceConversationLiveActivityPresence`). One left by an app killed or crashed mid-conversation ends when the app next launches. A tap opens Rome. Its attributes are in `Shared/`, beside the mascot's paths, which the app and the widget both draw.
+
+It lives in the existing widget extension, so a TestFlight build needs nothing new on the Apple Developer site: no capability, entitlement, App ID or App Group. Both Info plists set `NSSupportsLiveActivities`. It is started from the app, never by a push, so it needs no push token and no APNs change. The guardian can turn it off under Settings → Rome → Live Activities, and the conversation runs the same without it. Mac Catalyst has no Live Activities, and builds none. To see it in the Simulator, pick an iPhone with a Dynamic Island, start a voice conversation, then lock the screen (⌘L) or go home.
+
 ## Debug modes
 
 Debug builds read these environment variables (set them in the scheme's Run options):

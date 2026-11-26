@@ -39,7 +39,11 @@ function sealed(prompt: string): string {
   return prompt.replace(/<(\/?\s*current_message)/gi, "&lt;$1");
 }
 
-/** Puts a replied-to line ahead of the prompt it answers. */
-export function withReplyContext(prompt: string, line: string): string {
-  return [...replyContextSection(line), ...currentMessageSection(prompt)].join("\n");
+/** Puts a replied-to line ahead of the prompt it answers, naming its `sender` when given. */
+export function withReplyContext(
+  prompt: string,
+  line: string,
+  sender?: Parameters<typeof currentMessageSection>[1],
+): string {
+  return [...replyContextSection(line), ...currentMessageSection(prompt, sender)].join("\n");
 }

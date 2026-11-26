@@ -176,8 +176,9 @@ describe("webchat task actor admission without a database or provider", () => {
     ["private", guardian, "guardian"],
     ["shared", guardian, "guardian"],
     ["shared", visitor, "visitor:v"],
+    ["shared", visitor, "guardian"],
   ] as const) {
-    it(`keeps the ${audience} ${actor.kind} source audience as the task's parent boundary`, async () => {
+    it(`keeps the ${audience} ${actor.kind} source audience in ${owner}'s chat as the task's parent boundary`, async () => {
       const s = harness(owner, audience);
       expect(await s.send(actor)).toMatchObject({ ok: true });
       expect(s.submit).toHaveBeenCalledWith(
@@ -268,28 +269,24 @@ describe("webchat task actor admission without a database or provider", () => {
     }
   });
 
-  for (const change of ["owner", "archive"] as const) {
-    it(`rechecks ${change} after the model session opens`, async () => {
-      const s = harness();
-      s.open.mockImplementation(async () => {
-        const row = s.rows.get("target")!;
-        if (change === "owner") row.ownerKey = "visitor:other";
-        else Object.assign(row, { archivedAt: new Date() });
-        return {
-          sessionId: "agent-session",
-          key: { agentName: "core:main", channelThreadKey: "webchat:target" },
-          submit: s.submit,
-          release: s.release,
-        };
-      });
-      expect(await s.send()).toMatchObject({ ok: false });
-      expect(s.submit).not.toHaveBeenCalled();
-      expect(s.updateUserInput).toHaveBeenCalledWith(
-        "target",
-        expect.objectContaining({ state: "failed" }),
-      );
+  it("rechecks the task chat after the model session opens", async () => {
+    const s = harness();
+    s.open.mockImplementation(async () => {
+      Object.assign(s.rows.get("target")!, { archivedAt: new Date() });
+      return {
+        sessionId: "agent-session",
+        key: { agentName: "core:main", channelThreadKey: "webchat:target" },
+        submit: s.submit,
+        release: s.release,
+      };
     });
-  }
+    expect(await s.send()).toMatchObject({ ok: false });
+    expect(s.submit).not.toHaveBeenCalled();
+    expect(s.updateUserInput).toHaveBeenCalledWith(
+      "target",
+      expect.objectContaining({ state: "failed" }),
+    );
+  });
 
   it("marks a recorded attributed input failed after a generic open error, without resending", async () => {
     const s = harness();
