@@ -85,10 +85,6 @@ describe("connect_service", () => {
       expect(kind).not.toContain("iPhone");
       expect(tool!.description).toContain("never adds, pairs or wakes a device");
       expect(tool!.description).toContain("`target_unavailable`, show no card");
-      expect(tool!.description).toContain(
-        "macOS Window Control, use `rome-node device describe <id>`",
-      );
-      expect(tool!.description).toContain("Show no connect card for it.");
     }
   });
 

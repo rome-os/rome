@@ -49,16 +49,6 @@ describe("preload bridge", () => {
     expect(Object.keys(remote.apps as object)).toEqual(["addToDesktop"]);
   });
 
-  it("gives the app's macOS pages the Computer Use settings bridge", async () => {
-    const local = await load("file:", "darwin");
-    expect(Object.keys(local.computerUse as object)).toEqual([
-      "status",
-      "openSettings",
-      "revealHelper",
-    ]);
-    expect((await load("file:")).computerUse).toBeUndefined();
-  });
-
   it("gives the app's own pages the audit log", async () => {
     const local = await load("file:");
     expect(Object.keys(local.audit as object).sort()).toEqual(

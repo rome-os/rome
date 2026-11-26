@@ -5,7 +5,7 @@ import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import type { DeviceStatus } from "./cloud/device-host";
-import type { ComputerUsePane, registerComputerUseSettings } from "./computer-use-settings";
+import type { ComputerUsePane, createComputerUseSettings } from "./computer-use-settings";
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 
@@ -74,15 +74,15 @@ export function statusLabel(status: RuntimeStatus | null): string {
 }
 
 /**
- * The line for this computer: its connection, and Computer use when that is off. Null while the
- * app is signed out, which the status line above already says.
+ * The line for this computer shows its connection. Include Computer use when off if it has no
+ * submenu. The runtime status already says when the app is signed out.
  */
-export function deviceLabel(device: DeviceStatus): string | null {
+export function deviceLabel(device: DeviceStatus, showComputerUse = true): string | null {
   if (device.state === "off") return null;
   const connection = { connected: "Connected", connecting: "Connecting…", offline: "Offline" }[
     device.connection
   ];
-  return `This Mac: ${connection}${device.computerUse ? "" : " · Computer use off"}`;
+  return `This Mac: ${connection}${showComputerUse && !device.computerUse ? " · Computer use off" : ""}`;
 }
 
 export interface SetupTrayOptions {
@@ -96,7 +96,7 @@ export interface SetupTrayOptions {
   floatingPill: FloatingPill | null;
   /** This computer as a device. Without it the menu has no line for it. */
   device?: { status(): DeviceStatus; onChange(listener: () => void): void };
-  computerUseSettings?: ReturnType<typeof registerComputerUseSettings>;
+  computerUseSettings?: ReturnType<typeof createComputerUseSettings>;
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
@@ -129,8 +129,8 @@ export function setupTray(options: SetupTrayOptions): Tray {
     if (!tray) return;
 
     const quitting = isQuitting();
-    const deviceLine = device ? deviceLabel(device.status()) : null;
     const computerUse = computerUseSettings?.status();
+    const deviceLine = device ? deviceLabel(device.status(), !computerUse) : null;
     const openPrivacyPane = (pane: ComputerUsePane) => {
       void computerUseSettings?.open(pane).catch((error) => {
         log.warn(`Could not open macOS privacy settings (${String(error)})`);

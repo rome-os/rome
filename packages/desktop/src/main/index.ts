@@ -43,7 +43,7 @@ import { DEV_DASHBOARD_URL_ENV, DevUrlRuntime, resolveDevDashboardUrl } from "./
 import type { Runtime } from "./runtime/runtime";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
-import { registerComputerUseSettings } from "./computer-use-settings";
+import { createComputerUseSettings } from "./computer-use-settings";
 import { adoptLoginShellPath } from "./cloud/login-path";
 import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
@@ -121,7 +121,7 @@ async function bootstrap() {
           )
         : undefined;
     const computerUseSettings = computerUseHelperPath
-      ? registerComputerUseSettings(computerUseHelperPath, readDeviceEnabled)
+      ? createComputerUseSettings(computerUseHelperPath, readDeviceEnabled)
       : undefined;
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
@@ -174,6 +174,7 @@ async function bootstrap() {
       },
       setEnabled: async (enabled: boolean) => {
         writeDeviceEnabled(enabled);
+        for (const listener of deviceListeners) listener();
         await deviceHost?.stop();
         await device.start();
       },
