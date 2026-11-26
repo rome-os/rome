@@ -147,7 +147,6 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 ## What is and is not enforced
 
-- A turn that an action starts through a worker, such as `system:summon` or the reply to a channel message, takes the audience Rome read for the turn or chat that ran the action. Only a first-party action's chat is trusted for that, and only a first-party action passes it on, so a third-party action's turn is shared. Rome reads who sent a direct message from People itself, never from what the caller says. A session the turn opens gets the same value in its shell, but a session already live keeps the one it opened with.
 - `rome-node device run` reaches a device from a shell. The agent's session carries `ROME_TURN_AUDIENCE`, and the CLI refuses a personal capability (Health on any device, and any capability `system.info` marks `personal`) while it says `shared`. The agent could unset the variable, so this is a guardrail against a model mistake, not a security boundary. The variable is read when the session opens, so a chat that opens to visitors later keeps the value its session started with.
 - Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read.
