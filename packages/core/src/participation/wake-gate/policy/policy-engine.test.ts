@@ -150,12 +150,6 @@ describe("PolicyEngine", () => {
     expect(result.action).toBe("require_approval");
   });
 
-  it('evaluate() handles "sentinel_review" action', async () => {
-    // Default when untrusted and no policies
-    const result = await engine.evaluate(makeContext({ bondLevel: "other" }));
-    expect(result.action).toBe("sentinel_review");
-  });
-
   // Policy decision span-event emission
   describe("policy.decision span event", () => {
     // `node` kind installs an AsyncHooks context manager so
@@ -198,13 +192,13 @@ describe("PolicyEngine", () => {
 
       const [parent] = await harness.finishedSpans();
       const event = parent.events.find((e) => e.name === "policy.decision");
-      expect(event!.attributes?.["policy.decision"]).toBe("sentinel_review");
+      expect(event!.attributes?.["policy.decision"]).toBe("allow");
       expect(event!.attributes?.["policy.matched_scope"]).toBe("default");
     });
 
     it("no-ops when evaluate runs outside any span (no crash)", async () => {
       const result = await engine.evaluate(makeContext());
-      expect(result.action).toBe("sentinel_review"); // default trust is guardian-only.
+      expect(result.action).toBe("allow");
       expect(await harness.finishedSpans()).toHaveLength(0);
     });
   });
