@@ -28,8 +28,8 @@ function projectDirOf(projectPath: string | null | undefined): string | null {
 
 /**
  * A chat's outputs, the files its agent wrote or showed, and each one's bytes.
- * Mount behind the webchat routes' private chat gate, which answers for
- * `/chat/sessions/:id/*`: another owner's Concierge or task chat is not found.
+ * Mount behind the webchat routes' chat gate, which answers for
+ * `/chat/sessions/:id/*`.
  * docs/domains/chats.md#outputs
  */
 export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {

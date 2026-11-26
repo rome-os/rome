@@ -59,7 +59,7 @@ The team is the guardian and every [dashboard admin](#dashboard-admin). Access a
 
 - Every dashboard check admits the team, except four that stay the guardian's: billing for the instance, deleting the instance, removing or replacing the guardian's seat or its credentials, and what is the guardian's own person.
 - What is the guardian's own person covers their personal data, their device connections and their detected time zone. A dashboard admin reads the guardian's personal data and device connections. A dashboard admin pushes no personal data, pauses or deletes no personal-data origin, registers no device connection, and reports no detected time zone.
-- Each person's Concierge chats stay private to that person, the guardian's included.
+- A Concierge chat opens to the guardian and every dashboard admin, whoever owns it. The chat list shows a person their own.
 
 **Not to be confused with:**
 

@@ -211,7 +211,7 @@ describe("Settings API", () => {
   });
 
   it("rejects dashboardAccess, which only PUT /dashboard-access can apply", async () => {
-    const setConfig = rs.spyOn(deps.dashboardAccessState, "setConfig");
+    const load = rs.spyOn(deps.dashboardAccessState, "load");
 
     const res = await putSettings(app, {
       [DASHBOARD_ACCESS_SETTING_KEY]: { cloudEmailAccess: ["a@example.com"] },
@@ -222,7 +222,7 @@ describe("Settings API", () => {
     expect((await res.json()).error).toContain("/api/dashboard-access");
     expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toBeNull();
     expect(await deps.settingsRepo.get("theme")).toBeNull();
-    expect(setConfig).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("keeps each person's Concierge state out of the generic read and write", async () => {

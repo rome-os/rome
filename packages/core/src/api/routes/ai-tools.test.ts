@@ -12,8 +12,6 @@ import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
 import { asGuardian } from "../../test/signed-in.js";
-import { TASK_CHAT_TRIGGER_KIND } from "../../webchat/privacy.js";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 
 const {
   isAnthropicAuthRevokedMock,
@@ -746,15 +744,10 @@ describe("Rome credits API", () => {
 });
 
 describe("a card's switch and Continue, and the notices", () => {
-  it("is refused to a visitor on a chat that is not theirs, as the chat itself is", async () => {
+  it("answers a member, whoever's chat the card is in", async () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      // The guardian's task chat and main chat: private to the guardian.
-      const rows: Record<string, { id: string; agentName: string; triggerKind: string | null }> = {
-        task: { id: "task", agentName: "main", triggerKind: TASK_CHAT_TRIGGER_KIND },
-        [CONCIERGE_CHAT_ID]: { id: CONCIERGE_CHAT_ID, agentName: "concierge", triggerKind: null },
-      };
       const switchCard = rs.fn(async () => {});
       const continueCard = rs.fn(async () => {});
       const app = asGuardian(
@@ -762,11 +755,10 @@ describe("a card's switch and Continue, and the notices", () => {
           "/",
           aiToolsRoutes({
             ...deps,
-            webchatRepo: { getSession: async (id: string) => rows[id] ?? null } as never,
             providerFailures: {
               cards: async () => [{ messageId: "m1", chatId: "task" }],
               outages: async () => [
-                { id: "o1", noticeChatId: CONCIERGE_CHAT_ID, chats: [{ chatId: "task" }] },
+                { id: "o1", noticeChatId: "concierge", chats: [{ chatId: "task" }] },
               ],
               switchCard,
               continueCard,
@@ -784,24 +776,12 @@ describe("a card's switch and Continue, and the notices", () => {
           }),
         );
       const change = { kind: "provider", provider: "openai" };
-      expect((await post("/ai-tools/provider-failures/m1/switch", change)).status).toBe(404);
-      expect((await post("/ai-tools/provider-failures/m1/continue", {})).status).toBe(404);
+      expect((await post("/ai-tools/provider-failures/m1/switch", change)).status).toBe(200);
+      expect((await post("/ai-tools/provider-failures/m1/continue", {})).status).toBe(200);
       const listed = await runWithSessionActor(visitor, () =>
         app.request("/ai-tools/provider-outages"),
       );
-      expect((await listed.json()).outages).toEqual([]);
-      expect(switchCard).not.toHaveBeenCalled();
-      expect(continueCard).not.toHaveBeenCalled();
-      // The guardian may.
-      const own = await app.request("/ai-tools/provider-failures/m1/switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(change),
-      });
-      expect(own.status).toBe(200);
-      expect(
-        (await app.request("/ai-tools/provider-failures/m1/continue", { method: "POST" })).status,
-      ).toBe(200);
+      expect((await listed.json()).outages).toMatchObject([{ id: "o1", chatIds: ["task"] }]);
       expect(continueCard).toHaveBeenCalledWith("m1");
     } finally {
       testDb.close();

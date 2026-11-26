@@ -34,6 +34,7 @@
     "lint:agents": "tsx lint/agents-md.ts",
     "lint:agent-tools": "tsx lint/agent-tools.ts",
     "lint:imports": "tsx lint/import-rules.ts",
+    "lint:inside-checks": "tsx lint/inside-checks.ts",
     "imports-of": "tsx scripts/imports-of.ts",
     "concierge:eval": "tsx scripts/concierge-eval/main.ts",
     "concierge:baseline": "tsx scripts/concierge-eval/baseline.ts",

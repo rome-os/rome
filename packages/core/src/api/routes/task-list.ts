@@ -11,12 +11,13 @@ import { ChatTaskList } from "../../concierge/task-list.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import type { ApiDeps } from "../deps.js";
-import { conciergeCallerOwner, streamEvents } from "./concierge.js";
+import { enteredOwnerKey } from "../../access/require-entry.js";
+import { streamEvents } from "./concierge.js";
 import { updateRoutine } from "../../routines/update.js";
 
 type TaskListApiDeps = Pick<
   ApiDeps,
-  "concierge" | "dashboardAccessState" | "routinesRepo" | "routineRunsRepo" | "routineEngine"
+  "concierge" | "routinesRepo" | "routineRunsRepo" | "routineEngine"
 >;
 
 const lists = new WeakMap<ConciergeService, ChatTaskList>();
@@ -96,8 +97,7 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
   ): Promise<
     { concierge: ConciergeService; list: ChatTaskList; chatId: string; owner: string } | Response
   > => {
-    const owner = await conciergeCallerOwner(deps.dashboardAccessState);
-    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const owner = enteredOwnerKey(c);
     const concierge = deps.concierge;
     const list = chatTaskListOf(deps);
     if (!concierge || !list) return c.json({ error: "Concierge is not available" }, 404);

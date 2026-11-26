@@ -1,8 +1,17 @@
 import { Hono } from "hono";
-import type { ChatRef, ChatSettingField, PartialChatSettings } from "@rome-os/app-runtime";
+import type {
+  ChatRef,
+  ChatSettingField,
+  PartialChatSettings,
+  SettingsActor,
+} from "@rome-os/app-runtime";
+import { currentSessionActor } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 
-const dashboardActor = { kind: "guardian" as const, id: "dashboard" };
+async function dashboardActor(): Promise<SettingsActor> {
+  const person = await currentSessionActor();
+  return { kind: person?.kind === "visitor" ? "member" : "guardian", id: "dashboard" };
+}
 
 function parseRef(value: unknown): ChatRef {
   if (!value || typeof value !== "object") throw new Error("ref is required");
@@ -56,7 +65,7 @@ function mount(app: Hono, path: string, deps: ApiDeps) {
           ref: parseRef(body.ref),
           set: body.set ?? {},
           clear: Array.isArray(body.clear) ? body.clear : [],
-          actor: dashboardActor,
+          actor: await dashboardActor(),
         }),
       );
     } catch (err) {
@@ -68,7 +77,10 @@ function mount(app: Hono, path: string, deps: ApiDeps) {
     try {
       const body = await c.req.json<{ ref?: unknown }>();
       return c.json(
-        await deps.chatSettings.reset({ ref: parseRef(body.ref), actor: dashboardActor }),
+        await deps.chatSettings.reset({
+          ref: parseRef(body.ref),
+          actor: await dashboardActor(),
+        }),
       );
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
