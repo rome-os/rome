@@ -21,6 +21,15 @@ const device = {
 };
 
 /**
+ * Rome apps on this Mac's Desktop. The open Rome's dashboard puts one there by
+ * id; main reads its name, page and icon from that Rome.
+ */
+const apps = {
+  addToDesktop: (appId: string): Promise<{ path: string }> =>
+    ipcRenderer.invoke("apps:addToDesktop", appId),
+};
+
+/**
  * This computer's local audit log, for the app's own audit window. Never part of what
  * other pages get below: main also refuses these channels to any page that is not `file:`.
  */
@@ -110,9 +119,12 @@ const api = {
 // only for the Rome this launch opened. Main refuses everything else.
 // `microphone` tells the dashboard this app gives it the microphone for voice
 // input; an older app does not, and the dashboard then hides the control.
+// `apps` is macOS only, where an app can sit on the Desktop as its own app.
 contextBridge.exposeInMainWorld(
   "rome",
-  location.protocol === "file:" ? api : { device, microphone: true },
+  location.protocol === "file:"
+    ? api
+    : { device, microphone: true, ...(process.platform === "darwin" ? { apps } : {}) },
 );
 
 // Tag the document so the web app can conditionally apply

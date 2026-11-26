@@ -94,6 +94,10 @@ export default defineConfig({
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
+      // An app's own home-screen manifest and icon, which the Mac app also
+      // reads to put the app on the Desktop.
+      "/app-manifest": { target: internalApiTarget, changeOrigin: true },
+      "/app-icon": { target: internalApiTarget, changeOrigin: true },
       // Explicitly set `changeOrigin: false` (Rsbuild defaults it to `true`):
       // Rsbuild's WS `xfwd` pass stamps `X-Forwarded-For/Port/Proto` without
       // `X-Forwarded-Host`, so rewriting `Host` to the loopback API target

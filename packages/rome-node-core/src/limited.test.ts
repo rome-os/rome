@@ -51,11 +51,14 @@ describe("limited responder", () => {
     expect(typeof result.platform).toBe("string");
     // Without a transferVersion, rome-node cp stops before it opens a transfer.
     expect(result).not.toHaveProperty("transferVersion");
+    expect(result).not.toHaveProperty("computerUseStatus");
   });
 
   it.each([
     "exec",
     "fs.list",
+    "computer.windows",
+    "computer.cancel",
     "transfer.open",
     "anything.else",
   ])("refuses %s with computer_use_off as a normal reply", (action) => {
