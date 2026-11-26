@@ -16,7 +16,7 @@ function harness() {
   let reply: unknown = { code: 0, data: { content: "SYNTHETIC_DOCUMENT_BODY" } };
   const full = createFeishuDescriptor({
     chatSettings: {} as never,
-    pressed: async () => {},
+    pressed: async () => false,
     listAgents: () => [],
     documentRequest: async (material, documentId) => {
       calls.push({ bot: material.appId, documentId });
