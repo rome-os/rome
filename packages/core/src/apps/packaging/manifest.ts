@@ -51,6 +51,12 @@ const NamespacedArtifactEntrySchema = z.union([
     .strict(),
 ]);
 
+/** The window sizes a share target may ask for, in points. */
+export const SHARE_PANEL_LIMITS = {
+  width: { min: 280, max: 720 },
+  height: { min: 200, max: 900 },
+} as const;
+
 const WebDeclarationSchema = z
   .object({
     manifest: z.string().min(1),
@@ -64,6 +70,20 @@ const WebDeclarationSchema = z
           // Plain segments only: a dot segment, even percent-encoded, would
           // resolve the target out of the app's own route.
           .regex(/^(\/[A-Za-z0-9_-]+)*\/?$/, "must be an app route of plain /segments")
+          .optional(),
+        // The window size the page is designed for, in points, where a surface
+        // shows it in a window of its own (the Mac app's floating panel).
+        width: z
+          .number()
+          .int()
+          .min(SHARE_PANEL_LIMITS.width.min)
+          .max(SHARE_PANEL_LIMITS.width.max)
+          .optional(),
+        height: z
+          .number()
+          .int()
+          .min(SHARE_PANEL_LIMITS.height.min)
+          .max(SHARE_PANEL_LIMITS.height.max)
           .optional(),
       })
       .strict()

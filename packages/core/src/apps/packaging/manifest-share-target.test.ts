@@ -33,6 +33,16 @@ describe("AppManifestSchema web.shareTarget", () => {
     }
   });
 
+  it("accepts a panel size within the limits and rejects one outside them", () => {
+    expect(
+      AppManifestSchema.parse(withTarget({ path: "/quick", width: 380, height: 460 })).web
+        ?.shareTarget,
+    ).toEqual({ path: "/quick", width: 380, height: 460 });
+    for (const size of [{ width: 100 }, { width: 2000 }, { height: 50 }, { height: 380.5 }]) {
+      expect(() => AppManifestSchema.parse(withTarget(size))).toThrow();
+    }
+  });
+
   it("rejects unknown share target fields", () => {
     expect(() => AppManifestSchema.parse(withTarget({ param: "q" }))).toThrow();
   });

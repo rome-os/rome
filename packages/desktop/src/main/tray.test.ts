@@ -30,7 +30,7 @@ rs.mock("./logger", () => ({
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 import type { DeviceStatus } from "./cloud/device-host";
-import { deviceLabel, setupTray, statusLabel } from "./tray";
+import { deviceLabel, setupTray, shareShortcutItems, statusLabel } from "./tray";
 
 function status(partial: Partial<RuntimeStatus>): RuntimeStatus {
   return {
@@ -186,5 +186,30 @@ describe("deviceLabel", () => {
     expect(
       deviceLabel(device({ connection: "offline", computerUse: false, state: "disabled" })),
     ).toBe("This Mac: Offline · Computer use off");
+  });
+});
+
+describe("shareShortcutItems", () => {
+  const target = {
+    appId: "what-does-it-mean",
+    name: "Clear Translate",
+    url: "https://ray.romeos.cc/full/apps/what-does-it-mean",
+    param: "text",
+  };
+
+  it("lists nothing until an app is chosen", () => {
+    expect(shareShortcutItems(null)).toEqual([]);
+    expect(shareShortcutItems({ current: () => null, open: rs.fn(), clear: rs.fn() })).toEqual([]);
+  });
+
+  it("names the chosen app and offers to open it or turn the key off", () => {
+    const shortcut = { current: () => target, open: rs.fn(), clear: rs.fn() };
+    const [item] = shareShortcutItems(shortcut);
+    expect(item.label).toBe("⌥D Opens Clear Translate");
+    const [open, turnOff] = item.submenu as Electron.MenuItemConstructorOptions[];
+    open.click?.({} as never, undefined, {} as never);
+    turnOff.click?.({} as never, undefined, {} as never);
+    expect(shortcut.open).toHaveBeenCalledOnce();
+    expect(shortcut.clear).toHaveBeenCalledOnce();
   });
 });
