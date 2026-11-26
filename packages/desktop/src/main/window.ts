@@ -83,8 +83,13 @@ export function shouldNavigateToDashboard(currentUrl: string, dashboardUrl: stri
   return shouldAutoOpenDashboard(currentUrl, ONBOARDING_URL, dashboardUrl);
 }
 
-export async function createMainWindow(runtime: Runtime): Promise<BrowserWindow> {
+export async function createMainWindow(
+  runtime: Runtime,
+  options: { show?: boolean } = {},
+): Promise<BrowserWindow> {
   const win = new BrowserWindow({
+    // Hidden when an app on the Desktop launched Rome to open its own window.
+    show: options.show ?? true,
     width: 1280,
     height: 820,
     minWidth: 800,
