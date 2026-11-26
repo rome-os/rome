@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { Account } from "@rome-os/app-runtime";
 import { links, persons } from "../db/schema.js";
-import { guardianSeatCreated, inviteMember, memberContext } from "../access/application/members.js";
+import {
+  guardianSeatCreated,
+  inviteMember,
+  memberContext,
+  memberOfAccount,
+  type NamedMember,
+} from "../access/application/members.js";
 import {
   accountCodeContext,
   accountCodeIssued,
@@ -9,18 +15,12 @@ import {
 } from "../identity/application/account-codes.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
-import {
-  type AccountHolder,
-  accountHolders,
-  SenderLabels,
-  whoIs,
-  whoSaid,
-} from "./sender-labels.js";
+import { SenderLabels, whoIs, whoSaid } from "./sender-labels.js";
 
 const at = new Date("2026-11-14T03:00:00.000Z");
 const ana: Account = { platform: "discord", id: "ana" };
 
-const ANA: AccountHolder = { id: "p-ana", name: "Ana Lopez", role: "guardian" };
+const ANA: NamedMember = { personId: "p-ana", name: "Ana Lopez", role: "guardian" };
 
 function line(id: number, senderName: string | null, account: Account | null): ContextLine {
   return { id, senderName, account, text: `m${id}`, at };
@@ -52,7 +52,7 @@ describe("whoIs", () => {
   });
 
   it("answers a member with the lowest bond level, and a nameless one by role", () => {
-    expect(whoIs({ id: "p-bo", name: null, role: "member" })).toEqual({
+    expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toEqual({
       person: { id: "p-bo", name: "member", bondLevel: "other" },
       delegate: false,
       label: "member",
@@ -64,11 +64,9 @@ describe("whoIs", () => {
 describe("SenderLabels", () => {
   it("asks once per account and labels every message it reads", async () => {
     const asked: Account[] = [];
-    const labels = new SenderLabels({
-      byAccount: async (account) => {
-        asked.push(account);
-        return account.id === "ana" ? ANA : null;
-      },
+    const labels = new SenderLabels(async (account) => {
+      asked.push(account);
+      return account.id === "ana" ? ANA : null;
     });
     const quoted = line(1, "Ana", ana);
     const unseen: UnseenLine[] = [
@@ -107,7 +105,7 @@ describe("SenderLabels", () => {
   });
 });
 
-describe("accountHolders", () => {
+describe("SenderLabels over memberOfAccount", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
     testDb?.close();
@@ -128,7 +126,9 @@ describe("accountHolders", () => {
     await ctx.identity.addAccount(guardian.id, { platform: "agent", accountId: "ana-bot" });
     const member = await inviteMember(ctx, "bo@example.com");
     await ctx.identity.addAccount(member.id, { platform: "slack", accountId: "T1/U2" });
-    const labels = new SenderLabels(accountHolders(ctx));
+    const labels = new SenderLabels((account) =>
+      memberOfAccount(ctx, { platform: account.platform, accountId: account.id }),
+    );
     return { db: testDb.db, ctx, guardian, member, labels };
   }
 

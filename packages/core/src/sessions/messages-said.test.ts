@@ -9,7 +9,8 @@ import type {
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
-import { type AccountHolder, SenderLabels } from "../chats/sender-labels.js";
+import type { NamedMember } from "../access/application/members.js";
+import { SenderLabels } from "../chats/sender-labels.js";
 import { markArrival } from "../participation/entrance.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
@@ -811,18 +812,16 @@ describe("messagesSaid", () => {
   });
 
   describe("who said it", () => {
-    const ALICE: AccountHolder = { id: "p-alice", name: "Alice Liddell", role: "member" };
+    const ALICE: NamedMember = { personId: "p-alice", name: "Alice Liddell", role: "member" };
     /** Alice's accounts: two of her own, and her agent's, which is hers too. */
     const ALICE_ACCOUNTS = ["alice-tg", "alice-tg-2", "alice-bot"];
     /** Identity and Access, answering Alice for her accounts and nobody for
      *  any other, and counting each question. */
     function people() {
       const asked: string[] = [];
-      const labels = new SenderLabels({
-        byAccount: async (account) => {
-          asked.push(account.id);
-          return ALICE_ACCOUNTS.includes(account.id) ? ALICE : null;
-        },
+      const labels = new SenderLabels(async (account) => {
+        asked.push(account.id);
+        return ALICE_ACCOUNTS.includes(account.id) ? ALICE : null;
       });
       return { labels, asked };
     }

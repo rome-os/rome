@@ -7,7 +7,7 @@ import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { ChatRepository } from "./chats/storage/chat-repository.js";
 import { MessageRepository } from "./chats/storage/message-repository.js";
-import { accountHolders, SenderLabels } from "./chats/sender-labels.js";
+import { SenderLabels } from "./chats/sender-labels.js";
 import type { ChatRef } from "./chats/storage/place.js";
 import { ChatAdapters } from "./connections/chat-adapter.js";
 import { ChatAddresses } from "./connections/chat-addresses.js";
@@ -16,7 +16,7 @@ import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapt
 import { recordedSends } from "./connections/recorded-sends.js";
 import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
-import { memberContext } from "./access/application/members.js";
+import { memberContext, memberOfAccount } from "./access/application/members.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
 import { TurnLinks } from "./sessions/turn-links.js";
@@ -65,7 +65,10 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
   });
   const speakerMessages = new SpeakerMessages({ speakers, messages, adapters });
   const reads = new ChatReadModel(db, { messages, links });
-  const labels = new SenderLabels(accountHolders(memberContext(db)));
+  const members = memberContext(db);
+  const labels = new SenderLabels((account) =>
+    memberOfAccount(members, { platform: account.platform, accountId: account.id }),
+  );
   return {
     chats,
     messages,
