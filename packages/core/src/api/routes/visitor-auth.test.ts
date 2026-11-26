@@ -17,7 +17,8 @@ import {
   memberContext,
   roleOfAccount,
 } from "../../access/application/members.js";
-import { identities } from "../../db/schema.js";
+import { createCloudGuardian } from "../../access/guardian-auth-state.js";
+import { guardianAuth, identities } from "../../db/schema.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());
@@ -27,6 +28,7 @@ const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   testDb.db.delete(identities).run();
+  testDb.db.delete(guardianAuth).run();
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = "http://localhost:3100";
 });
@@ -91,6 +93,28 @@ describe("/api/auth/visitor dashboard access", () => {
       body: JSON.stringify({ scope: "dashboard", next: "/" }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("starts dashboard sign-in for the guardian's seat email with no member invited, and refuses another email", async () => {
+    await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
+    const state = new DashboardAccessState();
+    await state.load(testDb.db);
+
+    const guardianApp = await buildRoute(state, {
+      fetchImpl: mockAccountSession("Owner@Example.com", "acct-owner"),
+    });
+    const guardian = await guardianApp.request(
+      `/api/auth/visitor/callback?state=${await startDashboardLogin(guardianApp)}&code=abc`,
+    );
+    expect(guardian.headers.get("location")).toBe("/settings/advanced");
+    expect(guardian.headers.get("set-cookie")).toContain(`${VISITOR_COOKIE_NAME}=`);
+
+    const otherApp = await buildRoute(state, { fetchImpl: mockAccountSession("lin@example.com") });
+    const other = await otherApp.request(
+      `/api/auth/visitor/callback?state=${await startDashboardLogin(otherApp)}&code=abc`,
+    );
+    expect(other.headers.get("location")).toContain("reason=forbidden");
+    expect(other.headers.get("set-cookie")).toBeNull();
   });
 
   it("issues a visitor cookie and returns to the dashboard for an allowed email", async () => {
@@ -436,6 +460,32 @@ describe("/api/auth/visitor/native", () => {
     const replay = await nativeComplete(app, { state: request.state, code: "abc" });
     expect(replay.status).toBe(400);
     expect(await replay.json()).toEqual({ error: "invalid_state" });
+  });
+
+  it("starts for the guardian's seat email with no member invited, and refuses another email", async () => {
+    await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
+    const state = new DashboardAccessState();
+    await state.load(testDb.db);
+
+    const guardianApp = await buildRoute(state, {
+      fetchImpl: recordingAccountSession("Owner@Example.com").fetchImpl,
+    });
+    const guardianStart = await nativeStart(guardianApp);
+    const guardian = await nativeComplete(guardianApp, {
+      state: guardianStart.visitor_authorization_request.state,
+      code: "abc",
+    });
+    expect(guardian.status).toBe(200);
+
+    const otherApp = await buildRoute(state, {
+      fetchImpl: recordingAccountSession("lin@example.com").fetchImpl,
+    });
+    const otherStart = await nativeStart(otherApp);
+    const other = await nativeComplete(otherApp, {
+      state: otherStart.visitor_authorization_request.state,
+      code: "abc",
+    });
+    expect(other.status).toBe(403);
   });
 
   it("refuses a visitor the instance's own allow-list does not name", async () => {

@@ -375,7 +375,7 @@ export function authRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    if (forwardedUri && deps.dashboardAccessState.hasCloudEmailAccess()) {
+    if (forwardedUri && deps.dashboardAccessState.hasSignInEmails()) {
       if (await allowFullDashboardSession()) return c.body(null, 204);
       return (await visitor())
         ? c.json({ error: "Forbidden" }, 403)
