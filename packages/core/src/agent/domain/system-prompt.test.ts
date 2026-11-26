@@ -248,4 +248,25 @@ describe("the prompts and device connections", () => {
       "`rome-node` runs programs and reads files on the guardian's computers",
     );
   });
+
+  it("discovers macOS Window Control and uses the bound window workflow", () => {
+    const { systemPromptPrefix, actions, policy } = definition("main");
+    const prompt = buildPromptPrefix(
+      { name: "main", owner: "core", systemPromptPrefix, actions, policy },
+      { ...material, charter: "", identity: "" },
+    );
+    expect(prompt).toContain(
+      "`rome-node device describe <id>` to check for Window Control (`computer_use`)",
+    );
+    expect(prompt).toMatch(
+      /`computer\.windows`.*`computer\.bind`.*`computer\.observe`.*`computer\.act`.*`computer\.unbind`/,
+    );
+    expect(prompt).toContain("`screenshot: true` and pass `--output <path>`");
+    expect(prompt).toContain(
+      "prefer an observed `element` with `press`, `set_value`, `increment` or `decrement`",
+    );
+    expect(prompt).toContain(
+      "Do not show a `connect_service` card or ask for an external `computer_use`",
+    );
+  });
 });

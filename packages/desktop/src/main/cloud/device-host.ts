@@ -38,8 +38,8 @@ export interface DeviceHostOptions {
   credential(): Promise<CloudCredential | null>;
   /** The user's Computer use choice: whether Rome may run programs on this computer. */
   enabled(): boolean;
-  /** Rome Cloud no longer accepts the credential, so the app signs out. */
-  onRevoked(): Promise<void>;
+  /** Clears the app's sign-in after the device disconnects. */
+  signOut(): Promise<void>;
   /** Runs once, before the first connection. */
   prepare?(): Promise<void>;
   onStatus?(status: DeviceStatus): void;
@@ -77,6 +77,7 @@ export class DeviceHost {
   } | null = null;
   private current: DeviceStatus = { state: "off" };
   private prepared: Promise<void> | null = null;
+  private signingOut: Promise<void> | null = null;
 
   constructor(private readonly options: DeviceHostOptions) {}
 
@@ -85,31 +86,48 @@ export class DeviceHost {
   }
 
   /**
-   * Does nothing while a connection runs or the app is signed out. Resolves
+   * Does nothing while a connection runs or the app is signing out or signed out. Resolves
    * once the status says whether this run connects, so a caller that changed
    * the switch can answer with the new status.
    */
   start(): Promise<void> {
+    if (this.signingOut) return Promise.resolve();
     if (this.running) return this.running.decided;
     const abort = new AbortController();
     let decide: () => void = () => undefined;
     const decided = new Promise<void>((resolve) => {
       decide = resolve;
     });
-    const done = this.run(abort.signal, decide).finally(() => {
-      decide();
-      if (this.running?.abort === abort) this.running = null;
-    });
+    const done = this.run(abort.signal, decide)
+      .catch((err) => {
+        log.warn(`Starting this computer failed (${String(err)})`);
+        this.setStatus({ state: "off" });
+      })
+      .finally(() => {
+        decide();
+        if (this.running?.abort === abort) this.running = null;
+      });
     this.running = { abort, done, decided };
     return decided;
   }
 
   async stop(): Promise<void> {
     const running = this.running;
-    if (!running) return;
-    running.abort.abort();
-    await running.done;
+    if (running) {
+      running.abort.abort();
+      await running.done;
+      if (this.running) return;
+    }
     this.setStatus({ state: "off" });
+  }
+
+  signOut(): Promise<void> {
+    this.signingOut ??= this.stop()
+      .then(() => this.options.signOut())
+      .finally(() => {
+        this.signingOut = null;
+      });
+    return this.signingOut;
   }
 
   private async run(signal: AbortSignal, decide: () => void): Promise<void> {
@@ -160,7 +178,7 @@ export class DeviceHost {
         save: async (session: { name: string }) => {
           name = session.name;
         },
-        // Rome Cloud rejected the token. onRevoked signs the app out.
+        // Rome Cloud rejected the token. The app forgets it on sign-out.
         clear: async () => undefined,
       },
       authorize: async () => {
@@ -190,7 +208,7 @@ export class DeviceHost {
         log.info("Rome Cloud revoked this computer; signing out");
         this.setStatus({ state: "off" });
         // Not awaited: signing out stops this host, which waits for this run.
-        void this.options.onRevoked().catch((revokeErr) => {
+        void this.signOut().catch((revokeErr) => {
           log.error(`Signing out after revocation failed (${String(revokeErr)})`);
         });
         return;

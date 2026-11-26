@@ -62,7 +62,7 @@ An account Rome has heard of that nobody has decided about yet: it has no link a
 
 - An account named only by a link leaves the [account directory](#account-directory) with its link, and returns the first time it writes.
 
-- Rome does not ask a stranger to do anything. Whether a stranger's message is answered, triaged or dropped is the reply rule's and the sentinel's business, not People's.
+- Rome does not ask a stranger to do anything. Whether a stranger's message may start anything is [entry](participation.md#entry)'s question, not People's.
 
 ## Account directory
 
@@ -76,7 +76,7 @@ Every account Rome has heard of, and every account with a link or a dismissal, e
 The one question People answers about a sender. The answer is a person with their bond level, or nobody.
 
 - A stranger and a dismissed account both answer nobody.
-- An agent that meets someone it does not recognize reads who they are by name, with the guardian's notes on them. Sentinel, which answers senders Rome does not trust, reads the sender's own notes on each message instead, and no one else's.
+- An agent that meets someone it does not recognize reads who they are by name, with the guardian's notes on them.
 
 ## Decided against
 
@@ -84,7 +84,7 @@ The one question People answers about a sender. The answer is a person with thei
 - **A fifth bond level, stranger, for accounts with no person.** A level grades a relationship. Nobody knows who the account is, so there is no relationship to grade.
 - **A person made for every dismissed account.** The guardian often does not know who a stranger is. Dismissing is a decision about the account, not a new entry in the phone book.
 - **An agent as a person of its own.** An agent acts for whoever delegated it. A reply needs to know it is talking to someone's agent, and a person of its own hides that.
-- **The routing policy inside People.** People answers who a sender is. What happens to the message keys on that answer and belongs to the reply rule and the sentinel.
+- **The routing policy inside People.** People answers who a sender is. What happens to the message keys on that answer and belongs to entry and the reply rule.
 - **Links that go when Rome's access goes.** A link is a fact about who is who, not about Rome's access. Losing it on a disconnect made the guardian a stranger again on the next connect.
 - **An account per kind of connection.** A signed-in Telegram user and a Telegram bot see the same person by the same id. Splitting them by how Rome got in made one account two.
 - **Keeping an account named only by a link after its link goes.** It needs a record the platform cannot refill, which turns the account profile into a record with a lifetime of its own.

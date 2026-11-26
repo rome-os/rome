@@ -2,9 +2,10 @@ import { z } from "zod";
 // The approval record's closed value sets.
 //
 // `type` selects a lifecycle, not a subject. The action engine writes
-// `action_execution`, and the inbox app writes `outgoing_message`. Leaving the
-// column a bare string invited callers — and fixtures — to invent kinds nothing
-// downstream knows how to resolve.
+// `action_execution`. Rows of `outgoing_message` are an earlier release's record
+// of sent messages, and nothing writes them any more. Leaving the column a bare
+// string invited callers — and fixtures — to invent kinds nothing downstream
+// knows how to resolve.
 //
 // `person_mapping` stays in the published set so apps compiled against it keep
 // building, but nothing creates one any more: only the guardian links an

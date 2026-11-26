@@ -98,8 +98,8 @@ function oldAddressingQuiet(message: WakeMessage, settings: ChatWakeSettings): b
   return false;
 }
 
-/** The old gate, frozen. With the chat switched on, a trusted guardian and
- *  no policies, only its addressing checks could keep a message quiet. */
+/** The old gate, frozen. With the chat switched on and no
+ *  policies, only its addressing checks could keep a message quiet. */
 function oldGate(message: WakeMessage, settings: ChatWakeSettings): WakeDecision {
   return oldAddressingQuiet(message, settings) ? "quiet" : "wake";
 }
@@ -113,8 +113,6 @@ function* allSettings(): Generator<ChatWakeSettings> {
           replyRule,
           botMessages,
           whenOthersMentioned,
-          trustedLevels: ["guardian"],
-          replyToLevels: ["guardian"],
           policies: [],
           connectionKindOf: (channel) => channel,
         };

@@ -877,9 +877,9 @@ export function startConciergeEvents(
     // The messages the turn took settle as on the dashboard: done, failed or
     // stopped, which their status on the platform follows.
     const silent = await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
-    // A reminder runs with no sender, so its words would pass the send gate
-    // as the guardian's: only a turn the guardian started, or one no person
-    // started, such as a task's report, gets one.
+    // A reminder runs as Rome's own turn, which may use the task tools: only a
+    // turn the guardian started, or one no person started, such as a task's
+    // report, gets one.
     const othersTurn =
       thread.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian";
     if (

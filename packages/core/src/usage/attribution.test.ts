@@ -158,6 +158,7 @@ describe("UsageAttributionResolver.forTurn", () => {
     const sessions = {
       clicked: session({ type: "action", rootActionExecutionId: "exec-click" }),
       loopback: session({ type: "action", rootActionExecutionId: "exec-loopback" }),
+      said: session({ type: "action", rootActionExecutionId: "exec-said" }),
       ranNow: session({
         type: "action",
         triggerExecutionId: "exec-ran-now",
@@ -171,6 +172,10 @@ describe("UsageAttributionResolver.forTurn", () => {
         initiator: "app:news",
         actor: { kind: "guardian", userId: "g", via: "loopback" },
       },
+      "exec-said": {
+        initiator: "app:inbox",
+        actor: { kind: "guardian", userId: "g", via: "account" },
+      },
       "exec-ran-now": "routine:Digest",
       // No session root id: the routine run is found through the execution.
       "exec-on-email": { initiator: "routine:Inbox", rootExecutionId: "email-root" },
@@ -181,6 +186,7 @@ describe("UsageAttributionResolver.forTurn", () => {
     });
     expect((await r.forTurn(turn("clicked"))).trigger).toBe("user");
     expect((await r.forTurn(turn("loopback"))).trigger).toBe("background");
+    expect((await r.forTurn(turn("said"))).trigger).toBe("user");
     expect((await r.forTurn(turn("ranNow"))).trigger).toBe("user");
     expect((await r.forTurn(turn("onEmail"))).trigger).toBe("event");
   });

@@ -18,7 +18,6 @@ import {
   type SendInput,
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import { isFeishuAuthError } from "./feishu.js";
 import { createTestDb } from "../../../test/db.js";
 import { CredentialRejected, Disconnected } from "../../errors.js";
@@ -106,15 +105,6 @@ class FakeLarkChannel {
   }
 }
 
-function fakePersonRepo(): PeopleRepository {
-  return {
-    byAccount: async () => null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [],
-    linkStated: async () => "id",
-  } as unknown as PeopleRepository;
-}
-
 function makeDescriptor(channel: FakeLarkChannel) {
   return createFeishuDescriptor({
     chatSettings: {
@@ -135,7 +125,7 @@ function makeDescriptor(channel: FakeLarkChannel) {
         supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
       }),
     } as never,
-    peopleRepo: fakePersonRepo(),
+    pressed: async () => false,
     listAgents: () => ["main"],
     createChannel: () => channel as never,
   });

@@ -26,7 +26,6 @@ import type {
   LarkChannel,
   NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import {
   type CreateLarkChannel,
   createLarkChannel,
@@ -133,12 +132,15 @@ export function feishuProfileFromSettings(
 /**
  * The runtime deps the FeishuAdapter needs, threaded from index.ts at
  * registration time (the composition root has the repos): the shared settings
- * control, person repo, and loaded-agent lister the group-config
+ * control, who is let in, and loaded-agent lister the group-config
  * card offers. `createChannel` is injectable so tests drive a fake LarkChannel.
  */
 export interface FeishuDescriptorDeps {
   chatSettings: ChatSettingsPort;
-  peopleRepo: PeopleRepository;
+  /** Takes a press on a card, or an ask for one. Absent, nothing is answered. */
+  pressed?: FeishuConfig["pressed"];
+  /** Read by nothing. test/team/instance.ts still passes it. */
+  peopleRepo?: unknown;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
@@ -562,7 +564,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             domain: app.domain,
             connectionId: kit.connectionId,
             chatSettings: deps.chatSettings,
-            peopleRepo: deps.peopleRepo,
+            pressed: deps.pressed,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,

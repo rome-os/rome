@@ -49,8 +49,6 @@ import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
-import { partsText } from "../chats/storage/message.js";
-import type { BondLevel } from "@rome-os/app-runtime";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -258,9 +256,6 @@ export async function buildConciergeTools(
     return { chatId: thread.threadId, turnId };
   };
 
-  // A reaction in a chat on a connection: one emoji on the guardian's
-  // message, sent to the platform. It cannot be taken back there, and no
-  // message status follows it.
   // The keys of this turn's messages in a chat on a connection, oldest first.
   // The model sees no message ids there, so a reply and a reaction name one
   // of these, never an id it guessed.
@@ -269,6 +264,9 @@ export async function buildConciergeTools(
       .filter((row) => row.role === "user")
       .map((row) => row.id);
 
+  // A reaction in a chat on a connection: one emoji on the turn's message,
+  // sent to the platform. It cannot be taken back there, and no message status
+  // follows it.
   const reactOnConnection = async (args: Record<string, unknown>) => {
     const { chatId, turnId } = currentTurn();
     const { emoji } = args;
@@ -281,7 +279,7 @@ export async function buildConciergeTools(
     const keys = await turnMessageKeys(chatId, turnId);
     const asked = optionalString(args, "message_id");
     const target = asked && keys.includes(asked) ? asked : keys.at(-1);
-    if (!target) throw new Error("No message of the guardian's in this turn to react to.");
+    if (!target) throw new Error("No message in this turn to react to.");
     if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
     // A message shows one emoji for its whole life, as on the dashboard: one
     // that showed working takes no reaction (docs/domains/chats.md#reaction).
@@ -678,29 +676,7 @@ export async function buildConciergeTools(
     return service.runsSystemTurnIn(chatId) ? "guardian" : "other";
   };
 
-  // The turn's message on a connection, which a message said there answers:
-  // its sender as People knows them, and what they said.
-  const connectionRecipient = async (chatId: string, turnId: string) => {
-    const thread = context.getThreadContext();
-    const asked = (await webchatRepo.getTurnChatMessages(chatId, turnId))
-      .filter((row) => row.role === "user")
-      .at(-1);
-    let said = asked?.content ?? "";
-    try {
-      const parts: unknown = JSON.parse(said);
-      if (Array.isArray(parts)) said = partsText(parts);
-    } catch {
-      // Plain text already.
-    }
-    return {
-      bondLevel: bondHere(chatId) as BondLevel,
-      shownName: thread?.channelUserId ?? "someone",
-      said,
-    };
-  };
-
-  // Says `text` in this chat on a connection, through the account's send
-  // gate to the platform. Answers the platform's key, or why it was not sent.
+  // Says `text` in this chat on a connection. Answers the platform's key.
   // The turn's first message quotes the message it answers, as the inbox
   // quoted every reply.
   const sayOnConnection = async (text: string, replyTo: string | undefined) => {
@@ -714,8 +690,6 @@ export async function buildConciergeTools(
       text,
       ...(quoting ? { replyTo: quoting } : {}),
       turnId,
-      place: context.getThreadContext()?.threadType === "private" ? "direct" : "group",
-      recipient: await connectionRecipient(chatId, turnId),
     });
   };
 
@@ -724,7 +698,7 @@ export async function buildConciergeTools(
     format: "bubble" | "long",
     isPrivate: boolean,
     replyTo?: string,
-  ): Promise<{ id: string } | { notSent: string }> => {
+  ): Promise<{ id: string }> => {
     const { chatId, turnId } = currentTurn();
     // Others may read a chat on a connection, and no lock screen hides a
     // message there: nothing said there is private.
@@ -752,9 +726,7 @@ export async function buildConciergeTools(
     // platform the chat on a connection is on.
     let id: string;
     if (onConnection) {
-      const result = await sayOnConnection(text, target?.id);
-      if ("notSent" in result) return result;
-      id = result.sent;
+      id = await sayOnConnection(text, target?.id);
     } else {
       id = await addMessage(parts, target);
     }
@@ -989,7 +961,6 @@ export async function buildConciergeTools(
             args.private === true,
             optionalString(args, "replyTo"),
           );
-          if ("notSent" in said) return { sent: false, note: said.notSent };
           return {
             sent: onConnection
               ? "Sent to this chat. Call say again only for a new message."
@@ -1001,7 +972,7 @@ export async function buildConciergeTools(
     {
       name: "react",
       description: onConnection
-        ? "React to the guardian's message of this turn with an emoji. It cannot be taken back here."
+        ? "React to the message of this turn with an emoji. It cannot be taken back here."
         : "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
       inputSchema: onConnection
         ? {
@@ -1739,15 +1710,15 @@ export async function buildConciergeTools(
     },
   ];
   if (!onConnection) return tools;
-  // On a connection, a reaction and the task tools act for the guardian. A
-  // message from anyone else may not use them; a turn Rome runs there, such as
-  // a task's report, may. Anyone's turn may say something.
+  // On a connection, the task tools act for the guardian. A message from
+  // anyone else may not use them; a turn Rome runs there, such as a task's
+  // report, may. Anyone's turn may say something and react.
   const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
   return tools
     .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     .map(
       (tool): RomeTool =>
-        tool.name === "say"
+        tool.name === "say" || tool.name === "react"
           ? tool
           : {
               ...tool,
@@ -1757,7 +1728,7 @@ export async function buildConciergeTools(
                       content: [
                         {
                           type: "text",
-                          text: "Only the guardian can react or start or change tasks here. Answer with say.",
+                          text: "Only the guardian can start or change tasks here. Answer with say.",
                         },
                       ],
                       isError: true,

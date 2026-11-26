@@ -122,7 +122,7 @@ describe("the guardian's links in People reaching Identity", () => {
     expect(await inIdentity()).toEqual(["agents:ep-atlas"]);
     expect(await enter(agent)).toEqual({
       kind: "entered",
-      person: { kind: "guardian", userId: "u", via: "loopback" },
+      person: { kind: "guardian", userId: "u", via: "account" },
     });
 
     await people.unlink(agent);

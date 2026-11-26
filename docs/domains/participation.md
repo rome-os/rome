@@ -10,11 +10,13 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 ## Entry
 
-Whether what someone says on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names.
+Whether what someone says or presses on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names, when the connection hands it in. A message, a command and a press all pass the one place that asks, before any agent or app sees them.
 
 - The guardian and a member are let in by any account of theirs, as they are at that moment. The account of an agent in the guardian's own Rome Cloud account is one of the guardian's ([delegate link](people.md#delegate-link)).
 - Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a member whose sign-in Rome cannot find, a sender whose address the connection could not verify, and everyone when no answer can be had.
 - The answer is asked before anything hears the message, and stays with it. The message of someone not let in is recorded in its chat and wakes no agent, and no app hears it. An agent woken later may read it.
+- What a message starts is the work of who said it, so a turn acts for the guardian or the member it was let in for, and nothing inside asks again.
+- A [command](connections.md#command) and `/stop` pass the same entry. Anyone let in uses every command, and stops any turn. Anyone else's does nothing, and a refusal shows only to them. A press on a card passes the same entry, and a Feishu group's settings card is sent only when someone let in asks for it. A press by anyone else gets no answer at all, and their ask for a card is recorded as any message of theirs is.
 - Whom the wake gate would wake for, and what Rome starts itself, are other questions: entry comes before the one and never asks about the other.
 - A message from an unknown sender that addresses one of Rome's [own accounts](chats.md#own-account) can be told of once it is on record, at most once, and nothing waits for that. What a bot or an app posted, and what one of Rome's accounts said, is never told of.
 - Rome answers such a sender with a link to the dashboard's connect page, where a person gets a code to send back. The link is the same for everyone, so Rome answers in the chat itself, to the sender alone where the connection offers that, at most once a day for an account. An answer the whole chat sees goes to a chat at most once in ten minutes, and an account it holds back is answered later.
@@ -31,9 +33,9 @@ The moment a message is judged to need the agent and the agent starts a turn. Th
 
 ## Wake gate
 
-The check that decides whether a message wakes the agent. It looks at where the message was said and who said it, never at the text, and answers *wake*, *quiet*, *block* or *review*. On *review*, the sentinel reads the message and ignores it, answers it itself, or wakes the agent.
+The check that decides whether a message from someone [let in](#entry) wakes the agent. It looks at where the message was said and how it addressed the agent, never at the text, and answers *wake*, *quiet* or *block*.
 
-- By default a chat switched off wakes nobody, a policy that blocks the sender or the chat wins over every setting, a sender below the bond levels the agent replies to stays quiet, and a trusted sender or one a policy allows wakes the agent. Anyone else goes to review.
+- A chat switched off wakes nobody, and a policy that blocks the sender or the chat wakes nobody. Any other message wakes the agent, unless a rule of the chat below keeps it quiet. A sender's bond level changes nothing.
 - A chat that wakes the agent only on a mention stays quiet on a message addressed to nobody. Another bot's message stays quiet unless the chat takes bots' messages, or takes them when they mention the account and this one does. A message that mentions only others stays quiet unless the chat answers those. A rule a kind of connection does not offer runs at the value the kind fixes, else at its default ([Chat rule](chats.md#chat-rule)).
 - Another bot's message never stops a turn.
 - A message that wakes nobody shows no typing, and stays in the record: a message the reply rule, the bot rule or a mention of others keeps quiet is recorded like any other. A chat switched off is not heard at all, and none of its messages are recorded.
@@ -76,15 +78,6 @@ What the agent says back after a wake, through the account it was woken on.
 - The agent decides where in the chat a reply goes: the thread the message was said in, the chat itself, or another of its threads.
 - A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it. A message from one of the guardian's dashboard chats into another needs no card: the guardian is the only other participant in both, so nothing leaves their sight. Concierge hands work to its task chats this way.
 - A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
-
-## Send gate
-
-The check that decides whether a message an agent wrote may go out. It looks at where the message goes, who sent the message it answers and which agent wrote it, never at the text, and answers *send*, *check*, *ask the guardian* or *refuse*. On *check*, a checking agent reads the message and sends it, refuses it, or holds it for the guardian in Approvals.
-
-- A reply to the guardian goes out unchecked, even in a group where others read it, and a reply to anyone else is checked first.
-- The send gate calls no model, sends nothing and stores nothing, so the same request always gets the same answer.
-- The sentinel's own reply to a message it triaged does not pass the send gate.
-- An agent whose own app runs its turns has no send gate: its app decides what goes out.
 
 ## Audience
 

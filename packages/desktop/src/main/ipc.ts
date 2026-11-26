@@ -24,11 +24,11 @@ interface IpcHandlerOptions {
   openSettingsWindow: () => void;
   openAuditWindow: () => void;
   cloudAccount: CloudAccount;
+  signOut(): Promise<void>;
   /** This computer as a device of the signed-in account. */
   device: {
     status(): DeviceStatus;
     start(): Promise<void>;
-    stop(): Promise<void>;
     setEnabled(enabled: boolean): Promise<void>;
   };
   /** Rome apps on this Mac's Desktop; absent where the app can't make them. */
@@ -203,8 +203,7 @@ export function registerIpcHandlers(
   });
 
   handleTrusted("cloud:signOut", async () => {
-    await options.device.stop();
-    await controller.signOut();
+    await options.signOut();
     return cloudState();
   });
 

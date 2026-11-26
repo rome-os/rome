@@ -4,10 +4,10 @@
 The highest trust level. Full access to all capabilities.
 
 ## Inner Circle
-Trusted friends and family. Can interact freely but outgoing messages require envoy approval.
+Trusted friends and family. Can interact freely.
 
 ## Acquaintance
-Known contacts. Sentinel triages their messages.
+Known contacts.
 
 ## Other
-Unknown senders. Sentinel triages; most interactions are limited.
+Unknown senders. Most interactions are limited.

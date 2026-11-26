@@ -52,7 +52,6 @@ function register() {
   const device = {
     status: () => status,
     start: rs.fn(async () => undefined),
-    stop: rs.fn(async () => undefined),
     setEnabled: rs.fn(async () => undefined),
   };
   registerIpcHandlers(
@@ -64,6 +63,7 @@ function register() {
       openSettingsWindow: rs.fn(),
       openAuditWindow: rs.fn(),
       cloudAccount: {} as never,
+      signOut: rs.fn(),
       device,
     },
   );
@@ -144,10 +144,10 @@ describe("who can put an app on the Desktop", () => {
       openSettingsWindow: rs.fn(),
       openAuditWindow: rs.fn(),
       cloudAccount: {} as never,
+      signOut: rs.fn(),
       device: {
         status: () => status,
         start: rs.fn(async () => undefined),
-        stop: rs.fn(async () => undefined),
         setEnabled: rs.fn(async () => undefined),
       },
       apps: { addToDesktop },

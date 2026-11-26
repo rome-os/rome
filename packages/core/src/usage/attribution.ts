@@ -146,7 +146,7 @@ export class UsageAttributionResolver {
       });
       return triggerForRoutineFire(firedBy);
     }
-    if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {
+    if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via !== "loopback")) {
       return "user";
     }
     if (actor?.kind === "guardian") return "background";

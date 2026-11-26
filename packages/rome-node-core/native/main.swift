@@ -120,7 +120,16 @@ do {
     }
     throw Failure("desktop_disabled")
     #else
+    if arguments == ["--check-permissions"] { alarm(2) }
     guard signedApp() else { throw Failure("desktop_disabled") }
+    if arguments == ["--check-permissions"] {
+        let output = try JSONSerialization.data(withJSONObject: [
+            "accessibility": AXIsProcessTrusted(),
+            "screenRecording": CGPreflightScreenCaptureAccess(),
+        ])
+        try FileHandle.standardOutput.write(contentsOf: output)
+        exit(0)
+    }
     let store = KeychainTrustedKeyStore()
     if arguments.count == 2, arguments[0] == "--serve" {
         try MainActor.assumeIsolated { try launch(path: arguments[1], desktop: true, store: store) }

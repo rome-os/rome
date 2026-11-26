@@ -1,6 +1,6 @@
 // The wake gate: does a message wake the agent. Rules:
 // docs/domains/participation.md#wake-gate.
-import type { BondLevel, ChatRef, MessageAddressing } from "@rome-os/app-runtime";
+import type { ChatRef, MessageAddressing } from "@rome-os/app-runtime";
 
 /** A message as the wake gate reads it. The text is not part of it: a gate
  *  judges where and from whom, never what. */
@@ -26,16 +26,15 @@ export interface WakeMessage {
 /** People's answer for the account that said the message. */
 export interface WakeSender {
   /** The linked person, or null when the account is linked to nobody. */
-  person: { id: string; bondLevel: BondLevel } | null;
+  person: { id: string } | null;
 }
 
 /**
  * - `wake`: the agent starts a turn on the message.
  * - `quiet`: the message stays in the record and wakes nobody.
  * - `block`: the same, because a policy blocks the sender or chat.
- * - `review`: the caller runs the sentinel, which ignores, replies or wakes the agent.
  */
-export type WakeDecision = "wake" | "quiet" | "block" | "review";
+export type WakeDecision = "wake" | "quiet" | "block";
 
 /** Pure: no model call, no send, no storage. The same message from the same
  *  sender always gets the same decision. */

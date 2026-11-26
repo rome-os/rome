@@ -1,7 +1,8 @@
-// The commands a guardian runs in a chat to read and change its chat rules,
-// and `/stop`. A connection that offers commands puts these on its platform
-// and reports each one run; this file decides who may run it, what it does,
-// and what the answer says. Vocabulary: docs/domains/chats.md#chat-rule,
+// The commands the guardian and members run in a chat to read and change its
+// chat rules, and `/stop`. A connection that offers commands puts these on its
+// platform and reports each one run. The entrance (participation/entrance.ts)
+// decides who may run one; this file decides what it does and what the answer
+// says. Vocabulary: docs/domains/chats.md#chat-rule,
 // docs/domains/connections.md#command.
 
 import {
@@ -11,7 +12,7 @@ import {
   type ChatStopHandler,
   chatStopReceipt,
   type PartialChatSettings,
-  type PersonRecord,
+  type SettingsActor,
 } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import {
@@ -20,12 +21,12 @@ import {
   storedAgentChoice,
 } from "../chats/connected-accounts/account-agents.js";
 import type { Command, CommandSpec, Commands } from "../connections/index.js";
-import { createLogger } from "../logger.js";
+import { type LetInAs, settingsActorOf } from "./settings-actor.js";
 
-const log = createLogger("chat-commands");
-
-/** The settings a chat's commands are written by. */
-const ACTOR = { kind: "guardian", id: "discord-slash" } as const;
+/** The commands, each run told whom it was let in as. */
+export type ChatCommands = Omit<Commands, "ran"> & {
+  ran(command: Command, by: LetInAs): Promise<string>;
+};
 
 /** Most suggestions a platform shows for one option. */
 const MAX_SUGGESTIONS = 25;
@@ -36,9 +37,6 @@ export interface ChatCommandsDeps {
   service: string;
   settings: ChatSettingsControl;
   chatStop?: ChatStopHandler;
-  /** The person account `accountId` belongs to, by the platform's id, or
-   *  null for an account no person is linked to. */
-  personOf: (accountId: string) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
   /** The loaded agents, by name. Absent, any name is taken. */
   listAgents?: () => string[];
   /** Whether an agent is loaded, aliases included. Absent, every agent counts
@@ -121,7 +119,7 @@ export const CHAT_COMMANDS: readonly CommandSpec[] = [
                 name: "name",
                 description: "Agent name (e.g. main, or an agent shipped by an installed app)",
                 required: true,
-                // The guardian may still type a name the list does not hold;
+                // Whoever runs it may still type a name the list does not hold;
                 // `set` checks it against the loaded agents.
                 suggested: true,
               },
@@ -168,25 +166,20 @@ const HELP = [
 ].join("\n");
 
 /** The chat commands run on Connection `deps.connectionId`. */
-export function chatCommands(deps: ChatCommandsDeps): Commands {
-  const isGuardian = (command: Command) => guardianRuns(deps, command);
+export function chatCommands(deps: ChatCommandsDeps): ChatCommands {
   return {
     list: CHAT_COMMANDS,
-    async ran(command) {
+    async ran(command, by) {
       const [name, sub] = command.path;
       if (name === "stop") return stop(deps, command);
-      if (!(await isGuardian(command))) {
-        return "Only the linked guardian can configure this Discord conversation.";
-      }
       if (name === "help") return HELP;
       if (name === "bot" && sub === "status") return botStatus(deps);
-      if (name === "channel") return channel(deps, command);
+      if (name === "channel") return channel(deps, command, settingsActorOf(by, "discord-slash"));
       return "Unknown command";
     },
     async suggest(command, option, typed) {
       const [name, group, sub] = command.path;
       if (name !== "channel" || group !== "agent" || sub !== "set" || option !== "name") return [];
-      if (!(await isGuardian(command))) return [];
       // `main` is the default: `/channel agent clear` goes back to it.
       const candidates = (deps.listAgents?.() ?? []).filter((each) => !isCoreMainAgentId(each));
       const query = typed.toLowerCase();
@@ -207,41 +200,6 @@ async function stop(deps: ChatCommandsDeps, command: Command): Promise<string> {
   return chatStopReceipt(result.status);
 }
 
-/** Whether the guardian ran `command`. A sender no person is linked to, or
- *  whose person cannot be read, is refused, and the refusal is logged. */
-async function guardianRuns(deps: ChatCommandsDeps, command: Command): Promise<boolean> {
-  const accountId = command.sender.accountId;
-  let person: Pick<PersonRecord, "id" | "bondLevel"> | null;
-  try {
-    person = await deps.personOf(accountId);
-  } catch {
-    logRefusal(deps, command, "resolution_failed");
-    return false;
-  }
-  if (person?.bondLevel === "guardian") return true;
-  logRefusal(deps, command, person ? "bond_level_not_guardian" : "unlinked", person);
-  return false;
-}
-
-function logRefusal(
-  deps: ChatCommandsDeps,
-  command: Command,
-  authorizationResult: string,
-  person?: Pick<PersonRecord, "id" | "bondLevel"> | null,
-): void {
-  log.warn("chat command authorization rejected", {
-    connectionId: deps.connectionId,
-    senderId: command.sender.accountId,
-    command: command.path[0],
-    authorized: false,
-    decision: "deny",
-    authorizationResult,
-    ...(person !== undefined
-      ? { personId: person?.id ?? null, bondLevel: person?.bondLevel ?? null }
-      : {}),
-  });
-}
-
 async function botStatus(deps: ChatCommandsDeps): Promise<string> {
   const page = await deps.settings.list({ connectionId: deps.connectionId, limit: 100 });
   const changed = page.items.filter((item) => Object.keys(item.snapshot.overrides).length > 0);
@@ -250,7 +208,11 @@ async function botStatus(deps: ChatCommandsDeps): Promise<string> {
     : `**Rome Bot Status**\n\n${changed.length} conversation(s) have explicit overrides. Manage them on the Discord connection's page in Settings → Connections.`;
 }
 
-async function channel(deps: ChatCommandsDeps, command: Command): Promise<string> {
+async function channel(
+  deps: ChatCommandsDeps,
+  command: Command,
+  actor: SettingsActor,
+): Promise<string> {
   const [, sub, agentSub] = command.path;
   const { where } = command;
   const ref = { connectionId: deps.connectionId, chatId: where.chatId };
@@ -271,12 +233,12 @@ async function channel(deps: ChatCommandsDeps, command: Command): Promise<string
     return "This thread follows the settings of the channel it was opened in. Run the command there to change them.";
   }
   if (sub === "reset") {
-    await deps.settings.reset({ ref, actor: ACTOR });
+    await deps.settings.reset({ ref, actor });
     return `✓ ${named} configuration cleared\nRestored all defaults (require @mention, ignore other bots, auto-thread on)`;
   }
 
   const change = (set: PartialChatSettings, clear: ChatSettingField[] = []) =>
-    deps.settings.update({ ref, set, clear, actor: ACTOR });
+    deps.settings.update({ ref, set, clear, actor });
   const option = (name: string) => command.options[name] ?? "";
 
   switch (sub) {

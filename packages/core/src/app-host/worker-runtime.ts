@@ -28,7 +28,6 @@ import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PolicyEngine } from "../participation/wake-gate/policy/policy-engine.js";
-import { guardedSend } from "../participation/send-gate/index.js";
 import { wakeGateLoader } from "../participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "../profile-memory.js";
 import {
@@ -177,11 +176,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
     chatSettings: (chat) => appChatSettings.get(chat),
-    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
   });
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
@@ -232,7 +230,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
-      sendGate: guardedSend,
       wakeGateFor,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>

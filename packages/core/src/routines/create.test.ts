@@ -1553,7 +1553,7 @@ describe("create_routine — explicit action targets (#679)", () => {
 
   it("rejects an explicit target the calling agent does not hold", async () => {
     const engine = makeFakeEngine();
-    const result = await asAgent("inbox:sentinel", () =>
+    const result = await asAgent("assistant:explore", () =>
       createRoutine(input, {
         routinesRepo: repo,
         actionRegistry: explicitRoot,
@@ -1608,7 +1608,7 @@ describe("create_routine — explicit action targets (#679)", () => {
 
   it("trusts app code binding an explicit action", async () => {
     const result = await asAgent(
-      "inbox:sentinel",
+      "assistant:explore",
       () =>
         createRoutine(input, {
           routinesRepo: repo,

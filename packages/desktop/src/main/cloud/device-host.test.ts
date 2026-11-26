@@ -49,7 +49,7 @@ function host(overrides: Partial<DeviceHostOptions> = {}) {
     deviceName: "RayBook",
     credential: async () => credential,
     enabled: () => true,
-    onRevoked: rs.fn(async () => undefined),
+    signOut: rs.fn(async () => undefined),
     prepare: rs.fn(async () => undefined),
     onStatus: (status) => statuses.push(status),
     audit,
@@ -164,7 +164,7 @@ describe("DeviceHost", () => {
       new Error("This device was removed from your account. Connect it again to add it back."),
     );
     await settle();
-    expect(options.onRevoked).toHaveBeenCalledTimes(1);
+    expect(options.signOut).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });
   });
 
@@ -231,7 +231,41 @@ describe("DeviceHost", () => {
     await subject.stop();
     expect(gateway.calls[0].signal.aborted).toBe(true);
     expect(subject.status()).toEqual({ state: "off" });
-    expect(options.onRevoked).not.toHaveBeenCalled();
+    expect(options.signOut).not.toHaveBeenCalled();
+  });
+
+  it("waits for host cleanup before signing out and blocks reconnect until sign-out finishes", async () => {
+    let endHost = () => {};
+    let clearCredential = () => {};
+    const hostEnded = new Promise<void>((resolve) => {
+      endHost = resolve;
+    });
+    const clearingCredential = new Promise<void>((resolve) => {
+      clearCredential = resolve;
+    });
+    const connect = rs.fn((_options: HostOptions) => hostEnded);
+    const { subject, options } = host({
+      connect,
+      signOut: rs.fn(() => clearingCredential),
+    });
+    await subject.start();
+    const signingOut = subject.signOut();
+    expect(subject.signOut()).toBe(signingOut);
+    expect(connect.mock.calls[0][0].signal.aborted).toBe(true);
+    expect(options.signOut).not.toHaveBeenCalled();
+
+    endHost();
+    await settle();
+    expect(options.signOut).toHaveBeenCalledTimes(1);
+    await subject.start();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(subject.status()).toEqual({ state: "off" });
+
+    options.credential = async () => null;
+    clearCredential();
+    await signingOut;
+    await subject.start();
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 
   it("signs the app out when Rome Cloud revokes the device", async () => {
@@ -245,7 +279,7 @@ describe("DeviceHost", () => {
       new Error("This device was removed from your account. Connect it again to add it back."),
     );
     await settle();
-    expect(options.onRevoked).toHaveBeenCalledTimes(1);
+    expect(options.signOut).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });
   });
 
@@ -257,7 +291,7 @@ describe("DeviceHost", () => {
     const { subject, options } = host({ connect });
     subject.start();
     await settle();
-    expect(options.onRevoked).toHaveBeenCalledTimes(1);
+    expect(options.signOut).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });
   });
 
@@ -268,7 +302,7 @@ describe("DeviceHost", () => {
     gateway.emit({ type: "connection", status: "superseded" });
     gateway.end(new Error("Another connection replaced this device. This process has stopped."));
     await settle();
-    expect(options.onRevoked).not.toHaveBeenCalled();
+    expect(options.signOut).not.toHaveBeenCalled();
     expect(subject.status()).toEqual({
       state: "offline",
       deviceId: credential.deviceSessionId,

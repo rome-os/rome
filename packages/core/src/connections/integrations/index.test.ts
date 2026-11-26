@@ -426,8 +426,6 @@ describe("chat rule conformance", () => {
           if (!c.message) continue;
           const gate = chatSettingsWake({
             ...chatRules({ effective: asChatSettings(effective) } as ChatSettingsSnapshot),
-            trustedLevels: ["guardian"],
-            replyToLevels: ["guardian"],
             policies: [],
             connectionKindOf: () => descriptor.connectionKind,
           });
@@ -439,7 +437,7 @@ describe("chat rule conformance", () => {
               place: "group",
               ...c.message,
             },
-            { person: { id: "guardian", bondLevel: "guardian" } },
+            { person: { id: "guardian" } },
           );
           expect({ rule, value: c.value, message: c.message, decision }).toEqual({
             rule,

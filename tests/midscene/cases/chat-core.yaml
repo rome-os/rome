@@ -61,7 +61,7 @@ cases:
           mention picker opens; do not select an agent.
       - aiAssert: >-
           An agent mention picker titled "Pick an agent to chat with" is open, showing a "Built-in
-          agents" section with a "Rome" group and its two agents, "main" and "envoy".
+          agents" section with a "Rome" group and its two agents, "main" and "concierge".
   - name: CHAT-04 Inspect a successful execution trace
     tags:
       - chat

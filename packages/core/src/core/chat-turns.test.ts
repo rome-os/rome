@@ -10,9 +10,9 @@ const chat = {
 describe("ChatTurns", () => {
   it("names the turn running in a chat and who started it until it ends", () => {
     const turns = createChatTurns();
-    const end = turns.start(chat, { turnId: "turn-1", initiatorId: "user-1" });
+    const end = turns.start(chat, { turnId: "turn-1" });
 
-    expect(turns.runningIn(chat)).toEqual({ turnId: "turn-1", initiatorId: "user-1" });
+    expect(turns.runningIn(chat)).toEqual({ turnId: "turn-1" });
 
     end();
     expect(turns.runningIn(chat)).toBeUndefined();

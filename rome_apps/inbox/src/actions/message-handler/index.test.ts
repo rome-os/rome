@@ -13,10 +13,7 @@ import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
-  buildSenderInfo,
-  recipientLabel,
   createAction as createMessageHandlerAction,
-  parseSentinelDecision,
   sendAnswer,
 } from "./index.js";
 
@@ -50,9 +47,8 @@ function createMockAgentRunner(
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
-  // Catalog of agents the runner pretends to know. Defaults to the core trio
-  // plus envoy so existing tests don't need to opt in.
-  const known = new Set(options.knownAgents ?? ["main", "sentinel", "envoy"]);
+  // Catalog of agents the runner pretends to know.
+  const known = new Set(options.knownAgents ?? ["main"]);
   const actionCapable = options.actionCapableAgents ?? {};
 
   return {
@@ -70,11 +66,6 @@ function createMockAgentRunner(
       return (actionCapable[agentName] ?? []).includes(actionName);
     },
   };
-}
-
-function envoyAnswer(verdict: string, reason: string): AgentMessage {
-  const structuredOutput = { verdict, reason };
-  return { type: "result", content: JSON.stringify(structuredOutput), structuredOutput };
 }
 
 function createAction(
@@ -96,7 +87,6 @@ function createAction(
 function createMessageHandlerDeps(
   overrides: {
     personMappingRepo?: Record<string, unknown>;
-    settings?: Record<string, unknown>;
     agentResponses?: AgentMessage[][];
     knownAgents?: string[];
     actionCapableAgents?: Record<string, string[]>;
@@ -108,10 +98,11 @@ function createMessageHandlerDeps(
     actionCapableAgents: overrides.actionCapableAgents,
   });
   const sentMessages: Record<string, unknown>[] = [];
-  const approvals: Record<string, unknown>[] = [];
-  const settings = overrides.settings ?? {};
-  const wake: { policyAction: string; asked: { message: unknown; sender: WakeSender }[] } = {
-    policyAction: "allow",
+  const wake: {
+    answer: "wake" | "quiet" | "block";
+    asked: { message: unknown; sender: WakeSender }[];
+  } = {
+    answer: "wake",
     asked: [],
   };
   const conversations = {
@@ -126,9 +117,6 @@ function createMessageHandlerDeps(
 
   const deps = {
     agentRunner,
-    // Answers as Core's guardedSend does, which an app test cannot import.
-    sendGate: ({ recipient }: { recipient: { bondLevel: string } | null }) =>
-      recipient?.bondLevel === "guardian" ? "send" : "check",
     personMappingRepo: {
       findByChannelUser: rs.fn(async () => null),
       findByName: rs.fn(async () => []),
@@ -138,28 +126,10 @@ function createMessageHandlerDeps(
       addChannelMapping: rs.fn(async () => undefined),
       ...overrides.personMappingRepo,
     },
-    sentinelLogRepo: {
-      create: rs.fn(async () => "sentinel-1"),
-      findUnreviewed: rs.fn(async () => []),
-      markReviewed: rs.fn(async () => undefined),
-    },
-    approvalsRepo: {
-      create: rs.fn(async (approval: Record<string, unknown>) => {
-        approvals.push(approval);
-        return "approval-1";
-      }),
-    },
-    // Answers as Core's chatSettingsWake does, which an app test cannot
-    // import, with the policy answering `wake.policyAction`.
+    // Answers `wake.answer`.
     wakeGateFor: rs.fn(async () => (message: unknown, sender: WakeSender) => {
       wake.asked.push({ message, sender });
-      const bondLevel = sender.person?.bondLevel ?? "other";
-      const trusted = (settings.trustedBondLevels as string[] | undefined) ?? ["guardian"];
-      const replyTo = (settings.replyToBondLevels as string[] | undefined) ?? ["guardian"];
-      if (wake.policyAction === "block") return "block";
-      if (!replyTo.includes(bondLevel)) return "quiet";
-      if (trusted.includes(bondLevel) || wake.policyAction === "allow") return "wake";
-      return "review";
+      return wake.answer;
     }),
     appContext: {
       app: { id: "inbox", version: "0.1.0", description: "Inbox" },
@@ -168,7 +138,7 @@ function createMessageHandlerDeps(
       log: {} as never,
       repositories: {
         settings: {
-          get: rs.fn(async (key: string) => (key in settings ? settings[key] : null)),
+          get: rs.fn(async () => null),
           set: rs.fn(async () => undefined),
         },
         chats: conversations,
@@ -183,7 +153,7 @@ function createMessageHandlerDeps(
     strangerPersonId: STRANGER_PERSON_ID,
   } as unknown as Parameters<typeof createAction>[1];
 
-  return { deps, agentRunner, sentMessages, approvals, conversations, wake };
+  return { deps, agentRunner, sentMessages, conversations, wake };
 }
 
 describe("buildMessageContext", () => {
@@ -251,7 +221,7 @@ describe("buildMessageContext", () => {
     expect(result).not.toContain("is group chat: yes");
   });
 
-  it("no longer embeds the Discord channel-control cue (moved to the trusted-path injector)", () => {
+  it("no longer embeds the Discord channel-control cue (moved to the turn's injector)", () => {
     const profileDir = createTempProfile({
       "memory/relationship/GUARDIAN.md": "# Guardian Profile\n\nName: Test Guardian",
     });
@@ -268,7 +238,7 @@ describe("buildMessageContext", () => {
       strangerPersonId: STRANGER_PERSON_ID,
     };
 
-    // The cue is now appended in handleTrustedMessage once the routed target
+    // The cue is now appended in runTurnAndReply once the routed target
     // agent is known, so buildMessageContext itself stays channel-agnostic.
     const discord = buildMessageContext({ ...base, channel: "discord" });
     expect(discord).not.toContain("## Discord channel control");
@@ -322,78 +292,6 @@ describe("buildMessageContext", () => {
   });
 });
 
-// Pins the inbox's label to the form core's `whoSaid`
-// (packages/core/src/chats/sender-labels.ts) gives a message the agent reads:
-// "<shown name> [<person>, <bond level in words>]", or "[not linked]".
-// Apps cannot import core, so the format is asserted literally.
-describe("recipientLabel", () => {
-  it("labels a linked sender with their person and bond level in words, as core does", () => {
-    expect(
-      recipientLabel({ shownName: "Ada", person: "Ada Lovelace", bondLevel: "inner-circle" }),
-    ).toBe("Ada [Ada Lovelace, inner circle]");
-  });
-
-  it("labels a sender with no linked person as not linked, as core does", () => {
-    expect(recipientLabel({ shownName: "Ada", person: null, bondLevel: "other" })).toBe(
-      "Ada [not linked]",
-    );
-  });
-});
-
-describe("buildSenderInfo", () => {
-  it("reads the sender's notes", () => {
-    const profileDir = createTempProfile({
-      "memory/relationship/alice.md": "# Alice\n\nLikes concise updates.",
-    });
-    const result = buildSenderInfo({
-      person: {
-        id: "alice",
-        displayName: "Alice",
-        bondLevel: "acquaintance",
-        profilePath: "memory/relationship/alice.md",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
-      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
-    });
-    expect(result).toContain("Likes concise updates.");
-  });
-
-  it("reads the notes kept under the sender's id when no path is stored", () => {
-    const profileDir = createTempProfile({
-      "memory/relationship/bob-id.md": "# Bob\n\nPrefers email.",
-    });
-    const result = buildSenderInfo({
-      person: {
-        id: "bob-id",
-        displayName: "Bob",
-        bondLevel: "acquaintance",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
-      resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
-    });
-    expect(result).toContain("Prefers email.");
-  });
-
-  it("marks an unknown sender as a stranger", () => {
-    const result = buildSenderInfo({
-      person: {
-        id: STRANGER_PERSON_ID,
-        displayName: "Unknown",
-        bondLevel: "other",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
-      resolveProfilePath: (filePath: string) => filePath,
-      strangerPersonId: STRANGER_PERSON_ID,
-    });
-    expect(result).toBe("stranger (no person mapping yet)");
-  });
-});
-
 describe("appendAttachmentPathsToPrompt", () => {
   it("adds saved attachment paths to text prompts", () => {
     const result = appendAttachmentPathsToPrompt("Please inspect this", [
@@ -419,84 +317,12 @@ describe("appendAttachmentPathsToPrompt", () => {
   });
 });
 
-describe("parseSentinelDecision", () => {
-  it("extracts only the explicit reply body", () => {
-    expect(parseSentinelDecision("REPLY: Hello there.")).toEqual({
-      action: "replied",
-      response: "Hello there.",
-    });
-    expect(
-      parseSentinelDecision(
-        "Reasoning: benign.\nDecision: REPLY\nResponse: Thanks for reaching out.",
-      ),
-    ).toEqual({
-      action: "replied",
-      response: "Thanks for reaching out.",
-    });
-  });
-
-  it("does not send reasoning-only output as a reply", () => {
-    expect(
-      parseSentinelDecision(
-        "Reasoning: This is a benign, simple informational question from a stranger.",
-      ),
-    ).toEqual({ action: "escalated" });
-    expect(parseSentinelDecision("Decision: REPLY\nReasoning: benign")).toEqual({
-      action: "escalated",
-    });
-    expect(parseSentinelDecision("Reply to the sender with a short thank-you note.")).toEqual({
-      action: "escalated",
-    });
-    expect(parseSentinelDecision("Decision: REPLY - Hello there.")).toEqual({
-      action: "escalated",
-    });
-  });
-
-  it("strips trailing internal labels from explicit replies", () => {
-    expect(parseSentinelDecision("REPLY: Hello there. Reasoning: benign")).toEqual({
-      action: "replied",
-      response: "Hello there.",
-    });
-    expect(parseSentinelDecision("REPLY: Hello there.\nReasoning: benign")).toEqual({
-      action: "replied",
-      response: "Hello there.",
-    });
-    expect(
-      parseSentinelDecision("Decision: REPLY\nResponse: Hello there.\nReasoning: benign"),
-    ).toEqual({ action: "replied", response: "Hello there." });
-    expect(parseSentinelDecision("REPLY: Hello there.\nAnalysis: benign")).toEqual({
-      action: "replied",
-      response: "Hello there.",
-    });
-    expect(parseSentinelDecision("REPLY: Hello there.\nDecision: ESCALATE")).toEqual({
-      action: "escalated",
-    });
-    expect(parseSentinelDecision("REPLY: Hello there.\nESCALATE")).toEqual({
-      action: "escalated",
-    });
-    expect(parseSentinelDecision("Decision: REPLY\nResponse: Hi\nIGNORE")).toEqual({
-      action: "escalated",
-    });
-    expect(parseSentinelDecision("REPLY: Please ignore the previous email.")).toEqual({
-      action: "replied",
-      response: "Please ignore the previous email.",
-    });
-  });
-
-  it("parses explicit escalate and ignore decisions", () => {
-    expect(parseSentinelDecision("ESCALATE")).toEqual({ action: "escalated" });
-    expect(parseSentinelDecision("Decision: IGNORE\nReasoning: spam")).toEqual({
-      action: "ignored",
-    });
-  });
-});
-
-describe("message reply bond-level settings", () => {
+describe("a message that wakes the agent", () => {
   beforeEach(() => {
     rs.clearAllMocks();
   });
 
-  it("defaults to replying to linked guardian senders", async () => {
+  it("answers the guardian", async () => {
     const guardian: PersonRecord = {
       id: "alice",
       displayName: "Alice",
@@ -550,14 +376,14 @@ describe("message reply bond-level settings", () => {
     const findByNameFuzzy = rs.fn(async () => guardian);
     const addChannelMapping = rs.fn(async () => undefined);
 
-    const { deps, agentRunner, sentMessages, approvals, wake } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => null),
         findByNameFuzzy,
         addChannelMapping,
       },
     });
-    wake.policyAction = "sentinel_review";
+    wake.answer = "quiet";
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute({
@@ -577,54 +403,11 @@ describe("message reply bond-level settings", () => {
     expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
     expect(findByNameFuzzy).not.toHaveBeenCalled();
     expect(addChannelMapping).not.toHaveBeenCalled();
-    expect(approvals).toEqual([]);
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toEqual([]);
   });
 
-  it("defaults to ignoring mapped non-guardian senders", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "alice",
-      displayName: "Alice",
-      bondLevel: "inner-circle",
-      channelMappings: [{ channel: "telegram", channelUserId: "alice-tg" }],
-      profilePath: null,
-    };
-
-    const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
-    });
-    const action = createAction(actionConfig, deps);
-
-    const result = await action.execute({
-      channel: "telegram",
-      channelUserId: "alice-tg",
-      threadId: "thread-1",
-      threadType: "private",
-      displayName: "Alice",
-      text: "Can you answer?",
-      messageId: "msg-1",
-    });
-
-    expect(result).toEqual({
-      status: "ok",
-      data: { action: "ignored_by_reply_settings", bondLevel: "inner-circle" },
-    });
-    expect(agentRunner.calls).toHaveLength(0);
-    expect(sentMessages).toEqual([]);
-    expect(conversations.addMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: "channel:telegram:thread-1",
-        role: "notification",
-        platformMessageId: "msg-1",
-        senderId: "alice-tg",
-      }),
-    );
-  });
-
-  it("passes provider reply context to the trusted turn without persisting a synthetic message", async () => {
+  it("passes provider reply context to the turn without persisting a synthetic message", async () => {
     const mappedPerson: PersonRecord = {
       id: "ray",
       displayName: "Ray",
@@ -705,7 +488,7 @@ describe("message reply bond-level settings", () => {
     expect(sentMessages).toEqual([]);
   });
 
-  it("uses replyToBondLevels to allow other senders explicitly", async () => {
+  it("answers anyone else the same way, with no other agent", async () => {
     const mappedPerson: PersonRecord = {
       id: "casey",
       displayName: "Casey",
@@ -715,14 +498,10 @@ describe("message reply bond-level settings", () => {
     };
 
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
       personMappingRepo: {
         findByChannelUser: rs.fn(async () => mappedPerson),
       },
-      agentResponses: [
-        [{ type: "result", content: "Sure." }],
-        [envoyAnswer("approve", "Fine to send.")],
-      ],
+      agentResponses: [[{ type: "result", content: "Sure." }]],
     });
     const action = createAction(actionConfig, deps);
 
@@ -737,7 +516,7 @@ describe("message reply bond-level settings", () => {
     });
 
     expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
-    expect(agentRunner.calls).toHaveLength(2);
+    expect(agentRunner.calls).toHaveLength(1);
     expect(sentMessages).toEqual([
       {
         channel: "telegram",
@@ -750,205 +529,16 @@ describe("message reply bond-level settings", () => {
       },
     ]);
   });
-
-  it("tells the envoy the reply goes to the sender, not the guardian", async () => {
-    const priya: PersonRecord = {
-      id: "priya",
-      displayName: "Priya Lindqvist-Mbeki",
-      bondLevel: "acquaintance",
-      channelMappings: [{ channel: "discord", channelUserId: "priya-dc" }],
-      profilePath: null,
-    };
-    const { deps, agentRunner } = createMessageHandlerDeps({
-      settings: { replyToBondLevels: ["guardian", "acquaintance"] },
-      personMappingRepo: { findByChannelUser: rs.fn(async () => priya) },
-      agentResponses: [
-        [{ type: "result", content: "You committed to the launch plan." }],
-        [{ type: "result", content: "APPROVE" }],
-      ],
-    });
-
-    await createAction(actionConfig, deps).execute({
-      channel: "discord",
-      channelUserId: "priya-dc",
-      threadId: "thread-1",
-      threadType: "group",
-      displayName: "Priya",
-      text: "What did I commit to?",
-      messageId: "msg-1",
-    });
-
-    const envoyPrompt = agentRunner.calls[1]?.prompt ?? "";
-    expect(envoyPrompt).toContain("from Priya [Priya Lindqvist-Mbeki, acquaintance]:");
-    expect(envoyPrompt).toContain("in the same group chat the message was sent in");
-    expect(envoyPrompt).toContain("The sender is not the guardian");
-  });
-
-  it("escalates malformed sentinel output instead of sending reasoning to other senders", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "casey",
-      displayName: "Casey",
-      bondLevel: "other",
-      channelMappings: [{ channel: "email", channelUserId: "casey@example.com" }],
-      profilePath: null,
-    };
-
-    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
-      settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
-      agentResponses: [
-        [
-          {
-            type: "result",
-            content: "Reasoning: This is a benign, simple informational question from a stranger.",
-          },
-        ],
-        [{ type: "result", content: "Here is the answer." }],
-        [envoyAnswer("approve", "Fine to send.")],
-      ],
-    });
-    wake.policyAction = "sentinel_review";
-    const action = createAction(actionConfig, deps);
-
-    const result = await action.execute({
-      channel: "email",
-      channelUserId: "casey@example.com",
-      threadId: "mail-thread-1",
-      threadType: "private",
-      displayName: "Casey",
-      text: "What is Rome?",
-      messageId: "msg-1",
-    });
-
-    expect(result).toEqual({
-      status: "ok",
-      data: { action: "sent", response: "Here is the answer." },
-    });
-    expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel", "main", "envoy"]);
-    // Sentinel reads the sender's own notes on the message it triages. No
-    // session's system prompt carries them.
-    expect(agentRunner.calls[0].prompt).toContain(
-      "<sender>\nMapped person: Casey\nBond level: other\nNo notes on this sender yet.\n</sender>",
-    );
-    for (const call of agentRunner.calls) {
-      expect(String(call.contextSuffix ?? "")).not.toContain("Casey");
-    }
-    // Its session is the sender's own, so no other sender's notes are in it.
-    expect(agentRunner.calls[0].channelThreadKey).toBe(
-      "sentinel:email:mail-thread-1:casey@example.com",
-    );
-    // Envoy judges what is private by who is replying, so it is told the agent.
-    expect(agentRunner.calls[2]?.prompt).toContain("Replying agent: main");
-    expect(sentMessages).toEqual([
-      {
-        channel: "email",
-        channelUserId: "casey@example.com",
-        threadId: "mail-thread-1",
-        text: "Here is the answer.",
-        replyToMessageId: "msg-1",
-        romeSessionId: "channel:email:mail-thread-1",
-        knownToProvider: true,
-      },
-    ]);
-  });
-
-  it("still ignores other bond-level senders by default", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "casey",
-      displayName: "Casey",
-      bondLevel: "other",
-      channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
-      profilePath: null,
-    };
-
-    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
-    });
-    const action = createAction(actionConfig, deps);
-
-    const result = await action.execute({
-      channel: "telegram",
-      channelUserId: "casey-tg",
-      threadId: "thread-1",
-      threadType: "private",
-      displayName: "Casey",
-      text: "Can you answer?",
-      messageId: "msg-1",
-    });
-
-    expect(result).toEqual({
-      status: "ok",
-      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
-    });
-    expect(agentRunner.calls).toHaveLength(0);
-    expect(sentMessages).toHaveLength(0);
-  });
-});
-
-describe("envoy verdict", () => {
-  const casey: PersonRecord = {
-    id: "casey",
-    displayName: "Casey",
-    bondLevel: "other",
-    channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
-    profilePath: null,
-  };
-
-  async function replyWithEnvoyAnswer(answer: AgentMessage) {
-    const { deps, sentMessages } = createMessageHandlerDeps({
-      settings: { replyToBondLevels: ["guardian", "other"] },
-      personMappingRepo: { findByChannelUser: rs.fn(async () => casey) },
-      agentResponses: [[{ type: "result", content: "Sure." }], [answer]],
-    });
-    const result = await createAction(actionConfig, deps).execute({
-      channel: "telegram",
-      channelUserId: "casey-tg",
-      threadId: "thread-1",
-      threadType: "private",
-      displayName: "Casey",
-      text: "Can you answer?",
-      messageId: "msg-1",
-    });
-    return { action: (result.data as { action: string }).action, sentMessages };
-  }
-
-  it.each([
-    ["approve", "sent", 1],
-    ["require_approval", "pending_approval", 0],
-    ["reject", "rejected_by_envoy", 0],
-  ])("acts on the verdict %s", async (verdict, action, sent) => {
-    const outcome = await replyWithEnvoyAnswer(envoyAnswer(verdict, "Because."));
-    expect(outcome.action).toBe(action);
-    expect(outcome.sentMessages).toHaveLength(sent);
-  });
-
-  it("sends an approved reply whose reason names another verdict", async () => {
-    const outcome = await replyWithEnvoyAnswer(
-      envoyAnswer("approve", "No need to REJECT or REQUIRE_APPROVAL; it answers the question."),
-    );
-    expect(outcome.action).toBe("sent");
-    expect(outcome.sentMessages).toHaveLength(1);
-  });
-
-  it("holds the reply when the envoy answers without a verdict", async () => {
-    const outcome = await replyWithEnvoyAnswer({ type: "result", content: "APPROVE" });
-    expect(outcome.action).toBe("pending_approval");
-    expect(outcome.sentMessages).toEqual([]);
-  });
 });
 
 // ---------------------------------------------------------------------------
 // Per-channel agent routing (e.g. Discord channel bound to an app-declared
 // agent). The channel adapter resolves the override and the inbox hook passes
-// it in as `routedAgentName`. Trusted-path messages should target that agent
-// instead of "main"; untrusted messages still go through sentinel.
+// it in as `routedAgentName`. Messages should target that agent instead of
+// "main".
 // ---------------------------------------------------------------------------
 
-describe("per-channel agent routing (trusted path)", () => {
+describe("per-channel agent routing", () => {
   beforeEach(() => {
     rs.clearAllMocks();
   });
@@ -962,10 +552,9 @@ describe("per-channel agent routing (trusted path)", () => {
   };
 
   it("routes to the app-declared agent when channel binds one and it is in the catalog", async () => {
-    const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
+    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "sentinel", "envoy", "pm-assistant"],
-      // Guardian path skips envoy → only one agent run is performed.
+      knownAgents: ["main", "pm-assistant"],
       agentResponses: [[{ type: "result", content: "On it." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -985,14 +574,12 @@ describe("per-channel agent routing (trusted path)", () => {
     expect(agentRunner.calls).toHaveLength(1);
     expect(agentRunner.calls[0].agentName).toBe("pm-assistant");
     expect(sentMessages).toHaveLength(1);
-    // requestedBy reflects the actual routed agent so approvals UI can scope by source.
-    expect(approvals[0]).toMatchObject({ requestedBy: "pm-assistant" });
   });
 
   it("uses the parent-derived routing for a native thread session", async () => {
     const { deps, conversations } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "sentinel", "envoy", "parent-agent"],
+      knownAgents: ["main", "parent-agent"],
       agentResponses: [[{ type: "result", content: "Child reply" }]],
     });
     const action = createAction(actionConfig, deps);
@@ -1056,9 +643,9 @@ describe("per-channel agent routing (trusted path)", () => {
   });
 
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
-    const { deps, agentRunner, approvals } = createMessageHandlerDeps({
+    const { deps, agentRunner } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
-      knownAgents: ["main", "sentinel", "envoy"], // pm-assistant intentionally absent
+      knownAgents: ["main"], // pm-assistant intentionally absent
       agentResponses: [[{ type: "result", content: "Hi from main." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -1075,7 +662,6 @@ describe("per-channel agent routing (trusted path)", () => {
     });
 
     expect(agentRunner.calls[0].agentName).toBe("main");
-    expect(approvals[0]).toMatchObject({ requestedBy: "main" });
   });
 
   it("honors the routed agent when the catalog check itself fails (transient RPC error)", async () => {
@@ -1124,44 +710,6 @@ describe("per-channel agent routing (trusted path)", () => {
 
     expect(agentRunner.calls[0].agentName).toBe("main");
   });
-
-  it("does not affect the untrusted path — sentinel still triages", async () => {
-    const strangerPerson: PersonRecord = {
-      id: "stranger",
-      displayName: "Stranger",
-      bondLevel: "other",
-      channelMappings: [{ channel: "discord", channelUserId: "s-discord" }],
-      profilePath: null,
-    };
-
-    const { deps, agentRunner, wake } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => strangerPerson) },
-      knownAgents: ["main", "sentinel", "envoy", "pm-assistant"],
-      // Allow replies to "other" so the untrusted branch actually runs (the
-      // default replyToBondLevels would otherwise short-circuit and ignore).
-      settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
-      agentResponses: [[{ type: "result", content: "IGNORE" }]],
-    });
-    // Force untrusted: bond level "other" isn't in the default trustedBondLevels
-    // and policy.action !== "allow" → falls into handleUntrustedMessage.
-    wake.policyAction = "monitor";
-
-    const action = createAction(actionConfig, deps);
-
-    await action.execute({
-      channel: "discord",
-      channelUserId: "s-discord",
-      threadId: "channel-pm",
-      threadType: "group",
-      displayName: "Stranger",
-      text: "hi",
-      messageId: "msg-1",
-      routedAgentName: "pm-assistant", // should be ignored — untrusted path
-    });
-
-    // First (and only) run should target sentinel, NOT pm-assistant.
-    expect(agentRunner.calls[0].agentName).toBe("sentinel");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1205,12 +753,7 @@ describe("account agent", () => {
     });
 
   it("answers with the account's agent, in groups and private chats", async () => {
-    const { deps, agentRunner, approvals } = guardianDeps([
-      "main",
-      "sentinel",
-      "envoy",
-      "sales:agent",
-    ]);
+    const { deps, agentRunner } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "sales:agent" }));
@@ -1224,11 +767,10 @@ describe("account agent", () => {
     );
 
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sales:agent", "sales:agent"]);
-    expect(approvals[0]).toMatchObject({ requestedBy: "sales:agent" });
   });
 
   it("answers with main when main is linked", async () => {
-    const { deps, agentRunner } = guardianDeps(["main", "sentinel", "envoy"]);
+    const { deps, agentRunner } = guardianDeps(["main"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "core:main" }));
@@ -1240,8 +782,6 @@ describe("account agent", () => {
     for (const accountAgentName of ["sales:agent", "core:main"]) {
       const { deps, agentRunner, conversations } = guardianDeps([
         "main",
-        "sentinel",
-        "envoy",
         "sales:agent",
         "pm:assistant",
       ]);
@@ -1258,12 +798,7 @@ describe("account agent", () => {
   });
 
   it("answers with the account's agent when the stored agent is not loaded", async () => {
-    const { deps, agentRunner, conversations } = guardianDeps([
-      "main",
-      "sentinel",
-      "envoy",
-      "sales:agent",
-    ]);
+    const { deps, agentRunner, conversations } = guardianDeps(["main", "sales:agent"]);
     conversations.ensureChannelChat.mockImplementation(async () => ({
       id: "channel:feishu-2:group-1",
       agentName: "pm:assistant",
@@ -1276,7 +811,7 @@ describe("account agent", () => {
   });
 
   it("answers with main in a group pinned to main on an account linked elsewhere", async () => {
-    const { deps, agentRunner } = guardianDeps(["main", "sentinel", "envoy", "sales:agent"]);
+    const { deps, agentRunner } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(
@@ -1289,8 +824,6 @@ describe("account agent", () => {
   it("answers a private chat with the account's agent over its stored agent", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",
-      "sentinel",
-      "envoy",
       "sales:agent",
       "pm:assistant",
     ]);
@@ -1308,13 +841,7 @@ describe("account agent", () => {
   });
 
   it("stores a group's choice on a linked account's conversation", async () => {
-    const { deps, conversations } = guardianDeps([
-      "main",
-      "sentinel",
-      "envoy",
-      "sales:agent",
-      "pm:assistant",
-    ]);
+    const { deps, conversations } = guardianDeps(["main", "sales:agent", "pm:assistant"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(
@@ -1327,7 +854,7 @@ describe("account agent", () => {
   });
 
   it("never stores the account's agent on the conversation", async () => {
-    const { deps, conversations } = guardianDeps(["main", "sentinel", "envoy", "sales:agent"]);
+    const { deps, conversations } = guardianDeps(["main", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
     await action.execute(inbound({ accountAgentName: "sales:agent" }));
@@ -1338,7 +865,7 @@ describe("account agent", () => {
   });
 
   it("stays silent, storing nothing, when the account's agent is not loaded", async () => {
-    const { deps, agentRunner, conversations } = guardianDeps(["main", "sentinel", "envoy"]);
+    const { deps, agentRunner, conversations } = guardianDeps(["main"]);
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute(inbound({ accountAgentName: "sales:agent" }));
@@ -1439,9 +966,10 @@ describe("a message the host recorded", () => {
   });
 
   it("leaves a message no agent answers as recorded", async () => {
-    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+    const { deps, agentRunner, conversations, wake } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => inner) },
     });
+    wake.answer = "quiet";
 
     const result = await createAction(actionConfig, deps).execute(recordedArgs);
 

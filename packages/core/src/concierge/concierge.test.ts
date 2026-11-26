@@ -850,7 +850,7 @@ describe("Concierge tools", () => {
       }
     });
 
-    it("reacts to the guardian's message of the turn through the chat's account", async () => {
+    it("reacts to the message of the turn through the chat's account", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
       const reacted: unknown[] = [];
@@ -868,23 +868,23 @@ describe("Concierge tools", () => {
       await run(there(s, chatId, "guardian"), s, "react", { emoji: "❤️", message_id: "900" });
       expect(reacted[1]).toEqual(["discord_app", "900", "800000000000000001", "❤️"]);
       reacted.splice(1);
-      // Anyone else's turn gets no reaction, and one cannot be taken back here.
-      expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
-        true,
-      );
+      // A member's message takes one too, and one cannot be taken back here.
+      expect(
+        (await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError,
+      ).toBeFalsy();
       expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
         true,
       );
-      expect(reacted).toHaveLength(1);
+      expect(reacted).toHaveLength(2);
     });
 
-    it("says through the chat's account, past its send gate, never into a dashboard chat", async () => {
+    it("says through the chat's account, never into a dashboard chat", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
       const said: unknown[] = [];
       s.deps.sayInChat = async (chat, message) => {
         said.push({ chat, message });
-        return { sent: "800000000000000009" };
+        return "800000000000000009";
       };
       s.deps.webchatRepo.getTurnChatMessages = (async () => [
         {
@@ -906,8 +906,6 @@ describe("Concierge tools", () => {
             // The turn's first message quotes the one it answers, as the inbox did.
             replyTo: "800000000000000001",
             turnId: expect.any(String),
-            place: "group",
-            recipient: { bondLevel: "guardian", shownName: expect.any(String), said: "@Rome hi" },
           },
         },
       ]);
@@ -921,36 +919,28 @@ describe("Concierge tools", () => {
       expect((said[2] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
     });
 
-    it("lets anyone's turn say something, and tells the gate whom it answers", async () => {
+    it("lets anyone's turn say something", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
-      const recipients: unknown[] = [];
-      s.deps.sayInChat = async (_chat, message) => {
-        recipients.push(message.recipient.bondLevel);
-        return { sent: "1" };
-      };
+      s.deps.sayInChat = async () => "1";
       s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
       expect(
         (await run(there(s, chatId, "acquaintance"), s, "say", { text: "Hi" })).isError,
       ).toBeFalsy();
-      // A turn with no sender that Rome does not run is anyone's: Envoy checks it.
       expect(
         (await run(there(s, chatId, undefined), s, "say", { text: "Hm" })).isError,
       ).toBeFalsy();
-      // A task's report, which Rome runs, answers the guardian who started the task.
+      // A task's report, which Rome runs.
       s.service.runsSystemTurnIn = (id: string) => id === chatId;
       expect(
         (await run(there(s, chatId, undefined), s, "say", { text: "Done" })).isError,
       ).toBeFalsy();
-      expect(recipients).toEqual(["acquaintance", "other", "guardian"]);
     });
 
-    it("refuses private there, and tells the model what the send gate held back", async () => {
+    it("refuses private there", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
-      s.deps.sayInChat = async () => ({
-        notSent: "This message waits for the guardian's approval.",
-      });
+      s.deps.sayInChat = async () => "1";
       s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
       const secret = await run(there(s, chatId, "guardian"), s, "say", {
         text: "1234",
@@ -958,12 +948,6 @@ describe("Concierge tools", () => {
       });
       expect(secret.isError).toBe(true);
       expect(secret.content[0]!.text).toContain("Nothing here is private");
-      const held = await run(there(s, chatId, "other"), s, "say", { text: "Hi" });
-      expect(held.isError).toBeFalsy();
-      expect(JSON.parse(held.content[0]!.text)).toEqual({
-        sent: false,
-        note: "This message waits for the guardian's approval.",
-      });
     });
 
     it("reminds a turn there that ended on text outside say, once, and not one that ended on done", async () => {
@@ -1003,7 +987,7 @@ describe("Concierge tools", () => {
       expect(s.backendTurns).toHaveLength(1);
     });
 
-    it("shows the guardian's message working while the turn works, and settles it when the turn ends", async () => {
+    it("shows a message working while the turn works, and settles it when the turn ends", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
       s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
@@ -1017,10 +1001,8 @@ describe("Concierge tools", () => {
         channel: "discord_app",
         chatId,
         messageKey: "800000000000000001",
-        senderBondLevel: "guardian",
       };
-      // Anyone else's message, and a dashboard turn, are not watched here.
-      expect(s.service.observeConnectionTurn({ ...turn, senderBondLevel: "other" })).toBeNull();
+      // A dashboard turn is not watched here.
       expect(s.service.observeConnectionTurn({ ...turn, channel: "webchat" })).toBeNull();
       const watch = s.service.observeConnectionTurn(turn);
       expect(watch).not.toBeNull();
@@ -1065,7 +1047,6 @@ describe("Concierge tools", () => {
         channel: "discord_app",
         chatId,
         messageKey: "800000000000000002",
-        senderBondLevel: "guardian",
       });
       await new Promise((resolve) => setTimeout(resolve, 20));
       await s.finish({

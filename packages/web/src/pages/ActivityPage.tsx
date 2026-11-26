@@ -37,7 +37,7 @@ export interface SessionActor {
   userId?: string;
   accountId?: string;
   email?: string;
-  via?: "cookie" | "loopback";
+  via?: "cookie" | "loopback" | "account";
 }
 
 export interface ActionExecution {

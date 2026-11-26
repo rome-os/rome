@@ -129,7 +129,7 @@ Use these fixed ids instead of guessing the owner of a platform artifact:
 | Send a message / read channel history | `system:send_message`, `system:fetch_channel_history` |
 | Publish/search event types | `system:publish_event`, `system:search_event_catalog` |
 | Call a connected provider API | `connector:connector_proxy` |
-| Core agents | `core:main`, `core:envoy` |
+| Core agents | `core:main` |
 | General-purpose agents | `assistant:assistant`, `assistant:explore` |
 | Coding agent | `coding:coding` |
 | App authoring skills | `coding:app_creation`, `coding:workflow_creation`, `coding:app_remix`, `coding:app_verification` |
@@ -264,8 +264,8 @@ provider's native structured-output API. The provider returns one schema-valid
 terminal value or fails the turn.
 
 ```yaml
-name: sentinel
-description: Triages incoming messages from untrusted senders
+name: triage
+description: Triages incoming support requests
 tier: small
 permissionMode: bypassPermissions
 tools: []
@@ -289,7 +289,7 @@ While iterating `agentRunner.run()`, callers read the validated payload from
 the terminal `result`:
 
 ```ts
-for await (const msg of agentRunner.run({ agentName: "research-app:sentinel", prompt })) {
+for await (const msg of agentRunner.run({ agentName: "research-app:triage", prompt })) {
   if (msg.type === "result" && msg.structuredOutput) {
     const { decision, reason } = msg.structuredOutput as {
       decision: string;
@@ -1245,8 +1245,8 @@ The template's `src/db/README.md` has more detail.
 
 A hook is a callback registered against the daemon's event loop. The
 canonical example is the `channel-message` hook: every incoming channel
-message flows through it, and the hook decides whether to dispatch the
-sentinel agent.
+message from someone let in flows through it, and the hook decides whether
+to wake an agent.
 
 Hook directory layout:
 

@@ -148,7 +148,7 @@ import { createTurnsById, type TurnsById } from "./turns-by-id.js";
 
 export interface AgentSessionKey {
   agentName: string;
-  /** e.g. `webchat:<id>`, `telegram:<chatId>`, `sentinel:<channel>:<thread>:<sender>`. */
+  /** e.g. `webchat:<id>`, `telegram:<chatId>`. */
   channelThreadKey: string;
 }
 
@@ -1154,7 +1154,7 @@ function sessionSetupOf(
   }
   // `defer` schedules a one-off wakeup back into this same thread. Only wired
   // for guardian-facing threads with a real `channelThreadKey` to wake;
-  // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
+  // keyless/synthetic runs (e.g. ad-hoc triage) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferTool: DeferTool | undefined =

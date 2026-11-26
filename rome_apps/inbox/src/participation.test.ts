@@ -1,14 +1,10 @@
 /**
- * Pins how Inbox decides today whether a message wakes an agent, and whether
- * the agent's reply goes out. The wake gate and send gate moving into Core
- * keep every row here green, and the table becomes their providers' shared
- * suite. One row is one case: change a row only when the behavior is meant
+ * Pins what Inbox does with the wake gate's answer, and that the agent's reply
+ * goes out. One row is one case: change a row only when the behavior is meant
  * to change.
  *
- * The gates' own tables live with them in packages/core/src/participation:
- * which sender, policy and settings wake the agent (chat-settings-wake.test.ts),
- * and which reply is checked (guarded-send.test.ts). The rows here take the
- * gates' answers as given and pin what Inbox does with each.
+ * The gate's own table lives with it in packages/core/src/participation: which
+ * policy and settings wake the agent (chat-settings-wake.test.ts).
  */
 import { describe, expect, it, rs } from "@rstest/core";
 import type {
@@ -25,7 +21,7 @@ import type {
   RunParams,
   SaidInboundEvent,
 } from "@rome-os/app-runtime";
-import type { SendGate, WakeGate } from "./actions/message-handler/index.js";
+import type { WakeGate } from "./actions/message-handler/index.js";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
 
@@ -49,12 +45,9 @@ interface Setup {
   /** What Core's wake gate answers, `wake` when absent. */
   wake?: ReturnType<WakeGate>;
   /** The hook's decision passed on with the message, so Inbox asks no gate. */
-  decidedByHook?: "wake" | "review";
+  decidedByHook?: "wake";
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
-  /** What Core's send gate answers. Its own table is guarded-send.test.ts in
-   *  packages/core/src/participation/send-gate. */
-  gate?: ReturnType<SendGate>;
   /** The host recorded the message before Inbox heard it, as it does when it
    *  hands the hook `messagesSaid`. */
   recorded?: boolean;
@@ -62,12 +55,8 @@ interface Setup {
   threadType?: "private" | "group";
 }
 
-function result(content: string, structuredOutput?: unknown): AgentMessage {
-  return { type: "result", content, ...(structuredOutput ? { structuredOutput } : {}) };
-}
-
-function envoy(verdict: string, reason: string): AgentMessage {
-  return result(JSON.stringify({ verdict, reason }), { verdict, reason });
+function result(content: string): AgentMessage {
+  return { type: "result", content };
 }
 
 function person(bondLevel: BondLevel): PersonRecord {
@@ -96,25 +85,12 @@ async function handle(setup: Setup) {
   const stored: { role: string }[] = [];
   const promoted: string[] = [];
   const sent: Record<string, unknown>[] = [];
-  const approvals: Record<string, unknown>[] = [];
   const wakeRequests: Parameters<WakeGate>[] = [];
-  const gateRequests: Parameters<SendGate>[0][] = [];
 
   const action = createAction(actionConfig, {
     agentRunner,
-    sendGate: (request: Parameters<SendGate>[0]) => {
-      gateRequests.push(request);
-      return setup.gate ?? "check";
-    },
     personMappingRepo: {
       findByChannelUser: async () => (setup.sender === "stranger" ? null : person(setup.sender)),
-    },
-    sentinelLogRepo: { create: async () => "sentinel-1" },
-    approvalsRepo: {
-      create: async (approval: Record<string, unknown>) => {
-        approvals.push(approval);
-        return "approval-1";
-      },
     },
     wakeGateFor:
       async () =>
@@ -158,19 +134,17 @@ async function handle(setup: Setup) {
     ...(setup.decidedByHook ? { wake: setup.decidedByHook } : {}),
   });
 
-  return { outcome, runs, stored, promoted, sent, approvals, wakeRequests, gateRequests };
+  return { outcome, runs, stored, promoted, sent, wakeRequests };
 }
 
-type Wake = "woke" | "quiet" | "blocked" | "reviewed";
+type Wake = "woke" | "quiet" | "blocked";
 
 /** The wake decision as a caller sees it: which agent ran first, if any. */
 function wakeOf(handled: Awaited<ReturnType<typeof handle>>): Wake {
   const data = handled.outcome.data as { action?: string } | undefined;
   if (data?.action === "blocked") return "blocked";
   if (data?.action === "ignored_by_reply_settings") return "quiet";
-  const first = handled.runs[0]?.agentName;
-  if (first === "sentinel") return "reviewed";
-  if (first === "main") return "woke";
+  if (handled.runs[0]?.agentName === "main") return "woke";
   throw new Error(`unexpected handler outcome: ${JSON.stringify(handled.outcome)}`);
 }
 
@@ -179,53 +153,31 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     { wake: "wake", outcome: "woke" },
     { wake: "quiet", outcome: "quiet" },
     { wake: "block", outcome: "blocked" },
-    { wake: "review", outcome: "reviewed" },
   ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
-    const answers = wake === "review" ? [[result("IGNORE")]] : [];
-    const handled = await handle({ sender: "inner-circle", wake, answers });
+    const handled = await handle({ sender: "inner-circle", wake });
     expect(wakeOf(handled)).toBe(outcome);
   });
 
   it("records a message that wakes the agent as said to it, and any other as said around it", async () => {
     const woke = await handle({ sender: "guardian", wake: "wake" });
     const quiet = await handle({ sender: "stranger", wake: "quiet" });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("IGNORE")]],
-    });
     const blocked = await handle({ sender: "guardian", wake: "block" });
 
     expect(woke.stored.map((m) => m.role)).toEqual(["user"]);
     expect(quiet.stored.map((m) => m.role)).toEqual(["notification"]);
-    expect(reviewed.stored.map((m) => m.role)).toEqual(["notification"]);
     expect(blocked.stored).toEqual([]);
   });
 
   it("on a message the host recorded, makes it the turn's prompt only when it wakes the agent", async () => {
     const woke = await handle({ sender: "guardian", wake: "wake", recorded: true });
     const quiet = await handle({ sender: "stranger", wake: "quiet", recorded: true });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("IGNORE")]],
-      recorded: true,
-    });
-    const escalated = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("ESCALATE")]],
-      recorded: true,
-    });
     const blocked = await handle({ sender: "guardian", wake: "block", recorded: true });
 
-    for (const handled of [woke, quiet, reviewed, escalated, blocked]) {
+    for (const handled of [woke, quiet, blocked]) {
       expect(handled.stored).toEqual([]);
     }
     expect(woke.promoted).toEqual(["message-1"]);
     expect(quiet.promoted).toEqual([]);
-    expect(reviewed.promoted).toEqual([]);
-    expect(escalated.promoted).toEqual(["message-1"]);
     expect(blocked.promoted).toEqual([]);
   });
 
@@ -250,208 +202,30 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
 
   it("takes the hook's decision without asking the gate again", async () => {
     const woke = await handle({ sender: "guardian", wake: "block", decidedByHook: "wake" });
-    const reviewed = await handle({
-      sender: "stranger",
-      wake: "block",
-      decidedByHook: "review",
-      answers: [[result("IGNORE")]],
-    });
 
     expect(wakeOf(woke)).toBe("woke");
-    expect(wakeOf(reviewed)).toBe("reviewed");
-    expect([...woke.wakeRequests, ...reviewed.wakeRequests]).toEqual([]);
+    expect(woke.wakeRequests).toEqual([]);
   });
 });
 
-describe("wake: what review decides", () => {
-  const reviewable: Setup = { sender: "stranger", wake: "review" };
-
+describe("send: the agent's reply", () => {
   it.each([
-    { sentinel: "IGNORE", action: "sentinel_ignored", agents: ["sentinel"] },
-    { sentinel: "REPLY: Hi there", action: "sentinel_replied", agents: ["sentinel"] },
-    { sentinel: "ESCALATE", action: "no_response", agents: ["sentinel", "main"] },
-    { sentinel: "", action: "no_response", agents: ["sentinel", "main"] },
-  ])("Sentinel answers '$sentinel' → $action", async ({ sentinel, action, agents }) => {
-    const handled = await handle({ ...reviewable, answers: [[result(sentinel)]] });
+    "guardian",
+    "stranger",
+  ] as const)("goes out as it is, with no other agent, to %s", async (sender) => {
+    const handled = await handle({ sender, answers: [[result("Hi")]] });
 
-    expect(handled.outcome.data).toMatchObject({ action });
-    expect(handled.runs.map((run) => run.agentName)).toEqual(agents);
-    // An escalated message wakes the agent as if it had been said to it.
-    expect(handled.promoted).toEqual(agents.includes("main") ? ["message-1"] : []);
+    expect(handled.outcome.data).toEqual({ action: "sent", response: "Hi" });
+    expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
+    expect(handled.sent).toEqual([expect.objectContaining({ text: "Hi", threadId: "chat-1" })]);
   });
 
-  it("wakes the agent when Sentinel fails", async () => {
-    const handled = await handle({
-      ...reviewable,
-      answers: [[{ type: "error", error: "model down" } as AgentMessage]],
-    });
-
-    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel", "main"]);
-    expect(handled.promoted).toEqual(["message-1"]);
-  });
-});
-
-type Send = "sent" | "checked" | "held" | "refused";
-
-/** The send decision as a caller sees it: whether the reply went out, and
- *  whether Envoy looked at it first. */
-function sendOf(handled: Awaited<ReturnType<typeof handle>>): Send {
-  const envoyRan = handled.runs.some((run) => run.agentName === "envoy");
-  const data = handled.outcome.data as { action?: string };
-  if (data.action === "sent") return envoyRan ? "checked" : "sent";
-  if (data.action === "pending_approval") return "held";
-  if (data.action === "rejected_by_envoy" || data.action === "rejected_by_send_gate") {
-    return "refused";
-  }
-  throw new Error(`unexpected handler outcome: ${JSON.stringify(handled.outcome)}`);
-}
-
-describe("send: send gate × Envoy", () => {
-  const woken: Setup = { sender: "inner-circle", wake: "wake" };
-
-  const rows: {
-    name: string;
-    gate: ReturnType<SendGate>;
-    envoy?: AgentMessage;
-    send: Send;
-    approval: { status?: string; description: string };
-  }[] = [
-    {
-      name: "the gate says send",
-      gate: "send",
-      send: "sent",
-      approval: { status: "auto_approved", description: "Skipped envoy (guardian)" },
-    },
-    {
-      name: "the gate asks the guardian",
-      gate: "ask_guardian",
-      send: "held",
-      approval: { description: "Held by the send gate" },
-    },
-    {
-      name: "the gate refuses",
-      gate: "refuse",
-      send: "refused",
-      approval: { status: "rejected", description: "Refused by the send gate" },
-    },
-    {
-      name: "the gate asks for a check and Envoy approves",
-      gate: "check",
-      envoy: envoy("approve", "Friendly"),
-      send: "checked",
-      approval: { status: "auto_approved", description: "Friendly" },
-    },
-    {
-      name: "the gate asks for a check and Envoy asks the guardian",
-      gate: "check",
-      envoy: envoy("require_approval", "Mentions plans"),
-      send: "held",
-      approval: { description: "Mentions plans" },
-    },
-    {
-      name: "the gate asks for a check and Envoy rejects",
-      gate: "check",
-      envoy: envoy("reject", "Leaks an address"),
-      send: "refused",
-      approval: { status: "rejected", description: "Leaks an address" },
-    },
-    {
-      name: "the gate asks for a check and Envoy answers without a verdict",
-      gate: "check",
-      envoy: result("looks fine"),
-      send: "held",
-      approval: { description: "Envoy answered without a verdict: looks fine" },
-    },
-    {
-      name: "the gate asks for a check and Envoy fails",
-      gate: "check",
-      envoy: { type: "error", error: "model down" } as AgentMessage,
-      send: "held",
-      approval: { description: "Envoy validation failed: model down" },
-    },
-  ];
-
-  it.each(rows)("a reply when $name → $send", async ({ gate, envoy, send, approval }) => {
-    const handled = await handle({
-      ...woken,
-      gate,
-      answers: [[result("Hi")], ...(envoy ? [[envoy]] : [])],
-    });
-
-    expect(sendOf(handled)).toBe(send);
-    expect(handled.runs.some((run) => run.agentName === "envoy")).toBe(gate === "check");
-    expect(handled.sent.length).toBe(send === "sent" || send === "checked" ? 1 : 0);
-    expect(handled.approvals).toHaveLength(1);
-    expect(handled.approvals[0]).toEqual(
-      expect.objectContaining({ type: "outgoing_message", requestedBy: "main", ...approval }),
-    );
-    if (!approval.status) expect(handled.approvals[0]).not.toHaveProperty("status");
-  });
-
-  it("asks the gate about the chat the message came from, the person who sent it, and the agent", async () => {
-    const guardian = await handle({
-      sender: "guardian",
-      answers: [[result("Hi")]],
-    });
-    const stranger = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
-    });
-
-    const guardianDirect = await handle({
-      sender: "guardian",
-      threadType: "private",
-      answers: [[result("Hi")]],
-    });
-
-    // The guardian's message answered in a group: others read the reply.
-    expect(guardian.gateRequests).toEqual([
-      {
-        destination: {
-          connectionId: "connection:telegram",
-          chatId: "chat-1",
-          place: "group",
-          sameChatAsWake: true,
-          onlyGuardianReads: false,
-        },
-        recipient: { bondLevel: "guardian" },
-        author: { agentName: "main" },
-      },
-    ]);
-    expect(guardianDirect.gateRequests).toEqual([
-      expect.objectContaining({
-        destination: expect.objectContaining({
-          place: "direct",
-          sameChatAsWake: true,
-          onlyGuardianReads: true,
-        }),
-      }),
-    ]);
-    expect(stranger.gateRequests).toEqual([expect.objectContaining({ recipient: null })]);
-  });
-
-  it("sends Sentinel's own reply without asking the gate or Envoy", async () => {
-    const handled = await handle({
-      sender: "stranger",
-      wake: "review",
-      answers: [[result("REPLY: I'll pass that on")]],
-    });
-
-    expect(handled.runs.map((run) => run.agentName)).toEqual(["sentinel"]);
-    expect(handled.gateRequests).toEqual([]);
-    expect(handled.sent).toEqual([expect.objectContaining({ text: "I'll pass that on" })]);
-    expect(handled.approvals).toEqual([]);
-  });
-
-  it("sends nothing and asks no one when the agent says nothing", async () => {
-    const handled = await handle(woken);
+  it("sends nothing when the agent says nothing", async () => {
+    const handled = await handle({ sender: "inner-circle" });
 
     expect(handled.outcome.data).toMatchObject({ action: "no_response" });
     expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
-    expect(handled.gateRequests).toEqual([]);
     expect(handled.sent).toEqual([]);
-    expect(handled.approvals).toEqual([]);
   });
 });
 
@@ -563,7 +337,6 @@ describe("wake: in the hook", () => {
   // the wake gate, the hook showed typing for it and Inbox dropped it after.
   it.each([
     { gate: "wake", heard: "handled", wake: "wake", typing: true },
-    { gate: "review", heard: "handled", wake: "review", typing: true },
     { gate: "quiet", heard: "quiet", wake: undefined, typing: false },
     { gate: "block", heard: "quiet", wake: undefined, typing: false },
   ] as const)("with the sender named, the gate says $gate → $heard", async ({

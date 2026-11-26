@@ -15,6 +15,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { SenderLabels } from "../chats/sender-labels.js";
 import { createLogger } from "../logger.js";
+import { runWithSessionActor, type SessionActor } from "../access/session-actor.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
@@ -112,8 +113,9 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           return;
         }
         // The one line that decides whether a hook hears a recorded message
-        // of someone not let in.
-        if (!enteredAs(heard)) {
+        // of someone not let in. What it starts is its sender's.
+        const person = enteredAs<SessionActor>(heard);
+        if (!person) {
           settle(event, hearer);
           return;
         }
@@ -138,7 +140,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           ...(handed.get(key) ?? []),
           { event, hearer, recorded: recorded.recorded },
         ]);
-        await handler(recorded);
+        await runWithSessionActor(person, () => handler(recorded));
       });
       let left = false;
       return () => {

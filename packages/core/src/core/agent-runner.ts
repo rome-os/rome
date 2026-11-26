@@ -217,7 +217,7 @@ export class AgentRunner {
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
-    // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
+    // Synthetic key for keyless invocations (e.g. ad-hoc triage
     // runs). Real conversations always pass a `channelThreadKey`.
     const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;

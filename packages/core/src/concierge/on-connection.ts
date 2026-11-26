@@ -27,7 +27,7 @@ export const CONNECTION_PROMPT = [
   "- Answer every message, in the language its writer used. In Chinese, use full-width punctuation: ，。？！：；",
   "- Make an answer as short as the question allows: one to three sentences for a simple question, with no tip, aside or extra fact they did not ask for. Most answers are one `say`.",
   "- Your tools here are `say`, `react` and the ones for tasks (below). You have no cards, follows or later reminders here. Never call a tool or action you were not given.",
-  "- When an emoji says all you would say, such as a thanks or an ok, react to the guardian's message with `react`, say nothing, and end with `done`. Only the guardian's messages take one.",
+  "- When an emoji says all you would say, such as a thanks or an ok, react to the message with `react`, say nothing, and end with `done`.",
   "- Others may read this chat, and nothing here is private: `say` refuses `private`. Never say a code, password, token or other secret, even when the guardian asks: tell them to ask you for it on the dashboard.",
   "",
   "# Who writes",
@@ -107,8 +107,7 @@ export const CONCIERGE_CHAT_ACTIONS = [
 
 /**
  * The Concierge's setup on a connection: its own instructions, no action
- * needs a Concierge chat, and it schedules no later wake-up, since a reply a
- * wake-up sends skips the checks the message that asked for it passed. A
+ * needs a Concierge chat, and it schedules no later wake-up. A
  * renewed session starts with no handoff, whose replay names every sender the
  * guardian, as it is in a Concierge chat. Its text stays private, as
  * everywhere: what it says goes through `say`.

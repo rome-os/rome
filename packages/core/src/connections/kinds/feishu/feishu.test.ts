@@ -8,6 +8,7 @@ import type {
   ChatSettingsControl,
   ChatSettingsOverrides,
   ChatSettingsSnapshot,
+  SettingsActor,
 } from "@rome-os/app-runtime";
 import type {
   CardActionEvent,
@@ -16,8 +17,6 @@ import type {
   SendInput,
   SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
-import type { Link } from "../../../people/model/person.js";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
 import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
 
@@ -214,28 +213,16 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
   return { control, get, update, reset, current: () => structuredClone(effective) };
 }
 
-function guardianPersonRepo(channelUserId: string): PeopleRepository {
-  return {
-    byAccount: async (account: Link) =>
-      account.platform === "feishu" && account.id === channelUserId
-        ? {
-            id: "guardian",
-            displayName: "Guardian",
-            bondLevel: "guardian",
-            links: [{ channel: "feishu", channelUserId }],
-          }
-        : null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [
-      {
-        id: "guardian",
-        displayName: "Guardian",
-        bondLevel: "guardian",
-        links: [],
-      },
-    ],
-    linkStated: async () => "mapping-id",
-  } as unknown as PeopleRepository;
+/** As Rome takes a press while only `openId` is let in, as `by`. */
+function pressedWith(openId: string, by: SettingsActor["kind"] = "guardian") {
+  return async (
+    presser: { platform: string; id: string },
+    answer: (by: SettingsActor["kind"]) => Promise<void>,
+  ) => {
+    if (presser.platform !== "feishu" || presser.id !== openId) return false;
+    await answer(by);
+    return true;
+  };
 }
 
 describe("FeishuAdapter", () => {
@@ -450,7 +437,34 @@ describe("FeishuAdapter", () => {
     expect(captured[0].addressing).toBe("ambient");
   });
 
-  it("sends a group settings card for guardian settings requests", async () => {
+  it("sends no card to someone who is not let in and asks for one, and hands the message on", async () => {
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        chatSettings: makeChatSettings().control,
+        pressed: pressedWith("ou_someone_else"),
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    const heard: unknown[] = [];
+    adapter.onInbound(async (message) => {
+      heard.push(message);
+    });
+    await adapter.start();
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 settings",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
+    expect(channel.sent).toEqual([]);
+    expect(heard).toHaveLength(1);
+  });
+
+  it("sends a group settings card to someone let in who asks for it", async () => {
     const chatSettings = makeChatSettings();
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
@@ -459,7 +473,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -550,7 +564,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -609,7 +623,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -646,7 +660,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         listAgents: () => ["sales:agent", "support:agent"],
         accountAgent: () => linked,
       },
@@ -656,7 +670,12 @@ describe("FeishuAdapter", () => {
     adapter.onInbound(async () => {});
     await adapter.start();
 
-    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 settings",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
     const card = JSON.stringify(channel.sent[0].input);
     expect(card).toContain('"initial_option":"sales:agent"');
     expect(card).toContain('"shown":"sales:agent"');
@@ -683,7 +702,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
@@ -692,7 +711,12 @@ describe("FeishuAdapter", () => {
     adapter.onInbound(async () => {});
     await adapter.start();
 
-    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 settings",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
     expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"main"');
 
     const value = { action: "configure_feishu_group", op: "save", shown: "main" };
@@ -717,7 +741,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         listAgents: () => ["sales:agent"],
         hasAgent: (name) => name === "sales:agent",
         accountAgent: () => "sales:agent",
@@ -728,7 +752,12 @@ describe("FeishuAdapter", () => {
     adapter.onInbound(async () => {});
     await adapter.start();
 
-    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 settings",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
     const card = JSON.stringify(channel.sent[0].input);
     expect(card).toContain('"initial_option":"gone:agent"');
     expect(card).toContain("gone:agent is not loaded, so sales:agent answers instead.");
@@ -743,7 +772,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
@@ -752,7 +781,12 @@ describe("FeishuAdapter", () => {
     adapter.onInbound(async () => {});
     await adapter.start();
 
-    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 settings",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
     const card = JSON.stringify(channel.sent[0].input);
     expect(card).toContain("No agent answers in this group");
     expect(card).not.toContain('"initial_option":"main"');
@@ -852,7 +886,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,
@@ -907,7 +941,7 @@ describe("FeishuAdapter", () => {
     });
   });
 
-  it("rejects native settings submissions from an unlinked actor", async () => {
+  it("does nothing for a settings card pressed by someone who is not let in", async () => {
     const chatSettings = makeChatSettings();
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
@@ -916,9 +950,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: {
-          byAccount: async () => null,
-        } as unknown as PeopleRepository,
+        pressed: pressedWith("ou_someone_else"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -943,9 +975,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(chatSettings.update).not.toHaveBeenCalled();
-    expect(channel.sent[0]).toMatchObject({
-      input: { markdown: "Only the linked guardian can change this group." },
-    });
+    expect(channel.sent).toEqual([]);
   });
 
   it("clears default-valued policy fields and stores an explicit main-agent override", async () => {
@@ -962,7 +992,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,
@@ -1023,7 +1053,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -1048,6 +1078,43 @@ describe("FeishuAdapter", () => {
     });
   });
 
+  it("records a member's reset as the member's", async () => {
+    const chatSettings = makeChatSettings({
+      enabled: false,
+      routing: { agentName: "pm-assistant" },
+    });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        chatSettings: chatSettings.control,
+        pressed: pressedWith("ou_alice", "member"),
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    await adapter.start();
+
+    await channel.emitCardAction({
+      action: {
+        tag: "button",
+        value: { action: "configure_feishu_group", op: "reset" },
+      },
+      raw: {
+        action: {
+          value: { action: "configure_feishu_group", op: "reset" },
+          form_value: {},
+        },
+      },
+    });
+
+    expect(chatSettings.reset).toHaveBeenCalledWith({
+      ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
+      actor: { kind: "member", id: "Alice" },
+    });
+  });
+
   it("does not apply older immediate card actions", async () => {
     const chatSettings = makeChatSettings();
     channel = new FakeLarkChannel();
@@ -1057,7 +1124,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        peopleRepo: guardianPersonRepo("ou_alice"),
+        pressed: pressedWith("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,

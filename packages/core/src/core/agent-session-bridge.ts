@@ -92,14 +92,9 @@ export interface AgentSessionChildBridge {
   attach(rpc: IpcRpc, child: ChildProcess): void;
 }
 
-/**
- * Told that a turn started in a connected account's chat, with the platform
- * user whose message started it. The returned call is told when it ends.
- */
-export type TurnStartedInChat = (
-  chat: ChatRef,
-  turn: { turnId: string; initiatorId?: string },
-) => () => void;
+/** Told that a turn started in a connected account's chat. The returned call
+ *  is told when it ends. */
+export type TurnStartedInChat = (chat: ChatRef, turn: { turnId: string }) => () => void;
 
 /**
  * Bridge wires `Sessions` into a worker child's IPC channel.
@@ -404,7 +399,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             threadId: thread?.threadId,
             chatId: romeSessionId,
             ...(req.platformMessageId ? { messageKey: req.platformMessageId } : {}),
-            ...(thread?.senderBondLevel ? { senderBondLevel: thread.senderBondLevel } : {}),
             initiatedBy: req.platformMessageId ? "user" : "system",
             // Read at the turn's first event, once the session has its provider.
             providerId: () => session.providerId,
@@ -440,10 +434,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   if (thread?.connectionId && this.turnStartedInChat) {
                     endChatTurn = this.turnStartedInChat(
                       { connectionId: thread.connectionId, chatId: thread.threadId as ChatId },
-                      {
-                        turnId: msg.turnId,
-                        ...(thread.channelUserId ? { initiatorId: thread.channelUserId } : {}),
-                      },
+                      { turnId: msg.turnId },
                     );
                   }
                 } catch (err) {

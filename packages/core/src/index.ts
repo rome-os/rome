@@ -66,6 +66,7 @@ import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attrib
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
+import type { TeamActor } from "./access/team.js";
 import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./instance/runtime.js";
@@ -285,7 +286,6 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
-import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -293,7 +293,7 @@ import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
-import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
+import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { createChatTurns } from "./core/chat-turns.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
@@ -346,7 +346,6 @@ import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
 import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
-import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -421,6 +420,7 @@ import {
   ChatSettingsService,
   chatCommands,
   heardUnlessSwitchedOff,
+  settingsKindOf,
 } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -774,9 +774,9 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
-  // What people say on a connection passes this before it starts anything
-  // (docs/domains/participation.md#entry).
-  const entrance = entranceOf({
+  // What people say or press on a connection passes this before it starts
+  // anything (docs/domains/participation.md#entry).
+  const entrance = entranceOf<TeamActor>({
     enter: accountEntry({ db }),
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
@@ -1070,7 +1070,7 @@ async function main() {
     }),
   });
 
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
   // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
@@ -1339,13 +1339,6 @@ async function main() {
     stopActiveConversationTurn(input, {
       chatTurns,
       sessions: { turn: (id) => agentSessionManager.turn(id) },
-      isGuardian: async (service, senderId) => {
-        const platform = stopSenderPlatform(input.ref, service, {
-          accountOf: (connectionId) => accounts.accountOf(connectionId),
-          platformOfChannel,
-        });
-        return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
-      },
     });
   const romeCloudAccess = (): RomeCloudAccess | null => {
     const credentialId = instanceCredentialId();
@@ -1440,66 +1433,31 @@ async function main() {
       if (!added) throw new Error("This chat's account takes no reaction.");
       await added;
     },
-    // What the Concierge says in a chat on a connection goes out as the inbox
-    // sends an agent's reply: past the send gate, and Envoy where it asks, to
-    // the platform through the chat's speaker, which records it.
-    sayInChat: (chat, message) =>
-      sayOnConnection(
-        {
-          gate: guardedSend,
-          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
-          envoy: async (input) => {
-            let verdict: unknown;
-            for await (const event of agentRunner.run({
-              agentName: "envoy",
-              prompt: envoyPrompt(input),
-              initiatedBy: "system",
-            })) {
-              if (event.type === "result") verdict = event.structuredOutput;
-            }
-            return readEnvoyVerdict(verdict);
-          },
-          send: async (target, text, replyTo, turnId) => {
-            const channel = channels.find((candidate) => candidate.name === target.channel);
-            if (!channel) throw new Error(`Channel "${target.channel}" cannot send`);
-            const say = (quoting: string | undefined) =>
-              chatsWired.replies.send(
-                target.id,
-                channel,
-                { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
-                { turnId, agent: CONCIERGE_AGENT_ID },
-              );
-            let said: Awaited<ReturnType<typeof say>>;
-            try {
-              said = await say(replyTo);
-            } catch (error) {
-              // A platform that cannot quote that message takes it unquoted.
-              if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
-                throw error;
-              }
-              said = await say(undefined);
-            }
-            if (!said) throw new Error("This chat stands nowhere a message can be said.");
-            return said.sent;
-          },
-          record: async ({ status, description, chat: target, text }) => {
-            await approvalsRepo
-              .create({
-                type: "outgoing_message",
-                requestedBy: CONCIERGE_AGENT_ID,
-                description,
-                payload: { response: text, channel: target.channel, threadId: target.threadId },
-                status,
-              })
-              .catch((error: unknown) =>
-                log.warn("outgoing message not put on record", {
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-          },
-        },
-        { chat, ...message },
-      ),
+    // What the Concierge says in a chat on a connection goes to the platform
+    // through the chat's speaker, which records it.
+    sayInChat: async (chat, { text, replyTo, turnId }) => {
+      const channel = channels.find((candidate) => candidate.name === chat.channel);
+      if (!channel) throw new Error(`Channel "${chat.channel}" cannot send`);
+      const say = (quoting: string | undefined) =>
+        chatsWired.replies.send(
+          chat.id,
+          channel,
+          { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
+          { turnId, agent: CONCIERGE_AGENT_ID },
+        );
+      let said: Awaited<ReturnType<typeof say>>;
+      try {
+        said = await say(replyTo);
+      } catch (error) {
+        // A platform that cannot quote that message takes it unquoted.
+        if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
+          throw error;
+        }
+        said = await say(undefined);
+      }
+      if (!said) throw new Error("This chat stands nowhere a message can be said.");
+      return said.sent;
+    },
     // Who answers a chat on a connection, as the inbox routes it: the
     // account's agent (a task started there reports there when it is the
     // Concierge).
@@ -1735,7 +1693,7 @@ async function main() {
             Promise.resolve();
         },
       }),
-      // The status of the guardian's message a Concierge turn there works on.
+      // The status of the message a Concierge turn there works on.
       (turn) => concierge.observeConnectionTurn(turn),
     ),
     isTextPrivate,
@@ -2059,7 +2017,6 @@ async function main() {
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
     chatSettings: (chat) => appChatSettings.get(chat),
-    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
   });
@@ -2111,7 +2068,6 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: guardedSend,
     wakeGateFor,
     routinesRepo,
     routineEngine,
@@ -2432,16 +2388,18 @@ async function main() {
     ),
     // A Discord bot's slash commands read and change its chats' rules.
     discordCommandsOf: (connectionId) =>
-      chatCommands({
-        connectionId,
-        service: "discord",
-        settings: chatSettings,
-        chatStop,
-        personOf: (accountId) => peopleRepo.byAccount({ platform: "discord", id: accountId }),
-        listAgents: () => agentLoader.list().map((agent) => agent.name),
-        hasAgent: (name) => agentLoader.find(name) !== undefined,
-        accountAgent: () => accountAgentOf(connectionId) ?? null,
-      }),
+      entrance.commands(
+        "discord",
+        chatCommands({
+          connectionId,
+          service: "discord",
+          settings: chatSettings,
+          chatStop,
+          listAgents: () => agentLoader.list().map((agent) => agent.name),
+          hasAgent: (name) => agentLoader.find(name) !== undefined,
+          accountAgent: () => accountAgentOf(connectionId) ?? null,
+        }),
+      ),
     // The account that connected is the guardian's own, so People links it.
     onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
@@ -2465,7 +2423,7 @@ async function main() {
   const connectionKinds: KindMount[] = [
     feishu({
       chatSettings,
-      peopleRepo,
+      pressed: (presser, answer) => entrance.press(presser, (by) => answer(settingsKindOf(by))),
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
