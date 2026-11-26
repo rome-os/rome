@@ -35,8 +35,8 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
   name: `system:${string}`;
   /** What the agent reads to choose the tool. */
   description: string;
-  /** Picks who may ask: a read needs a turn that works for the guardian, a
-   *  write the guardian's own message in their private chat (who-may-ask.ts). */
+  /** Picks who may ask: any turn for a read, the guardian's own message in
+   *  their private chat for a write (who-may-ask.ts). */
   sideEffects: ActionConfig["sideEffects"];
   /** The tool's arguments, each with a `.describe()` the agent reads. An
    *  argument that does not fit answers the agent with what is wrong. */

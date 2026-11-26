@@ -9,11 +9,7 @@
 import { runningTurn } from "../../apps/actions/agent-tool.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
-import {
-  changeRefusalReason,
-  type ToolTurn,
-  type WhoMayAsk,
-} from "../../apps/actions/who-may-ask.js";
+import { changeRefusalReason, type ToolTurn } from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
 import { connectStep } from "./connect-step.js";
@@ -48,17 +44,14 @@ export interface DeviceActionDeps {
 const STATE_CODE = { off: "live_off", broken: "permission_denied" } as const;
 
 /**
- * Registers the older names. `whoMayAsk` is the check the agent tools pass:
- * each older name asks it as its new name does, a read, so either name lets
- * the same turns in. A change to the device has its own rule in the run.
+ * Registers the older names. A change to the device has its own rule in the
+ * run.
  */
 export function registerDeviceActions(
   actions: Pick<ActionRegistry, "register">,
-  deps: DeviceActionDeps & { whoMayAsk: WhoMayAsk },
+  deps: DeviceActionDeps,
 ): void {
   const now = deps.now ?? Date.now;
-  const refusalFor = (name: string, turn: ToolTurn) =>
-    deps.whoMayAsk({ name, sideEffects: "read-only" }, turn);
 
   actions.register({
     config: {
@@ -78,8 +71,6 @@ export function registerDeviceActions(
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     execute: async () => {
       const turn = runningTurn();
-      const refusal = await refusalFor(DEVICE_DESCRIBE_ACTION, turn);
-      if (refusal) return { status: "error", error: refusal };
       return {
         status: "ok",
         data: describeDevices(deps.connections.list(), now(), askingDeviceOf(turn.channelContext)),
@@ -124,8 +115,6 @@ export function registerDeviceActions(
     },
     execute: async (input) => {
       const turn = runningTurn();
-      const refusal = await refusalFor(DEVICE_RUN_ACTION, turn);
-      if (refusal) return { status: "error", error: refusal };
       const {
         operation,
         args = {},

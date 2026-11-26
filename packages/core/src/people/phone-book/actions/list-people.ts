@@ -3,13 +3,12 @@
 
 import type { Action } from "@rome-os/app-runtime";
 import { PERSON_BOND_LEVELS, parsePersonFilterLevel } from "@rome/api-types/people";
-import { type OwnerOfChat, runsForGuardian } from "../../actions/guardian-only.js";
 import { listPeople } from "../application/list.js";
 import type { PeopleReadDeps } from "../application/resource.js";
 
 export const LIST_PEOPLE_ACTION = "core:list_people";
 
-export function listPeopleAction(deps: PeopleReadDeps & { ownerOfChat: OwnerOfChat }): Action {
+export function listPeopleAction(deps: PeopleReadDeps): Action {
   return {
     config: {
       name: LIST_PEOPLE_ACTION,
@@ -34,9 +33,6 @@ export function listPeopleAction(deps: PeopleReadDeps & { ownerOfChat: OwnerOfCh
       additionalProperties: false,
     },
     execute: async (args) => {
-      if (!(await runsForGuardian(deps.ownerOfChat))) {
-        return { status: "error", error: "Only the guardian's agents can read the phone book." };
-      }
       const rawLevel = typeof args.level === "string" ? args.level : undefined;
       const level = parsePersonFilterLevel(rawLevel);
       if (rawLevel && level === null) {
