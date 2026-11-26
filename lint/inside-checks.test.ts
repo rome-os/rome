@@ -16,8 +16,9 @@ describe("checks inside Rome", () => {
       'const label = actor.name ?? "Rome";',
       "if (actor.kind === /* split */",
       '  "guardian") return;',
+      'if ((await repo.audienceOf(id)) !== "private") return;',
     ].join("\n");
-    expect(lines(text)).toEqual([1, 2, 3, 4, 5, 6, 7, 9]);
+    expect(lines(text)).toEqual([1, 2, 3, 4, 5, 6, 7, 9, 11]);
   });
 
   it("leaves out comments, imports, types, and words that only look alike", () => {

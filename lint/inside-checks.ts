@@ -18,7 +18,7 @@ import { BASELINE } from "./inside-checks-baseline.js";
 /** Words that decide by whether someone is the guardian, then by personal data or the audience. */
 const LOOKS: readonly RegExp[] = [
   /[!=]==?\s*"(guardian|visitor)"|"(guardian|visitor)"\s*[!=]==?|\bcase\s+"(guardian|visitor)"|"guardian"\]\.includes|\bvia\s*[!=]==?\s*"(cookie|loopback)"|\b(is|needs|only)_?[Gg]uardian|guardian_?[Oo]nly|GUARDIAN_ONLY/,
-  /isPersonalDataAction|readsPersonalData|PERSONAL_DATA_(?!SOURCES\b|CATALOG_ACTION\b|QUERY_ACTION\b)\w+|\.personal\b|\b\w*[Aa]udience\b|AUDIENCE|private_only/,
+  /isPersonalDataAction|readsPersonalData|PERSONAL_DATA_(?!SOURCES\b|CATALOG_ACTION\b|QUERY_ACTION\b)\w+|\.personal\b|\b\w*[Aa]udience(?!_mismatch)\w*|AUDIENCE|private_only/,
 ];
 
 const ROOTS = ["packages/core/src", "packages/rome-node-cli/src"];
@@ -79,6 +79,13 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
   "packages/core/src/api/routes/cloud-login.ts": {
     lines: ["audience: OAUTH_CLIENT_ID,"],
     why: "the audience of a Rome Cloud token",
+  },
+  "packages/core/src/instance/instance-identity.ts": {
+    lines: [
+      "async function audienceMatches(socket: string): Promise<boolean> {",
+      "if (socket && !(await audienceMatches(socket))) {",
+    ],
+    why: "the audience the signing service is set up for",
   },
   "packages/core/src/api/routes/chat-settings.ts": {
     lines: [
