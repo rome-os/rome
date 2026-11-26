@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import type { AppLifecycle } from "@/hooks/use-app-lifecycle";
@@ -223,5 +223,48 @@ describe("getAppActionMenuEntries", () => {
     expect(lifecycle.requestUninstall).toHaveBeenCalledWith(app, false);
     select("uninstall-purge");
     expect(lifecycle.requestUninstall).toHaveBeenCalledWith(app, true);
+  });
+});
+
+describe("Add to Desktop", () => {
+  const menu = (app = makeApp()) =>
+    getAppActionMenuEntries({
+      app,
+      lifecycle: makeLifecycle(),
+      t,
+      disabled: false,
+      pin: { pinned: false, onToggle: rs.fn() },
+      onRemix: rs.fn(),
+    });
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("is offered in a Mac app that can put apps on the Desktop, and adds this app", () => {
+    const addToDesktop = rs.fn(async () => ({ path: "/Users/me/Desktop/Demo.app" }));
+    Object.assign(globalThis, { window: { rome: { apps: { addToDesktop } } } });
+    const entries = menu();
+    expect(keysOf(entries).slice(0, 5)).toEqual([
+      "details",
+      "chat",
+      "full-view",
+      "add-to-desktop",
+      "pin",
+    ]);
+    const entry = entries.find((e) => e.key === "add-to-desktop");
+    if (entry?.type !== "action") throw new Error("missing Add to Desktop");
+    expect(entry.label).toBe("installed.addToDesktop");
+    entry.onSelect();
+    expect(addToDesktop).toHaveBeenCalledWith("@ray/demo");
+  });
+
+  it("is not offered for an app without a page, or by a Mac app without it", () => {
+    Object.assign(globalThis, { window: { rome: { apps: { addToDesktop: rs.fn() } } } });
+    expect(keysOf(menu(makeApp({ hasFrontend: false, href: null })))).not.toContain(
+      "add-to-desktop",
+    );
+    Object.assign(globalThis, { window: { rome: {} } });
+    expect(keysOf(menu())).not.toContain("add-to-desktop");
   });
 });
