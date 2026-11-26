@@ -8,6 +8,7 @@ import type {
   ChatSettingsControl,
   ChatSettingsOverrides,
   ChatSettingsSnapshot,
+  SettingsActor,
 } from "@rome-os/app-runtime";
 import type {
   CardActionEvent,
@@ -212,10 +213,13 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
   return { control, get, update, reset, current: () => structuredClone(effective) };
 }
 
-/** As Rome takes a press while only `openId` is let in. */
-function pressedWith(openId: string) {
-  return async (presser: { platform: string; id: string }, answer: () => Promise<void>) => {
-    if (presser.platform === "feishu" && presser.id === openId) await answer();
+/** As Rome takes a press while only `openId` is let in, as `by`. */
+function pressedWith(openId: string, by: SettingsActor["kind"] = "guardian") {
+  return async (
+    presser: { platform: string; id: string },
+    answer: (by: SettingsActor["kind"]) => Promise<void>,
+  ) => {
+    if (presser.platform === "feishu" && presser.id === openId) await answer(by);
   };
 }
 
@@ -1065,6 +1069,43 @@ describe("FeishuAdapter", () => {
     expect(chatSettings.reset).toHaveBeenCalledWith({
       ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
       actor: { kind: "guardian", id: "Alice" },
+    });
+  });
+
+  it("records a member's reset as the member's", async () => {
+    const chatSettings = makeChatSettings({
+      enabled: false,
+      routing: { agentName: "pm-assistant" },
+    });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        chatSettings: chatSettings.control,
+        pressed: pressedWith("ou_alice", "member"),
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    await adapter.start();
+
+    await channel.emitCardAction({
+      action: {
+        tag: "button",
+        value: { action: "configure_feishu_group", op: "reset" },
+      },
+      raw: {
+        action: {
+          value: { action: "configure_feishu_group", op: "reset" },
+          form_value: {},
+        },
+      },
+    });
+
+    expect(chatSettings.reset).toHaveBeenCalledWith({
+      ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
+      actor: { kind: "member", id: "Alice" },
     });
   });
 
