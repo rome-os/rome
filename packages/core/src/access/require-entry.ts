@@ -7,7 +7,7 @@ import { mayEnter } from "./entry.js";
 import { currentSessionActor, type SessionActor, sessionOwnerKey } from "./session-actor.js";
 import type { TeamActor } from "./team.js";
 
-type AllowList = Pick<DashboardAccessState, "isCloudEmailAllowed" | "hasCloudEmailAccess">;
+type AllowList = Pick<DashboardAccessState, "isCloudEmailAllowed" | "hasSignInEmails">;
 
 const ENTERED = "enteredPerson";
 
@@ -50,7 +50,7 @@ export function entryRefusal(
   actor: SessionActor | undefined,
   allowList: AllowList,
 ): { status: 401 | 403; error: string } {
-  if (!allowList.hasCloudEmailAccess()) return { status: 401, error: "Unauthorized" };
+  if (!allowList.hasSignInEmails()) return { status: 401, error: "Unauthorized" };
   return actor?.kind === "visitor"
     ? { status: 403, error: "Forbidden" }
     : { status: 401, error: "Visitor authentication required" };

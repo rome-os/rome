@@ -2,16 +2,24 @@
 // says which person an account is, Access which role that person has.
 // Vocabulary: docs/domains/access.md.
 
-import type { DrizzleDb } from "../../db/index.js";
+import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import {
   type Account,
   createIdentity,
   type Identity,
+  identityWithinTx,
   type Person,
   ROME_CLOUD_EMAIL_PLATFORM,
+  type SyncIdentity,
 } from "../../identity/identity.js";
 import { createLogger } from "../../logger.js";
-import { type Access, createAccess, type Role } from "../access.js";
+import {
+  type Access,
+  accessWithinTx,
+  createAccess,
+  type Role,
+  type SyncAccess,
+} from "../access.js";
 import { normalizeVisitorEmail } from "../visitor-email.js";
 
 export type { Account, Person };
@@ -28,6 +36,17 @@ export interface MemberContext {
 /** Identity and Access over `db`. */
 export function memberContext(db: DrizzleDb): MemberContext {
   return { identity: createIdentity(db), access: createAccess(db) };
+}
+
+/** What the `…WithinTx` steps work with: Identity and Access, synchronously. */
+export interface SyncMemberContext {
+  identity: SyncIdentity;
+  access: SyncAccess;
+}
+
+/** Identity and Access on `tx`, so every step given it joins that transaction. */
+export function memberContextWithinTx(tx: DrizzleTx): SyncMemberContext {
+  return { identity: identityWithinTx(tx), access: accessWithinTx(tx) };
 }
 
 /** A person with a role, with every account of theirs. */
@@ -67,6 +86,25 @@ export async function listMembers({ identity, access }: MemberContext): Promise<
   return listed;
 }
 
+/** The email of every Rome Cloud sign-in account of every person with role
+ *  member, sorted. The
+ *  guardian's are not among them: the guardian's seat says who the guardian is. */
+export async function memberEmails(ctx: MemberContext): Promise<string[]> {
+  return memberEmailsWithinTx(syncOf(ctx));
+}
+
+/** {@link memberEmails}, synchronously. */
+export function memberEmailsWithinTx({ identity, access }: SyncMemberContext): string[] {
+  const emails: string[] = [];
+  for (const { personId, role } of access.members()) {
+    if (role !== "member") continue;
+    for (const account of identity.accountsOf(personId)) {
+      if (account.platform === ROME_CLOUD_EMAIL_PLATFORM) emails.push(account.accountId);
+    }
+  }
+  return emails.sort();
+}
+
 /**
  * Makes the guardian's person hold `accounts`, creating the person, with
  * `name` and `avatarUrl`, when there is no guardian yet. When there is one,
@@ -78,18 +116,25 @@ export async function guardianSeatCreated(
   ctx: MemberContext,
   seat: { accounts: Account[]; name?: string; avatarUrl?: string },
 ): Promise<Person> {
-  const { identity, access } = ctx;
-  const current = (await access.members()).find((m) => m.role === "guardian");
-  let guardian = current ? await identity.person(current.personId) : null;
+  return guardianSeatCreatedWithinTx(syncOf(ctx), seat);
+}
+
+/** {@link guardianSeatCreated}, synchronously. Throws where it rejects. */
+export function guardianSeatCreatedWithinTx(
+  { identity, access }: SyncMemberContext,
+  seat: { accounts: Account[]; name?: string; avatarUrl?: string },
+): Person {
+  const current = access.members().find((m) => m.role === "guardian");
+  let guardian = current ? identity.person(current.personId) : null;
   if (!guardian) {
-    guardian = await identity.createPerson({
+    guardian = identity.createPerson({
       name: seat.name,
       avatarUrl: seat.avatarUrl,
       accounts: [],
     });
-    await access.grant(guardian.id, "guardian");
+    access.grant(guardian.id, "guardian");
   }
-  for (const account of seat.accounts) await giveGuardian(identity, guardian.id, account);
+  for (const account of seat.accounts) giveGuardian(identity, guardian.id, account);
   return guardian;
 }
 
@@ -123,15 +168,8 @@ export async function guardianSeatRebound(
  * a role keeps it, so the guardian's own email answers the guardian. Throws
  * when `email` is not an email address.
  */
-export async function inviteMember(
-  { identity, access }: MemberContext,
-  email: string,
-): Promise<Person> {
-  const account = signInAccount(email);
-  const person =
-    (await identity.personOf(account)) ?? (await identity.createPerson({ accounts: [account] }));
-  await access.grant(person.id, "member");
-  return person;
+export async function inviteMember(ctx: MemberContext, email: string): Promise<Person> {
+  return inviteMemberWithinTx(syncOf(ctx), email);
 }
 
 /**
@@ -159,18 +197,29 @@ export async function invitedEmailsSaved(
   ctx: MemberContext,
   emails: readonly string[],
 ): Promise<void> {
+  invitedEmailsSavedWithinTx(syncOf(ctx), emails);
+}
+
+/** {@link invitedEmailsSaved}, synchronously. Throws where it rejects. */
+export function invitedEmailsSavedWithinTx(
+  ctx: SyncMemberContext,
+  emails: readonly string[],
+): void {
   const { identity, access } = ctx;
   const listed = new Set(emails.map((email) => signInAccount(email).accountId));
-  for (const { personId, role } of await access.members()) {
+  for (const { personId, role } of access.members()) {
     if (role !== "member") continue;
-    const held = (await identity.accountsOf(personId)).some(
-      (account) => account.platform === ROME_CLOUD_EMAIL_PLATFORM && listed.has(account.accountId),
-    );
+    const held = identity
+      .accountsOf(personId)
+      .some(
+        (account) =>
+          account.platform === ROME_CLOUD_EMAIL_PLATFORM && listed.has(account.accountId),
+      );
     if (held) continue;
-    await access.revoke(personId);
-    await identity.deletePerson(personId);
+    access.revoke(personId);
+    identity.deletePerson(personId);
   }
-  for (const email of listed) await inviteMember(ctx, email);
+  for (const email of listed) inviteMemberWithinTx(ctx, email);
 }
 
 /**
@@ -181,12 +230,20 @@ export async function invitedEmailsSaved(
  * member gets no person.
  */
 export async function memberSignedIn(
-  { identity, access }: MemberContext,
+  ctx: MemberContext,
   signIn: { email: string; avatarUrl?: string | null },
 ): Promise<void> {
-  const person = await identity.personOf(signInAccount(signIn.email));
-  if (!person || (await access.roleOf(person.id)) === null) return;
-  if (signIn.avatarUrl) await identity.updatePerson(person.id, { avatarUrl: signIn.avatarUrl });
+  memberSignedInWithinTx(syncOf(ctx), signIn);
+}
+
+/** {@link memberSignedIn}, synchronously. */
+export function memberSignedInWithinTx(
+  { identity, access }: SyncMemberContext,
+  signIn: { email: string; avatarUrl?: string | null },
+): void {
+  const person = identity.personOf(signInAccount(signIn.email));
+  if (!person || access.roleOf(person.id) === null) return;
+  if (signIn.avatarUrl) identity.updatePerson(person.id, { avatarUrl: signIn.avatarUrl });
 }
 
 /**
@@ -198,17 +255,28 @@ export function logStepFailure(message: string): (err: unknown) => void {
   return (err) => log.warn(message, { error: err instanceof Error ? err.name : "unknown" });
 }
 
-async function giveGuardian(identity: Identity, guardianId: string, account: Account) {
-  const holder = await identity.personOf(account);
+function inviteMemberWithinTx({ identity, access }: SyncMemberContext, email: string): Person {
+  const account = signInAccount(email);
+  const person = identity.personOf(account) ?? identity.createPerson({ accounts: [account] });
+  access.grant(person.id, "member");
+  return person;
+}
+
+function giveGuardian(identity: SyncIdentity, guardianId: string, account: Account) {
+  const holder = identity.personOf(account);
   if (holder?.id === guardianId) return;
   if (holder) {
-    await identity.removeAccount(account);
+    identity.removeAccount(account);
     log.warn("account moved to the guardian from another person", {
       platform: account.platform,
       from: holder.id,
     });
   }
-  await identity.addAccount(guardianId, account);
+  identity.addAccount(guardianId, account);
+}
+
+function syncOf({ identity, access }: MemberContext): SyncMemberContext {
+  return { identity: identity.sync, access: access.sync };
 }
 
 function accountKey(account: Account): string {

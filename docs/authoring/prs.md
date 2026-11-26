@@ -1,5 +1,13 @@
 # Pull Requests
 
+## Cutting
+
+A PR either refactors or changes behavior, never both. A reviewer checks a refactor by asking whether anything changed, and a behavior change by asking whether the new behavior is right. One PR cannot be read both ways.
+
+Try to keep a PR under 400 changed lines, not counting lockfiles, generated files and snapshots. Past that, split it before opening, as a stack if the parts depend on each other.
+
+Each PR leaves `main` working once it and the PRs below it have landed. A PR that only works once a later one lands is not finished.
+
 ## Title
 
 Every PR title is a Conventional Commit — `<type>[(<scope>)][!]: <subject>`, with a lower-case type and scope. Allowed types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
