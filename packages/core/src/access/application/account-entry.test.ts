@@ -58,7 +58,11 @@ describe("accountEntry", () => {
     const agent = { platform: "agents", id: "dot" };
     expect(await enter(agent)).toEqual({ kind: "unknown" });
     agents = ["dot"];
-    expect(await enter(agent)).toEqual({ kind: "entered", person: GUARDIAN });
+    // As the guardian, though not as the guardian's own message.
+    expect(await enter(agent)).toEqual({
+      kind: "entered",
+      person: { ...GUARDIAN, via: "loopback" },
+    });
   });
 
   it("refuses an account whose person has no role", async () => {
