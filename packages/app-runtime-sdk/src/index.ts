@@ -1245,8 +1245,7 @@ export interface ThreadContext {
   };
   /**
    * Bond level of the message sender, when known. Lets turn-level logic tell the
-   * guardian apart from other trusted senders (inner-circle, acquaintance) who
-   * reach the same `<channel>:<thread>` trusted path.
+   * guardian apart from a member let in on the same `<channel>:<thread>`.
    */
   senderBondLevel?: string;
 }
