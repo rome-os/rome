@@ -161,7 +161,6 @@ const emptyConnections: ApiConnection[] = [
   apiConnection("telegram", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("telegram_user", { session: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("whatsapp", { session: { state: "unauthorized" } }, { placeholder: true }),
-  apiConnection("wechat", { account: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("discord", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("email", { inbox: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("feishu", { app: { state: "unauthorized" } }, { placeholder: true }),
@@ -195,9 +194,6 @@ const connectedConnections: ApiConnection[] = [
     },
   }),
   apiConnection("whatsapp", { session: { state: "authorized" } }),
-  apiConnection("wechat", {
-    account: { state: "authorized", display: { handle: "wx_rome" } },
-  }),
   apiConnection("discord", {
     bot: { state: "authorized", display: { handle: "rome-bot#1234" } },
   }),

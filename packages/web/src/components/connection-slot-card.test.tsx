@@ -178,19 +178,19 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
     render(
       <SoleSlotScope>
         <ConnectionSlotCard
-          service="wechat"
-          slot={slot("bot", "authorized", "wx_user")}
+          service="whatsapp"
+          slot={slot("bot", "authorized", "rome_user")}
           state="connected"
           role="primary"
           icon={<span data-testid="icon" />}
-          identityTitle="wx_user"
+          identityTitle="rome_user"
           action={<button type="button">Disconnect</button>}
         />
       </SoleSlotScope>,
     );
 
     expect(screen.queryByTestId("icon")).toBeNull();
-    expect(screen.getByText("wx_user")).toBeTruthy();
+    expect(screen.getByText("rome_user")).toBeTruthy();
     expect(screen.queryByText("Connected")).toBeNull();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     expect(screen.getByText("This connection lets your agent")).toBeTruthy();
@@ -199,7 +199,7 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
   it("outside the scope the full card frame is unchanged", () => {
     const { container } = render(
       <ConnectionSlotCard
-        service="wechat"
+        service="whatsapp"
         slot={slot("bot", "unauthorized")}
         state="unconnected"
         role="primary"
@@ -209,6 +209,6 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
 
     expect(container.querySelector("section")?.className).toContain("border-dashed");
     expect(screen.getByTestId("icon")).toBeTruthy();
-    expect(screen.getByText("Your WeChat")).toBeTruthy();
+    expect(screen.getByText("Your WhatsApp")).toBeTruthy();
   });
 });

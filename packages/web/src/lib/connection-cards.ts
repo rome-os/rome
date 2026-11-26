@@ -96,7 +96,6 @@ export interface ConnectionCard {
 const SERVICE_ORDER = [
   "telegram",
   "whatsapp",
-  "wechat",
   "linkedin",
   "discord_app",
   "discord",
@@ -113,7 +112,6 @@ const SERVICE_ORDER = [
 const LABELS: Record<string, string> = {
   telegram: "Telegram",
   whatsapp: "WhatsApp",
-  wechat: "WeChat",
   linkedin: "LinkedIn",
   discord: "Discord bot",
   discord_app: "Discord",
@@ -139,7 +137,6 @@ const OAUTH_SERVICES = new Set(["github", "google", "microsoft", "shopify"]);
 const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   telegram: { bot: "bot" },
   whatsapp: { session: "bot" },
-  wechat: { account: "bot" },
   linkedin: { session: "bot" },
   discord: { bot: "bot" },
   discord_app: { bot: "bot" },

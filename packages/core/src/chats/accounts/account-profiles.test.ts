@@ -78,9 +78,9 @@ describe("AccountProfiles", () => {
     );
     profiles.heard(
       inbound({
-        account: on("wechat"),
-        senderId: "wxid_ada@im.wechat",
-        senderDisplayName: "wxid_ada",
+        account: on("whatsapp"),
+        senderId: "15551234567@s.whatsapp.net",
+        senderDisplayName: "15551234567",
         senderUsername: undefined,
       }),
     );
@@ -90,7 +90,7 @@ describe("AccountProfiles", () => {
       await repo.profilesOf([
         { platform: "telegram", id: "1001" },
         { platform: "email", id: "unauthenticated:ada@example.com" },
-        { platform: "wechat", id: "wxid_ada@im.wechat" },
+        { platform: "whatsapp", id: "15551234567@s.whatsapp.net" },
       ]),
     ).toEqual([null, null, null]);
   });

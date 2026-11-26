@@ -1,7 +1,7 @@
 // The connection kinds whose accounts are an agent's own, as each kind's
 // descriptor in core declares it (`link: "own_account"`), which an app cannot
 // read. A core test keeps the two in step. Every other channel
-// carries the guardian's own accounts (a linked WhatsApp, a WeChat login) or
+// carries the guardian's own accounts (a linked WhatsApp) or
 // Rome's own traffic, and stays out of Dream.
 export const ACCOUNT_KINDS = ["feishu", "telegram", "discord", "slack_app", "discord_app"];
 
