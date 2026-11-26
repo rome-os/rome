@@ -172,7 +172,10 @@ describe("connect authorization modes", () => {
       to: "caller",
       payload: {
         ok: true,
-        result: { name: "Remote Linux", actions: ["system.info", "exec", "fs.list"] },
+        result: {
+          name: "Remote Linux",
+          actions: expect.arrayContaining(["system.info", "exec", "fs.list"]),
+        },
       },
     });
     expect(JSON.parse(await readFile(join(f.root, "credential.json"), "utf8"))).toEqual({

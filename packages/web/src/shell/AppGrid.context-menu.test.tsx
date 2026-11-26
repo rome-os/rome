@@ -157,6 +157,36 @@ it("keeps a plain Open in the Mac app, where a new tab lands in a browser with n
   expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
 });
 
+describe("Add to Desktop", () => {
+  it("is offered in a Mac app that can put apps on the Desktop, and adds this app", async () => {
+    const addToDesktop = rs.fn(async () => ({ path: "/Users/me/Desktop/Recipe Box.app" }));
+    window.rome = { apps: { addToDesktop } };
+    const user = userEvent.setup();
+    renderSidebar();
+
+    fireEvent.contextMenu(await findPinnedAppLink());
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open", "Chat with app", "View details", "Add to Desktop", "Unpin from sidebar"]);
+
+    await user.click(within(menu).getByRole("menuitem", { name: "Add to Desktop" }));
+    expect(addToDesktop).toHaveBeenCalledWith("recipe-box");
+  });
+
+  it("is not offered by a Mac app without it", async () => {
+    window.rome = {};
+    renderSidebar();
+
+    fireEvent.contextMenu(await findPinnedAppLink());
+
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "Add to Desktop" })).toBeNull();
+  });
+});
+
 it("opens a pinned app beside a new chat in its source folder from another page", async () => {
   const user = userEvent.setup();
   renderSidebar("/projects");
