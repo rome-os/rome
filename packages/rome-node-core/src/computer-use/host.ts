@@ -4,6 +4,7 @@ import { actionError, isRecord, type ActionResponse, type BinaryActionResult } f
 import { isUuid } from "../frame.js";
 import { ComputerUseBridge } from "./bridge.js";
 import { discoverHelper } from "./discovery.js";
+import { probeHelperPermissions } from "./launch.js";
 import {
   ComputerUseError,
   JSON_LIMIT,
@@ -56,6 +57,7 @@ type Bridge = Pick<
 interface HostDeps {
   bundledAppPath?: string;
   discover: typeof discoverHelper;
+  probePermissions: typeof probeHelperPermissions;
   launch: (options: Parameters<typeof ComputerUseBridge.launch>[0]) => Promise<Bridge>;
   sessionTtlMs: number;
 }
@@ -105,11 +107,13 @@ export class ComputerUseHost {
   private readonly sessions = new Map<string, Session>();
   private readonly windows = new Map<number, Session>();
   private readonly deps: HostDeps;
+  private readonly permissionProbes = new Map<string, Promise<boolean | undefined>>();
   private discovering?: Promise<string>;
 
   constructor(deps: Partial<HostDeps> = {}) {
     this.deps = {
       discover: discoverHelper,
+      probePermissions: probeHelperPermissions,
       launch: (options) => ComputerUseBridge.launch(options),
       sessionTtlMs: SESSION_TTL_MS,
       ...deps,
@@ -215,20 +219,18 @@ export class ComputerUseHost {
 
   async info(peer: string) {
     if (isUuid(peer)) peer = peer.toLowerCase();
-    const bridge = this.sessions.get(peer)?.bridge;
-    const installed =
-      (bridge && !bridge.closed) ||
-      (await this.findHelper().then(
-        () => true,
-        () => false,
-      ));
+    const appPath = await this.findHelper().catch(() => undefined);
+    const permitted =
+      appPath && !this.sessions.get(peer)?.stop ? await this.permissions(appPath) : undefined;
     const session = this.sessions.get(peer);
     const stopped = Boolean(session?.stop);
-    const live = session?.bridge && !session.bridge.closed;
-    const state = stopped ? "off" : live ? "on" : installed ? "needs_permission" : "off";
+    const live = Boolean(session?.bridge && !session.bridge.closed);
+    const installed = Boolean(appPath) || live;
+    const state = stopped || !installed ? "off" : (permitted ?? live) ? "on" : "needs_permission";
     const operations = Object.entries<Operation>(this.operations);
-    const advertised =
-      installed || live ? operations.filter(([, operation]) => !stopped || operation.urgent) : [];
+    const advertised = installed
+      ? operations.filter(([, operation]) => !stopped || operation.urgent)
+      : [];
     return {
       capability: {
         id: "computer_use",
@@ -324,6 +326,20 @@ export class ComputerUseHost {
     return this.discovering;
   }
 
+  private permissions(appPath: string): Promise<boolean | undefined> {
+    const existing = this.permissionProbes.get(appPath);
+    if (existing) return existing;
+    // Older helpers have no permission probe. Keep their session-based status.
+    const checking = this.deps
+      .probePermissions(appPath)
+      .catch(() => undefined)
+      .finally(() => {
+        this.permissionProbes.delete(appPath);
+      });
+    this.permissionProbes.set(appPath, checking);
+    return checking;
+  }
+
   private requireSession(session: Session | undefined): Session {
     if (!session) throw new ComputerUseError("busy");
     return session;
@@ -371,8 +387,16 @@ export class ComputerUseHost {
     session.bridge = bridge;
     session.expiresAt = performance.now() + this.deps.sessionTtlMs;
     session.timer = setTimeout(() => this.remove(session), this.deps.sessionTtlMs).unref();
-    bridge.onDisconnect(() => {
-      if (!session.stop) this.remove(session);
+    bridge.onDisconnect((cause) => {
+      if (session.stop) return;
+      if (cause.code !== "session_stopped") {
+        this.remove(session);
+        return;
+      }
+      session.stop = Promise.resolve(stopConfirmed);
+      session.stopped = stopConfirmed;
+      session.bindings.clear();
+      this.releaseWindows(session);
     });
     return bridge;
   }

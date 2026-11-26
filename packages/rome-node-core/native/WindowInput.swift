@@ -157,6 +157,8 @@ struct WindowInput {
                   point.map({ bounds.contains($0) }) ?? target.bounds.intersects(bounds) else { continue }
             let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
             let layer = (row[kCGWindowLayer as String] as? NSNumber)?.int32Value
+            // Normal windows can overlap without intercepting PID-directed events.
+            if let pid, pid > 0, layer == 0 { continue }
             if pid == target.pid, point == nil, let layer, layer < CGWindowLevelForKey(.screenSaverWindow) { continue }
             if layer == CGWindowLevelForKey(.cursorWindow),
                row[kCGWindowOwnerName as String] as? String == "Window Server",
@@ -175,15 +177,11 @@ struct WindowInput {
         post(event)
     }
 
-    static func unicodeChunks(_ text: String) -> [[UniChar]] {
-        var chunks: [[UniChar]] = [], chunk: [UniChar] = []
-        for scalar in text.unicodeScalars {
-            let units = Array(String(scalar).utf16)
-            if chunk.count + units.count > 16 { chunks.append(chunk); chunk = [] }
-            chunk += units
-        }
-        if !chunk.isEmpty { chunks.append(chunk) }
-        return chunks
+    static func unicodePayloads(_ character: Character) -> [[UniChar]] {
+        let units = Array(character.utf16)
+        // Keep a grapheme intact when it fits in the event's Unicode payload.
+        if units.count <= 16 { return [units] }
+        return character.unicodeScalars.map { Array(String($0).utf16) }
     }
 
     // send validates before dispatching a batch. release can run after send rejects the drag.
@@ -208,8 +206,8 @@ struct WindowInput {
             event.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button.button.rawValue))
             return event
         }
-        func key(_ code: CGKeyCode, flags: CGEventFlags, chars: [UniChar] = []) throws {
-            let pair = try [true, false].map { down in
+        func key(_ code: CGKeyCode, flags: CGEventFlags, chars: [UniChar] = []) throws -> [CGEvent] {
+            try [true, false].map { down in
                 guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else {
                     throw Failure("action_rejected")
                 }
@@ -221,7 +219,6 @@ struct WindowInput {
                 }
                 return event
             }
-            try send(nil, pair)
         }
 
         switch operation {
@@ -272,15 +269,26 @@ struct WindowInput {
             try send(point, [event])
         case .key(let name):
             if let code = Self.keys[name.lowercased()] {
-                try key(code, flags: flags)
+                try send(nil, key(code, flags: flags))
             } else if let (code, effectiveFlags) = lookupKey(name, flags) {
-                try key(code, flags: effectiveFlags)
+                try send(nil, key(code, flags: effectiveFlags))
             } else {
                 guard flags.isEmpty else { throw Failure("key_unavailable") }
-                try key(0, flags: [], chars: Array(name.utf16))
+                try send(nil, key(0, flags: [], chars: Array(name.utf16)))
             }
         case .text(let text):
-            for chunk in Self.unicodeChunks(text) { try key(0, flags: [], chars: chunk) }
+            var events: [CGEvent] = []
+            // Some apps consume only the first character of each key event.
+            for character in text {
+                for payload in Self.unicodePayloads(character) {
+                    events += try key(0, flags: [], chars: payload)
+                    if events.count == 16 {
+                        try send(nil, events)
+                        events.removeAll(keepingCapacity: true)
+                    }
+                }
+            }
+            if !events.isEmpty { try send(nil, events) }
         }
     }
 }

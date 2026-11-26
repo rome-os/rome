@@ -66,10 +66,10 @@ function fakeHelper() {
         disconnect = undefined;
       };
     },
-    close: rs.fn(() => {
+    close: rs.fn((reason = new ComputerUseError("connection_closed")) => {
       if (helper.closed) return;
       helper.closed = true;
-      disconnect?.(new ComputerUseError("connection_closed"));
+      disconnect?.(reason);
     }),
     windows: rs.fn(async () => ({ windows: [{ ...window, bounds: [...window.bounds] }] })),
     bind: rs.fn(async (id: number) => ({
@@ -228,6 +228,52 @@ it("refuses helper launch while the host cannot record the request", async () =>
   expect(mock.launch).not.toHaveBeenCalled();
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+});
+
+it("refreshes permissions before a session and across helper restarts", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  const probePermissions = rs.fn(async () => true);
+  const host = new ComputerUseHost({ probePermissions });
+  cleanups.push(() => host.disconnect());
+
+  const info = () => host.info(peer).then(({ capability }) => capability.state);
+  expect(await Promise.all([info(), info()])).toEqual(["on", "on"]);
+  expect(probePermissions).toHaveBeenCalledTimes(1);
+  expect(mock.launch).not.toHaveBeenCalled();
+
+  const list = host.prepare("computer.windows", peer, {})!;
+  expect((await list.run()).response).toMatchObject({ ok: true });
+  list.release();
+  probePermissions.mockResolvedValueOnce(false);
+  expect(await info()).toBe("needs_permission");
+  helper.close();
+  expect(await info()).toBe("on");
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+
+  const cancel = host.prepare("computer.cancel", peer, {})!;
+  await cancel.run();
+  cancel.release();
+  expect(await info()).toBe("off");
+  expect(probePermissions).toHaveBeenCalledTimes(3);
+  mock.discover.mockRejectedValueOnce(new ComputerUseError("computer_use_helper_missing"));
+  expect((await host.info(other)).capability.state).toBe("off");
+  expect(probePermissions).toHaveBeenCalledTimes(3);
+});
+
+it("keeps a peer off after a confirmed local emergency stop", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  const f = executor();
+  const binding = await f.bind();
+  helper.close(new ComputerUseError("session_stopped"));
+  expect(await f.json("system.info")).toMatchObject({
+    result: { capabilities: [{ state: "off" }] },
+  });
+  expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await f.json("computer.act", input(binding))).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+  expect(mock.launch).toHaveBeenCalledTimes(1);
 });
 
 it("routes JSON and PNG by peer and writes only metadata to the host audit", async () => {

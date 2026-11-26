@@ -15,10 +15,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { isRecord } from "../actions.js";
 import { ComputerUseError } from "./protocol.js";
 
 export const APP_NAME = "Rome Computer Use.app";
@@ -183,6 +185,31 @@ async function verifyHelperBundle(
     return appPath;
   } catch (cause) {
     throw new ComputerUseError("invalid_helper_bundle", { cause });
+  }
+}
+
+export async function probeHelperPermissions(path: string): Promise<boolean | undefined> {
+  const signal = AbortSignal.timeout(2500);
+  const app = await verifyHelperBundle(path, signal);
+  const directory = await mkdtemp("/private/tmp/rome-cu-permissions-");
+  const output = join(directory, "permissions.json");
+  try {
+    const args = ["-n", "-g", "-j", "-W", "--stdout", output, "--stderr", "/dev/null"];
+    args.push("-a", app, "--args", "--check-permissions");
+    // Direct execution can inherit the host's TCC identity. LaunchServices checks the app.
+    await run("/usr/bin/open", args, { signal }).catch(() => {
+      // A short-lived app can exit before open registers its wait, with valid output.
+    });
+    const result: unknown = JSON.parse(await readFile(output, { encoding: "utf8", signal }));
+    if (
+      isRecord(result) &&
+      typeof result.accessibility === "boolean" &&
+      typeof result.screenRecording === "boolean"
+    ) {
+      return result.accessibility && result.screenRecording;
+    }
+  } finally {
+    await rm(directory, { force: true, recursive: true });
   }
 }
 

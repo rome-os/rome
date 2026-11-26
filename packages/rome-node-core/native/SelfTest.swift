@@ -226,36 +226,11 @@ final class SelfTest {
     }
 
     private func windowFocus() throws {
-        var requests: [String] = []
-        func focus(activationPoll: Int?, fallbackPoll: Int? = nil, raisesToFocus: Int = 1,
-                   timeout: DispatchTimeInterval = .milliseconds(750)) throws {
-            requests.removeAll()
-            var poll = 0
-            var frontmostAt: Int?
-            var raises = 0
-            func frontmost() -> Bool { frontmostAt.map { poll >= $0 } ?? false }
-            try Windows.focus(frontmost: frontmost, focused: { frontmost() && raises == raisesToFocus }, activate: {
-                requests.append("activate")
-                frontmostAt = activationPoll
-            }, setFrontmost: {
-                requests.append("AXFrontmost")
-                frontmostAt = fallbackPoll.map { poll + $0 }
-            }, raise: {
-                try expect(frontmost(), "raise waits for the app to come to the front")
-                requests.append("raise")
-                raises += 1
-            }, check: { poll += 1 }, timeout: timeout)
-        }
-        try focus(activationPoll: 3)
-        try expect(requests == ["activate", "raise"], "asynchronous activation skips the fallback")
-        try focus(activationPoll: nil, fallbackPoll: 2)
-        try expect(requests == ["activate", "AXFrontmost", "raise"], "Accessibility activates the app before the window is raised")
-        try focus(activationPoll: 3, raisesToFocus: 2)
-        try expect(requests == ["activate", "raise", "raise"], "raise retries in the foreground until the window has focus")
-        try rejects("window_focus_unavailable") { try focus(activationPoll: nil) }
-        try expect(requests == ["activate", "AXFrontmost"], "focus fails without raising a background window")
-        try rejects("window_focus_unavailable") { try focus(activationPoll: nil, timeout: .milliseconds(50)) }
-        try expect(requests == ["activate"], "the focus deadline bounds the activation wait")
+        let bound = AXUIElementCreateApplication(42)
+        let sibling = AXUIElementCreateApplication(43)
+        try Windows.verifyKeyboardTarget(bound, focused: AXUIElementCreateApplication(42))
+        try rejects("window_focus_unavailable") { try Windows.verifyKeyboardTarget(bound, focused: sibling) }
+        try rejects("window_focus_unavailable") { try Windows.verifyKeyboardTarget(bound, focused: nil) }
     }
 
     private final class EndedBindings: @unchecked Sendable {
@@ -432,7 +407,7 @@ final class SelfTest {
         try verify([cursor, adjacent, expected, helper], at: point)
         try verify([expected, adjacent, helper])
         try rejects("window_coordinate_out_of_bounds") { try verify([expected], at: CGPoint(x: -70, y: 70)) }
-        for blocker in [helper, foreignPopup, highOverlay] {
+        for blocker in [foreignPopup, highOverlay] {
             try rejects("window_occluded") { try verify([blocker, expected], at: point) }
             try rejects("window_occluded") { try verify([blocker, expected]) }
         }
@@ -449,11 +424,10 @@ final class SelfTest {
         shareableOverlay[kCGWindowSharingState as String] = 1
         try rejects("window_occluded") { try verify([shareableOverlay, expected], at: point, hit: { _ in true }) }
         try rejects("window_occluded") { try verify([row(17, pid, bounds, layer: highLayer), expected], hit: { _ in true }) }
-        try rejects("window_occluded") { try verify([remoteOverlay, helper, expected], at: point, hit: { _ in true }) }
-        for blocker in [document, popup] {
-            try rejects("window_occluded") { try verify([blocker, expected], at: point) }
-        }
-        try verify([document, popup, expected])
+        try verify([remoteOverlay, helper, expected], at: point, hit: { _ in true })
+        try verify([helper, document, expected], at: point)
+        try verify([helper, document, popup, expected])
+        try rejects("window_occluded") { try verify([popup, expected], at: point) }
         try rejects("window_unavailable") { try verify([adjacent], at: point) }
         try rejects("window_unavailable") { try verify([expected, expected], at: point) }
         try rejects("window_unavailable") { try verify([row(7, getpid(), bounds)], at: point) }
@@ -543,15 +517,31 @@ final class SelfTest {
         try rejects("key_unavailable") { try run(action("key_press", ["key": "🪴", "modifiers": ["command"]])) }
         try run(action("key_press", ["key": "🪴"]))
         try expect(events.map(\.type) == [.keyDown, .keyUp], "unmapped unmodified character uses Unicode")
-        let text = String(repeating: "a", count: 15) + "🪴" + String(repeating: "b", count: 16)
-        let chunks = WindowInput.unicodeChunks(text)
-        try expect(chunks.map(\.count) == [15, 16, 2] && chunks.flatMap { $0 } == Array(text.utf16),
-                   "Unicode chunks preserve surrogate pairs and order")
-        try run(action("type_text", ["text": text]))
-        try expect(events.count == chunks.count * 2 && checks == [nil, nil, nil], "each text chunk revalidates once")
-        try rejects("session_stopped") { try run(action("type_text", ["text": text]), limit: 1) }
-        try expect(events.count == 2, "stopped text never sends later chunks")
+        try run(action("key_press", ["key": "Escape"]))
+        try expect(events.map(\.type) == [.keyDown, .keyUp] && checks == [nil] && events.allSatisfy {
+            $0.getIntegerValueField(.keyboardEventKeycode) == 53 && $0.flags.isEmpty
+        }, "Escape uses a physical down/up pair with clear flags")
 
+        func unicode(_ event: CGEvent) -> [UniChar] {
+            var chars = [UniChar](repeating: 0, count: 16)
+            var count = 0
+            event.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &count,
+                                           unicodeString: &chars)
+            return Array(chars.prefix(count))
+        }
+        let text = "7*8🪴e\u{301}👨‍👩‍👧‍👦"
+        try run(action("type_text", ["text": text]))
+        let payloads = text.flatMap { character in Array(repeating: Array(character.utf16), count: 2) }
+        try expect(events.map(unicode) == payloads && checks == [nil],
+                   "each text grapheme gets its own Unicode down/up payload")
+        let largeCluster = "e" + String(repeating: "\u{301}", count: 30)
+        try run(action("type_text", ["text": largeCluster]))
+        let down = events.filter { $0.type == .keyDown }
+        try expect(down.flatMap(unicode) == Array(largeCluster.utf16) && checks.count == 4,
+                   "oversized graphemes preserve all scalars across batches")
+        try rejects("session_stopped") { try run(action("type_text", ["text": "0123456789"]), limit: 1) }
+        try expect(events.count == 16 && events.filter { $0.type == .keyDown }.flatMap(unicode) == Array("01234567".utf16),
+                   "stopped text never sends later batches")
         for (name, args): (String, [String: Any]) in [
             ("click", ["x": 1, "y": 2, "clickCount": 4]),
             ("click", ["x": 1, "y": 2, "button": "unknown"]),
@@ -1311,10 +1301,17 @@ final class SelfTest {
         }
 
         let legacy = ConsentProbe()
-        try withControllerSocket(path, store: store, consent: legacy.provider(.allowSession)) { fd, _, key in
+        try withControllerSocket(path, store: store, consent: legacy.provider(.allowSession)) { fd, admission, key in
             let grant = try result(hello(fd, key, ["locale": "ja-JP"]))
             try expect(grant["auth"] as? String == "session" && grant["locale"] as? String == "ja" &&
                        grant["challenge"] == nil, "hello without a controller directly grants a session")
+            admission.terminate("local_stop")
+            let header = try readBytes(fd, count: 8)
+            let (length, _) = try Wire.lengths(header, request: false)
+            let (reply, _) = try decode(header + readBytes(fd, count: length))
+            try expect(reply["id"] is NSNull && (reply["error"] as? [String: String])?["code"] == "session_stopped",
+                       "a local stop sends a terminal error before the socket closes")
+            try closed(fd)
         }
         try expect(legacy.prompts.count == 1 && legacy.prompts.first?.controller == nil &&
                    legacy.prompts.first?.mode == .sessionOnly, "hello without a controller uses session-only consent")
