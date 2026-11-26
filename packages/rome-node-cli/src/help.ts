@@ -6,6 +6,7 @@ Usage:
 
 Commands:
   connect          Keep this computer online as a remote executor.
+  computer-use setup  Open the macOS permission guide for Rome Computer Use.
   web              Run the local Web UI to manage connection and audit logs.
   auth             Configure caller authorization through stdin or server mode.
   auth status      Report local caller configuration without revealing the token.
@@ -31,6 +32,13 @@ Set ROME_NODE_CONFIG_DIR to use a separate configuration directory.
 `;
 
 const commands: Record<string, string> = {
+  "computer-use setup": `Usage: rome-node computer-use setup [--pane accessibility|screen-recording|all] [--locale <tag>]
+
+Open the Rome Computer Use permission guide on this Mac.
+The guide opens System Settings and shows how to grant Accessibility and
+Screen Recording to Rome Computer Use. By default it starts at the first
+missing permission and uses the system language.
+`,
   watch: `Usage: rome-node watch
 
 Subscribe to caller connection state as newline-delimited JSON.
@@ -344,6 +352,7 @@ Environment:
 export function commandHelp(positionals: string[], explicitTopic: boolean): string {
   if (positionals.length === 0) return overview;
   const topic = positionals.join(" ");
+  if (topic === "computer-use") return commands["computer-use setup"];
   if (Object.hasOwn(commands, topic)) return commands[topic];
   if (
     positionals[0] === "daemon" &&

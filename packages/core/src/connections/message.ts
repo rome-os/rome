@@ -29,9 +29,6 @@ export interface MessageWhere {
     readonly startedBy?: string;
     readonly id?: ChatId;
   };
-  /** The group it was said in, where the platform carries a group's messages
-   *  on a direct chat with each sender, as WeChat's bot does. */
-  readonly group?: { readonly id: string };
 }
 
 /** Who said a message, as the platform names them. */

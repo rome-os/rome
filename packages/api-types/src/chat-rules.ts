@@ -82,13 +82,6 @@ export const FEISHU_CHAT_RULES: KindChatRules = {
   },
 };
 
-/** A WeChat chat can be switched off and given its own agent. It wakes on
- *  every message it hears. */
-export const WECHAT_CHAT_RULES: KindChatRules = {
-  offers: ["enabled", "routing.agentName", "session.reset"],
-  fixed: WAKES_ON_EVERY_MESSAGE,
-};
-
 /** When a chat's session starts afresh where nobody set it: after a week
  *  with no message. */
 const DEFAULT_SESSION_RESET = {

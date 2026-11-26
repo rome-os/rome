@@ -28,7 +28,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   telegram: "Telegram",
   telegram_user: "Telegram",
   whatsapp: "WhatsApp",
-  wechat: "WeChat",
   discord: "Discord",
   webchat: "Web chat",
   email: "Email",

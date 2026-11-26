@@ -43,6 +43,21 @@ export function buildAppIdentity(
 }
 
 /**
+ * Where the app takes shared text: its full-screen route at the declared
+ * `web.shareTarget.path`, which reads the text from `?text=`. Null when the
+ * app declares no share target.
+ */
+export function appShareTargetRoute(
+  appId: string,
+  app: Pick<ResolvedApp, "manifest">,
+): string | null {
+  const target = app.manifest.web?.shareTarget;
+  if (!target) return null;
+  const path = target.path && target.path !== "/" ? target.path : "";
+  return `/full/apps/${appIdToPathSegment(appId)}${path}`;
+}
+
+/**
  * Web app manifest for one app. `id` is per app so Android treats it as its
  * own install rather than as Rome's; `scope` stays "/" so the sign-in page a
  * fresh shortcut lands on stays inside the standalone window.
@@ -50,6 +65,8 @@ export function buildAppIdentity(
 export function buildAppWebManifest(appId: string, app: WebApp): Record<string, unknown> {
   const route = `/full/apps/${appIdToPathSegment(appId)}`;
   const iconUrl = homeScreenIconUrl(appId, app);
+  const shareRoute = appShareTargetRoute(appId, app);
+  const target = app.manifest.web?.shareTarget;
   const size = `${HOME_SCREEN_ICON_SIZE}x${HOME_SCREEN_ICON_SIZE}`;
   const icon = iconUrl
     ? { src: iconUrl, sizes: size, type: "image/png" }
@@ -67,5 +84,15 @@ export function buildAppWebManifest(appId: string, app: WebApp): Record<string, 
     // manifest: Android then crops it to the launcher shape instead of
     // shrinking it onto a white plate. iOS reads apple-touch-icon instead.
     icons: (["any", "maskable"] as const).map((purpose) => ({ ...icon, purpose })),
+    // The Web Share Target member: a phone that installed the app lists it in
+    // the share sheet, and the Mac app's share shortcut opens this page.
+    ...(shareRoute
+      ? { share_target: { action: shareRoute, method: "GET", params: { text: "text" } } }
+      : {}),
+    // Rome's own member, beside the standard one browsers read: the window
+    // size the share page is designed for.
+    ...(shareRoute && (target?.width || target?.height)
+      ? { rome_share_panel: { width: target.width, height: target.height } }
+      : {}),
   };
 }

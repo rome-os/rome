@@ -626,9 +626,8 @@ export class EmailAdapter {
     // strips the `unauthenticated` label) is honored at face value. Because the
     // From header is freely forgeable, mail that fails auth is namespaced under
     // `unauthenticated:` for EVERY sender — not just the guardian — so a spoofed
-    // From can never resolve to a mapped person (guardian, inner-circle, or
-    // acquaintance) and reach the trusted path. The unmapped namespaced id falls
-    // through to the untrusted/sentinel path; `resolveRecipient` strips the
+    // From can never resolve to the guardian or a member and be let in
+    // (docs/domains/participation.md#entry). `resolveRecipient` strips the
     // prefix so a reply still addresses the real mailbox.
     const authenticated =
       event.authentication?.authenticated === true && !event.authentication.blocked;
