@@ -2,13 +2,16 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, resolve } from "node:path";
-import { actionError, isRecord, type ActionResponse } from "./actions.js";
+import { actionError, isRecord, type ActionResponse, type BinaryActionResult } from "./actions.js";
 import { AUDIT_PUSH_BYTES, type AuditOutcome, type AuditStore } from "./audit.js";
+import { computerUseAuditFields } from "./computer-use/audit-fields.js";
+import { ComputerUseHost } from "./computer-use/host.js";
 import {
   decodeMeta,
   encodeMeta,
   FRAME_TYPE,
   frameFits,
+  isUuid,
   MAX_FRAME_BYTES,
   type Frame,
 } from "./frame.js";
@@ -154,24 +157,29 @@ export function createExecutor(
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
 ) {
+  const computer = new ComputerUseHost();
   const children = new Set<ChildProcess>();
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
-  const info = async (): Promise<ActionResponse> => ({
-    type: "response",
-    ok: true,
-    result: {
-      name,
-      platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
-      // Lists caller-facing actions only. transfer.open is an internal frame protocol for
-      // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
-      actions: ["system.info", "exec", "fs.list"],
-      frameVersion: 1,
-      transferVersion: TRANSFER_VERSION,
-      // Unavailable means every other action is refused until the owner fixes the log.
-      audit: await audit.status(),
-    },
-  });
+  const info = async (peer: string): Promise<ActionResponse> => {
+    const { capability, actions, usage } = await computer.info(peer);
+    return {
+      type: "response",
+      ok: true,
+      result: {
+        name,
+        platform:
+          platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
+        // transfer.open belongs to the transfer protocol, advertised by transferVersion.
+        actions: [...Object.keys(handlers), ...actions],
+        ...(actions.length ? { usage } : {}),
+        frameVersion: 1,
+        transferVersion: TRANSFER_VERSION,
+        capabilities: [capability],
+        audit: await audit.status(),
+      },
+    };
+  };
   // A request the log could not record never runs, so its outcome is known: nothing happened.
   const refused = () =>
     actionError(
@@ -278,40 +286,13 @@ export function createExecutor(
   const isOutput = (value: ProgramOutput | ActionResponse): value is ProgramOutput =>
     !("type" in value);
 
-  const handlers: Record<string, (args: unknown, notes: Notes) => Promise<ActionResponse>> = {
-    "system.info": () => info(),
-    exec: async (input, notes) => {
-      const parsed = execInput(input);
-      if (!parsed) return invalidExec();
-      const output = await runProgram(parsed, notes);
-      if (!isOutput(output)) return output;
-      return {
-        type: "response",
-        ok: true,
-        result: {
-          exitCode: output.exitCode,
-          signal: output.signal,
-          stdout: redactText(output.stdout),
-          stderr: redactText(output.stderr),
-          truncated: { stdout: false, stderr: false },
-        },
-      };
-    },
-    "fs.list": listFolder,
-  };
   const empty = new Uint8Array();
-  // Binary mode: the request body is the program's stdin and stdout is the response body.
-  const frameHandlers: Record<
+  const handlers: Record<
     string,
-    (
-      args: unknown,
-      body: Uint8Array,
-      notes: Notes,
-    ) => Promise<{ response: ActionResponse; body: Uint8Array }>
+    (args: unknown, notes: Notes, peer: string, body?: Uint8Array) => Promise<BinaryActionResult>
   > = {
-    "system.info": async () => ({ response: await info(), body: empty }),
-    "fs.list": async (input) => ({ response: await listFolder(input), body: empty }),
-    exec: async (input, body, notes) => {
+    "system.info": async (_args, _notes, peer) => ({ response: await info(peer), body: empty }),
+    exec: async (input, notes, _peer, body) => {
       const parsed = execInput(input);
       if (!parsed) return { response: invalidExec(), body: empty };
       const output = await runProgram(parsed, notes, body);
@@ -323,13 +304,15 @@ export function createExecutor(
           result: {
             exitCode: output.exitCode,
             signal: output.signal,
+            ...(body === undefined ? { stdout: redactText(output.stdout) } : {}),
             stderr: redactText(output.stderr),
             truncated: { stdout: false, stderr: false },
           },
         },
-        body: redactBytes(output.stdout, secrets),
+        body: body === undefined ? empty : redactBytes(output.stdout, secrets),
       };
     },
+    "fs.list": async (args) => ({ response: await listFolder(args), body: empty }),
   };
   // Requests still running, so a host can let them write their end records before it stops.
   let running = 0;
@@ -355,52 +338,9 @@ export function createExecutor(
     const request = message.payload;
     if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
       return;
-    const current = generation;
-    const action = request.action;
-    const handler = Object.hasOwn(handlers, action) ? handlers[action] : undefined;
-    const notes: Notes = { fields: {}, content: {} };
-    // system.info changes nothing and is probed on every dashboard refresh, so it is not
-    // recorded. Every other request is recorded before it runs, or refused.
-    const started = Date.now();
-    const seq =
-      action === "system.info"
-        ? 0
-        : await audit.start(
-            action,
-            startRecord(action, request.args, {
-              requestId: message.id,
-              from: message.from,
-              transport: "json",
-              generation: current,
-            }),
-            {},
-            secrets,
-          );
-    const payload =
-      seq === null
-        ? refused()
-        : current !== generation
-          ? replaced()
-          : handler
-            ? await handler(request.args, notes).catch(() =>
-                actionError("exec_failed", "The action failed."),
-              )
-            : actionError("unsupported_action", "The computer does not support this action.");
-    const reply = { id: message.id, to: message.from, payload };
-    // A process from an earlier connection must never reply on its replacement.
-    const interrupted = current !== generation;
-    if (seq)
-      endRecord(
-        action,
-        seq,
-        started,
-        payload,
-        interrupted,
-        notes,
-        interrupted ? 0 : Buffer.byteLength(JSON.stringify(reply)),
-      );
-    if (!interrupted) send(reply);
+    await dispatch(request.action, request.args, message.id, message.from);
   }
+
   async function receiveFrame(frame: Frame) {
     if (frame.type !== FRAME_TYPE.request) return;
     const request = decodeMeta(frame.meta);
@@ -411,112 +351,150 @@ export function createExecutor(
     }
     if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
       return;
+    await dispatch(request.action, request.args, frame.id, frame.peer, frame.body);
+  }
+
+  async function dispatch(
+    action: string,
+    args: unknown,
+    id: string,
+    peer: string,
+    body?: Uint8Array,
+  ) {
     const current = generation;
-    const action = request.action;
-    const respond = (response: ActionResponse) =>
-      current === generation &&
-      sendFrame({
-        type: FRAME_TYPE.response,
-        id: frame.id,
-        peer: frame.peer,
-        meta: encodeMeta(response),
-        body: empty,
-      });
     const started = Date.now();
-    const seq =
-      action === "system.info"
-        ? 0
-        : await audit.start(
-            action,
-            startRecord(action, request.args, {
-              requestId: frame.id,
-              from: frame.peer,
-              transport: "binary",
-              generation: current,
-            }),
-            { stdin: frame.body },
-            secrets,
-          );
-    if (seq === null) {
-      // For a push this also means no part file is created.
-      respond(refused());
-      return;
-    }
-    if (current !== generation) {
-      endRecord(action, seq, started, replaced(), true, { fields: {}, content: {} }, 0);
-      return;
-    }
-    if (action === "transfer.open") {
-      // The transfer outlives this frame. Later frames for it arrive through transfers.receive.
-      const transfer = transfers.open(frame.id, frame.peer, request.args, (meta, body = empty) => {
-        // A transfer from an earlier connection must never send on its replacement.
-        if (current !== generation) return false;
-        return sendFrame({
-          type: FRAME_TYPE.response,
-          id: frame.id,
-          peer: frame.peer,
-          meta: encodeMeta(meta),
-          body,
-        });
-      });
-      void track(() =>
-        transfer.then(({ code, file, ...fields }) => {
-          const response: ActionResponse = code
-            ? actionError(code, "")
-            : { type: "response", ok: true, result: null };
-          endRecord(
-            action,
-            seq,
-            started,
-            response,
-            current !== generation,
-            { fields, content: file ? { file } : {} },
-            0,
-          );
-        }),
-      );
-      return;
-    }
-    const handler = Object.hasOwn(frameHandlers, action) ? frameHandlers[action] : undefined;
+    const input = computer.prepare(action, peer, args, body);
+    const privateAction = action.startsWith("computer.");
+    const recordAction = privateAction && !input ? "computer.unsupported" : action;
+    const transport = body === undefined ? "json" : "binary";
     const notes: Notes = { fields: {}, content: {} };
-    const result = handler
-      ? await handler(request.args, frame.body, notes).catch(() => ({
-          response: actionError("exec_failed", "The action failed."),
-          body: empty,
-        }))
-      : {
-          response: actionError("unsupported_action", "The computer does not support this action."),
-          body: empty,
-        };
-    // A process from an earlier connection must never reply on its replacement.
-    const interrupted = current !== generation;
-    let response = result.response;
-    let meta = encodeMeta(response);
-    let body = result.body;
-    // An oversized frame would close this connection and with it every program and transfer.
-    if (!frameFits(meta.byteLength, body.byteLength)) {
-      response = actionError(
-        "output_too_large",
-        `The output does not fit in one ${MAX_FRAME_BYTES / 1024 / 1024} MiB frame and was discarded. The program ran. Use rome-node cp to copy large files.`,
-      );
-      meta = encodeMeta(response);
-      body = empty;
+    if (privateAction) Object.assign(notes.fields, computerUseAuditFields(action, args));
+    const metadata = {
+      ...(!privateAction || isUuid(id) ? { requestId: id } : {}),
+      ...(!privateAction || isUuid(peer) ? { from: peer } : {}),
+      transport,
+      generation: current,
+    };
+    const respond = (response: ActionResponse, output: Uint8Array = empty, meta?: Uint8Array) => {
+      if (current !== generation) return;
+      if (body === undefined) send({ id, to: peer, payload: response });
+      else
+        sendFrame({
+          type: FRAME_TYPE.response,
+          id,
+          peer,
+          meta: meta ?? encodeMeta(response),
+          body: output,
+        });
+    };
+    try {
+      const seq =
+        action === "system.info"
+          ? 0
+          : await audit
+              .start(
+                recordAction,
+                privateAction
+                  ? { ...metadata, ...notes.fields }
+                  : startRecord(action, args, metadata),
+                privateAction || body === undefined ? {} : { stdin: body },
+                secrets,
+              )
+              .catch(() => null);
+      if (seq === null && !input) {
+        respond(refused());
+        return;
+      }
+      if (current !== generation) {
+        if (seq) endRecord(recordAction, seq, started, replaced(), true, notes, 0);
+        return;
+      }
+      if (body !== undefined && action === "transfer.open" && seq) {
+        // The transfer outlives its opening frame. Later frames go through transfers.receive.
+        const transfer = transfers.open(
+          id,
+          peer,
+          args,
+          (meta, data) =>
+            current === generation &&
+            sendFrame({
+              type: FRAME_TYPE.response,
+              id,
+              peer,
+              meta: encodeMeta(meta),
+              body: data ?? empty,
+            }),
+        );
+        void track(() =>
+          transfer.then(({ code, file, ...fields }) => {
+            const response: ActionResponse = code
+              ? actionError(code, "")
+              : { type: "response", ok: true, result: null };
+            endRecord(
+              action,
+              seq,
+              started,
+              response,
+              current !== generation,
+              { fields, content: file ? { file } : {} },
+              0,
+            );
+          }),
+        );
+        return;
+      }
+      const handler = Object.hasOwn(handlers, action) ? handlers[action] : undefined;
+      const result = input
+        ? await input.run(seq === null ? refused() : undefined)
+        : handler
+          ? await handler(args, notes, peer, body).catch(() => ({
+              response: actionError("exec_failed", "The action failed."),
+              body: empty,
+            }))
+          : {
+              response: actionError(
+                "unsupported_action",
+                "The computer does not support this action.",
+              ),
+              body: empty,
+            };
+      let response = result.response;
+      let output = result.body;
+      let meta = body === undefined ? undefined : encodeMeta(response);
+      // An oversized frame would close the connection and stop every program and transfer.
+      if (meta && !frameFits(meta.byteLength, output.byteLength)) {
+        response = actionError(
+          "output_too_large",
+          `The output does not fit in one ${MAX_FRAME_BYTES / 1024 / 1024} MiB frame and was discarded. The program ran. Use rome-node cp to copy large files.`,
+        );
+        meta = encodeMeta(response);
+        output = empty;
+      }
+      if (action === "computer.cancel" && response.ok && isRecord(response.result)) {
+        notes.fields.stop = response.result.stop;
+        notes.fields.reason = response.result.reason;
+      }
+      const interrupted = current !== generation;
+      if (seq)
+        endRecord(
+          recordAction,
+          seq,
+          started,
+          response,
+          interrupted,
+          notes,
+          meta
+            ? meta.byteLength + output.byteLength
+            : Buffer.byteLength(JSON.stringify({ id, to: peer, payload: response })),
+        );
+      respond(response, output, meta);
+    } finally {
+      input?.release();
     }
-    if (seq)
-      endRecord(
-        action,
-        seq,
-        started,
-        response,
-        interrupted,
-        notes,
-        meta.byteLength + body.byteLength,
-      );
-    if (interrupted) return;
-    sendFrame({ type: FRAME_TYPE.response, id: frame.id, peer: frame.peer, meta, body });
   }
   function disconnect() {
     generation++;
+    computer.disconnect();
     transfers.abortAll();
     for (const child of children) {
       child.kill("SIGTERM");

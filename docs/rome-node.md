@@ -392,16 +392,22 @@ and the Rome desktop app in `~/.rome-desktop/audit/audit.db`. The two never shar
 a file. The folder has mode 0700 and the file 0600. The log is written with
 `node:sqlite`, never uploaded, and never sent to Rome Cloud.
 
-Every request except `system.info` is recorded before it runs. The `start` record
+The host records each request before it runs, with exceptions for `system.info`
+and the stop itself in `computer.cancel`. The `start` record
 is committed with WAL and `synchronous=FULL`, and on macOS also `fullfsync`,
 before the program starts, the folder is read, or a push creates its part file.
-If that commit fails, the host replies `audit_unavailable` and runs nothing. The
+If that commit fails, the host replies `audit_unavailable` for regular actions. The
 message tells the caller where to look: `rome-node audit status` for the CLI, and
 **Rome → Computer Use Log…** for the app. `system.info` changes nothing and answers as
 usual, with `audit: { state: "ok" | "unavailable", code?, message? }`, so Settings →
 Devices can show why a device refuses requests. The `end` record is written after
 the action and before the reply. A failed `end` stays in memory and is written
 first by the next request's transaction. If that fails too, the request is refused.
+`computer.cancel` closes input admission before the audit write and can stop input
+if the log is unavailable. For `computer.*` actions the host records the action
+name, action ID when present, outcome, and duration. It omits arguments, input
+bytes, window and AX content, and screenshot bytes. The caller activity log also
+omits those arguments and payloads.
 
 | Record | Written | Holds |
 | --- | --- | --- |
@@ -1034,41 +1040,69 @@ replacement connection.
 
 ## Screen control on macOS
 
-The host offers no screen action. On a macOS device, a caller controls the
-screen by running the system tools through `exec` and copying the screenshot
-back with `rome-node cp`.
+Full Rome Node hosts register the `computer.*` actions for window control.
+A limited host refuses remote actions with `computer_use_off`.
 
-```json
-{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}
-{"command":"cliclick","args":["c:640,400"]}
-{"command":"cliclick","args":["t:hello"]}
-{"command":"osascript","args":["-e","tell application \"System Events\" to keystroke \"hello\""]}
-```
+On macOS, the host looks for `Rome Computer Use.app` in `/Applications` and
+`~/Applications`, in that order. `ROME_NODE_COMPUTER_USE_HELPER` overrides the
+bundle path. The host verifies the signature at launch before asking for local
+session approval. The helper may also need Accessibility and Screen Recording
+permissions in System Settings → Privacy & Security.
 
-`screencapture -x` saves the screen without the shutter sound. Copy the file
-with `rome-node cp <device-id>:/tmp/rome-screen.png ./screen.png` to read it.
-`cliclick` clicks and types at screen coordinates, and Homebrew installs it.
-`osascript` with System Events types into the frontmost app without extra installs.
+`system.info.capabilities` reports Window Control with `id: "computer_use"`,
+`prefix: "computer"`, and `personal: true`. The shared-chat audience guard
+refuses access to its observations, including AX content and screenshots.
+The capability reports `needs_permission` when a helper bundle is present and
+the peer has yet to establish an approved session. It reports `on` while that
+peer has a live approved helper bridge. It reports `off` on other platforms,
+when discovery fails, or after the peer stops its session. Request errors such
+as `computer_use_unsupported_platform`, `computer_use_helper_missing`,
+`invalid_helper_bundle`, and `session_stopped` give the reason.
 
-A screenshot of a Retina display has twice as many pixels as the screen has
-points. `cliclick` and System Events take points, so divide the image
-coordinates by the display's scale factor before clicking.
+The flat `actions` list advertises the operations a peer can request.
+`system.info.usage` maps each advertised `computer.*` action to its argument
+summary. A stopped peer can still check `computer.cancel` until its session
+ends.
 
-macOS grants Screen Recording and Accessibility to the app that started the
-host, either the terminal running `rome-node connect` or the Rome desktop app.
-Grant both in System Settings → Privacy & Security on the Mac itself. Without
-Screen Recording, the screenshot leaves out other apps' windows. Without
-Accessibility, clicks and keystrokes fail. The first `osascript` call to System
-Events also asks for Automation permission. The Mac must stay awake and unlocked,
-because a locked screen shows only the lock screen.
+| Action | Arguments and result |
+| --- | --- |
+| `computer.windows` | `{application?}` lists windows, optionally filtered by application. |
+| `computer.bind` | `{window}` returns a binding ID and `bindingTTLms`. |
+| `computer.observe` | `{binding, element?}` returns the Accessibility tree as JSON. Set `screenshot: true` on a binary request to receive raw PNG bytes, up to 8 MiB. |
+| `computer.act` | `{binding, actionId, action, ...}` sends an input to the bound window. Use a UUID for `actionId` and the same ID when checking a timed-out action. |
+| `computer.unbind` | `{binding}` releases the window. |
+| `computer.cancel` | Closes input admission for the calling peer's session and returns the stop status. |
+
+Each peer needs its own helper approval. Bindings expire when the helper's
+five-minute session ends and on host disconnect. The host remembers each action
+ID for its binding's lifetime. A duplicate returns the recorded dispatch outcome
+without sending input again. After an uncertain outcome, use a fresh observation
+before deciding whether to send a different action.
+
+`computer.cancel` returns `stop_confirmed` immediately if a helper has never
+been ready to accept input for the session. With a live helper, `cancel_requested`
+means input admission is closed and the helper has yet to confirm stopping. When
+the helper reports `cancel_requested`, the host checks for confirmation for up to
+one more second and then closes the bridge. If the helper cannot confirm,
+`cancel_requested` remains the final
+result for that session. A stopped peer receives `session_stopped` on other
+window control actions for the rest of its five-minute session lease, or for up
+to five minutes after a cancel before approval. A host disconnect ends the lock.
+The peer needs local approval for any new helper session.
+
+With remote execution on, `exec` can also run local system tools. For example,
+`{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}` saves a
+full-screen image. Fetch it with `rome-node cp <device-id>:/tmp/rome-screen.png
+./screen.png`. macOS applies the permissions of the app that started the host
+when it runs these tools.
 
 ## Failure and shutdown
 
 The CLI daemon waits up to 60 seconds for an action response. Timeout and connection loss
 return `unknown_outcome`. The remote program may have started or completed.
 A local timeout does not cancel it. Never automatically repeat an operation after
-an unknown outcome. The protocol has no offline queue, replay, cancellation, or
-remote task-status API.
+an unknown outcome. The protocol has no offline queue or automatic replay.
+`computer.cancel` provides an emergency stop for Computer Use sessions.
 
 The executor attempts to terminate its direct child processes on connection loss,
 revocation, supersession, or shutdown. It escalates to forced termination after
