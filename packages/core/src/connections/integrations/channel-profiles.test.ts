@@ -69,7 +69,6 @@ const CASES: ChannelCase[] = [
     connectionKind: "feishu",
     descriptor: createFeishuDescriptor({
       chatSettings: stub,
-      peopleRepo: stub,
       listAgents: () => [],
     }),
     grant: "app",

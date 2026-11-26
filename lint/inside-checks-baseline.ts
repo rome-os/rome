@@ -21,7 +21,6 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/concierge/service.ts": 1,
   "packages/core/src/concierge/tools.ts": 4,
   "packages/core/src/connections/device/actions.ts": 8,
-  "packages/core/src/connections/kinds/feishu/feishu.ts": 4,
   "packages/core/src/core/agent-session-bridge.ts": 6,
   "packages/core/src/core/conversation-title.ts": 1,
   "packages/core/src/core/place-audience.ts": 4,

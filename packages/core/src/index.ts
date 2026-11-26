@@ -421,6 +421,7 @@ import {
   ChatSettingsService,
   chatCommands,
   heardUnlessSwitchedOff,
+  settingsKindOf,
 } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -2460,7 +2461,7 @@ async function main() {
   const connectionKinds: KindMount[] = [
     feishu({
       chatSettings,
-      peopleRepo,
+      pressed: (presser, answer) => entrance.press(presser, (by) => answer(settingsKindOf(by))),
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,

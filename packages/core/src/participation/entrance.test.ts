@@ -53,6 +53,21 @@ describe("entrance", () => {
     expect(asked[0]).toEqual({ platform: "discord", id: "ada" });
     expect(asked).toHaveLength(4);
   });
+
+  it("answers a press by someone let in alone, told whom as", async () => {
+    const { entrance: door } = onlyAda();
+    const answered: string[] = [];
+    const ran: boolean[] = [];
+    for (const id of ["sam", "ada"]) {
+      ran.push(
+        await door.press({ platform: "feishu", id }, async (by) => {
+          answered.push(`${id} as ${by}`);
+        }),
+      );
+    }
+    expect(ran).toEqual([false, true]);
+    expect(answered).toEqual(["ada as Ada"]);
+  });
 });
 
 describe("markArrival", () => {
