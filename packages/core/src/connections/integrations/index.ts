@@ -2,7 +2,6 @@
 
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
@@ -44,7 +43,6 @@ export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   chatSettings: ChatSettingsPort;
-  peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The commands a Discord Connection's bot offers. */
   discordCommandsOf?: (connectionId: string) => Commands;
@@ -89,7 +87,6 @@ export function registerBuiltinConnections(
     makeEmailDescriptor({
       provider: deps.mailProvider,
       settingsRepo: deps.settingsRepo,
-      peopleRepo: deps.peopleRepo,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),

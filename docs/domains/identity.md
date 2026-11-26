@@ -16,7 +16,7 @@ A person's identity on a platform: the platform plus the platform's own id. The 
 
 - `rome-cloud-email`: the email Rome Cloud reports for a sign-in. Rome trusts Rome Cloud to have verified it. Rome Cloud's own account id is no account.
 - A connection's platform, such as Slack, with the sender id the connection reports on a message, so a Slack account names its workspace.
-- `email`: the sender address of a message an email connection hears. Anyone can write any address there, so it proves nothing about a Rome Cloud sign-in, and the same address on `rome-cloud-email` is another account.
+- `email`: the sender address of a message an email connection hears. Anyone can write any address there, so it proves nothing about a Rome Cloud sign-in, and the same address on `rome-cloud-email` is another account. The address a person signs in with is also their account here, given by Access with the sign-in, for the guardian and every member: Rome Cloud proved it at sign-in, so no code is needed and no connection takes part. Mail that failed the email connection's authentication arrives under another id and matches no one.
 
 The rules of accounts:
 

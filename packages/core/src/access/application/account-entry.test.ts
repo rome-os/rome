@@ -3,7 +3,13 @@ import { guardianAuth } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { VisitorProfilesRepository } from "../visitor-profiles.js";
 import { accountEntry } from "./account-entry.js";
-import { guardianSeatCreated, inviteMember, memberContext, removeMember } from "./members.js";
+import {
+  guardianSeatCreated,
+  inviteMember,
+  memberContext,
+  removeMember,
+  seatAccounts,
+} from "./members.js";
 
 const OWNER = { platform: "slack", id: "T1:U0" };
 const ADA = { platform: "slack", id: "T1:U2" };
@@ -66,8 +72,7 @@ describe("accountEntry", () => {
 
   it("knows nobody by an account no person holds", async () => {
     expect(await enter({ platform: "slack", id: "T1:U9" })).toEqual({ kind: "unknown" });
-    // The address of a sign-in, seen as the sender of a message.
-    expect(await enter({ platform: "email", id: "ada@example.com" })).toEqual({ kind: "unknown" });
+    expect(await enter({ platform: "email", id: "zed@example.com" })).toEqual({ kind: "unknown" });
   });
 
   it("refuses an account no one named or verified", async () => {
@@ -99,5 +104,48 @@ describe("accountEntry", () => {
     });
     const asked = accountEntry({ db });
     expect(await asked({ platform: "slack", id: "T1:U9" })).toEqual({ kind: "refused" });
+  });
+});
+
+describe("accountEntry for mail from a sign-in's address", () => {
+  let testDb: TestDb;
+  beforeEach(async () => {
+    testDb = createTestDb();
+    const ctx = memberContext(testDb.db);
+    await testDb.db.insert(guardianAuth).values({
+      id: "seat",
+      userId: "owner",
+      passwordHash: "",
+      email: "owner@example.com",
+      createdAt: new Date(),
+    });
+    await guardianSeatCreated(ctx, { accounts: seatAccounts({ email: "Owner@Example.com" }) });
+    await inviteMember(ctx, "ada@example.com");
+    await new VisitorProfilesRepository(testDb.db).record("cloud-ada", {
+      email: "ada@example.com",
+      avatarUrl: null,
+    });
+  });
+  afterEach(() => testDb.close());
+
+  const enter = (id: string) => accountEntry({ db: testDb.db })({ platform: "email", id });
+
+  it("lets in the guardian and a member by the address each signs in with", async () => {
+    expect(await enter("owner@example.com")).toEqual({ kind: "entered", person: GUARDIAN });
+    expect(await enter("ADA@example.com")).toEqual({
+      kind: "entered",
+      person: { kind: "visitor", accountId: "cloud-ada", email: "ada@example.com" },
+    });
+  });
+
+  it("stops letting a member's address in once they are removed", async () => {
+    await removeMember(memberContext(testDb.db), "ada@example.com");
+    expect(await enter("ada@example.com")).toEqual({ kind: "unknown" });
+  });
+
+  it("knows nobody by another address, a tagged form of a sign-in's, or mail that failed authentication", async () => {
+    expect(await enter("ada.other@example.com")).toEqual({ kind: "unknown" });
+    expect(await enter("ada+news@example.com")).toEqual({ kind: "unknown" });
+    expect(await enter("unauthenticated:ada@example.com")).toEqual({ kind: "refused" });
   });
 });
