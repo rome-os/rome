@@ -50,7 +50,7 @@ A file shown in a dashboard chat is a copy in the profile's `assets` folder unde
 
 ## Routines
 
-A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
+A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). A routine's own run cannot run a routine now, so routines cannot run each other without end. Agents create routines when the guardian asks to automate or schedule something.
 
 *Deprecated alias:* **Events** — surfaces that still say "events" for scheduled automation mean routines.
 

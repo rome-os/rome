@@ -1,10 +1,18 @@
 // Running a routine now from an action, as the Routines page's Run now does,
 // but answering once the run has started rather than when it ends.
 
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { createLogger } from "../logger.js";
 import type { RoutineEngine } from "./engine.js";
 
 const log = createLogger("routine-run-now");
+
+/** Whether the running action is part of a routine's run, which every action
+ * it calls inherits from the fire (`initiator`). A run started from there
+ * could start the next one without end, so such a run starts none. */
+export function insideRoutineRun(): boolean {
+  return actionExecutionContext.getStore()?.initiator.startsWith("routine:") === true;
+}
 
 /** Starts a run of the routine now and answers with its id once it has
  * started; the run goes on and records its own outcome. Rejects when the
