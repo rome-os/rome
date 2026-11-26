@@ -35,7 +35,7 @@ const log = createLogger("voice-conversation");
  */
 export const SPOKEN_TURN_NOTE = [
   "<voice_context>",
-  "The guardian said this aloud on a voice call and hears your reply read aloud. Answer as a secretary on the phone, in the language they spoke:",
+  "This was said aloud on a voice call, and whoever said it hears your reply read aloud. Answer as a secretary on the phone, in the language they spoke:",
   "- Lead with the conclusion, in one or two short spoken sentences.",
   "- Do not repeat back what they said, and do not ask follow-up questions.",
   "- Use no headings, lists or other formatting.",

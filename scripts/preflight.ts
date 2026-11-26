@@ -10,7 +10,7 @@
  * origin/main. The checks are:
  *
  * - Biome over the changed files, or the whole repo when `biome.jsonc` changed.
- * - `pnpm lint:imports`, and `pnpm typecheck:lint` when lint/ changed.
+ * - `pnpm lint:imports` and `pnpm lint:inside-checks`, and `pnpm typecheck:lint` when lint/ changed.
  * - Type checks of every workspace package that changed and every package
  *   that depends on one, incremental between runs. A changed package that
  *   others read from `dist` is rebuilt first, so they check against the edit.
@@ -357,6 +357,7 @@ async function main() {
         ]
       : []),
     { name: "lint:imports", command: "pnpm", args: ["-s", "lint:imports"] },
+    { name: "lint:inside-checks", command: "pnpm", args: ["-s", "lint:inside-checks"] },
     ...nodeTestChecks(files),
     ...(rootConfig.length > 0 || paths.some((f) => f.startsWith("lint/"))
       ? [{ name: "typecheck:lint", command: "pnpm", args: ["-s", "typecheck:lint"] }]

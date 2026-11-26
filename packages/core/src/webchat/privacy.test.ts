@@ -1,35 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
-import {
-  type ChatPrivacyRow,
-  canOpen,
-  canOpenChat,
-  PRIVATE_CHILD_TRIGGER_KIND,
-} from "./privacy.js";
+import { type ChatPrivacyRow, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "./privacy.js";
 
 const VISITOR = "visitor:a";
 
-describe("chat privacy, read off the chat's own row", () => {
-  it("opens a Concierge chat, a task chat and a private fork only for their owner", () => {
+describe("whose Concierge a chat is, read off the chat's own row", () => {
+  it("is its owner's for a Concierge chat, a task chat and their fork", () => {
     const rows: ChatPrivacyRow[] = [
       { id: "topic", agentName: "core:concierge", ownerKey: VISITOR },
       { id: "task", triggerKind: "concierge", ownerKey: VISITOR },
       { id: "branch", triggerKind: PRIVATE_CHILD_TRIGGER_KIND, ownerKey: VISITOR },
     ];
-    for (const row of rows) {
-      expect(canOpen(row, VISITOR)).toBe(true);
-      expect(canOpen(row, "guardian")).toBe(false);
-      expect(canOpen(row, null)).toBe(false);
-    }
+    for (const row of rows) expect(privateOwnerOf(row)).toBe(VISITOR);
     // The guardian's main chat records no owner, and is the guardian's.
-    expect(canOpen({ id: "concierge", agentName: "core:concierge" }, "guardian")).toBe(true);
-    expect(canOpen({ id: "concierge", agentName: "core:concierge" }, VISITOR)).toBe(false);
+    expect(privateOwnerOf({ id: "concierge", agentName: "core:concierge" })).toBe("guardian");
   });
 
-  it("opens an ordinary chat and an ordinary fork for everyone", () => {
-    expect(canOpen({ id: "plain", ownerKey: "guardian" }, VISITOR)).toBe(true);
-    expect(canOpen({ id: "branch", triggerKind: "fork", ownerKey: "guardian" }, null)).toBe(true);
+  it("is no one's for an ordinary chat and an ordinary fork", () => {
+    expect(privateOwnerOf({ id: "plain", ownerKey: "guardian" })).toBeNull();
+    expect(privateOwnerOf({ id: "branch", triggerKind: "fork", ownerKey: "guardian" })).toBeNull();
   });
 
   describe("a child session", () => {
@@ -57,7 +47,7 @@ describe("chat privacy, read off the chat's own row", () => {
         },
       );
 
-    it("of a visitor's task chat is private to them from the start, and after the task chat is gone", async () => {
+    it("of a member's task chat is theirs from the start, and after the task chat is gone", async () => {
       await chat("task", VISITOR);
       await repo.setSessionTrigger("task", { triggerKind: "concierge", triggerName: "Task" });
       for (const [id, type] of [
@@ -77,8 +67,7 @@ describe("chat privacy, read off the chat's own row", () => {
       for (const id of ["subagent-1", "fork-1"]) {
         const row = await repo.getSession(id);
         expect(row).toMatchObject({ ownerKey: VISITOR, triggerKind: PRIVATE_CHILD_TRIGGER_KIND });
-        expect(canOpen(row, VISITOR)).toBe(true);
-        expect(canOpen(row, "guardian")).toBe(false);
+        expect(privateOwnerOf(row)).toBe(VISITOR);
       }
     });
 
@@ -95,11 +84,7 @@ describe("chat privacy, read off the chat's own row", () => {
       expect(await repo.getSession("orphan")).toBeNull();
     });
 
-    it("a chat that cannot be found is open to no one", async () => {
-      expect(await canOpenChat((id) => repo.getSession(id), "missing", "guardian")).toBe(false);
-    });
-
-    it("of an ordinary chat stays open", async () => {
+    it("of an ordinary chat is no one's", async () => {
       await chat("plain", "guardian");
       await repo.ensureRomeSession({
         id: "subagent-2",
@@ -110,7 +95,7 @@ describe("chat privacy, read off the chat's own row", () => {
       });
       const row = await repo.getSession("subagent-2");
       expect(row?.triggerKind).toBeNull();
-      expect(canOpen(row, VISITOR)).toBe(true);
+      expect(privateOwnerOf(row)).toBeNull();
     });
   });
 });
