@@ -8,11 +8,12 @@ import type {
 import type { Command } from "../connections/index.js";
 import { entrance } from "../participation/entrance.js";
 import type { Entry, EntryAccount } from "../participation/entry.js";
-import { type ChatCommandsDeps, chatCommands } from "./chat-commands.js";
+import { type ChatCommandsDeps, chatCommands, type RanBy } from "./chat-commands.js";
 
 const CONNECTION_ID = "connection:discord";
 const CHANNEL_ID = "channel-1" as ChatId;
 const GUARDIAN_ID = "discord-guardian-777";
+const MEMBER_ID = "discord-member-555";
 const UNLINKED_ID = "discord-user-888";
 
 function makeSettings() {
@@ -46,10 +47,11 @@ function makeSettings() {
 
 function commands(overrides: Partial<ChatCommandsDeps> = {}) {
   const settings = makeSettings();
-  const enter = rs.fn(
-    async ({ id }: EntryAccount): Promise<Entry> =>
-      id === GUARDIAN_ID ? { kind: "entered", person: {} } : { kind: "unknown" },
-  );
+  const enter = rs.fn(async ({ id }: EntryAccount): Promise<Entry<RanBy>> => {
+    if (id === GUARDIAN_ID) return { kind: "entered", person: { kind: "guardian" } };
+    if (id === MEMBER_ID) return { kind: "entered", person: { kind: "visitor" } };
+    return { kind: "unknown" };
+  });
   // As the host hands them to a connection.
   const answer = entrance({ enter }).commands(
     "discord",
@@ -187,6 +189,22 @@ describe("chat commands, for the guardian", () => {
     expect(await answer.suggest(command(["channel", "agent", "set"]), "name", "SAL")).toEqual([
       "sales:agent",
     ]);
+  });
+});
+
+describe("chat commands, for a member", () => {
+  it("records a member's change as theirs", async () => {
+    const { answer, settings } = commands();
+
+    await answer.ran(command(["channel", "ignore"], { by: MEMBER_ID }));
+    await answer.ran(command(["channel", "reset"], { by: MEMBER_ID }));
+
+    expect(settings.control.update).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { kind: "member", id: "discord-slash" } }),
+    );
+    expect(settings.control.reset).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { kind: "member", id: "discord-slash" } }),
+    );
   });
 });
 
