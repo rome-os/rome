@@ -7,7 +7,6 @@ const GUARDIAN_FACING_CHANNELS = new Set([
   "telegram_user",
   "whatsapp",
   "discord",
-  "wechat",
 ]);
 
 /** Whether the key's channel is on a guardian-facing connection kind. A key carries

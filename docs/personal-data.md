@@ -1,12 +1,12 @@
 # Personal data
 
-The personal-data store: what the guardian's devices push, what Rome keeps, and how an agent reads it, only in a private turn ([audience](domains/participation.md#audience)). The terms are in [personal data](concepts/data.md#personal-data), and the code is in [`packages/core/src/personal-data/`](../packages/core/src/personal-data/README.md).
+The personal-data store: what the guardian's devices push, what Rome keeps, and how an agent reads it. The terms are in [personal data](concepts/data.md#personal-data), and the code is in [`packages/core/src/personal-data/`](../packages/core/src/personal-data/README.md).
 
 How stored data and live reads fit together: [Device connection](domains/connections.md#device-connection).
 
 ## Scope
 
-A source joins the store when each item is either a reading or an entry. A reading has a time range and a numeric value, and a query over a window aggregates it: Health readings fit, and so would location samples or screen time. An entry is a document with a time, such as a calendar event: it has words and people, changes in place, is listed over a window it overlaps and found by its words, and is never aggregated. Entries keep the same personal-data mark, audience rule, origin and ingest log as readings, and never go into a reading's `fields`. Contacts and notes have no time, so neither shape fits them.
+A source joins the store when each item is either a reading or an entry. A reading has a time range and a numeric value, and a query over a window aggregates it: Health readings fit, and so would location samples or screen time. An entry is a document with a time, such as a calendar event: it has words and people, changes in place, is listed over a window it overlaps and found by its words, and is never aggregated. Entries keep the same personal-data mark, origin and ingest log as readings, and never go into a reading's `fields`. Contacts and notes have no time, so neither shape fits them.
 
 Each source declares its types in core: the type, its shape, its canonical unit, whether it adds up or averages, and the units a query may convert to. An entry type declares instead the content fields it keeps, each a text, a flag, a number or a list of texts, and how far past Rome's clock an entry may end. Apple Health's table is [`sources/apple-health.ts`](../packages/core/src/personal-data/sources/apple-health.ts), and the iPhone's calendar is [`sources/apple-calendar.ts`](../packages/core/src/personal-data/sources/apple-calendar.ts).
 
@@ -147,8 +147,8 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 
 ## What is and is not enforced
 
-- `rome-node device run` reaches any capability of a device from a shell, in any chat.
+- A shell reaches a device through `rome-node device run`, which runs any capability in any chat.
 - Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read.
 - An installed app's page runs in the guardian's browser with their session, so it can call these routes as the guardian. No route returns a reading, but such a page can read the catalog and the ingest log, ingest, or delete an origin.
-- What an agent already wrote into memory or a chat is not checked. The system prompt tells it not to repeat the guardian's personal data in a shared chat, and only the model keeps that rule.
+- What an agent already wrote into memory or a chat is not checked.
