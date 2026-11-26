@@ -46,8 +46,6 @@ export type PolicyScope =
   | { type: "global" };
 
 export interface Settings {
-  trustedBondLevels: string[];
-  replyToBondLevels: string[];
   database: {
     type: "sqlite" | "postgresql";
     sqlitePath?: string;
