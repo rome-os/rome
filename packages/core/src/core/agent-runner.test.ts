@@ -7238,7 +7238,7 @@ describe("AgentRunner", () => {
       const people = new SenderLabels({
         byAccount: async (account) =>
           account.id === "T_A/U_GUARDIAN"
-            ? ({ id: "p1", displayName: "Ouou", bondLevel: "guardian", links: [] } as never)
+            ? { id: "p1", name: "Ouou", role: "guardian" as const }
             : null,
       });
       const latest = rs.fn(async () => {
@@ -7281,7 +7281,7 @@ describe("AgentRunner", () => {
       expect(latest).toHaveBeenCalledTimes(1);
       const [first, second] = providerPrompts;
       expect(first).toContain("<conversation_context>");
-      // Oldest first, each named as People names its sender, and none of
+      // Oldest first, each named by who holds its account, and none of
       // them the guardian but the guardian's own.
       const order = ["12 May", "Noted.", "4417"].map((text) => first.indexOf(text));
       expect(order).toEqual([...order].sort((a, b) => a - b));

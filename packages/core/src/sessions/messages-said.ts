@@ -64,7 +64,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
     recorded: SaidInboundEvent["recorded"];
   };
   const handed = new Map<string, Handed[]>();
-  /** Who said each raise, asked of People once however many hooks hear it. */
+  /** Who said each raise, asked once however many hooks hear it. */
   const senders = new WeakMap<MessageSaid, Promise<SaidSender | undefined>>();
   const senderOf = (event: MessageSaid): Promise<SaidSender | undefined> => {
     let answer = senders.get(event);
@@ -171,7 +171,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
   };
 }
 
-/** Who said `event`'s message, or nothing when People could not be asked:
+/** Who said `event`'s message, or nothing when it could not be asked:
  *  the hook still hears the message, without a sender. */
 async function askSender(
   deps: MessagesSaidDeps,
@@ -181,7 +181,7 @@ async function askSender(
   try {
     return await deps.labels.sender(event.message.saidBy.account);
   } catch (error) {
-    log.warn("could not ask People who said a message", {
+    log.warn("could not ask who said a message", {
       messageId: event.message.id,
       error: error instanceof Error ? error.message : String(error),
     });

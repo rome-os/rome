@@ -1,6 +1,6 @@
 # People
 
-Who is behind an account, and how close they are to the guardian. People follows the definitions of [platform](chats.md#platform) and [account](chats.md#account) in Chats and changes neither. [Participation](participation.md) asks People one question about a sender, [who is this](#who-is-this), and People never decides what happens to a message.
+Who is behind an account, and how close they are to the guardian. People follows the definitions of [platform](chats.md#platform) and [account](chats.md#account) in Chats and changes neither. People answers one question about a sender, [who is this](#who-is-this), and never decides what happens to a message. Who said a message an agent reads is asked of Identity and Access instead ([Participation](participation.md#projection)).
 
 ## Person
 
@@ -73,10 +73,9 @@ Every account Rome has heard of, and every account with a link or a dismissal, e
 
 ## Who is this
 
-The one question Participation asks People about a sender. The answer is a person with their bond level, or nobody.
+The one question People answers about a sender. The answer is a person with their bond level, or nobody.
 
 - A stranger and a dismissed account both answer nobody.
-- Participation asks it about the sender of every message a wake hands an agent, each time a turn runs, and of every message an app hears as it is said.
 - An agent that meets someone it does not recognize reads who they are by name, with the guardian's notes on them. Sentinel, which answers senders Rome does not trust, reads the sender's own notes on each message instead, and no one else's.
 
 ## Decided against
