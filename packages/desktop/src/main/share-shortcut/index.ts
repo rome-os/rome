@@ -37,6 +37,13 @@ export interface ShareShortcut {
  * that text. Which app is the user's choice, from the app's menu in Rome; any
  * app that declares `web.shareTarget` can be the one.
  */
+/** Whether two URLs are the same page, whatever their queries. */
+function samePage(a: string, b: string): boolean {
+  const left = new URL(a);
+  const right = new URL(b);
+  return left.origin === right.origin && left.pathname === right.pathname;
+}
+
 /** The saved form of an app's share target, or null when the app takes no text. */
 function toRecord(appId: string, identity: AppIdentity): ShareShortcutApp | null {
   if (!identity.shareTarget) return null;
@@ -106,6 +113,17 @@ export function setupShareShortcut(
       if (JSON.stringify(record) === JSON.stringify(saved)) return;
       settings.write(SHARE_SHORTCUT_KEY, JSON.stringify(record));
       changed?.();
+      // A panel made from the old copy is kept between presses, so it takes
+      // the new size now, and the new page with the text it was showing.
+      if (panel && !panel.isDestroyed()) {
+        const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+        const { width, height } = panelSize(record, workArea);
+        panel.setSize(width, height);
+        if (loadedUrl !== null && !samePage(loadedUrl, record.url)) {
+          const text = new URL(loadedUrl).searchParams.get(saved.param);
+          load(panel, record, shareUrl(record, text));
+        }
+      }
     } catch (err) {
       log.warn(`Could not refresh ${saved.name}'s share target (${String(err)})`);
     }
@@ -171,6 +189,19 @@ export function setupShareShortcut(
     return created;
   };
 
+  const load = (win: BrowserWindow, target: ShareShortcutApp, url: string): void => {
+    loadedUrl = url;
+    // As for apps on the Desktop: a press right after launch waits for the
+    // Rome, so the page does not land on a sign-in it can't complete.
+    void whenReady()
+      .then(() => (win.isDestroyed() || loadedUrl !== url ? undefined : win.loadURL(url)))
+      .catch((err: unknown) => {
+        log.warn(`${target.name} did not load (${String(err)})`);
+        // The next press loads again rather than keeping the failed page.
+        if (loadedUrl === url) loadedUrl = null;
+      });
+  };
+
   const show = (target: ShareShortcutApp, text: string | null): void => {
     const win = ensurePanel(target);
     if (!win.isVisible()) {
@@ -181,18 +212,8 @@ export function setupShareShortcut(
       win.setPosition(x, y);
     }
     // A press with nothing selected reopens the page as it was left.
-    const url = shareUrl(target, text);
-    if (text || loadedUrl === null || !loadedUrl.startsWith(target.url)) {
-      loadedUrl = url;
-      // As for apps on the Desktop: a press right after launch waits for the
-      // Rome, so the page does not land on a sign-in it can't complete.
-      void whenReady()
-        .then(() => (win.isDestroyed() || loadedUrl !== url ? undefined : win.loadURL(url)))
-        .catch((err: unknown) => {
-          log.warn(`${target.name} did not load (${String(err)})`);
-          // The next press loads again rather than keeping the failed page.
-          if (loadedUrl === url) loadedUrl = null;
-        });
+    if (text || loadedUrl === null || !samePage(loadedUrl, target.url)) {
+      load(win, target, shareUrl(target, text));
     }
     win.showInactive();
   };

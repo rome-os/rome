@@ -35,8 +35,12 @@ const electron = rs.hoisted(() => {
     hide() {
       this.visible = false;
     }
+    size = [420, 560];
     getSize() {
-      return [420, 560];
+      return this.size;
+    }
+    setSize(width: number, height: number) {
+      this.size = [width, height];
     }
     setPosition() {}
     setTitle() {}
@@ -235,5 +239,23 @@ describe("refreshing the saved app", () => {
     await flush();
     expect(settings.saved()).toEqual(TARGET);
     expect(electron.shortcuts.has(SHARE_SHORTCUT_ACCELERATOR)).toBe(true);
+  });
+
+  it("moves an open panel to the app's new page and size when the app changes after launch", async () => {
+    const settings = store();
+    rs.mocked(fetchAppIdentity).mockResolvedValue(identity({ url: TARGET.url, param: "text" }));
+    setupShareShortcut(settings, async () => {});
+    await flush();
+    // The app moves its target to a compact page after launch, before the first press.
+    rs.mocked(fetchAppIdentity).mockResolvedValue(
+      identity({ url: `${TARGET.url}/quick`, param: "text", width: 380, height: 460 }),
+    );
+    selecting("serendipity");
+    await press();
+    await flush();
+    const [panel] = electron.windows;
+    expect(panel.size).toEqual([380, 460]);
+    expect(panel.loads.at(-1)).toBe(`${TARGET.url}/quick?text=serendipity`);
+    expect(settings.saved()).toMatchObject({ url: `${TARGET.url}/quick`, width: 380 });
   });
 });
