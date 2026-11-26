@@ -1,6 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
 
-rs.mock("electron", () => ({ app: { on: rs.fn(), quit: rs.fn() } }));
+type QuitListener = (event: { preventDefault(): void }) => Promise<void>;
+const app = rs.hoisted(() => ({
+  on: rs.fn<(event: string, listener: QuitListener) => void>(),
+  quit: rs.fn(),
+}));
+rs.mock("electron", () => ({ app }));
 rs.mock("./logger", () => ({
   createLogger: () => ({ error: rs.fn(), info: rs.fn(), warn: rs.fn() }),
 }));
@@ -17,8 +22,6 @@ describe("runShutdown", () => {
     expect(done).toBe(true);
   });
 
-  // The private VM's stop used to get 45 s. Only a socket closes now, and a
-  // quit must not hang on a network that never answers.
   it("gives up on a disconnect that never finishes", async () => {
     const started = Date.now();
     await runShutdown(() => new Promise<void>(() => {}), 20);
@@ -32,4 +35,35 @@ describe("runShutdown", () => {
       }, 1_000),
     ).resolves.toBeUndefined();
   });
+});
+
+it.each([
+  "quit",
+  "update",
+])("drains the host before %s and shares the shutdown work", async (mode) => {
+  rs.resetModules();
+  const { prepareForUpdateInstall, setupLifecycle } = await import("./lifecycle");
+  let finish = () => {};
+  const stop = rs.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  setupLifecycle({ onShutdown: stop });
+  const beforeQuit = app.on.mock.calls.at(-1)![1];
+  const preventDefault = rs.fn();
+  app.quit.mockClear();
+
+  const exiting = mode === "quit" ? beforeQuit({ preventDefault }) : prepareForUpdateInstall();
+  await beforeQuit({ preventDefault });
+  expect(preventDefault).toHaveBeenCalled();
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(app.quit).not.toHaveBeenCalled();
+  finish();
+  await exiting;
+  expect(app.quit).toHaveBeenCalledTimes(mode === "quit" ? 1 : 0);
+  preventDefault.mockClear();
+  await beforeQuit({ preventDefault });
+  expect(preventDefault).not.toHaveBeenCalled();
 });

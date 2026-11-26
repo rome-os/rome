@@ -64,6 +64,7 @@ final class Admission: @unchecked Sendable {
     }
 
     var terminating: Bool { lock.withLock { exiting } }
+    var locallyStopped: Bool { lock.withLock { reason == "local_stop" } }
 
     func status() -> [String: Any] {
         lock.withLock { statusLocked() }
@@ -181,6 +182,7 @@ final class Connection: @unchecked Sendable {
     let peer: Peer
     let admission: Admission
     private let writer = DispatchQueue(label: "rome.computer-use.writer", qos: .userInitiated)
+    private let writes = DispatchGroup()
     private let output = NSLock()
     private var pendingBytes = 0
     private var pendingFrames = 0
@@ -201,7 +203,18 @@ final class Connection: @unchecked Sendable {
 
     func end(_ reason: String = "connection_closed") {
         _ = admission.stop(reason)
-        shutdown(fd, SHUT_RDWR)
+        // Wake the reader and preserve the write side for the local stop notice.
+        shutdown(fd, admission.locallyStopped ? SHUT_RD : SHUT_RDWR)
+    }
+
+    func notifyLocalStop() {
+        guard admission.locallyStopped else { return }
+        defer { shutdown(fd, SHUT_RDWR) }
+        // A blocked writer must not delay local shutdown.
+        guard writes.wait(timeout: .now() + .milliseconds(100)) == .success,
+              (try? peer.identity.verifyPeer()) != nil,
+              let frame = try? Wire.failure(nil, "session_stopped") else { return }
+        _ = frame.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, MSG_DONTWAIT) }
     }
 
     func verify() throws {
@@ -252,7 +265,7 @@ final class Connection: @unchecked Sendable {
             end()
             throw Failure("connection_closed")
         }
-        writer.async {
+        writer.async(group: writes) {
             defer {
                 self.output.withLock {
                     self.pendingBytes -= frame.count
@@ -516,6 +529,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     defer {
         _ = admission.stop()
         worker.sync { windows.stopAll() }
+        connection.notifyLocalStop()
     }
 
     while true {

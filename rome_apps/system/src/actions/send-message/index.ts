@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
+  Access,
   Action,
   ActionConfig,
   ActionResult,
@@ -34,15 +35,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   agents: "Agents",
 };
 
-type GuardianPerson = {
-  channelMappings: { channel: string; channelUserId: string }[];
-  accounts?: { platform: string; id: string }[];
-};
-
-interface PersonMappingResolver {
-  findByBondLevel(bondLevel: "guardian"): Promise<GuardianPerson[]>;
-}
-
 /** Core's agent-name lookup, handed to the system app alone. Declared here
  *  because an app cannot import core, and a worker receives a proxy. */
 export interface AgentNamesService {
@@ -57,7 +49,7 @@ export interface AgentNamesService {
 }
 
 interface SendMessageRuntimeDeps {
-  personMappingRepo?: PersonMappingResolver;
+  access?: Access;
   chats?: ChatRepository;
   agentNames?: AgentNamesService;
 }
@@ -267,35 +259,20 @@ async function validateAttachmentSources(input: SendMessageInput): Promise<SendM
   return { ...input, attachments };
 }
 
-/** The guardian's address on `channel`: their link on the platform of the
- *  account it sends from. A host that predates `accounts` names a link by
- *  `channelMappings` alone, under the channel or the platform. */
+/** The guardian's address on `channel`: the newest of their accounts on the
+ *  platform of the account it sends from. */
 async function resolveGuardianThreadId(
   channel: string,
   platform: string,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
-  if (!deps.personMappingRepo) {
-    throw new Error(
-      `Channel "${channel}" recipient "guardian" requires a person mapping repository`,
-    );
+  if (!deps.access) {
+    throw new Error(`Channel "${channel}" recipient "guardian" requires the host's access port`);
   }
-
-  const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
-  const account = guardians
-    .flatMap((guardian) => guardian.accounts ?? [])
-    .find((candidate) => candidate.platform === platform);
-  if (account) return account.id;
-  const mappings = guardians.flatMap((guardian) => guardian.channelMappings);
-  const mapping =
-    mappings.find((candidate) => candidate.channel === channel) ??
-    mappings.find((candidate) => candidate.channel === platform);
-
-  if (!mapping) {
-    throw new Error(`No guardian mapping found for channel "${channel}"`);
-  }
-
-  return mapping.channelUserId;
+  const accounts = await deps.access.guardianAccounts();
+  const account = accounts.find((candidate) => candidate.platform === platform);
+  if (!account) throw new Error(`The guardian has no account on channel "${channel}"`);
+  return account.id;
 }
 
 const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -384,7 +361,7 @@ async function resolveChatThreadId(
  *
  * An account no Connection can send as is refused before anything else is
  * checked, so an unconfigured channel is not reported as a bad attachment or a
- * missing guardian mapping. The text is the one the channels service rejects
+ * guardian with no account there. The text is the one the channels service rejects
  * with.
  */
 async function sendableAccount(
@@ -551,7 +528,7 @@ export function createSendMessageAction(
           type: ["string", "array"],
           items: { type: "string" },
           description:
-            'Recipient alias/address. For chat channels, the literal "guardian" resolves through the guardian\'s channel mapping, and on "agents" the main agent can give an agent\'s name, which resolves to its id. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
+            'Recipient alias/address. For chat channels, the literal "guardian" resolves to the guardian\'s account on that channel, and on "agents" the main agent can give an agent\'s name, which resolves to its id. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
         },
         subject: {
           type: "string",
@@ -635,11 +612,15 @@ export function createSendMessageAction(
 export function createAction(
   config: ActionConfig,
   deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
-      appContext?: { repositories?: { chats?: ChatRepository; conversations?: ChatRepository } };
+      appContext?: {
+        access?: Access;
+        repositories?: { chats?: ChatRepository; conversations?: ChatRepository };
+      };
     },
 ): Action {
   return createSendMessageAction(config, deps.channelsService, {
     ...deps,
+    access: deps.appContext?.access,
     chats:
       deps.chats ??
       deps.appContext?.repositories?.chats ??

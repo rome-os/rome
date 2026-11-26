@@ -700,34 +700,12 @@ final class Windows: @unchecked Sendable {
         return ["binding": id, "dispatched": true]
     }
 
-    static func focus(frontmost: () -> Bool, focused: () -> Bool, activate: () throws -> Void,
-                      setFrontmost: () throws -> Void, raise: () throws -> Void, check: () throws -> Void,
-                      timeout: DispatchTimeInterval = .milliseconds(750)) throws {
-        guard !focused() else { return }
-        let deadline = DispatchTime.now() + timeout
-        var fallbackAt: DispatchTime?
-        if !frontmost() {
-            try activate()
-            fallbackAt = min(.now() + .milliseconds(150), deadline)
-        }
-        while !focused() {
-            try check()
-            guard DispatchTime.now() < deadline else { throw Failure("window_focus_unavailable") }
-            if frontmost() {
-                fallbackAt = nil
-                // Activation can restore a different key window.
-                try raise()
-                if focused() { return }
-            } else if let fallback = fallbackAt, DispatchTime.now() >= fallback {
-                try setFrontmost()
-                fallbackAt = nil
-            }
-
-            let now = DispatchTime.now()
-            let nextPoll = min(now + .milliseconds(25), fallbackAt ?? deadline)
-            if now < nextPoll {
-                Thread.sleep(forTimeInterval: Double(nextPoll.uptimeNanoseconds - now.uptimeNanoseconds) / 1_000_000_000)
-            }
+    static func verifyKeyboardTarget(_ target: AXUIElement, focused: AXUIElement?,
+                                     recover: () throws -> AXUIElement? = { nil }) throws {
+        // PID-directed keys follow the app's focus, which can belong to a sibling window.
+        if let focused, CFEqual(focused, target) { return }
+        guard let recovered = try recover(), CFEqual(recovered, target) else {
+            throw Failure("window_focus_unavailable")
         }
     }
 
@@ -737,51 +715,15 @@ final class Windows: @unchecked Sendable {
         let row = match.row
         let app = AXUIElementCreateApplication(row.pid)
         AXUIElementSetMessagingTimeout(app, 0.06)
+        var firstKeyboardBatch = true
 
-        func frontmost() -> Bool {
-            NSWorkspace.shared.frontmostApplication?.processIdentifier == row.pid
-        }
-
-        func focused() -> Bool {
-            guard frontmost(), let root = focusedRoot(app) else { return false }
-            return CFEqual(root, match.root) && frontmost()
-        }
-
-        func checkTarget() throws {
-            try match.identity.verify()
-            try requireRecording()
-            try checkLive(value)
-        }
-
-        func changeFocus(_ change: () -> Void) throws {
-            try access.check()
-            try match.identity.verify()
-            try value.capture.whileActive {
-                try live()
-                change()
-            }
-        }
-
-        var shouldFocus = true
         try action.execute(window: row, locate: { try WindowInput.global($0, in: row.bounds) },
                            lookupKey: { name, flags in
             DispatchQueue.main.sync { WindowInput.physicalKey(name, flags: flags) }
         }, send: { point, events in
-            try checkTarget()
-            if shouldFocus {
-                try Self.focus(frontmost: frontmost, focused: focused, activate: {
-                    try changeFocus { _ = match.app.activate() }
-                }, setFrontmost: {
-                    try changeFocus { _ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) }
-                }, raise: {
-                    try changeFocus { _ = AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue) }
-                    try changeFocus { _ = AXUIElementPerformAction(match.root, kAXRaiseAction as CFString) }
-                }, check: {
-                    try checkTarget()
-                    try access.check()
-                })
-                shouldFocus = false
-            }
+            try match.identity.verify()
+            try requireRecording()
+            try checkLive(value)
             guard let rows = Self.onScreen() else { throw Failure("console_unavailable") }
             try access.check(rows: rows)
             if let point {
@@ -794,7 +736,28 @@ final class Windows: @unchecked Sendable {
                                         hitsTarget: { point in
                 DispatchQueue.main.sync { DesktopAccess.windowHit(at: point) == row.id }
             })
-            guard focused() else { throw Failure("window_focus_unavailable") }
+            if point == nil {
+                let focused = focusedRoot(app)
+                try Self.verifyKeyboardTarget(match.root, focused: focused) {
+                    guard firstKeyboardBatch, let focused, eligibleRoot(focused, pid: row.pid) != nil,
+                          eligibleRoot(match.root, pid: row.pid) == row.bounds else { return nil }
+                    try match.identity.verify()
+                    try requireRecording()
+                    return try value.capture.whileActive {
+                        try live()
+                        // Switching a foreground sibling would move the user's keyboard focus.
+                        guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != row.pid,
+                              !match.app.isActive,
+                              AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue)
+                                == .success else { return nil }
+                        let recovered = focusedRoot(app)
+                        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == front.processIdentifier
+                        else { return nil }
+                        return recovered
+                    }
+                }
+                firstKeyboardBatch = false
+            }
             try match.identity.verify()
             try requireRecording()
             try value.capture.whileActive {

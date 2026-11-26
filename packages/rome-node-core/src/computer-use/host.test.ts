@@ -66,10 +66,10 @@ function fakeHelper() {
         disconnect = undefined;
       };
     },
-    close: rs.fn(() => {
+    close: rs.fn((reason = new ComputerUseError("connection_closed")) => {
       if (helper.closed) return;
       helper.closed = true;
-      disconnect?.(new ComputerUseError("connection_closed"));
+      disconnect?.(reason);
     }),
     windows: rs.fn(async () => ({ windows: [{ ...window, bounds: [...window.bounds] }] })),
     bind: rs.fn(async (id: number) => ({
@@ -228,6 +228,141 @@ it("refuses helper launch while the host cannot record the request", async () =>
   expect(mock.launch).not.toHaveBeenCalled();
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+});
+
+it("shares and caches permission probes by helper path until the TTL expires", async () => {
+  let now = 0;
+  const probePermissions = rs.fn(async () => true);
+  const host = new ComputerUseHost({ probePermissions, now: () => now });
+  const info = () => host.info(peer).then(({ capability }) => capability.state);
+  expect(await Promise.all([info(), info()])).toEqual(["on", "on"]);
+  now = 29_999;
+  expect(await info()).toBe("on");
+  expect(probePermissions).toHaveBeenCalledTimes(1);
+  mock.discover.mockResolvedValueOnce("/other/Rome Computer Use.app");
+  probePermissions.mockResolvedValueOnce(false);
+  expect(await info()).toBe("needs_permission");
+  now = 30_000;
+  probePermissions.mockResolvedValueOnce(false);
+  expect(await info()).toBe("needs_permission");
+  expect(await info()).toBe("needs_permission");
+  expect(probePermissions).toHaveBeenCalledTimes(3);
+  expect(mock.launch).not.toHaveBeenCalled();
+});
+
+it("refreshes permissions before a session and across helper restarts", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  const probePermissions = rs.fn(async () => true);
+  const host = new ComputerUseHost({ probePermissions });
+  cleanups.push(() => host.disconnect());
+
+  const info = () => host.info(peer).then(({ capability }) => capability.state);
+  expect(await Promise.all([info(), info()])).toEqual(["on", "on"]);
+  expect(probePermissions).toHaveBeenCalledTimes(1);
+  expect(mock.launch).not.toHaveBeenCalled();
+
+  const list = host.prepare("computer.windows", peer, {})!;
+  expect((await list.run()).response).toMatchObject({ ok: true });
+  list.release();
+  probePermissions.mockResolvedValueOnce(false);
+  expect(await info()).toBe("needs_permission");
+  helper.close();
+  expect(await info()).toBe("on");
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+
+  const cancel = host.prepare("computer.cancel", peer, {})!;
+  await cancel.run();
+  cancel.release();
+  expect(await info()).toBe("off");
+  expect(probePermissions).toHaveBeenCalledTimes(3);
+  mock.discover.mockRejectedValueOnce(new ComputerUseError("computer_use_helper_missing"));
+  expect((await host.info(other)).capability.state).toBe("off");
+  expect(probePermissions).toHaveBeenCalledTimes(3);
+});
+
+it("does not reuse a probe that was in flight when the helper started", async () => {
+  let finishProbe!: (permitted: boolean) => void;
+  let markStarted!: () => void;
+  const pending = new Promise<boolean>((resolve) => {
+    finishProbe = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const probePermissions = rs
+    .fn(async () => true)
+    .mockImplementationOnce(() => {
+      markStarted();
+      return pending;
+    });
+  const host = new ComputerUseHost({ probePermissions });
+  cleanups.push(() => host.disconnect());
+  mock.launch.mockResolvedValue(fakeHelper());
+
+  const info = host.info(peer);
+  await started;
+  const list = host.prepare("computer.windows", peer, {})!;
+  expect((await list.run()).response).toMatchObject({ ok: true });
+  list.release();
+  finishProbe(false);
+  await info;
+  expect((await host.info(peer)).capability.state).toBe("on");
+  expect(probePermissions).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  "accessibility_permission_required",
+  "screen_recording_permission_required",
+] as const)("invalidates permissions when the helper reports %s", async (code) => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  const probePermissions = rs.fn(async () => true);
+  const host = new ComputerUseHost({ probePermissions });
+  cleanups.push(() => host.disconnect());
+  const list = async () => {
+    const op = host.prepare("computer.windows", peer, {})!;
+    const result = await op.run();
+    op.release();
+    return result.response;
+  };
+  expect(await list()).toMatchObject({ ok: true });
+  expect((await host.info(peer)).capability.state).toBe("on");
+  helper.windows.mockRejectedValueOnce(new ComputerUseError(code));
+  expect(await list()).toMatchObject(error(code));
+  probePermissions.mockResolvedValueOnce(false);
+  expect((await host.info(peer)).capability.state).toBe("needs_permission");
+  expect(probePermissions).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a peer off after a confirmed local emergency stop", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  const f = executor();
+  const binding = await f.bind();
+  helper.close(new ComputerUseError("session_stopped"));
+  expect(await f.json("system.info")).toMatchObject({
+    result: { capabilities: [{ state: "off" }] },
+  });
+  expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await f.json("computer.act", input(binding))).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+});
+
+it("offers focus and Accessibility alternatives when keyboard dispatch is unavailable", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValue(helper);
+  helper.act.mockRejectedValueOnce(new ComputerUseError("window_focus_unavailable"));
+  const f = executor();
+  const binding = await f.bind();
+  expect(await f.json("computer.act", input(binding))).toMatchObject({
+    ok: false,
+    error: {
+      code: "window_focus_unavailable",
+      message: expect.stringMatching(/Focus that window.*set_value or press/),
+    },
+  });
 });
 
 it("routes JSON and PNG by peer and writes only metadata to the host audit", async () => {

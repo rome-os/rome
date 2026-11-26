@@ -1043,6 +1043,24 @@ replacement connection.
 Full Rome Node hosts register the `computer.*` actions for window control.
 A limited host refuses remote actions with `computer_use_off`.
 
+Window Control uses the Mac's local permission and consent flow. The browser
+extension's `computer_use` connection serves browser profiles. A `connect_service`
+card cannot set up Window Control on a Mac connected through Rome Node.
+
+1. Run `rome-node device` to find the Mac, then `rome-node device describe <id>`
+   to check that it answers and read the advertised `computer.*` actions and usage.
+2. Run `computer.windows` to find the target and `computer.bind` with its window
+   ID. Ask the guardian to grant permission or approve the local consent prompt
+   if the Mac requires it.
+3. Run `computer.observe` with the binding to read its Accessibility tree. For a
+   screenshot, pass `screenshot: true` in the arguments and add `--output <path>`
+   to `rome-node device run`.
+4. In `computer.act`, prefer an observed `element` with `press`, `set_value`,
+   `increment` or `decrement` when the element offers that action. Use keyboard
+   or pointer input when the tree has no suitable action.
+5. Run `computer.unbind` when finished. On current hosts, `computer.cancel`
+   stops input for your session in an emergency.
+
 Rome Desktop bundles `Rome Computer Use.app` in its macOS arm64 build. On
 macOS arm64, npm installs the helper through `@rome-os/node-core-darwin-arm64`,
 an optional dependency of `@rome-os/node-core`. The host never downloads the
@@ -1057,6 +1075,8 @@ helper installed in either Applications directory.
 The host verifies the signature at launch before asking for local session
 approval. The helper may also need Accessibility and Screen Recording
 permissions in System Settings → Privacy & Security.
+In Rome Desktop, open **Computer Use** from the tray menu to see the switch and
+bundled helper status, open either privacy pane, or find the helper in Finder.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,
 `prefix: "computer"`, and `personal: true`. The shared-chat audience guard

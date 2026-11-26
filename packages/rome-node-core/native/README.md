@@ -394,28 +394,28 @@ Named keys are case-insensitive. Use `return`, `enter`, `tab`, `escape`,
 `right`, `home`, `end`, `page_up`, `page_down`, or `f1` through `f12`.
 A single character of up to 16 UTF-16 units uses the current keyboard layout.
 Unmapped characters can use Unicode input when no modifiers are supplied.
-`type_text` accepts 1–16384 UTF-8 bytes and sends the text in Unicode chunks
-without splitting surrogate pairs.
+`type_text` accepts 1–16384 UTF-8 bytes and sends a key pair per grapheme.
+Graphemes over 16 UTF-16 units send one pair per Unicode scalar.
 
 Before dispatch, the helper checks the host, console, capture, and target
-process identity. If the target app needs activation, the helper asks AppKit
-to activate it and waits briefly for the app to come to the front. If the app
-stays in the background, the helper uses Accessibility to bring it to the
-front. Once the app is in front, the helper raises the bound window as needed
-and checks that it has focus.
+process identity. Pointer events name the bound window. Keyboard events
+require the bound window to be the target app's focused Accessibility
+window. Before the first key batch, the helper can set the main window
+inside a background app and check that its focused window now matches
+the binding. If the app keeps focus elsewhere, focus the bound window
+before sending keys, or use an Accessibility action such as `set_value`
+or `press`.
 
-A window above the bound window blocks pointer input at the event coordinates.
-This includes menus and other windows from the target process. For keyboard
-input, a window from another process blocks input if it overlaps any part of
-the bound window from above. Keyboard input allows overlap with windows from
-the target process. The system cursor is exempt for both kinds of input.
+Normal windows can overlap the bound window during input. Higher layers
+can still block dispatch, including menus at pointer coordinates.
+The system cursor is exempt for both kinds of input.
 
 The helper sends the events to the verified PID. It checks each stage of a
-drag and each text chunk before dispatch. If a drag stops after mouse-down,
-the helper sends mouse-up at the last dispatched point if the process
-identity still matches. A failure can leave earlier events dispatched. A
-successful `dispatched:true` confirms event submission. The target
-application decides how to handle those events.
+drag and each batch of up to 16 key pairs before dispatch. If a drag
+stops after mouse-down, the helper sends mouse-up at the last dispatched
+point if the process identity still matches. A failure can leave earlier
+events dispatched. A successful `dispatched:true` confirms event
+submission. The target application decides how to handle those events.
 
 ### Capture
 
@@ -453,9 +453,9 @@ console guard checks public session fields, display state, and the executable
 owners of high-layer system windows. For overlapping high-layer third-party
 windows, the helper uses the platform's mouse-down hit test to verify the
 bound window at the pointer location or, for keyboard input, in the overlap.
-Keyboard dispatch still verifies the focused Accessibility root. Ordinary
-windows remain subject to geometric occlusion checks. The guard runs during
-window operations and once per second while a slot or binding is active.
+Keyboard dispatch still verifies the focused Accessibility root. The guard
+runs during window operations and once per second while a slot or binding
+is active.
 
 `stop` and `cancel` permanently seal admission and stop every binding's
 stream. `cancel_requested` means an admitted operation or binding cleanup
@@ -480,7 +480,7 @@ batch that crossed the final check can still reach its destination.
 | `binding_not_found` | `unbind` did not find an active binding with that UUID |
 | `binding_unavailable`, `element_unavailable` | Missing or revoked binding, stale ref or a node outside the window |
 | `window_coordinate_out_of_bounds` | A pointer coordinate lies outside the window or the desktop displays |
-| `window_focus_unavailable`, `window_occluded` | The helper cannot verify focus on the target or another window blocks input |
+| `window_focus_unavailable`, `window_occluded` | Keyboard focus does not match the binding, or an overlapping higher-layer window blocks input |
 | `key_unavailable` | The keyboard layout cannot supply the character for a shortcut with modifiers |
 | `action_unavailable`, `invalid_value`, `action_rejected` | The action, input or target rejected the request |
 | `action_outcome_unknown` | An AX timeout after dispatch. Observe the window before deciding what to do next. |
@@ -490,3 +490,13 @@ batch that crossed the final check can still reach its destination.
 System Settings supplies Accessibility and Screen Recording permissions.
 The helper checks permissions without opening prompts. The host can guide
 the user to System Settings when a permission is missing.
+
+For device status, the host verifies the release signature and uses
+LaunchServices to run `--check-permissions` in a hidden, short-lived instance.
+The command reports the helper's Accessibility and Screen Recording grants.
+The host caches the result per helper path for 30 seconds. Session starts,
+stops, disconnects, and permission errors invalidate the result.
+The host reports `on` when both are granted and `needs_permission` when either
+grant is missing. If the probe is unavailable, the host uses session-based
+status for compatibility with older helpers. An explicit cancel or confirmed
+local menu stop keeps the peer `off` until its session ends.

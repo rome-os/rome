@@ -1,13 +1,13 @@
 import { EventEmitter } from "events";
 import { describe, expect, it, rs } from "@rstest/core";
 
-const menus = rs.hoisted(() => [] as Array<Array<{ label?: string; enabled?: boolean }>>);
+const menus = rs.hoisted(() => [] as Electron.MenuItemConstructorOptions[][]);
 
 rs.mock("electron", () => ({
   app: { on: rs.fn() },
   BrowserWindow: class {},
   Menu: {
-    buildFromTemplate: (template: Array<{ label?: string; enabled?: boolean }>) => {
+    buildFromTemplate: (template: Electron.MenuItemConstructorOptions[]) => {
       menus.push(template);
       return template;
     },
@@ -84,7 +84,65 @@ describe("setupTray", () => {
     const labels = menus.at(-1)?.map((item) => item.label);
     expect(labels).toContain("Quit Rome");
     expect(labels).toContain("Status: Ready");
+    expect(labels?.some((label) => label?.startsWith("Computer Use:"))).toBe(false);
     expect(labels?.some((label) => /agent|Stopping/.test(label ?? ""))).toBe(false);
+  });
+
+  it("updates Computer Use while the device is off and shows the setting only in its submenu", () => {
+    const runtime = Object.assign(new EventEmitter(), {
+      getStatus: () => status({ phase: "ready" }),
+    }) as unknown as Runtime;
+    const open = rs.fn(async () => undefined);
+    let enabled = false;
+    let currentDevice: DeviceStatus = { state: "off" };
+    let notifyChange: () => void = () => {};
+    setupTray({
+      getMainWindow: () => null,
+      ensureMainWindow: rs.fn(),
+      openSettings: rs.fn(),
+      runtime,
+      floatingPill: null,
+      device: {
+        status: () => currentDevice,
+        onChange: (listener) => {
+          notifyChange = listener;
+        },
+      },
+      computerUseSettings: {
+        status: () => ({ enabled, helperPresent: true }),
+        open,
+        revealHelper: rs.fn(),
+      },
+    });
+    const item = menus.at(-1)?.find(({ label }) => label === "Computer Use: Off");
+    const submenu = item?.submenu as Electron.MenuItemConstructorOptions[];
+    expect(menus.at(-1)?.some(({ label }) => label?.startsWith("This Mac:"))).toBe(false);
+    expect(submenu[0]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
+    submenu
+      .find(({ label }) => label === "Screen Recording Settings…")
+      ?.click?.({} as never, undefined, {} as never);
+    expect(open).toHaveBeenCalledWith("screenRecording");
+
+    enabled = true;
+    notifyChange();
+    expect(menus.at(-1)?.map(({ label }) => label)).toContain("Computer Use: On");
+
+    enabled = false;
+    currentDevice = {
+      state: "disabled",
+      deviceId: "d1",
+      name: "Mac",
+      connection: "connected",
+      computerUse: false,
+    };
+    notifyChange();
+    expect(
+      menus
+        .at(-1)
+        ?.filter(({ label }) => label?.startsWith("This Mac:"))
+        .map(({ label }) => label),
+    ).toEqual(["This Mac: Connected"]);
+    expect(menus.at(-1)?.map(({ label }) => label)).toContain("Computer Use: Off");
   });
 });
 

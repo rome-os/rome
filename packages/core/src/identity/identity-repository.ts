@@ -1,7 +1,7 @@
 // The tables behind Identity: the people Rome knows and which accounts are
 // theirs. Vocabulary: docs/domains/identity.md.
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { identities, identityAccounts } from "../db/schema.js";
 
@@ -56,6 +56,17 @@ export class IdentityRepository {
       .from(identityAccounts)
       .where(eq(identityAccounts.identityId, personId))
       .orderBy(identityAccounts.platform, identityAccounts.accountId)
+      .all();
+  }
+
+  /** The person's accounts, the one given to them last first. Accounts given
+   *  in the same second keep the order they were written in. */
+  accountsOfNewestFirst(personId: string): Account[] {
+    return this.db
+      .select({ platform: identityAccounts.platform, accountId: identityAccounts.accountId })
+      .from(identityAccounts)
+      .where(eq(identityAccounts.identityId, personId))
+      .orderBy(desc(identityAccounts.createdAt), desc(sql`rowid`))
       .all();
   }
 
