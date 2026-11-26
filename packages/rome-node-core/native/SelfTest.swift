@@ -228,8 +228,13 @@ final class SelfTest {
     private func windowFocus() throws {
         let bound = AXUIElementCreateApplication(42)
         let sibling = AXUIElementCreateApplication(43)
-        try Windows.verifyKeyboardTarget(bound, focused: AXUIElementCreateApplication(42))
-        try rejects("window_focus_unavailable") { try Windows.verifyKeyboardTarget(bound, focused: sibling) }
+        try Windows.verifyKeyboardTarget(bound, focused: AXUIElementCreateApplication(42)) {
+            throw Failure("self-test: the focused target needs no recovery")
+        }
+        try Windows.verifyKeyboardTarget(bound, focused: sibling) { bound }
+        try rejects("window_focus_unavailable") {
+            try Windows.verifyKeyboardTarget(bound, focused: sibling) { sibling }
+        }
         try rejects("window_focus_unavailable") { try Windows.verifyKeyboardTarget(bound, focused: nil) }
     }
 
@@ -537,11 +542,15 @@ final class SelfTest {
         let largeCluster = "e" + String(repeating: "\u{301}", count: 30)
         try run(action("type_text", ["text": largeCluster]))
         let down = events.filter { $0.type == .keyDown }
-        try expect(down.flatMap(unicode) == Array(largeCluster.utf16) && checks.count == 4,
+        try expect(down.flatMap(unicode) == Array(largeCluster.utf16) && checks.count == 2,
                    "oversized graphemes preserve all scalars across batches")
-        try rejects("session_stopped") { try run(action("type_text", ["text": "0123456789"]), limit: 1) }
-        try expect(events.count == 16 && events.filter { $0.type == .keyDown }.flatMap(unicode) == Array("01234567".utf16),
+        let fullBatch = "0123456789abcdef"
+        try rejects("session_stopped") { try run(action("type_text", ["text": fullBatch + "g"]), limit: 1) }
+        try expect(events.count == 32 && events.filter { $0.type == .keyDown }.flatMap(unicode) == Array(fullBatch.utf16),
                    "stopped text never sends later batches")
+        try run(action("type_text", ["text": String(repeating: fullBatch, count: 1024)]))
+        try expect(events.count == 32_768 && checks.count == 1024,
+                   "maximum ASCII text revalidates once every 16 graphemes")
         for (name, args): (String, [String: Any]) in [
             ("click", ["x": 1, "y": 2, "clickCount": 4]),
             ("click", ["x": 1, "y": 2, "button": "unknown"]),
@@ -1147,6 +1156,9 @@ final class SelfTest {
         let second = try Peer.authenticate(pair[1], expecting: me, signed: false)
         try expect(first.audit == second.audit && first.identity == me, "both endpoints bind to audit identity")
         try rejects("peer_rejected") { _ = try Peer.authenticate(pair[1], expecting: other, signed: false) }
+        let server = pair[0]
+        pair[0] = -1
+        try localStopDuringResponse(path, server: server, client: pair[1], peer: first)
 
         try runServer(path, socket: socket, mode: .wrongProof)
         try runServer(path, socket: socket, mode: .localStop)
@@ -1159,6 +1171,38 @@ final class SelfTest {
         try runServer(path, socket: socket, mode: .consentStop)
         try execConnection(path, executable: me.executable)
         try controllerTransport(path)
+    }
+
+    private func localStopDuringResponse(_ path: String, server: Int32, client: Int32, peer: Peer) throws {
+        let listener = try Listener(state: StateDirectory(path))
+        defer { listener.removeSocket() }
+        let admission = Admission()
+        let connection = try Connection(fd: server, listener: listener, peer: peer, admission: admission)
+        defer { shutdown(server, SHUT_RDWR) }
+        var sendBuffer: Int32 = 4096
+        var receiveTimeout = timeval(tv_sec: 2, tv_usec: 0)
+        try expect(setsockopt(server, SOL_SOCKET, SO_SNDBUF, &sendBuffer, socklen_t(MemoryLayout.size(ofValue: sendBuffer))) == 0 &&
+                   setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &receiveTimeout, socklen_t(MemoryLayout.size(ofValue: receiveTimeout))) == 0,
+                   "bound the socket fixture's buffer and read timeout")
+        let response = try Wire.reply("in-flight", result: ["data": String(repeating: "x", count: 64 * 1024)])
+        try connection.send(response)
+        let header = try readBytes(client, count: 8)
+        let (length, _) = try Wire.lengths(header, request: false)
+        admission.terminate("local_stop")
+        connection.end()
+        let notified = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            connection.notifyLocalStop()
+            notified.signal()
+        }
+        try expect(notified.wait(timeout: .now() + .milliseconds(10)) == .timedOut,
+                   "local stop gives the blocked response writer time to drain")
+        try expect(try header + readBytes(client, count: length) == response, "the in-flight response remains intact")
+        let stopHeader = try readBytes(client, count: 8)
+        let (stopLength, _) = try Wire.lengths(stopHeader, request: false)
+        try expect(try stopHeader + readBytes(client, count: stopLength) == Wire.failure(nil, "session_stopped"),
+                   "the terminal stop notice follows the response")
+        try expect(notified.wait(timeout: .now() + .seconds(2)) == .success, "the local stop notification finishes")
     }
 
     private final class ConsentProbe: @unchecked Sendable {

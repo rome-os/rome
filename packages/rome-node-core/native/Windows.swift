@@ -700,9 +700,11 @@ final class Windows: @unchecked Sendable {
         return ["binding": id, "dispatched": true]
     }
 
-    static func verifyKeyboardTarget(_ target: AXUIElement, focused: AXUIElement?) throws {
+    static func verifyKeyboardTarget(_ target: AXUIElement, focused: AXUIElement?,
+                                     recover: () throws -> AXUIElement? = { nil }) throws {
         // PID-directed keys follow the app's focus, which can belong to a sibling window.
-        guard let focused, CFEqual(focused, target) else {
+        if let focused, CFEqual(focused, target) { return }
+        guard let recovered = try recover(), CFEqual(recovered, target) else {
             throw Failure("window_focus_unavailable")
         }
     }
@@ -713,6 +715,7 @@ final class Windows: @unchecked Sendable {
         let row = match.row
         let app = AXUIElementCreateApplication(row.pid)
         AXUIElementSetMessagingTimeout(app, 0.06)
+        var firstKeyboardBatch = true
 
         try action.execute(window: row, locate: { try WindowInput.global($0, in: row.bounds) },
                            lookupKey: { name, flags in
@@ -734,7 +737,26 @@ final class Windows: @unchecked Sendable {
                 DispatchQueue.main.sync { DesktopAccess.windowHit(at: point) == row.id }
             })
             if point == nil {
-                try Self.verifyKeyboardTarget(match.root, focused: focusedRoot(app))
+                let focused = focusedRoot(app)
+                try Self.verifyKeyboardTarget(match.root, focused: focused) {
+                    guard firstKeyboardBatch, let focused, eligibleRoot(focused, pid: row.pid) != nil,
+                          eligibleRoot(match.root, pid: row.pid) == row.bounds else { return nil }
+                    try match.identity.verify()
+                    try requireRecording()
+                    return try value.capture.whileActive {
+                        try live()
+                        // Switching a foreground sibling would move the user's keyboard focus.
+                        guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != row.pid,
+                              !match.app.isActive,
+                              AXUIElementSetAttributeValue(match.root, kAXMainAttribute as CFString, kCFBooleanTrue)
+                                == .success else { return nil }
+                        let recovered = focusedRoot(app)
+                        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == front.processIdentifier
+                        else { return nil }
+                        return recovered
+                    }
+                }
+                firstKeyboardBatch = false
             }
             try match.identity.verify()
             try requireRecording()

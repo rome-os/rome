@@ -400,14 +400,18 @@ Graphemes over 16 UTF-16 units send one pair per Unicode scalar.
 Before dispatch, the helper checks the host, console, capture, and target
 process identity. Pointer events name the bound window. Keyboard events
 require the bound window to be the target app's focused Accessibility
-window, including when the app is in the background.
+window. Before the first key batch, the helper can set the main window
+inside a background app and check that its focused window now matches
+the binding. If the app keeps focus elsewhere, focus the bound window
+before sending keys, or use an Accessibility action such as `set_value`
+or `press`.
 
 Normal windows can overlap the bound window during input. Higher layers
 can still block dispatch, including menus at pointer coordinates.
 The system cursor is exempt for both kinds of input.
 
 The helper sends the events to the verified PID. It checks each stage of a
-drag and each batch of up to eight key pairs before dispatch. If a drag
+drag and each batch of up to 16 key pairs before dispatch. If a drag
 stops after mouse-down, the helper sends mouse-up at the last dispatched
 point if the process identity still matches. A failure can leave earlier
 events dispatched. A successful `dispatched:true` confirms event
@@ -490,6 +494,8 @@ the user to System Settings when a permission is missing.
 For device status, the host verifies the release signature and uses
 LaunchServices to run `--check-permissions` in a hidden, short-lived instance.
 The command reports the helper's Accessibility and Screen Recording grants.
+The host caches the result per helper path for 30 seconds. Session starts,
+stops, disconnects, and permission errors invalidate the result.
 The host reports `on` when both are granted and `needs_permission` when either
 grant is missing. If the probe is unavailable, the host uses session-based
 status for compatibility with older helpers. An explicit cancel or confirmed

@@ -282,7 +282,7 @@ struct WindowInput {
             for character in text {
                 for payload in Self.unicodePayloads(character) {
                     events += try key(0, flags: [], chars: payload)
-                    if events.count == 16 {
+                    if events.count == 32 {
                         try send(nil, events)
                         events.removeAll(keepingCapacity: true)
                     }

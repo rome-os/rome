@@ -182,6 +182,7 @@ final class Connection: @unchecked Sendable {
     let peer: Peer
     let admission: Admission
     private let writer = DispatchQueue(label: "rome.computer-use.writer", qos: .userInitiated)
+    private let writes = DispatchGroup()
     private let output = NSLock()
     private var pendingBytes = 0
     private var pendingFrames = 0
@@ -210,7 +211,7 @@ final class Connection: @unchecked Sendable {
         guard admission.locallyStopped else { return }
         defer { shutdown(fd, SHUT_RDWR) }
         // A blocked writer must not delay local shutdown.
-        guard output.withLock({ pendingFrames == 0 }),
+        guard writes.wait(timeout: .now() + .milliseconds(100)) == .success,
               (try? peer.identity.verifyPeer()) != nil,
               let frame = try? Wire.failure(nil, "session_stopped") else { return }
         _ = frame.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, MSG_DONTWAIT) }
@@ -264,7 +265,7 @@ final class Connection: @unchecked Sendable {
             end()
             throw Failure("connection_closed")
         }
-        writer.async {
+        writer.async(group: writes) {
             defer {
                 self.output.withLock {
                     self.pendingBytes -= frame.count

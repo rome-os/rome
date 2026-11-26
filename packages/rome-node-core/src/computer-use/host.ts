@@ -14,6 +14,7 @@ import {
 } from "./protocol.js";
 
 const SESSION_TTL_MS = 5 * 60_000;
+const PERMISSION_TTL_MS = 30_000;
 const MAX_PEERS = 8;
 const MAX_BINDINGS = 8;
 const MAX_ACTION_IDS = 1024;
@@ -37,6 +38,8 @@ const errorMessages: Partial<Record<ComputerUseError["code"], string>> = {
   computer_use_helper_missing: "The Computer Use Helper is missing from this Mac.",
   action_outcome_unknown:
     "The Helper did not confirm the input outcome. Do not retry with a new action ID.",
+  window_focus_unavailable:
+    "Keyboard input requires the bound window to have focus within its app. Focus that window before sending keys, or use an Accessibility action such as set_value or press.",
 };
 
 type Bridge = Pick<
@@ -60,6 +63,7 @@ interface HostDeps {
   probePermissions: typeof probeHelperPermissions;
   launch: (options: Parameters<typeof ComputerUseBridge.launch>[0]) => Promise<Bridge>;
   sessionTtlMs: number;
+  now: () => number;
 }
 
 interface Binding {
@@ -81,6 +85,7 @@ interface Session {
   working: boolean;
   expiresAt: number;
   timer?: NodeJS.Timeout;
+  appPath?: string;
   bridge?: Bridge;
   stop?: Promise<StopResult>;
   stopped?: StopResult;
@@ -107,7 +112,10 @@ export class ComputerUseHost {
   private readonly sessions = new Map<string, Session>();
   private readonly windows = new Map<number, Session>();
   private readonly deps: HostDeps;
-  private readonly permissionProbes = new Map<string, Promise<boolean | undefined>>();
+  private readonly permissionProbes = new Map<
+    string,
+    { result: Promise<boolean | undefined>; expiresAt: number }
+  >();
   private discovering?: Promise<string>;
 
   constructor(deps: Partial<HostDeps> = {}) {
@@ -116,6 +124,7 @@ export class ComputerUseHost {
       probePermissions: probeHelperPermissions,
       launch: (options) => ComputerUseBridge.launch(options),
       sessionTtlMs: SESSION_TTL_MS,
+      now: () => performance.now(),
       ...deps,
     };
   }
@@ -289,6 +298,12 @@ export class ComputerUseHost {
         return result;
       } catch (cause) {
         const code = errorCode(cause);
+        if (
+          session?.appPath &&
+          (code === "accessibility_permission_required" ||
+            code === "screen_recording_permission_required")
+        )
+          this.permissionProbes.delete(session.appPath);
         if (session?.bridge && code === "session_stopped" && !session.stop)
           void this.cancel(session);
         if (
@@ -314,6 +329,7 @@ export class ComputerUseHost {
   }
 
   disconnect(): void {
+    this.permissionProbes.clear();
     for (const session of this.sessions.values()) this.remove(session);
   }
 
@@ -328,16 +344,18 @@ export class ComputerUseHost {
 
   private permissions(appPath: string): Promise<boolean | undefined> {
     const existing = this.permissionProbes.get(appPath);
-    if (existing) return existing;
+    if (existing && this.deps.now() < existing.expiresAt) return existing.result;
     // Older helpers have no permission probe. Keep their session-based status.
-    const checking = this.deps
-      .probePermissions(appPath)
-      .catch(() => undefined)
-      .finally(() => {
-        this.permissionProbes.delete(appPath);
-      });
+    const checking = {
+      result: this.deps.probePermissions(appPath).catch(() => undefined),
+      expiresAt: Infinity,
+    };
+    // An invalidated probe may finish for existing callers without replacing the current entry.
+    void checking.result.then(() => {
+      checking.expiresAt = this.deps.now() + PERMISSION_TTL_MS;
+    });
     this.permissionProbes.set(appPath, checking);
-    return checking;
+    return checking.result;
   }
 
   private requireSession(session: Session | undefined): Session {
@@ -370,6 +388,8 @@ export class ComputerUseHost {
     this.check(session);
     if (session.bridge) return session.bridge;
     if (!appPath) throw new ComputerUseError("computer_use_helper_missing");
+    session.appPath = appPath;
+    this.permissionProbes.delete(appPath);
     const bridge = await this.deps.launch({
       appPath,
       signal: session.launch.signal,
@@ -377,6 +397,7 @@ export class ComputerUseHost {
       consentTimeoutMs: 35_000,
       consentMode: "session_only",
     });
+    this.permissionProbes.delete(appPath);
     try {
       this.check(session);
     } catch (error) {
@@ -388,6 +409,7 @@ export class ComputerUseHost {
     session.expiresAt = performance.now() + this.deps.sessionTtlMs;
     session.timer = setTimeout(() => this.remove(session), this.deps.sessionTtlMs).unref();
     bridge.onDisconnect((cause) => {
+      this.permissionProbes.delete(appPath);
       if (session.stop) return;
       if (cause.code !== "session_stopped") {
         this.remove(session);
@@ -457,6 +479,7 @@ export class ComputerUseHost {
     if (!session) return Promise.resolve(stopConfirmed);
     if (session.stopped) return Promise.resolve(session.stopped);
     if (session.stop) return session.stop;
+    if (session.appPath) this.permissionProbes.delete(session.appPath);
     const bridge = session.bridge;
     session.bindings.clear();
     session.timer ??= setTimeout(() => this.remove(session), this.deps.sessionTtlMs).unref();
