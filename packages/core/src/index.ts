@@ -1099,7 +1099,6 @@ async function main() {
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       mainActions: agentToolNames,
-      placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -1589,7 +1588,6 @@ async function main() {
         actionRegistry,
         actionEngine,
         webchatRepo,
-        placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>

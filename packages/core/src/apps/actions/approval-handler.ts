@@ -23,9 +23,8 @@ interface ApprovalPayload {
   sessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
-  /** The agent turn that asked, and who read it, so the replay reads as it. */
+  /** The agent turn that asked, so the replay reads as it. */
   turnId?: string;
-  audience?: "private" | "shared";
 }
 
 /** The person an execution acted for, as its row records, for {@link ApprovalHandler}'s requester. */
@@ -229,7 +228,6 @@ export class ApprovalHandler {
         agentName: payload.agentName,
         channelThreadKey: payload.channelThreadKey,
         ...(payload.turnId ? { turnId: payload.turnId } : {}),
-        ...(payload.audience ? { audience: payload.audience } : {}),
       };
       const result = await this.actionEngine.run(
         payload.rootActionName,
