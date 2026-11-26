@@ -380,6 +380,7 @@ import {
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
+import { enteredChannels } from "./app-host/entered-channels.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
   createCodexImageGenerationProvider,
@@ -774,7 +775,8 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
-  // What people say on a connection passes this (docs/domains/participation.md#entry).
+  // What people say on a connection passes this before it starts anything
+  // (docs/domains/participation.md#entry).
   const entrance = entranceOf({
     enter: accountEntry({
       db,
@@ -2602,6 +2604,8 @@ async function main() {
     wakes: chatsWired.links,
     labels: chatsWired.labels,
   });
+  // A hook may also hear a channel itself. The host appends to this list too.
+  const hookHeardChannels = enteredChannels(hookChannels);
   const hookChatStop = legacyChatIdStop(chatStop);
   // Every app that declares a channel-message hook hears through its own,
   // each created with the same deps. The app that owns `inbox:message_handler`
@@ -2618,7 +2622,7 @@ async function main() {
       chatSettings: appChatSettings,
       conversationSettings: appChatSettings,
       chatStop: hookChatStop,
-      channels: hookChannels,
+      channels: hookHeardChannels,
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
@@ -2683,10 +2687,11 @@ async function main() {
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
     );
-    hookChannels.push(...added);
     inboundRecorder.addChannels(added);
     // Subscribe before the new talker starts.
-    void messageHooks.addChannels(added);
+    const heard = enteredChannels(added);
+    hookHeardChannels.push(...heard);
+    void messageHooks.addChannels(heard);
   });
 
   // Hydrate connection/grant state without starting provider transports, so
