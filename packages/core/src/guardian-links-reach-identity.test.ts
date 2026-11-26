@@ -1,10 +1,15 @@
 // The wiring between People's links to the guardian and the guardian's
 // accounts in Identity, as index.ts builds it.
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { guardianSeatCreated, memberContext, seatAccounts } from "./access/application/members.js";
+import { channelMessageOf } from "./chats/connected-accounts/channel-message.js";
+import { toAgentInboundMessage } from "./connections/integrations/agents.js";
+import { SettingsRepository } from "./db/repositories/settings.js";
 import { guardianAuth, persons, settings } from "./db/schema.js";
 import {
   accountCodeContext,
@@ -12,9 +17,26 @@ import {
   accountCodeRedeemed,
 } from "./identity/application/account-codes.js";
 import { createIdentity } from "./identity/identity.js";
+import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { createTestDb, type TestDb } from "./test/db.js";
+
+/** A message from an agent in this Rome's own Rome Cloud account. */
+function agentMessage(agentId: string): ChannelMessage {
+  const inbound = toAgentInboundMessage({
+    messageId: "msg_1",
+    from: { agentId, name: "atlas", kind: "dot", account: "ouou", sameAccount: true },
+    to: { agentId: "ep-home", name: "home-rome" },
+    sentAt: "2026-10-07T09:28:38.000Z",
+    text: "17 + 25 = 42.",
+    data: null,
+    inReplyTo: null,
+    hop: 1,
+  });
+  if (!inbound) throw new Error("the envelope names no sender agent");
+  return channelMessageOf(inbound, "agents");
+}
 
 const SEAT_EMAIL = "owner@example.com";
 
@@ -86,13 +108,38 @@ describe("the guardian's links in People reaching Identity", () => {
     expect(await inIdentity()).toEqual(["telegram:99", "whatsapp:15550001@s.whatsapp.net"]);
   });
 
-  it("never gives the guardian a delegate link or a Rome Cloud id", async () => {
-    people.linkDelegate({ platform: "agents", id: "ep-atlas" }, "owner");
-    people.linkStated({ platform: "rome-cloud", id: "acct-owner" }, "owner");
-    people.linkStated({ platform: "slack", id: "T1:U1" }, "owner");
-    // Marking the guardian's own link a delegate link takes it from the guardian.
-    people.linkDelegate({ platform: "slack", id: "T1:U1" }, "owner");
+  it("makes a same-account agent's account the guardian's from its first message, and lets it in as the guardian", async () => {
+    const link = createAgentsGuardianLink({
+      peopleRepo: people,
+      settingsRepo: new SettingsRepository(testDb.db),
+      platform: "agents",
+    });
+    const enter = accountEntry({ db: testDb.db });
+    const agent = { platform: "agents", id: "ep-atlas" };
+    expect(await enter(agent)).toEqual({ kind: "unknown" });
+
+    await link(agentMessage("ep-atlas"));
+    expect(await inIdentity()).toEqual(["agents:ep-atlas"]);
+    expect(await enter(agent)).toEqual({
+      kind: "entered",
+      person: { kind: "guardian", userId: "u", via: "loopback" },
+    });
+
+    await people.unlink(agent);
     expect(await inIdentity()).toEqual([]);
+    expect(await enter(agent)).toEqual({ kind: "unknown" });
+  });
+
+  it("gives nobody a delegate link to another person or a Rome Cloud id", async () => {
+    testDb.db
+      .insert(persons)
+      .values({ id: "fred", displayName: "Fred", bondLevel: "inner-circle", createdAt: new Date() })
+      .run();
+    people.linkDelegate({ platform: "agents", id: "ep-fred" }, "fred");
+    people.linkStated({ platform: "rome-cloud", id: "acct-owner" }, "owner");
+    expect(await inIdentity()).toEqual([]);
+    const identity = createIdentity(testDb.db);
+    expect(await identity.personOf({ platform: "agents", accountId: "ep-fred" })).toBeNull();
   });
 
   it("rolls the connect back, credential and link, when Identity cannot be written", async () => {
