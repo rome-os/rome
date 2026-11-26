@@ -169,6 +169,8 @@ import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
+import { importActingForGuardian } from "./access/application/import-acting-for-guardian.js";
+import { startedActingForGuardian, stoppedActingForGuardian } from "./access/acts-for-guardian.js";
 import { logStepFailure } from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
@@ -377,7 +379,6 @@ import {
   getReleaseNotesCacheDir,
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
-import { whoIs } from "./chats/sender-labels.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
 import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
@@ -531,7 +532,11 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new DrizzlePeopleRepository(db);
+  // An account whose delegate link to the guardian is removed or moved stops
+  // acting for the guardian, in the same transaction.
+  const peopleRepo = new DrizzlePeopleRepository(db, (account, tx) =>
+    stoppedActingForGuardian(tx, account),
+  );
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -770,16 +775,11 @@ async function main() {
     peopleRepo,
     settingsRepo,
     platform: AGENTS_KIND,
+    startedActingForGuardian: (account) => startedActingForGuardian(db, account),
   });
   // What people say on a connection passes this (docs/domains/participation.md#entry).
   const entrance = entranceOf({
-    enter: accountEntry({
-      db,
-      actsForGuardian: async (account) => {
-        const person = await peopleRepo.byAccount(account);
-        return person?.bondLevel === "guardian" && whoIs(account, person).delegate;
-      },
-    }),
+    enter: accountEntry({ db }),
   });
   const readBotsOfPeople = botsOfPeople(peopleRepo);
   // The platform a message's sender is on. A grant that recorded no account
@@ -2735,6 +2735,15 @@ async function main() {
   await backfillMembers(db).catch((err: unknown) => {
     log.error("members backfill failed", { error: err instanceof Error ? err.name : "unknown" });
   });
+  // A failure is logged and Rome starts; an account it did not import does not
+  // act for the guardian until a later start imports it.
+  try {
+    importActingForGuardian(db);
+  } catch (err) {
+    log.error("import of accounts acting for the guardian failed", {
+      error: err instanceof Error ? err.name : "unknown",
+    });
+  }
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

@@ -22,6 +22,17 @@ A person with a role, the guardian included. A member is a [person](identity.md#
 - The members are the one source of which emails are invited: the `rome-cloud-email` accounts of every person with role member. The settings page and Rome Cloud receive these emails. The dashboard and the auth edge hold an in-memory copy of the members' sign-in emails and, apart from them, the email of the guardian's seat. Only the members' emails say whether anyone besides the guardian may open the dashboard. They alone decide whether the guardian's chats stay private, whether the login page offers sign-in to members, and whether a Rome Cloud account refused as not the owner is sent on to sign in as a member. The sign-in and session gates open when a member is invited or the seat has an email, so the guardian's person can sign in with the seat's email when no member is invited. A Rome Cloud sign-in with a member's email or the seat's email is let in, since a sign-in with the seat's email is the guardian's person. Another email the guardian's person holds, such as an older seat email left after a failed rebind, is not let in. The copy is loaded at startup and reloaded after each save of the invited emails and each change of the guardian's seat, the one at startup included.
 - The guardian's email is not among the invited emails. The guardian's seat says who the guardian is, so inviting the guardian's own email adds no member.
 
+## Acting for the guardian
+
+A rule on an account: the account acts for the guardian, so work it starts is the guardian's. An agent with an account of its own, such as its own Telegram, acts for the guardian through it. Access holds the rule and not Identity, because it says what the account may do and not whose it is.
+
+- An account has the rule or does not. An account without it does not act for the guardian.
+- The guardian or a member who holds the account is let in as themselves, whatever the rule says.
+- In code, the rule is [`packages/core/src/access/acts-for-guardian.ts`](../../packages/core/src/access/acts-for-guardian.ts): ask whether an account acts for the guardian, start it, stop it.
+- **An agent of the guardian's own Rome Cloud account writes for the first time.** Rome writes a [delegate link](people.md#delegate-link) from its account to the guardian, then gives the account the rule. If the rule cannot be written, the account does not act for the guardian until the next startup imports it from the link. Rome never gives the rule over a link or a dismissal the guardian made, and never again to an agent the guardian removed, whatever it is renamed to.
+- **A delegate link is removed or moves to another person.** The account loses the rule in the same transaction.
+- **Startup.** After migrations, each account People links to the guardian with a delegate link gets the rule. A second run changes nothing, and no account loses the rule here. A run that fails writes nothing, and the accounts it would have added do not act for the guardian until a later start.
+
 ## Steps Rome takes today
 
 These coordinate Identity and Access. They are how Rome uses the rules above now, not rules of roles.

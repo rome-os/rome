@@ -1,12 +1,13 @@
 /**
- * Links the guardian's own agents to the guardian. An agent in this Rome's
+ * Makes the guardian's own agents act for the guardian. An agent in this Rome's
  * Rome Cloud account belongs to the account holder: a dot exists only once the
  * person has signed in to Rome Cloud from ChatGPT, and it is Cloud, not the
- * sender, that marks a message `sameAccount`. So the first message from such an agent
- * links its `agents` account to the guardian before the inbox resolves the
- * sender, and the dot speaks as the guardian from that message on. The link is
- * a delegate link (docs/domains/people.md#delegate-link), so a reader knows it
- * is the guardian's agent talking and not the guardian.
+ * sender, that marks a message `sameAccount`. So the first message from such an
+ * agent, before the inbox resolves the sender, links its `agents` account to
+ * the guardian with a delegate link (docs/domains/people.md#delegate-link) and
+ * tells Access the account acts for the guardian
+ * (docs/domains/access.md#acting-for-the-guardian). The dot speaks as the
+ * guardian from that message on.
  *
  * Only an account nobody has decided about is linked. A link to anyone, a
  * dismissal, or an earlier automatic link the guardian has since removed all
@@ -36,6 +37,8 @@ export function createAgentsGuardianLink(deps: {
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   /** The platform the agents' accounts live on. */
   platform: string;
+  /** Tells Access that the account acts for the guardian. */
+  startedActingForGuardian(account: { platform: string; id: string }): void;
 }) {
   // Admission takes different senders at once, and the record of linked
   // agents is one setting, so its read and write run one sender at a time.
@@ -55,8 +58,12 @@ export function createAgentsGuardianLink(deps: {
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
     await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, agent]);
+    // Goes once the sender label and the wake decision stop reading People.
     await deps.peopleRepo.linkDelegate(account, guardian.id);
-    log.info("linked a same-account agent to the guardian", { agentId: agent });
+    // Access goes last, so a failure leaves an agent that does not act for the
+    // guardian, and the startup import adds it from the link.
+    deps.startedActingForGuardian(account);
+    log.info("made a same-account agent act for the guardian", { agentId: agent });
   }
 
   /** Links the sender when it qualifies. Never refuses the message. */

@@ -54,6 +54,7 @@ A link that says the account is an agent's, acting on behalf of the person it is
 - An agent's account belongs to the person who delegated the agent, never to the agent itself.
 - The link says it is a delegate, so whoever reads it knows they are talking to someone's agent and not to the person.
 - Rome makes this link itself when the platform says the agent is the guardian's. Rome Cloud says so for the guardian's own agents on other Romes.
+- Whether the account acts for the guardian is Access's rule ([acting for the guardian](access.md#acting-for-the-guardian)), not the link's. Removing the link, or moving it to another person, ends the rule.
 
 ## Stranger
 

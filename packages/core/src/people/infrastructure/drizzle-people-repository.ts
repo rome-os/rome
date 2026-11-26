@@ -50,9 +50,16 @@ function toPerson(row: PersonRow, links: PersonLink[]): Person {
   };
 }
 
+/** Told, in the same transaction, of each account whose link was removed or
+ *  went to another person. */
+export type AccountLeft = (account: Link, exec: SqliteExec) => void;
+
 /** {@link PeopleRepository} on the persons, links and dismissed-accounts tables. */
 export class DrizzlePeopleRepository implements PeopleRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(
+    private readonly db: DrizzleDb,
+    private readonly accountLeft: AccountLeft = () => {},
+  ) {}
 
   async byId(id: string): Promise<Person | null> {
     const row = this.db.select().from(persons).where(eq(persons.id, id)).get();
@@ -242,6 +249,8 @@ export class DrizzlePeopleRepository implements PeopleRepository {
       return this.db.transaction((tx) => this.claim(account, personId, delegate, tx));
     }
     this.releaseDismissals(exec, account.platform, [account.id]);
+    const holder = this.holderOf(account);
+    if (holder && holder.personId !== personId) this.accountLeft(account, exec);
     const row = exec
       .insert(links)
       .values({
@@ -285,7 +294,7 @@ export class DrizzlePeopleRepository implements PeopleRepository {
     // their accounts into one. Conditioned, too, on the re-pointed row still
     // being there: a `from` that went away leaves the rival holding an account
     // nothing is about to take.
-    exec
+    const yielded = exec
       .delete(links)
       .where(
         and(
@@ -296,6 +305,7 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         ),
       )
       .run();
+    if (yielded.changes > 0) this.accountLeft({ platform, id: to }, exec);
     // A dismissal of `to` yields on the same terms: the account is about to be
     // this person's, and a linked account is never also dismissed.
     exec
@@ -331,15 +341,19 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         ),
       )
       .run();
+    if (result.changes > 0) this.accountLeft(account, exec);
     return result.changes > 0;
   }
 
   async unlink(account: Link, from?: string): Promise<boolean> {
-    const result = this.db
-      .delete(links)
-      .where(and(accountIs(account), from === undefined ? undefined : eq(links.personId, from)))
-      .run();
-    return result.changes > 0;
+    return this.db.transaction((tx) => {
+      const result = tx
+        .delete(links)
+        .where(and(accountIs(account), from === undefined ? undefined : eq(links.personId, from)))
+        .run();
+      if (result.changes > 0) this.accountLeft(account, tx);
+      return result.changes > 0;
+    });
   }
 
   /**
@@ -377,6 +391,7 @@ export class DrizzlePeopleRepository implements PeopleRepository {
         // The row moves rather than being replaced, so a delegate mark it
         // carries survives a move.
         tx.update(links).set({ personId: to }).where(eq(links.id, link.id)).run();
+        this.accountLeft(account, tx);
       }
       return { linked: true };
     });

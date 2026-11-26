@@ -228,6 +228,20 @@ export const members = sqliteTable(
 );
 
 /**
+ * The accounts that act for the guardian (docs/domains/access.md#acting-for-the-guardian):
+ * one row per account, and an account with no row does not.
+ */
+export const accountsActingForGuardian = sqliteTable(
+  "accounts_acting_for_guardian",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
+
+/**
  * What a platform says about an account: its display name, handle and avatar
  * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
  * account itself, the platform and the platform's own id. It has no id of its

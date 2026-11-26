@@ -509,6 +509,25 @@ describe("PeopleRepository", () => {
       expect((await repo.byId(alice))!.links).toEqual([{ ...agent, delegate: true }]);
     });
 
+    it("says when the link is removed or goes to another person, and not otherwise", async () => {
+      const left: string[] = [];
+      const told = new DrizzlePeopleRepository(testDb.db, ({ id }) => {
+        left.push(id);
+      });
+      const owner = await told.create({ displayName: "Owner", bondLevel: "guardian" });
+      const alice = await told.create({ displayName: "Alice", bondLevel: "other" });
+      for (const id of ["a1", "a2", "a3"]) told.linkDelegate({ platform: "agents", id }, owner);
+
+      told.linkDelegate({ platform: "agents", id: "a1" }, owner);
+      await told.unlink({ platform: "agents", id: "a1" }, alice);
+      expect(left).toEqual([]);
+
+      await told.unlink({ platform: "agents", id: "a1" }, owner);
+      await told.move({ platform: "agents", id: "a2" }, owner, alice);
+      told.linkStated({ platform: "agents", id: "a3" }, alice);
+      expect(left).toEqual(["a1", "a2", "a3"]);
+    });
+
     it("is never cleared by a platform's statement about the same account", async () => {
       const agent = { platform: "agents", id: "agt-atlas" };
       const owner = await repo.create({ displayName: "Owner", bondLevel: "guardian" });

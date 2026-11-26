@@ -31,15 +31,18 @@ function message(
 
 const external = { account: "friend", sameAccount: false };
 
-describe("linking same-account agents to the guardian", () => {
+describe("same-account agents acting for the guardian", () => {
   let testDb: TestDb;
   let people: PeopleRepository;
   let settings: SettingsRepository;
   let link: (message: ChannelMessage) => Promise<void>;
+  /** The accounts Access was told act for the guardian. */
+  let acting: Set<string>;
 
   beforeEach(async () => {
     testDb = createTestDb();
     people = new DrizzlePeopleRepository(testDb.db);
+    acting = new Set();
     settings = new SettingsRepository(testDb.db);
     testDb.db
       .insert(persons)
@@ -49,9 +52,12 @@ describe("linking same-account agents to the guardian", () => {
       peopleRepo: people,
       settingsRepo: settings,
       platform: "agents",
+      startedActingForGuardian: ({ platform, id }) => acting.add(`${platform}:${id}`),
     });
   });
   afterEach(() => testDb.close());
+
+  const acts = (id: string) => acting.has(`agents:${id}`);
 
   it("links an agent Cloud marks as in this account, before its first message is read", async () => {
     await link(message("ep-atlas"));
@@ -61,6 +67,7 @@ describe("linking same-account agents to the guardian", () => {
     expect(person?.bondLevel).toBe("guardian");
     // A delegate link: the guardian's agent, not the guardian.
     expect(person?.links).toEqual([{ platform: "agents", id: "ep-atlas", delegate: true }]);
+    expect(acts("ep-atlas")).toBe(true);
   });
 
   it("never links another account's agent, even one sharing a name with the guardian's", async () => {
@@ -70,6 +77,7 @@ describe("linking same-account agents to the guardian", () => {
     expect((await people.byAccount({ platform: "agents", id: "ep-atlas" }))?.id).toBe("owner");
     expect(await people.byAccount({ platform: "agents", id: "ep-friend-atlas" })).toBeNull();
     expect(await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["ep-atlas"]);
+    expect(acts("ep-friend-atlas")).toBe(false);
   });
 
   it("keeps a dismissal", async () => {
@@ -79,6 +87,7 @@ describe("linking same-account agents to the guardian", () => {
 
     expect(await people.byAccount({ platform: "agents", id: "ep-atlas" })).toBeNull();
     expect(await people.isDismissed({ platform: "agents", id: "ep-atlas" })).toBe(true);
+    expect(acts("ep-atlas")).toBe(false);
   });
 
   it("keeps a link to another person", async () => {
@@ -91,15 +100,18 @@ describe("linking same-account agents to the guardian", () => {
     await link(message("ep-atlas"));
 
     expect((await people.byAccount({ platform: "agents", id: "ep-atlas" }))?.id).toBe("ada");
+    expect(acts("ep-atlas")).toBe(false);
   });
 
   it("does not link again an agent the guardian unlinked, even renamed", async () => {
     await link(message("ep-atlas"));
     expect(await people.unlink({ platform: "agents", id: "ep-atlas" }, "owner")).toBe(true);
+    acting.clear();
 
     await link(message("ep-atlas", { name: "nova" }));
 
     expect(await people.byAccount({ platform: "agents", id: "ep-atlas" })).toBeNull();
+    expect(acts("ep-atlas")).toBe(false);
   });
 
   it("links a new agent that takes the name of one the guardian unlinked", async () => {
@@ -109,6 +121,7 @@ describe("linking same-account agents to the guardian", () => {
     await link(message("ep-atlas-2"));
 
     expect((await people.byAccount({ platform: "agents", id: "ep-atlas-2" }))?.id).toBe("owner");
+    expect(acts("ep-atlas-2")).toBe(true);
   });
 
   it("records every agent when several first messages arrive at once", async () => {

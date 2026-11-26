@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import { guardianAuth } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { startedActingForGuardian } from "../acts-for-guardian.js";
 import { VisitorProfilesRepository } from "../visitor-profiles.js";
 import { accountEntry } from "./account-entry.js";
 import { guardianSeatCreated, inviteMember, memberContext, removeMember } from "./members.js";
@@ -11,11 +13,8 @@ const GUARDIAN = { kind: "guardian", userId: "owner", via: "loopback" } as const
 
 describe("accountEntry", () => {
   let testDb: TestDb;
-  /** The accounts linked as agents acting for the guardian. */
-  let agents: string[];
   beforeEach(async () => {
     testDb = createTestDb();
-    agents = [];
     const ctx = memberContext(testDb.db);
     await testDb.db
       .insert(guardianAuth)
@@ -29,9 +28,7 @@ describe("accountEntry", () => {
   afterEach(() => testDb.close());
 
   const enter = (account: { platform: string; id: string }) =>
-    accountEntry({ db: testDb.db, actsForGuardian: async ({ id }) => agents.includes(id) })(
-      account,
-    );
+    accountEntry({ db: testDb.db })(account);
 
   it("lets in the guardian as their seat", async () => {
     expect(await enter(OWNER)).toEqual({ kind: "entered", person: GUARDIAN });
@@ -54,10 +51,10 @@ describe("accountEntry", () => {
     expect(await enter(ADA)).toEqual({ kind: "unknown" });
   });
 
-  it("lets in an agent linked to act for the guardian, as the guardian", async () => {
+  it("lets in an account that acts for the guardian, as the guardian", async () => {
     const agent = { platform: "agents", id: "dot" };
     expect(await enter(agent)).toEqual({ kind: "unknown" });
-    agents = ["dot"];
+    startedActingForGuardian(testDb.db, agent);
     expect(await enter(agent)).toEqual({ kind: "entered", person: GUARDIAN });
   });
 
@@ -91,12 +88,7 @@ describe("accountEntry", () => {
   });
 
   it("refuses when no answer can be had", async () => {
-    const asked = accountEntry({
-      db: testDb.db,
-      actsForGuardian: async () => {
-        throw new Error("unavailable");
-      },
-    });
-    expect(await asked({ platform: "slack", id: "T1:U9" })).toEqual({ kind: "refused" });
+    testDb.db.run(sql`DROP TABLE accounts_acting_for_guardian`);
+    expect(await enter({ platform: "slack", id: "T1:U9" })).toEqual({ kind: "refused" });
   });
 });

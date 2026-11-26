@@ -16,6 +16,7 @@ export default defineConfig({
     "identity_accounts",
     "members",
     "account_codes",
+    "accounts_acting_for_guardian",
     "channel_mappings",
     "sentinel_log",
     "approvals",
