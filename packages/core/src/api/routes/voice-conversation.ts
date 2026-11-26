@@ -4,8 +4,6 @@ import {
   voiceConversationPreviewSchema,
   voiceConversationSettingsSchema,
 } from "@rome/api-types/voice-conversation";
-import { mayEnter } from "../../access/entry.js";
-import { currentSessionActor } from "../../access/session-actor.js";
 import { NO_VOICE_INPUT } from "../../voice-input/index.js";
 import { speakSample } from "../../voice-output/speak-sample.js";
 import {
@@ -26,32 +24,21 @@ const SAMPLE = {
  * Settings picks the voice it speaks in and how fast, and can hear a voice first.
  */
 export function voiceConversationRoutes(
-  deps: Pick<ApiDeps, "voiceInput" | "speaker" | "dashboardAccessState" | "settingsRepo">,
+  deps: Pick<ApiDeps, "voiceInput" | "speaker" | "settingsRepo">,
 ): Hono {
   const app = new Hono();
-  // The guardian or a member, as at every other way into the dashboard.
-  const entered = async () =>
-    (await mayEnter(await currentSessionActor(), deps.dashboardAccessState)) !== null;
   const available = async () =>
-    Boolean(deps.speaker) &&
-    (await entered()) &&
-    (await (deps.voiceInput ?? NO_VOICE_INPUT).info()).available;
+    Boolean(deps.speaker) && (await (deps.voiceInput ?? NO_VOICE_INPUT).info()).available;
 
   app.get("/voice-conversation", async (c) => {
     return c.json({ available: await available() } satisfies VoiceConversationInfo);
   });
 
   app.get("/voice-conversation/settings", async (c) => {
-    if (!(await entered())) {
-      return c.json({ error: "Not found" }, 404);
-    }
     return c.json(await readSpeakingSettings(deps.settingsRepo));
   });
 
   app.put("/voice-conversation/settings", async (c) => {
-    if (!(await entered())) {
-      return c.json({ error: "Not found" }, 404);
-    }
     const parsed = voiceConversationSettingsSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
       return c.json({ error: "Pick a listed voice and a speed from 0.7 to 1.3" }, 400);

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@rstest/core";
-import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import type { VoiceInputSource } from "../../voice-input/index.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
@@ -7,8 +6,6 @@ import type { SpeakerSource, SpeakingChoice } from "../../voice-output/speaker-s
 import { voiceConversationRoutes } from "./voice-conversation.js";
 
 const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
-const visitor: SessionActor = { kind: "visitor", accountId: "a", email: "a@example.com" };
-const dashboardAccessState = new DashboardAccessState();
 const speaker = { open: async () => ({ ok: false, reason: "not-configured" }) } as SpeakerSource;
 /** Settings kept in memory. */
 const memorySettings = () => {
@@ -35,19 +32,15 @@ const voiceList = (available: boolean) => {
 };
 
 async function ask(
-  actor: SessionActor | null,
-  deps: Omit<
-    Parameters<typeof voiceConversationRoutes>[0],
-    "dashboardAccessState" | "settingsRepo"
-  >,
+  actor: SessionActor,
+  deps: Omit<Parameters<typeof voiceConversationRoutes>[0], "settingsRepo">,
 ) {
   const app = voiceConversationRoutes({
-    dashboardAccessState,
     settingsRepo: memorySettings().repo,
     ...deps,
   });
   const request = async () => (await app.request("/voice-conversation")).json();
-  return actor ? runWithSessionActor(actor, request) : request();
+  return runWithSessionActor(actor, request);
 }
 
 describe("GET /api/voice-conversation", () => {
@@ -64,28 +57,6 @@ describe("GET /api/voice-conversation", () => {
     expect(await ask(guardian, { speaker })).toEqual({ available: false });
   });
 
-  it("offers it to a dashboard admin on the guardian's voice input list", async () => {
-    const team = new DashboardAccessState();
-    team.setCloudEmailAccess(["a@example.com"]);
-    const app = voiceConversationRoutes({
-      dashboardAccessState: team,
-      settingsRepo: memorySettings().repo,
-      speaker,
-      voiceInput: voiceList(true).source,
-    });
-    const answer = await runWithSessionActor(visitor, async () =>
-      (await app.request("/voice-conversation")).json(),
-    );
-    expect(answer).toEqual({ available: true });
-  });
-
-  it("offers none to anyone off the team, without asking Rome Cloud", async () => {
-    const list = voiceList(true);
-    expect(await ask(visitor, { speaker, voiceInput: list.source })).toEqual({ available: false });
-    expect(await ask(null, { speaker, voiceInput: list.source })).toEqual({ available: false });
-    expect(list.asked.count).toBe(0);
-  });
-
   it("offers none without a speaker", async () => {
     expect(await ask(guardian, { voiceInput: voiceList(true).source })).toEqual({
       available: false,
@@ -97,7 +68,6 @@ describe("voice conversation settings", () => {
   const routes = (deps: { speaker?: SpeakerSource; available?: boolean } = {}) => {
     const settings = memorySettings();
     const app = voiceConversationRoutes({
-      dashboardAccessState,
       settingsRepo: settings.repo,
       speaker: deps.speaker ?? speaker,
       voiceInput: voiceList(deps.available ?? true).source,
@@ -131,7 +101,7 @@ describe("voice conversation settings", () => {
     expect(settings.stored.get("voiceMode.speaking")).toEqual({ voice: "Reid", speed: 1.2 });
   });
 
-  it("refuses a voice it does not list, a speed the provider cannot take, and anyone off the team", async () => {
+  it("refuses a voice it does not list and a speed the provider cannot take", async () => {
     const { call, settings } = routes();
     expect(
       (await call(guardian, "/voice-conversation/settings", put({ voice: "Nobody", speed: 1 })))
@@ -141,11 +111,6 @@ describe("voice conversation settings", () => {
       (await call(guardian, "/voice-conversation/settings", put({ voice: "Reid", speed: 2 })))
         .status,
     ).toBe(400);
-    expect(
-      (await call(visitor, "/voice-conversation/settings", put({ voice: "Reid", speed: 1 })))
-        .status,
-    ).toBe(404);
-    expect((await call(visitor, "/voice-conversation/settings")).status).toBe(404);
     expect(settings.stored.size).toBe(0);
   });
 
@@ -196,7 +161,6 @@ describe("voice conversation settings", () => {
       (await routes({ available: false }).call(guardian, "/voice-conversation/preview", preview))
         .status,
     ).toBe(404);
-    expect((await routes().call(visitor, "/voice-conversation/preview", preview)).status).toBe(404);
     expect((await routes().call(guardian, "/voice-conversation/preview", preview)).status).toBe(
       502,
     );

@@ -22,6 +22,7 @@ import type { Action } from "../../apps/actions/types.js";
 import type { ApiDeps } from "../deps.js";
 import type { Routine, Trigger } from "../../routines/types.js";
 import { FakeClock } from "../../test/kit/index.js";
+import { entryStep } from "../../test/entry-step.js";
 
 // Manual trigger provider shared by the CRUD describe (for validateTrigger
 // to find a "schedule" provider) and the fire-path describe (to deterministically
@@ -150,6 +151,7 @@ describe("Routines API", () => {
 
   it("works for the chat whose card turns it on, the caller's own only", async () => {
     await new ChatsWebChatRepository(testDb.db).createSession("chat-a", "Topic A");
+    const entered = new Hono().use("*", entryStep(["v@example.com"])).route("/", app);
     const guardian = { kind: "guardian" as const, userId: "g", via: "cookie" as const };
     const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
     const turnOn = (
@@ -159,7 +161,7 @@ describe("Routines API", () => {
       args: Record<string, unknown> = {},
     ) =>
       runWithSessionActor(as, () =>
-        app.request("/routines", {
+        entered.request("/routines", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
