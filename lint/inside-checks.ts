@@ -249,12 +249,17 @@ export function hitsIn(text: string): Hit[] {
     else for (const child of node.getChildren(source)) visit(child);
   };
   visit(source);
-  return code
-    .join("")
-    .split("\n")
-    .flatMap((line, at) =>
-      LOOKS.some((pattern) => pattern.test(line)) ? [{ line: at + 1, text: line.trim() }] : [],
-    );
+  // Matched over the whole text, so a comparison split across lines counts on
+  // the line it starts on.
+  const kept = code.join("");
+  const lines = kept.split("\n");
+  const starts = new Set<number>();
+  for (const pattern of LOOKS) {
+    for (const { index } of kept.matchAll(new RegExp(pattern.source, "g"))) {
+      starts.add(kept.slice(0, index).split("\n").length);
+    }
+  }
+  return [...starts].sort((a, b) => a - b).map((line) => ({ line, text: lines[line - 1]!.trim() }));
 }
 
 /** What fails, given the text of each file's hits. */
