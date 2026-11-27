@@ -8,7 +8,7 @@
 
 import { runningTurn } from "../../apps/actions/agent-tool.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
-import { changeRefusalReason, type ToolTurn } from "../../apps/actions/who-may-ask.js";
+import type { ToolTurn } from "../../apps/actions/agent-tool.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
 import { connectStep } from "./connect-step.js";
@@ -145,14 +145,13 @@ export function registerDeviceActions(
 }
 
 /** What running one operation on a device needs of its turn. */
-export type DeviceRunTurn = LiveTurn & Pick<ToolTurn, "audience" | "actor">;
+export type DeviceRunTurn = LiveTurn & Pick<ToolTurn, "audience">;
 
 /** The running turn as a device run reads it, from the action's store. */
 export function deviceRunTurnOf(store: ToolTurn | undefined): DeviceRunTurn {
   return {
     audience: store?.audience,
     askingDeviceId: askingDeviceOf(store?.channelContext),
-    actor: store?.actor,
   };
 }
 
@@ -164,7 +163,7 @@ export type DeviceRunOutcome =
 /**
  * Runs one operation on one of the guardian's devices for `turn`, as
  * `core:device_run` and `system:run_on_device` both do: the live route picks
- * the device, then the rule for a change to the device.
+ * the device.
  */
 export async function runOnDevice(
   deps: Pick<DeviceActionDeps, "connections" | "run"> & { now?: () => number },
@@ -176,18 +175,12 @@ export async function runOnDevice(
     askingDeviceId: turn.askingDeviceId,
     deviceId: request.deviceId,
   });
-  return runOperation(
-    deps,
-    { audience: turn.audience, actor: turn.actor },
-    request.operation,
-    request.args,
-    route,
-  );
+  return runOperation(deps, { audience: turn.audience }, request.operation, request.args, route);
 }
 
 async function runOperation(
   deps: Pick<DeviceActionDeps, "run">,
-  { audience, actor }: Pick<ToolTurn, "audience" | "actor">,
+  { audience }: Pick<ToolTurn, "audience">,
   operation: string,
   args: Record<string, unknown>,
   route: ReturnType<ReturnType<typeof createLiveRoutes>["forOperation"]>,
@@ -210,31 +203,6 @@ async function runOperation(
   if (access !== "read" && access !== "write") {
     return {
       error: `unsupported_operation: ${RUN_ON_DEVICE_TOOL} runs only read and write operations.`,
-    };
-  }
-  // A change to the guardian's device is theirs to ask for, in their own chat.
-  const refusal = access === "write" ? changeRefusalReason({ audience, actor }) : null;
-  if (refusal === "not_private") {
-    log.info("device write refused outside a private turn", {
-      capability: chosen.capability,
-      operation,
-    });
-    return {
-      error:
-        "write_private_only: This chat is not private with the guardian, so their device " +
-        "cannot be changed from it. Say so, and that they can ask in their own chat.",
-    };
-  }
-  if (refusal === "not_guardian") {
-    log.info("device write refused in a turn the guardian did not start", {
-      capability: chosen.capability,
-      operation,
-    });
-    return {
-      error:
-        "write_needs_guardian: Only the guardian's own message can change their device, and " +
-        "this turn did not start from one. Change nothing; tell them what you would change, " +
-        "so they can ask for it themselves.",
     };
   }
   if (chosen.state !== "working") {

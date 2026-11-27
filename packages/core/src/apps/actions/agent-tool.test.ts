@@ -1,6 +1,6 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it } from "@rstest/core";
 import { z } from "zod";
-import { approvalOf, callTool, whoMayAskSuite } from "./agent-tool-contract.js";
+import { approvalOf, callTool } from "./agent-tool-contract.js";
 import { agentToolsOf, toolError } from "./agent-tool.js";
 import { decidesApprovalPerCall } from "./types.js";
 
@@ -39,12 +39,9 @@ const showThing = agentTool({
 
 const deps = (): Deps => ({ names: new Map([["t-1", "Old"]]) });
 
-whoMayAskSuite(renameThing, { thingId: "t-1", name: "New" });
-whoMayAskSuite(showThing, { thingId: "t-1" });
-
 describe("an agent tool's action", () => {
   it("carries the declaration's name, description and side effects", () => {
-    const action = renameThing.action(deps(), async () => null);
+    const action = renameThing.action(deps());
 
     expect(action.config).toMatchObject({
       name: "system:rename_thing",
@@ -59,11 +56,11 @@ describe("an agent tool's action", () => {
   });
 
   it("asks for no approval when the tool declares none", () => {
-    expect(showThing.action(deps(), async () => null).config.requiresApproval).toBeUndefined();
+    expect(showThing.action(deps()).config.requiresApproval).toBeUndefined();
   });
 
   it("has the engine decide each call from its approval", () => {
-    expect(decidesApprovalPerCall(renameThing.action(deps(), async () => null))).toBe(true);
+    expect(decidesApprovalPerCall(renameThing.action(deps()))).toBe(true);
   });
 
   it("returns what run returns as the agent's data", async () => {
@@ -138,40 +135,5 @@ describe("an agent tool's action", () => {
     });
 
     await expect(approvalOf(broken, deps(), { thingId: "t-1" })).rejects.toThrow("no such thing");
-  });
-
-  it("refuses a turn that may not ask before its approval reads the deps", async () => {
-    const visitorTurn = {
-      audience: "private" as const,
-      channelContext: { channel: "webchat", threadId: "visitor-chat" },
-    };
-    const touched = rs.fn();
-    const watched = agentTool({
-      name: "system:rename_thing",
-      description: "Rename a thing",
-      sideEffects: "write",
-      input: z.object({ thingId: z.string() }),
-      approval: () => {
-        touched();
-        return { title: "Rename", summary: "" };
-      },
-      run: async (input) => input,
-    });
-
-    await expect(approvalOf(watched, deps(), { thingId: "t-1" }, visitorTurn)).rejects.toThrow(
-      /^needs_guardian: /,
-    );
-    expect(touched).not.toHaveBeenCalled();
-  });
-
-  it("checks who asks once per call, before run", async () => {
-    const check = rs.fn(async () => "needs_guardian: no");
-    const d = deps();
-
-    const result = await renameThing.action(d, check).execute({ thingId: "t-1", name: "New" });
-
-    expect(result).toEqual({ status: "error", error: "needs_guardian: no" });
-    expect(check).toHaveBeenCalledTimes(1);
-    expect(d.names.get("t-1")).toBe("Old");
   });
 });

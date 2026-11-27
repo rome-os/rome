@@ -59,11 +59,9 @@ export const readConnections = agentTool({
 export const disconnectService = agentTool({
   name: "system:disconnect_service",
   description:
-    "Disconnect one service from Rome, such as a Slack workspace or a Google account, so Rome no longer has access to it. Use it when the guardian asks to disconnect, unlink or remove a connection. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find the connection's id with system:read_connections",
+    "Disconnect one service from Rome, such as a Slack workspace or a Google account, so Rome no longer has access to it. Use it when the guardian asks to disconnect, unlink or remove a connection. The guardian approves it on a card first. Find the connection's id with system:read_connections",
   sideEffects: "write",
   input: z.object({ connectionId }),
-  // Called only for the guardian's own message in their private chat, so the
-  // card may name the account.
   approval: async (input, { deps }) => {
     const id = input.connectionId.trim();
     const found = (await deps.connections()).find((c) => c.id !== null && c.id === id);
