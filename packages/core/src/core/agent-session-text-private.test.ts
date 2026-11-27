@@ -124,7 +124,7 @@ describe("Sessions textPrivate", () => {
     await manager.open(
       { agentName, channelThreadKey: `webchat:${agentName}` },
       // A web chat faces the guardian, so a wake-up can be scheduled into it.
-      { workingDir: directory, guardianFacing: true },
+      { workingDir: directory, takesWakeUps: true },
     );
     expect(opened).toHaveLength(1);
     // A private-text agent's words never reach the guardian, so `defer` asks

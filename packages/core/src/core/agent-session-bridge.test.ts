@@ -635,14 +635,14 @@ describe("AgentSessionBridge working dir", () => {
   it("opens with what it states for the session, never what the worker sends", async () => {
     const stated = {
       drawsCards: false,
-      guardianFacing: true,
+      takesWakeUps: true,
       toolEnv: { ROME_CHANNEL: "telegram" },
       spanAttributes: { "channel.name": "telegram" },
     };
     const { acquired, runTurn } = setup({}, undefined, async () => stated);
     const forged = {
       drawsCards: true,
-      guardianFacing: false,
+      takesWakeUps: false,
       toolEnv: { ROME_CHANNEL: "discord" },
       spanAttributes: { "channel.name": "discord" },
     };

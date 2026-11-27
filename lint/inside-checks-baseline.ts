@@ -2,10 +2,5 @@
 // as lint/inside-checks.ts counts them. A count only goes down.
 export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/api/routes/webchat.ts": 2,
-  "packages/core/src/concierge/tools.ts": 3,
   "packages/core/src/connections/device/actions.ts": 1,
-  "packages/core/src/core/renewal-handoffs.ts": 1,
-  "packages/core/src/core/rome-tool-ports.ts": 1,
-  "packages/core/src/core/session-opening.ts": 1,
-  "packages/core/src/routines/engine.ts": 1,
 };

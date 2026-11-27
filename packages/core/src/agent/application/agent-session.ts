@@ -194,10 +194,10 @@ export interface SessionOpening {
    */
   drawsCards?: boolean;
   /**
-   * The session's conversation faces the guardian, so a wake-up can be
-   * scheduled back into it. Absent, it cannot.
+   * A wake-up can be scheduled back into the session's conversation. Absent,
+   * it cannot.
    */
-  guardianFacing?: boolean;
+  takesWakeUps?: boolean;
   /**
    * Name-value pairs the model session's tools run with; a name given no
    * value is cleared. The session passes them through. Absent, the tools run
@@ -1140,12 +1140,12 @@ function sessionSetupOf(
     }
   }
   // `defer` schedules a one-off wakeup back into this same thread. Only wired
-  // for guardian-facing threads with a real `channelThreadKey` to wake;
+  // for threads that take wake-ups, with a real `channelThreadKey` to wake;
   // keyless/synthetic runs (e.g. ad-hoc triage) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferTool: DeferTool | undefined =
-    init.guardianFacing === true && !isSubagent && place?.withoutDefer !== true
+    init.takesWakeUps === true && !isSubagent && place?.withoutDefer !== true
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,

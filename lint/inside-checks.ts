@@ -214,10 +214,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     ],
     why: "the guardian's person is never merged or deleted away",
   },
-  "packages/core/src/core/guardian-channel.ts": {
-    lines: ["export function isGuardianFacingChannel("],
-    why: "a list of channels, it names no person",
-  },
 };
 
 /** One line that decides by one of LOOKS: its number, from 1, and its text. */

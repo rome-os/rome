@@ -3,7 +3,7 @@
 // fallback that writes the handoff from those messages with a small model, and
 // the chat's "tidying up" activity while it is written.
 
-import type { SessionActor } from "../access/session-actor.js";
+import { memberEmail, type SessionActor } from "../access/session-actor.js";
 import type { ModelSession } from "./agent-runner.js";
 import {
   createRomeTools,
@@ -116,12 +116,9 @@ const SENDER: Record<string, string> = {
 /** The chat's said messages in `rows`, oldest first, leaving out turn `exceptTurnId`'s. */
 export function recentMessagesOf(rows: readonly ChatRow[], exceptTurnId?: string): RecentMessage[] {
   return rows.flatMap((row) => {
+    const email = memberEmail(row.actor);
     const senderName =
-      row.actor?.kind === "visitor"
-        ? row.actor.email
-          ? `Visitor (${row.actor.email})`
-          : "Visitor"
-        : SENDER[row.role];
+      email === undefined ? SENDER[row.role] : email ? `Visitor (${email})` : "Visitor";
     if (!senderName || (exceptTurnId && row.turnId === exceptTurnId)) return [];
     const text = messageContentText(row.content);
     return text
