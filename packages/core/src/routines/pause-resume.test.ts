@@ -17,7 +17,6 @@ const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn(async
 
 beforeEach(() => {
   testDb = createTestDb();
-  // Every routine's chat is the guardian's private chat.
   routines = new RoutinesRepository(testDb.db);
   routineEngine.activate.mockClear();
   routineEngine.deactivate.mockClear();
