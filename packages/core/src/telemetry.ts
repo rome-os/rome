@@ -506,6 +506,12 @@ export function recordConciergeTurnMetrics(facts: ConciergeTurnMetricFacts): voi
   conciergeTurnDurationMetric().record(facts.durationMs, attributes);
 }
 
+export const appSdkDeprecatedUsesMetric = lazyCounter(
+  "rome.app_sdk.deprecated_uses",
+  "Uses of a symbol the app SDK keeps only as deprecated, labelled by symbol " +
+    "(rome.app_sdk.symbol) and app (rome.app.id).",
+);
+
 export const modelPromptCacheMetric = lazyCounter(
   "rome.model.prompt.cache",
   'Prompt-cache outcome per turn ("hit" when cache_read_input_tokens > 0, ' +

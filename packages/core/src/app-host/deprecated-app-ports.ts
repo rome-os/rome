@@ -4,9 +4,10 @@
 // accounts and the ports that never needed People keep working. Types: packages/app-runtime-sdk/src/deprecated-people.ts.
 // A later breaking release deletes this file with that one.
 //
-// Each use is reported as a log record, so a symbol is deleted once no app
+// Each use adds one to a counter metric, so a symbol is deleted once no app
 // uses it: docs/observability/schema.md#deprecated-app-sdk-symbols.
 
+import type { Counter } from "@opentelemetry/api";
 import type {
   Access,
   AgentRunnerInterface,
@@ -23,46 +24,27 @@ import type { ConnectionKindOfChannel } from "../db/repositories/channel-records
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { applyGuardianProfile } from "../instance/guardian-profile/index.js";
-import { createLogger, type Logger } from "../logger.js";
 import { matchingPolicy } from "../participation/wake-gate/policy/policy-engine.js";
+import { appSdkDeprecatedUsesMetric } from "../telemetry.js";
 import type { Policy } from "../types.js";
 
-/** The log record's component, message and the attribute naming the symbol. */
-export const DEPRECATED_USE_COMPONENT = "deprecated-app-sdk";
-export const DEPRECATED_USE_MESSAGE = "deprecated app SDK symbol used";
-export const DEPRECATED_USE_SYMBOL = "rome.sdk.symbol";
-
-const HOUR_MS = 60 * 60 * 1000;
+/** The metric attributes naming the symbol and the app. */
+export const DEPRECATED_USE_SYMBOL = "rome.app_sdk.symbol";
+export const DEPRECATED_USE_APP = "rome.app.id";
 
 /** Notes that app `appId` used `symbol`, a fixed name such as
  *  `personMappingRepo.findByChannelUser`. */
 export type ReportDeprecatedUse = (appId: string, symbol: string) => void;
 
 /**
- * A {@link ReportDeprecatedUse} that writes one log record per app and symbol
- * an hour, in this process: the record says the symbol was used in that hour,
- * not how often. It carries the symbol and, through the logger, the app id.
+ * A {@link ReportDeprecatedUse} that adds one to `rome.app_sdk.deprecated_uses`
+ * per use, with the symbol and the app id as its only attributes.
  */
 export function deprecatedUseReporter(
-  options: { log?: (appId: string) => Pick<Logger, "info">; now?: () => number } = {},
+  counter: () => Pick<Counter, "add"> = appSdkDeprecatedUsesMetric,
 ): ReportDeprecatedUse {
-  const loggers = new Map<string, Pick<Logger, "info">>();
-  const logFor =
-    options.log ?? ((appId: string) => createLogger(DEPRECATED_USE_COMPONENT, { appId }));
-  const now = options.now ?? Date.now;
-  const lastReported = new Map<string, number>();
   return (appId, symbol) => {
-    const key = `${appId}\u0000${symbol}`;
-    const at = now();
-    const last = lastReported.get(key);
-    if (last !== undefined && at - last < HOUR_MS) return;
-    lastReported.set(key, at);
-    let log = loggers.get(appId);
-    if (!log) {
-      log = logFor(appId);
-      loggers.set(appId, log);
-    }
-    log.info(DEPRECATED_USE_MESSAGE, { [DEPRECATED_USE_SYMBOL]: symbol });
+    counter().add(1, { [DEPRECATED_USE_SYMBOL]: symbol, [DEPRECATED_USE_APP]: appId });
   };
 }
 

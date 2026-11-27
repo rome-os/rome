@@ -313,19 +313,22 @@ FORMAT JSONEachRow
 
 ### Deprecated app SDK symbols
 
-The host writes a log record when an app uses a symbol the app SDK keeps only
-as deprecated, so a symbol is deleted once no app uses it. Component
-`deprecated-app-sdk`, body `deprecated app SDK symbol used`, and
-`LogAttributes['rome.sdk.symbol']` names the symbol, such as
-`personMappingRepo.findByChannelUser`, beside the usual `rome.app.id`. Each
-process writes at most one record per app and symbol an hour, so a count is of
-hours in which the app used it, not of calls. The record holds no arguments.
-The host counts in
+Each time an app uses a symbol the app SDK keeps only as deprecated, the host
+adds one to the counter `rome.app_sdk.deprecated_uses`, so a symbol is deleted
+once no app uses it. The counter has two attributes: `rome.app_sdk.symbol`
+names the symbol, such as `personMappingRepo.findByChannelUser`, and
+`rome.app.id` names the app. The identity attributes above tell the Romes
+apart. The counter holds no arguments, message content or sender ids. The host
+counts in
 [`../../packages/core/src/app-host/deprecated-app-ports.ts`](../../packages/core/src/app-host/deprecated-app-ports.ts).
+
+The main process and each action worker count in their own process and export
+every 15 seconds, and a worker exports what is left when it exits. A process
+that crashes loses the uses since its last export.
 
 The host counts a use that reaches it at run time:
 
-| `rome.sdk.symbol` | Counted when an app |
+| `rome.app_sdk.symbol` | Counted when an app |
 |---|---|
 | `people.guardian` | calls `deps.people.guardian()` in an action |
 | `personMappingRepo.<method>` | calls any method of `deps.personMappingRepo` in an action, one symbol per method |
@@ -343,22 +346,36 @@ It cannot count a use that never reaches it:
 - `ChatStopStatus` `"forbidden"` and `chatStopReceipt("forbidden")`, which the host never answers and the app computes alone.
 - The web SDK's `people` page, which runs in the browser.
 
-Hours used per symbol, app and instance over the last 30 days:
+The counter lands in `otel_metrics_sum` under its own name. It is cumulative:
+each point holds the total since its process started (`StartTimeUnix`), and
+every process, told apart by `process.pid` and `host.name`, is its own series.
+The uses in a window are, per series, its last value less its value at the
+window's start, summed over the series. Uses per symbol, app and Rome over
+the last 30 days:
 
 ```sql
-SELECT
-  LogAttributes['rome.sdk.symbol'] AS symbol,
-  LogAttributes['rome.app.id'] AS app,
-  ResourceAttributes['service.instance.id'] AS instance,
-  uniqExact(toStartOfHour(Timestamp)) AS hours_used,
-  max(Timestamp) AS last_used
-FROM default.otel_logs
-WHERE LogAttributes['component'] = 'deprecated-app-sdk'
-  AND Timestamp > now() - INTERVAL 30 DAY
+WITH now64(9) - INTERVAL 30 DAY AS since
+SELECT symbol, app, instance, sum(uses) AS uses
+FROM (
+  SELECT
+    Attributes['rome.app_sdk.symbol'] AS symbol,
+    Attributes['rome.app.id'] AS app,
+    ResourceAttributes['service.instance.id'] AS instance,
+    argMax(Value, TimeUnix)
+      - if(StartTimeUnix < since, argMin(Value, TimeUnix), 0) AS uses
+  FROM default.otel_metrics_sum
+  WHERE MetricName = 'rome.app_sdk.deprecated_uses'
+    AND TimeUnix > since
+  GROUP BY symbol, app, instance,
+    ResourceAttributes['host.name'], ResourceAttributes['process.pid'], StartTimeUnix
+)
 GROUP BY symbol, app, instance
 ORDER BY symbol, app, instance
 FORMAT JSONEachRow
 ```
+
+A process that started before the window counts from its first point inside
+it, so up to one export interval of its uses is missed.
 
 ## Human UI
 

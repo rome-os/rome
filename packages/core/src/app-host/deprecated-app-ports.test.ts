@@ -2,9 +2,9 @@
  * An app built against @rome-os/app-runtime 0.11 still compiles against this
  * release and still runs: the fixture below names every symbol People's
  * removal deprecated, typed from the SDK as published here, and each port the
- * host restores answers without throwing. Each use is reported once an hour
- * per app and symbol, with the symbol and the app id alone. The web SDK's `people` page is
- * pinned in its own tests.
+ * host restores answers without throwing. Each use adds one to a counter, with
+ * the symbol and the app id alone. The web SDK's `people` page is pinned in its
+ * own tests.
  */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -40,7 +40,6 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/db.js";
 import type { Policy } from "../types.js";
 import {
-  DEPRECATED_USE_MESSAGE,
   deprecatedChatStopFor,
   deprecatedGuardianProfile,
   deprecatedPolicyEngine,
@@ -352,41 +351,37 @@ function startedApp(appId: string, hookDir: string): ResolvedApp {
 }
 
 describe("deprecatedUseReporter", () => {
-  it("writes one record per app and symbol an hour, holding the symbol and nothing else", async () => {
-    const records: Array<{ appId: string; message: string; data: unknown }> = [];
-    let now = 0;
-    const report = deprecatedUseReporter({
-      log: (appId) => ({
-        info: (message: string, data?: unknown) => void records.push({ appId, message, data }),
-      }),
-      now: () => now,
-    });
+  /** A reporter over a counter that records each add. */
+  function countedUses() {
+    const adds: Array<[number, unknown]> = [];
+    const counter = {
+      add: (value: number, attributes?: unknown) => void adds.push([value, attributes]),
+    };
+    return { adds, report: deprecatedUseReporter(() => counter) };
+  }
+
+  it("adds one per use, with the symbol and the app id and nothing else", async () => {
+    const { adds, report } = countedUses();
     const deps = depsOf("old-app", report);
 
     await deps.personMappingRepo.findByChannelUser("telegram", "secret-sender-id");
     await deps.personMappingRepo.findByChannelUser("telegram", "another-sender");
-    now += 59 * 60 * 1000;
-    await deps.personMappingRepo.findByChannelUser("telegram", "x");
     await depsOf("other-app", report).personMappingRepo.findByChannelUser("telegram", "x");
-    now += 60 * 1000;
-    await deps.personMappingRepo.findByChannelUser("telegram", "x");
 
-    expect(records).toEqual([
-      {
-        appId: "old-app",
-        message: DEPRECATED_USE_MESSAGE,
-        data: { "rome.sdk.symbol": "personMappingRepo.findByChannelUser" },
-      },
-      {
-        appId: "other-app",
-        message: DEPRECATED_USE_MESSAGE,
-        data: { "rome.sdk.symbol": "personMappingRepo.findByChannelUser" },
-      },
-      {
-        appId: "old-app",
-        message: DEPRECATED_USE_MESSAGE,
-        data: { "rome.sdk.symbol": "personMappingRepo.findByChannelUser" },
-      },
+    const use = (app: string) => [
+      1,
+      { "rome.app_sdk.symbol": "personMappingRepo.findByChannelUser", "rome.app.id": app },
+    ];
+    expect(adds).toEqual([use("old-app"), use("old-app"), use("other-app")]);
+  });
+
+  it("counts a copy of deps as one use of strangerPersonId", () => {
+    const { adds, report } = countedUses();
+    const deps = depsOf("old-app", report) as unknown as Record<string, unknown>;
+
+    expect({ ...deps }.strangerPersonId).toBe("__STRANGER__");
+    expect(adds).toEqual([
+      [1, { "rome.app_sdk.symbol": "strangerPersonId", "rome.app.id": "old-app" }],
     ]);
   });
 });
