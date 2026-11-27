@@ -245,8 +245,6 @@ describe("chat commands, for anyone else", () => {
     expect(await answer.ran(command(["stop"]))).toBe("Stopped.");
     expect(chatStop).toHaveBeenCalledWith({
       ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
-      service: "discord",
-      senderId: GUARDIAN_ID,
     });
   });
 });

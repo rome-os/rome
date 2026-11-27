@@ -14,11 +14,10 @@ import type {
   InboundEvent,
   ChannelActivitySession,
   SaidInboundEvent,
-  SaidSender,
   MessagesSaid,
 } from "@rome-os/app-runtime";
 
-import type { MessageSender, WakeGateFor } from "../../actions/message-handler/index.js";
+import type { WakeGateFor } from "../../actions/message-handler/index.js";
 
 const log = createAppLogger("channel-message-hook");
 
@@ -180,11 +179,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         return;
       }
       try {
-        const result = await this.chatStop({
-          ref,
-          service,
-          senderId: message.senderId,
-        });
+        const result = await this.chatStop({ ref });
         await this.reply(channel, message, chatStopReceipt(result.status));
       } catch (err) {
         log.error("stop command failed", {
@@ -232,19 +227,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     let wake: "wake" | undefined;
     if (sender && this.options.wakeGateFor) {
       const gate = await this.options.wakeGateFor({ chat: ref });
-      const decision = gate(
-        {
-          connectionId,
-          chatId: message.chatId,
-          channel: service,
-          place: message.thread?.kind === "dm" ? "direct" : "group",
-          threadName: message.thread?.name,
-          ...addressedBy(message),
-        },
-        {
-          person: sender.person ? { id: sender.person.id } : null,
-        },
-      );
+      const decision = gate({
+        connectionId,
+        chatId: message.chatId,
+        channel: service,
+        place: message.thread?.kind === "dm" ? "direct" : "group",
+        threadName: message.thread?.name,
+        ...addressedBy(message),
+      });
       // Logged at info, since no action span is open here to carry the
       // policy decision as an event.
       log.info("wake decided", {
@@ -302,7 +292,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       accountAgentName: accountAgent,
       ...(recorded ? { recordedMessageId: recorded.messageId } : {}),
       ...(wake ? { wake } : {}),
-      ...(sender ? { sender: messageSender(sender) } : {}),
     });
     return { turn };
   }
@@ -318,7 +307,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       accountAgentName: string | undefined;
       recordedMessageId?: string;
       wake?: "wake";
-      sender?: MessageSender;
     },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
@@ -348,7 +336,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           messageId: message.messageId,
           replyTo: message.replyTo,
           ...(message.inThread ? { inThread: message.inThread } : {}),
-          ...(message.account ? { platform: message.account.platform } : {}),
           ...addressedBy(message),
           ...agents,
         },
@@ -461,14 +448,6 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
       ...(wakeGateForOf(deps) ? { wakeGateFor: wakeGateForOf(deps) } : {}),
     },
   );
-}
-
-/** The host's answer for who said a message, as `inbox:message_handler` takes it. */
-function messageSender(sender: SaidSender): MessageSender {
-  return {
-    person: sender.person ? { id: sender.person.id } : null,
-    guardian: sender.person?.bondLevel === "guardian",
-  };
 }
 
 /** How the message addressed Rome's account, as its connection reported it. */

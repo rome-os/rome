@@ -1,4 +1,7 @@
-import type { Account, BondLevel } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
+
+/** How close a person is to the guardian, as People's tables store it. */
+export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
 
 /**
  * The account a link names, the way Chats names it: the platform and the

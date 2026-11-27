@@ -6,10 +6,6 @@ import { z } from "zod";
 // of sent messages, and nothing writes them any more. Leaving the column a bare
 // string invited callers — and fixtures — to invent kinds nothing downstream
 // knows how to resolve.
-//
-// `person_mapping` stays in the published set so apps compiled against it keep
-// building, but nothing creates one any more: only the guardian links an
-// account to a person (docs/domains/people.md#link).
 
 // Defined in @rome-os/app-runtime — the SDK apps compile against, and therefore
 // the only place that can constrain the two lifecycles apps create. Re-exported

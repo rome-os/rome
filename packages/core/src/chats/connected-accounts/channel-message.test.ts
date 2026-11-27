@@ -131,8 +131,6 @@ function wakeMessageOf(
   };
 }
 
-const GUARDIAN = { person: { id: "p-1", bondLevel: "guardian" as const } };
-
 /** The agreed change: Rome's account is addressed by a reply or its own thread, not a mention, and someone else is mentioned. */
 function isAgreedChange(facts: Facts): boolean {
   const mentions = facts.mentions ?? [];
@@ -212,7 +210,6 @@ describe("channelMessageOf", () => {
       for (const settings of allSettings()) {
         const now = chatSettingsWake(settings)(
           wakeMessageOf(channelMessageOf(messageOf(facts), "discord"), facts.kind),
-          GUARDIAN,
         );
         const beforeMessage = wakeMessageOf(oldDiscord(facts), facts.kind);
         const before = oldGate(beforeMessage, settings);
@@ -244,7 +241,6 @@ describe("channelMessageOf", () => {
         const { mentionsOthers: _never, ...before } = oldDiscord(facts);
         const now = chatSettingsWake(settings)(
           wakeMessageOf(channelMessageOf(messageOf(facts), "telegram"), facts.kind),
-          GUARDIAN,
         );
         const was = oldGate(wakeMessageOf(before, facts.kind), settings);
         if (now !== was) differ.push(`${JSON.stringify(facts)} ${replyRule}: ${was} → ${now}`);
@@ -280,7 +276,7 @@ describe("channelMessageOf", () => {
     const forOther = channelMessageOf(messageOf(facts, OTHER_ROME), "discord");
     expect([forMe.addressing, forMe.mentionsOthers]).toEqual(["ambient", true]);
     expect([forOther.addressing, forOther.mentionsOthers]).toEqual(["mention", undefined]);
-    expect(chatSettingsWake(settings)(wakeMessageOf(forMe, "group"), GUARDIAN)).toBe("quiet");
-    expect(chatSettingsWake(settings)(wakeMessageOf(forOther, "group"), GUARDIAN)).toBe("wake");
+    expect(chatSettingsWake(settings)(wakeMessageOf(forMe, "group"))).toBe("quiet");
+    expect(chatSettingsWake(settings)(wakeMessageOf(forOther, "group"))).toBe("wake");
   });
 });

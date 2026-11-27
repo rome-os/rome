@@ -2,7 +2,7 @@
 // links, and the account verbs that move a link between persons. Every People
 // feature changes people through it. Vocabulary: docs/domains/people.md.
 
-import type { BondLevel } from "@rome-os/app-runtime";
+import type { BondLevel } from "./person.js";
 import type { SqliteExec } from "../../db/index.js";
 import type {
   DeleteResult,

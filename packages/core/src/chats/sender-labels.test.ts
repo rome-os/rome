@@ -45,19 +45,17 @@ describe("whoSaid", () => {
 describe("whoIs", () => {
   it("answers the guardian as the guardian bond level", () => {
     expect(whoIs(ANA)).toEqual({
-      person: { id: "p-ana", name: "Ana Lopez", bondLevel: "guardian" },
-      delegate: false,
+      person: { id: "p-ana", name: "Ana Lopez" },
       label: "Ana Lopez, guardian",
     });
   });
 
   it("answers a member with the lowest bond level, and a nameless one by role", () => {
     expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toEqual({
-      person: { id: "p-bo", name: "member", bondLevel: "other" },
-      delegate: false,
+      person: { id: "p-bo", name: "member" },
       label: "member",
     });
-    expect(whoIs(null)).toEqual({ person: null, delegate: false, label: "not linked" });
+    expect(whoIs(null)).toEqual({ person: null, label: "not linked" });
   });
 });
 
@@ -138,8 +136,7 @@ describe("SenderLabels over memberOfAccount", () => {
     expect(db.select().from(links).all()).toEqual([]);
 
     const said = {
-      person: { id: guardian.id, name: "Ana Lopez", bondLevel: "guardian" },
-      delegate: false,
+      person: { id: guardian.id, name: "Ana Lopez" },
       label: "Ana Lopez, guardian",
     };
     expect(await labels.sender({ platform: "slack", id: "T1/U1" })).toEqual(said);
@@ -150,8 +147,7 @@ describe("SenderLabels over memberOfAccount", () => {
     const { member, labels } = await rome();
 
     expect(await labels.sender({ platform: "slack", id: "T1/U2" })).toEqual({
-      person: { id: member.id, name: "bo@example.com", bondLevel: "other" },
-      delegate: false,
+      person: { id: member.id, name: "bo@example.com" },
       label: "bo@example.com, member",
     });
   });
@@ -164,7 +160,7 @@ describe("SenderLabels over memberOfAccount", () => {
     await accountCodeRedeemed(codes, code, discord);
 
     expect(await labels.sender({ platform: "discord", id: "bo-discord" })).toMatchObject({
-      person: { id: member.id, bondLevel: "other" },
+      person: { id: member.id },
       label: "bo@example.com, member",
     });
     expect((await ctx.identity.personOf(discord))?.id).toBe(member.id);
@@ -177,7 +173,7 @@ describe("SenderLabels over memberOfAccount", () => {
       accounts: [{ platform: "slack", accountId: "T1/U3" }],
     });
 
-    const nobody = { person: null, delegate: false, label: "not linked" };
+    const nobody = { person: null, label: "not linked" };
     expect(await labels.sender({ platform: "slack", id: "T1/U9" })).toEqual(nobody);
     expect(await labels.sender({ platform: "slack", id: "T1/U3" })).toEqual(nobody);
   });

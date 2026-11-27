@@ -3373,7 +3373,7 @@ describe("Webchat API", () => {
     expect(recordSessionInChat).toHaveBeenCalledWith("runtime-topic", "topic-1", { replace: true });
     expect(init).toMatchObject({
       selectionId: "anthropic/claude-sonnet-5-5",
-      threadContext: { channel: "webchat", threadId: "topic-1", senderBondLevel: "guardian" },
+      threadContext: { channel: "webchat", threadId: "topic-1" },
     });
     expect(String(init?.contextSuffix)).toContain("## Guardian");
   });

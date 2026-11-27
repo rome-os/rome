@@ -39,7 +39,7 @@ function decide(row: {
     ...(row.fromBot ? { fromBot: true } : {}),
     ...(row.mentionsOthers ? { mentionsOthers: true } : {}),
   };
-  return chatSettingsWake(settings)({ ...message, ...facts }, { person: null });
+  return chatSettingsWake(settings)({ ...message, ...facts });
 }
 
 describe("chatSettingsWake", () => {
@@ -98,25 +98,19 @@ describe("chatSettingsWake", () => {
     expect(decide(row)).toBe(wake);
   });
 
-  it("asks the policies about the linked person, or no one, and never by bond level", () => {
-    const blockAlice: Policy = {
-      id: "p1",
-      scope: { type: "sender_specific", personId: "person-alice" },
-      rules: [{ action: "block" }],
-      priority: 0,
-    };
+  it("asks the policies about the chat, and matches nothing an earlier release stored for a sender", () => {
     const blockDevChat: Policy = {
       id: "p2",
       scope: { type: "thread", threadName: "Dev Chat", threadType: "group" },
       rules: [{ action: "block" }],
       priority: 0,
     };
-    const blockStrangers: Policy = {
-      id: "p3",
-      scope: { type: "sender", bondLevel: "other" },
+    const blockAlice = {
+      id: "p1",
+      scope: { type: "sender_specific", personId: "person-alice" },
       rules: [{ action: "block" }],
       priority: 0,
-    };
+    } as unknown as Policy;
     const gate = (policies: Policy[]) =>
       chatSettingsWake({
         enabled: true,
@@ -127,14 +121,12 @@ describe("chatSettingsWake", () => {
         connectionKindOf: (channel) => channel,
       });
 
-    expect(gate([blockAlice])(message, { person: { id: "person-alice" } })).toBe("block");
-    expect(gate([blockAlice])(message, { person: null })).toBe("wake");
-    expect(gate([blockStrangers])(message, { person: null })).toBe("wake");
-    expect(gate([blockDevChat])(message, { person: null })).toBe("block");
-    expect(gate([blockDevChat])({ ...message, place: "direct" }, { person: null })).toBe("wake");
+    expect(gate([blockAlice])(message)).toBe("wake");
+    expect(gate([blockDevChat])(message)).toBe("block");
+    expect(gate([blockDevChat])({ ...message, place: "direct" })).toBe("wake");
   });
 
-  it("answers the same message from the same sender the same way every time", () => {
+  it("answers the same message the same way every time", () => {
     const gate = chatSettingsWake({
       enabled: true,
       replyRule: "mention",
@@ -143,7 +135,7 @@ describe("chatSettingsWake", () => {
       policies: [],
       connectionKindOf: (channel) => channel,
     });
-    const answers = [1, 2, 3].map(() => gate(message, { person: null }));
+    const answers = [1, 2, 3].map(() => gate(message));
     expect(answers).toEqual(["wake", "wake", "wake"]);
   });
 });

@@ -4,13 +4,12 @@ What a message, a chat, an account and an agent in a chat are is defined in [`do
 
 ## Policies
 
-A policy decides whether a message from someone [let in](../domains/participation.md#entry) wakes the agent, based on who sent it and where.
+A policy decides whether a message from someone [let in](../domains/participation.md#entry) wakes the agent, based on where it was said.
 
 Evaluation order (first match wins):
-1. **Sender-specific** — exact [person](people.md#person) match
-2. **Thread-specific** — thread name + type match
-3. **Account-specific** — match on one of Rome's [accounts](../domains/chats.md#account). A policy on a later account's own id wins, and a policy on its service covers it otherwise
-4. **Global** — catch-all
+1. **Thread-specific** — thread name + type match
+2. **Account-specific** — match on one of Rome's [accounts](../domains/chats.md#account). A policy on a later account's own id wins, and a policy on its service covers it otherwise
+3. **Global** — catch-all
 
 Policy actions:
 - **Block** — the message wakes nobody
@@ -20,10 +19,11 @@ Policy actions:
 
 - Evaluation is strictly ordered from most to least specific, and the first matching policy wins. A more specific policy always overrides a broader one.
 - With no matching policy, the message wakes the agent as the chat's rules say.
+- A policy never names a sender. One an earlier release stored for a sender matches nothing.
 
 **Not to be confused with:**
 
-- **[Bond level](people.md#bond-levels)** — a bond level is an attribute of a person. A policy is about one person, thread or account, or every message, and never reads it.
+- **[Entry](../domains/participation.md#entry)** — entry decides who is let in. A policy is about a thread or an account, or every message.
 - **[Approvals](#approvals)** — a policy is about inbound messages. An approval gates a sensitive action before it executes.
 
 ## Approvals

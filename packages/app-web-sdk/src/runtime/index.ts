@@ -631,7 +631,6 @@ export type NavigateRomePayload =
   | { readonly path: "memory"; readonly file?: string }
   | { readonly path: "apps" }
   | { readonly path: "apps"; readonly appId: string; readonly subPath?: string }
-  | { readonly path: "people" }
   | { readonly path: "projects" }
   | { readonly path: "routines" }
   | { readonly path: "desktop" };
@@ -705,8 +704,6 @@ function resolveHostNavigatePath(payload: NavigateRomePayload): string {
             .join("/")}`
         : `/apps/${encodeURIComponent(payload.appId)}`;
     }
-    case "people":
-      return "/people";
     case "projects":
       return "/projects";
     case "routines":

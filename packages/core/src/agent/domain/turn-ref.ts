@@ -27,7 +27,6 @@ export function toLifecycleThreadContext(
     threadType: context.threadType,
     projectName: context.projectName,
     projectPath: context.projectPath,
-    ...(context.senderBondLevel ? { senderBondLevel: context.senderBondLevel } : {}),
   };
 }
 

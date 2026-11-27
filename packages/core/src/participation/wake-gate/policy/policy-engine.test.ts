@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
-import { PolicyEngine, type PolicyContext } from "./policy-engine.js";
+import { matchingPolicy, type PolicyContext } from "./policy-engine.js";
 import { PoliciesRepository } from "../../../db/repositories/policies.js";
+import type { ConnectionKindOfChannel } from "../../../db/repositories/channel-records.js";
 import type { PolicyRule, PolicyScope } from "../../../types.js";
 import {
   createTestDb,
@@ -11,32 +12,26 @@ import {
   identityConnectionKindOf,
 } from "../../../test/helpers.js";
 
-// PolicyEngine over real repositories on in-memory SQLite (edge-only fakes,
-// #763): policies are DB rows, so evaluate() runs against the same persistence —
-// including the priority ordering findAll() applies — that the production
-// engine reads.
+// matchingPolicy over real repositories on in-memory SQLite (edge-only fakes,
+// #763): policies are DB rows, so the match runs against the same persistence,
+// including the priority ordering findAll() applies, that the wake gate reads.
 
 function makeContext(overrides?: Partial<PolicyContext>): PolicyContext {
-  return {
-    channel: "telegram",
-    sender: { id: "person-1", bondLevel: "acquaintance" },
-    bondLevel: "acquaintance",
-    ...overrides,
-  };
+  return { channel: "telegram", ...overrides };
 }
 
 // A later channel carries an opaque name.
 const LATER_TELEGRAM = "9b2f4c1e-telegram-bot";
 
-describe("PolicyEngine", () => {
+describe("matchingPolicy", () => {
   let testDb: TestDb;
   let policiesRepo: PoliciesRepository;
-  let engine: PolicyEngine;
+  let connectionKindOf: ConnectionKindOfChannel;
 
   beforeEach(() => {
     testDb = createTestDb();
     policiesRepo = new PoliciesRepository(testDb.db);
-    engine = new PolicyEngine(policiesRepo, identityConnectionKindOf);
+    connectionKindOf = identityConnectionKindOf;
   });
 
   afterEach(() => {
@@ -51,106 +46,75 @@ describe("PolicyEngine", () => {
     return policiesRepo.create({ scope, rules: [{ action }], priority });
   }
 
-  it("evaluate() matches sender-specific policy first", async () => {
-    await seedPolicy({ type: "global" }, "block", 1);
-    await seedPolicy({ type: "sender_specific", personId: "person-1" }, "allow", 100);
+  async function evaluate(context: PolicyContext): Promise<PolicyRule | null> {
+    return matchingPolicy({ policies: await policiesRepo.findAll(), connectionKindOf }, context);
+  }
 
-    const result = await engine.evaluate(makeContext());
-    expect(result).toEqual({ action: "allow" });
-  });
-
-  it("evaluate() falls back to thread-specific policy", async () => {
+  it("matches a thread policy before a global one", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
     await seedPolicy({ type: "thread", threadName: "support", threadType: "group" }, "allow", 50);
 
-    const result = await engine.evaluate(
-      makeContext({
-        sender: null,
-        threadName: "support",
-        threadType: "group",
-      }),
-    );
+    const result = await evaluate(makeContext({ threadName: "support", threadType: "group" }));
     expect(result).toEqual({ action: "allow" });
   });
 
-  it("evaluate() matches no policy stored for a bond level", async () => {
+  it("matches nothing an earlier release stored for a sender", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
-    await seedPolicy({ type: "sender", bondLevel: "acquaintance" }, "allow", 30);
+    const earlier = [
+      { type: "sender", bondLevel: "acquaintance" },
+      { type: "sender_specific", personId: "person-1" },
+    ] as unknown as PolicyScope[];
+    for (const scope of earlier) await seedPolicy(scope, "allow", 30);
 
-    const result = await engine.evaluate(makeContext({ sender: null }));
-    expect(result).toEqual({ action: "block" });
+    expect(await evaluate(makeContext())).toEqual({ action: "block" });
   });
 
-  it("evaluate() falls back to channel policy", async () => {
+  it("falls back to a channel policy", async () => {
     await seedPolicy({ type: "channel", channel: "telegram" }, "sentinel_review", 20);
 
-    const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "sentinel_review" });
+    expect(await evaluate(makeContext())).toEqual({ action: "sentinel_review" });
   });
 
-  it("evaluate() applies a service's channel policy to its later channels", async () => {
-    engine = new PolicyEngine(policiesRepo, (name) =>
-      name === LATER_TELEGRAM ? "telegram" : name,
-    );
+  it("applies a service's channel policy to its later channels", async () => {
+    connectionKindOf = (name) => (name === LATER_TELEGRAM ? "telegram" : name);
     await seedPolicy({ type: "channel", channel: "telegram" }, "block", 20);
 
-    const context = makeContext({ channel: LATER_TELEGRAM, sender: null, bondLevel: "other" });
-    await expect(engine.evaluate(context)).resolves.toEqual({ action: "block" });
+    const context = makeContext({ channel: LATER_TELEGRAM });
+    expect(await evaluate(context)).toEqual({ action: "block" });
 
     await seedPolicy({ type: "channel", channel: LATER_TELEGRAM }, "sentinel_review", 10);
-    await expect(engine.evaluate(context)).resolves.toEqual({ action: "sentinel_review" });
+    expect(await evaluate(context)).toEqual({ action: "sentinel_review" });
   });
 
-  it("evaluate() falls back to global policy", async () => {
+  it("falls back to a global policy", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
 
-    const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "block" });
+    expect(await evaluate(makeContext())).toEqual({ action: "block" });
   });
 
-  it('evaluate() returns "allow" when no policies match, whatever the bond level', async () => {
-    for (const bondLevel of ["guardian", "inner-circle"]) {
-      expect(await engine.evaluate(makeContext({ bondLevel }))).toEqual({ action: "allow" });
-    }
+  it("matches nothing when no policy is stored", async () => {
+    expect(await evaluate(makeContext())).toBeNull();
   });
 
-  it("evaluate() lets scope specificity beat higher-priority broader scopes", async () => {
-    // The broader scopes carry the higher priorities, so findAll() returns
-    // them first — only the scope-tier grouping can make sender_specific win.
+  it("lets scope specificity beat higher-priority broader scopes", async () => {
+    // The broader scope carries the higher priority, so findAll() returns it
+    // first; only the scope-tier grouping can make the channel policy win.
     await seedPolicy({ type: "global" }, "sentinel_review", 100);
     await seedPolicy({ type: "channel", channel: "telegram" }, "block", 50);
-    await seedPolicy({ type: "sender_specific", personId: "person-1" }, "allow", 1);
 
-    const result = await engine.evaluate(makeContext());
-    expect(result).toEqual({ action: "allow" });
+    expect(await evaluate(makeContext())).toEqual({ action: "block" });
   });
 
-  it("evaluate() picks the higher-priority policy within the same scope", async () => {
-    // Within one scope tier the engine takes the first match from findAll(),
-    // which orders by priority descending — the low-priority row is inserted
-    // first so only the repository's ordering can make the right policy win.
+  it("picks the higher-priority policy within the same scope", async () => {
+    // Within one scope tier the first match from findAll() wins, which orders
+    // by priority descending. The low-priority row is inserted first so only
+    // the repository's ordering can make the right policy win.
     await seedPolicy({ type: "global" }, "block", 1);
     await seedPolicy({ type: "global" }, "require_approval", 99);
 
-    const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "require_approval" });
+    expect(await evaluate(makeContext())).toEqual({ action: "require_approval" });
   });
 
-  it('evaluate() handles "block" action', async () => {
-    await seedPolicy({ type: "global" }, "block");
-
-    const result = await engine.evaluate(makeContext({ sender: null }));
-    expect(result.action).toBe("block");
-  });
-
-  it('evaluate() handles "require_approval" action', async () => {
-    await seedPolicy({ type: "global" }, "require_approval");
-
-    const result = await engine.evaluate(makeContext({ sender: null }));
-    expect(result.action).toBe("require_approval");
-  });
-
-  // Policy decision span-event emission
   describe("policy.decision span event", () => {
     // `node` kind installs an AsyncHooks context manager so
     // `trace.getActiveSpan()` survives awaits inside `evaluate()`.
@@ -168,7 +132,7 @@ describe("PolicyEngine", () => {
       const tracer = trace.getTracer("test");
       await tracer.startActiveSpan("parent", async (span) => {
         try {
-          await engine.evaluate(context);
+          await evaluate(context);
         } finally {
           span.end();
         }
@@ -187,18 +151,9 @@ describe("PolicyEngine", () => {
       expect(event!.attributes?.["policy.matched_scope"]).toBe("global");
     });
 
-    it("marks the default-path as matched_scope=default", async () => {
-      await evaluateInsideSpan(makeContext({ bondLevel: "other" }));
-
-      const [parent] = await harness.finishedSpans();
-      const event = parent.events.find((e) => e.name === "policy.decision");
-      expect(event!.attributes?.["policy.decision"]).toBe("allow");
-      expect(event!.attributes?.["policy.matched_scope"]).toBe("default");
-    });
-
-    it("no-ops when evaluate runs outside any span (no crash)", async () => {
-      const result = await engine.evaluate(makeContext());
-      expect(result.action).toBe("allow");
+    it("no-ops when evaluated outside any span (no crash)", async () => {
+      await seedPolicy({ type: "global" }, "block");
+      expect(await evaluate(makeContext())).toEqual({ action: "block" });
       expect(await harness.finishedSpans()).toHaveLength(0);
     });
   });

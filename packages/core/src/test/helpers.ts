@@ -1,5 +1,4 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
-import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
@@ -584,11 +583,6 @@ export async function buildTestDeps(
       adapters: chatsWired.adapters,
       speakers: chatsWired.speakers,
     },
-    guardianProfile: appGuardianProfile({
-      db,
-      settingsRepo,
-      reactivateFloating: () => routineEngine.reactivateFloating(),
-    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);

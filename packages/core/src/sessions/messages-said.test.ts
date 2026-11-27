@@ -863,8 +863,7 @@ describe("messagesSaid", () => {
 
       expect(event?.message.senderDisplayName).toBe("Ally");
       expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "other" },
-        delegate: false,
+        person: { id: "p-alice", name: "Alice Liddell" },
         label: "Alice Liddell, member",
       });
     });
@@ -875,7 +874,7 @@ describe("messagesSaid", () => {
         senderDisplayName: "Alice Liddell",
       });
 
-      expect(event?.sender).toEqual({ person: null, delegate: false, label: "not linked" });
+      expect(event?.sender).toEqual({ person: null, label: "not linked" });
     });
 
     it("names the same person for both of one person's accounts", async () => {
@@ -892,8 +891,7 @@ describe("messagesSaid", () => {
       const [event] = await hear(people().labels, { senderId: "alice-bot" });
 
       expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "other" },
-        delegate: false,
+        person: { id: "p-alice", name: "Alice Liddell" },
         label: "Alice Liddell, member",
       });
     });

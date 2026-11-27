@@ -4,7 +4,6 @@
 import { readdir } from "node:fs/promises";
 import { eq, and, or, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import type { BondLevel } from "@rome-os/app-runtime";
 import { persons, links, dismissedAccounts } from "../../db/schema.js";
 import { type DrizzleDb, inTransaction, type SqliteExec } from "../../db/index.js";
 import { getRelationshipDir } from "../../profile-memory.js";
@@ -14,6 +13,7 @@ import {
   protectedPersonReason,
 } from "@rome/api-types/persons";
 import {
+  type BondLevel,
   PersonLink,
   Person,
   Link,

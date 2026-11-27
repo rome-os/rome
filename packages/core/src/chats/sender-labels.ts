@@ -2,16 +2,10 @@
 // their role, as Identity and Access answer. Vocabulary:
 // docs/domains/participation.md#projection and docs/domains/access.md.
 
-import type { Account, BondLevel, SaidSender } from "@rome-os/app-runtime";
-import type { Role } from "../access/access.js";
+import type { Account, SaidSender } from "@rome-os/app-runtime";
 import type { NamedMember } from "../access/application/members.js";
 import type { PromptMessage, UnseenMessage } from "../agent/index.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
-
-/** The bond level a published {@link SaidSender} carries for each role: the
- *  guardian's own, and for a member the lowest, which grants the least
- *  wherever a bond level is read. */
-const BOND_LEVEL_OF: Record<Role, BondLevel> = { guardian: "guardian", member: "other" };
 
 /** The member an account belongs to, as Access's `memberOfAccount` answers,
  *  or null when it belongs to nobody or its person has no role. */
@@ -24,14 +18,12 @@ export type MemberOfAccount = (account: Account) => Promise<NamedMember | null>;
  * message showed, which the sender chose.
  */
 export function whoIs(member: NamedMember | null): SaidSender {
-  if (!member) return { person: null, delegate: false, label: "not linked" };
+  if (!member) return { person: null, label: "not linked" };
   return {
     person: {
       id: member.personId,
       name: member.name ?? member.role,
-      bondLevel: BOND_LEVEL_OF[member.role],
     },
-    delegate: false,
     label: member.name ? `${member.name}, ${member.role}` : member.role,
   };
 }

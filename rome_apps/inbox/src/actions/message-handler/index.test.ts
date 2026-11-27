@@ -16,10 +16,6 @@ import {
   sendAnswer,
 } from "./index.js";
 
-const STRANGER_PERSON_ID = "__STRANGER__";
-
-type WakeSender = { person: { id: string } | null };
-
 const actionConfig: ActionConfig = {
   name: "inbox:message_handler",
   type: "system",
@@ -85,7 +81,6 @@ function createAction(
 
 function createMessageHandlerDeps(
   overrides: {
-    guardianAccounts?: { platform: string; id: string }[];
     agentResponses?: AgentMessage[][];
     knownAgents?: string[];
     actionCapableAgents?: Record<string, string[]>;
@@ -99,7 +94,7 @@ function createMessageHandlerDeps(
   const sentMessages: Record<string, unknown>[] = [];
   const wake: {
     answer: "wake" | "quiet" | "block";
-    asked: { message: unknown; sender: WakeSender }[];
+    asked: { message: unknown }[];
   } = {
     answer: "wake",
     asked: [],
@@ -117,8 +112,8 @@ function createMessageHandlerDeps(
   const deps = {
     agentRunner,
     // Answers `wake.answer`.
-    wakeGateFor: rs.fn(async () => (message: unknown, sender: WakeSender) => {
-      wake.asked.push({ message, sender });
+    wakeGateFor: rs.fn(async () => (message: unknown) => {
+      wake.asked.push({ message });
       return wake.answer;
     }),
     appContext: {
@@ -138,10 +133,8 @@ function createMessageHandlerDeps(
         return { status: "ok" };
       }),
       listRoutines: rs.fn(async () => []),
-      access: { guardianAccounts: rs.fn(async () => overrides.guardianAccounts ?? []) },
     },
     resolveProfilePath: (filePath: string) => filePath,
-    strangerPersonId: STRANGER_PERSON_ID,
   } as unknown as Parameters<typeof createAction>[1];
 
   return { deps, agentRunner, sentMessages, conversations, wake };
@@ -164,7 +157,6 @@ describe("buildMessageContext", () => {
       channelUserId: "user-456",
       displayName: "Alice",
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
     });
 
     expect(result).toContain("## Guardian");
@@ -193,7 +185,6 @@ describe("buildMessageContext", () => {
       channelUserId: "user-456",
       displayName: "Alice",
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
     });
 
     expect(result).not.toContain("## Thread context");
@@ -213,7 +204,6 @@ describe("buildMessageContext", () => {
       channelUserId: "user-456",
       displayName: "Guardian",
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
     };
 
     // The cue is now appended in runTurnAndReply once the routed target
@@ -236,7 +226,6 @@ describe("buildMessageContext", () => {
       channelUserId: "guardian",
       displayName: "Guardian",
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
     });
 
     expect(result).toContain("## Guardian");
@@ -257,7 +246,6 @@ describe("buildMessageContext", () => {
       selectedProjectName: "alpha",
       selectedProjectPath: "/home/rome/.rome/default/projects/alpha",
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
-      strangerPersonId: STRANGER_PERSON_ID,
     });
 
     expect(result).not.toContain("project name: alpha");
@@ -310,7 +298,6 @@ describe("a message that wakes the agent", () => {
       displayName: "Alice",
       text: "Can you answer?",
       messageId: "msg-1",
-      sender: { person: { id: "alice" }, guardian: true },
     });
 
     expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
@@ -329,70 +316,13 @@ describe("a message that wakes the agent", () => {
     ]);
   });
 
-  const telegram = {
-    channel: "telegram",
-    channelUserId: "alice-tg",
-    threadId: "thread-1",
-    threadType: "private",
-    displayName: "Alice",
-    text: "Can you answer?",
-    messageId: "msg-1",
-  };
-
-  const alice = { id: "alice" };
-  it.each([
-    {
-      who: "the guardian the host names",
-      args: { sender: { person: alice, guardian: true } },
-      person: alice,
-      bond: "guardian",
-    },
-    {
-      who: "a member the host names",
-      args: { sender: { person: alice, guardian: false } },
-      person: alice,
-      bond: "other",
-    },
-    {
-      who: "nobody, as the host says",
-      args: { sender: { person: null, guardian: false } },
-      person: null,
-      bond: "other",
-    },
-    {
-      who: "the guardian's account, the host naming nobody",
-      args: { platform: "telegram" },
-      person: null,
-      bond: "guardian",
-    },
-    {
-      who: "another account, the host naming nobody",
-      args: { platform: "telegram", channelUserId: "casey-tg" },
-      person: null,
-      bond: "other",
-    },
-    { who: "an account on an unknown platform", args: {}, person: null, bond: "other" },
-  ])("tells the wake gate and the turn who sent it: $who", async ({ args, person, bond }) => {
-    const { deps, agentRunner, wake } = createMessageHandlerDeps({
-      guardianAccounts: [{ platform: "telegram", id: "alice-tg" }],
-    });
-
-    await createAction(actionConfig, deps).execute({ ...telegram, ...args });
-
-    expect(wake.asked).toEqual([expect.objectContaining({ sender: { person } })]);
-    expect(agentRunner.calls[0].threadContext?.senderBondLevel).toBe(bond);
-  });
-
-  it("keeps a sender a stranger when only their display name matches the guardian", async () => {
-    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
-      guardianAccounts: [{ platform: "whatsapp", id: "15550199@s.whatsapp.net" }],
-    });
+  it("answers nothing the wake gate keeps quiet, whatever name the sender shows", async () => {
+    const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps();
     wake.answer = "quiet";
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute({
       channel: "whatsapp",
-      platform: "whatsapp",
       channelUserId: "15550100@s.whatsapp.net",
       threadId: "thread-1",
       threadType: "private",
@@ -405,7 +335,7 @@ describe("a message that wakes the agent", () => {
       status: "ok",
       data: { action: "ignored_by_reply_settings" },
     });
-    expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
+    expect(wake.asked).toHaveLength(1);
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toEqual([]);
   });

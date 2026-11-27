@@ -2,7 +2,6 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks } from "./concierge/open-tasks.js";
-import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import {
   startUsageLimitContinuation,
   usageLimitContinuationTakes,
@@ -131,7 +130,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
-import { appPersonMapping } from "./people/app-person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
@@ -345,7 +343,6 @@ import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
 import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
-import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -384,7 +381,6 @@ import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
 } from "./capabilities/image-generation/index.js";
-import { STRANGER_PERSON_ID } from "./constants.js";
 import {
   buildRuntimeStatusEntries,
   createRuntimeStatusSubscriber,
@@ -619,8 +615,6 @@ async function main() {
   if (endedTurns.length > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns.length });
   }
-  // `routineEngine` is built further down; the closure only runs on a profile
-  // write, which happens after boot.
   const appSpeakers = {
     chats: chatsWired.chats,
     adapters: chatsWired.adapters,
@@ -648,11 +642,6 @@ async function main() {
         open: (input) => openChannelChat({ records: sessionRecords, speakers: appSpeakers }, input),
       },
     },
-    guardianProfile: appGuardianProfile({
-      db,
-      settingsRepo,
-      reactivateFloating: () => routineEngine.reactivateFloating(),
-    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
@@ -1045,8 +1034,6 @@ async function main() {
       publicOrigin: () => getConfiguredInstanceOrigin() ?? undefined,
     }),
   });
-
-  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
   // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
@@ -2028,10 +2015,8 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
     sentinelLogRepo,
     approvalsRepo,
-    policyEngine,
     wakeGateFor,
     routinesRepo,
     routineEngine,
@@ -2062,7 +2047,6 @@ async function main() {
     actionRegistry,
     emitAgentMessage,
     resolveProfilePath: resolveProfileMemoryPath,
-    strangerPersonId: STRANGER_PERSON_ID,
     // The `system:resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,

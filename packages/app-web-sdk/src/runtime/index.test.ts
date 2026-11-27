@@ -183,7 +183,6 @@ describe("navigateRome", () => {
   }
 
   it.each([
-    ["people", "/people"],
     ["projects", "/projects"],
     ["routines", "/routines"],
     ["desktop", "/desktop"],

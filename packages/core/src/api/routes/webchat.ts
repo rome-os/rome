@@ -2103,7 +2103,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: project.name,
         projectPath: project.path,
         ...(input.session.deviceFolder ? { deviceFolder: input.session.deviceFolder } : {}),
-        senderBondLevel: "guardian",
       };
       // The in-memory source is intentionally short-lived (15s in production),
       // while webchat provider sessions are durable. Acquire transparently
@@ -4662,9 +4661,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: sessionProjectName,
         projectPath: sessionProjectPath,
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-        // Only the guardian and members write on the dashboard, and the
-        // dashboard answers each of them as the guardian.
-        senderBondLevel: "guardian",
       },
       // The guardian's own message names its device; a task chat's message
       // from the Concierge reads the device the task was handed from.
@@ -5862,7 +5858,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectName: project.name,
         projectPath,
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-        senderBondLevel: "guardian",
       };
       const opened = await deps.agentSessionManager.open(
         { agentName: session.agentName ?? "main", channelThreadKey },
