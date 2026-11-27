@@ -35,48 +35,51 @@ function read(root: string, file: string): string | null {
 }
 
 /**
- * The text of a doc without its HTML comments. `<!--` inside inline code is
- * text, not a comment. A comment that never closes runs to the end of the doc.
- */
-function withoutComments(text: string): string {
-  let shown = "";
-  let at = 0;
-  for (;;) {
-    const open = text.indexOf("<!--", at);
-    if (open === -1) return shown + text.slice(at);
-    const lineStart = text.lastIndexOf("\n", open) + 1;
-    const inCode = (text.slice(lineStart, open).split("`").length - 1) % 2 === 1;
-    if (inCode) {
-      shown += text.slice(at, open + 4);
-      at = open + 4;
-      continue;
-    }
-    shown += text.slice(at, open);
-    const close = text.indexOf("-->", open + 4);
-    if (close === -1) return shown;
-    at = close + 3;
-  }
-}
-
-/**
  * The lines of a doc that a reader sees as prose. A fenced code block is an
- * example that may hold a label or a link, and a comment is a note to the
- * writer, so neither counts. A block closes on a fence of the same character
- * that is at least as long as the one that opened it.
+ * example that may hold a label or a link, and an HTML comment is a note to
+ * the writer, so neither counts. The two are tracked together: a fence inside
+ * a comment opens no block, and `<!--` inside a block or inline code opens no
+ * comment. A block closes on a fence of the same character that is at least as
+ * long as the one that opened it.
  */
 function proseLines(text: string): string[] {
-  let open: string | null = null;
-  const outsideFences = text.split("\n").filter((line) => {
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (open === null) {
-      if (fence) open = fence[1];
-      return !fence;
+  const lines: string[] = [];
+  let fence: string | null = null;
+  let inComment = false;
+  for (const line of text.split("\n")) {
+    if (fence !== null) {
+      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line)?.[1];
+      if (close && close[0] === fence[0] && close.length >= fence.length) fence = null;
+      continue;
     }
-    const closes = fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
-    if (closes) open = null;
-    return false;
-  });
-  return withoutComments(outsideFences.join("\n")).split("\n");
+    const opens = inComment ? undefined : /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (opens) {
+      fence = opens;
+      continue;
+    }
+    let shown = "";
+    let at = 0;
+    while (at < line.length) {
+      if (inComment) {
+        const close = line.indexOf("-->", at);
+        if (close === -1) break;
+        inComment = false;
+        at = close + 3;
+        continue;
+      }
+      const open = line.indexOf("<!--", at);
+      if (open === -1) {
+        shown += line.slice(at);
+        break;
+      }
+      shown += line.slice(at, open);
+      at = open + 4;
+      if ((shown.split("`").length - 1) % 2 === 1) shown += "<!--";
+      else inComment = true;
+    }
+    lines.push(shown);
+  }
+  return lines;
 }
 
 /** Each field of a doc by its label. A field runs to the next field or heading. */

@@ -174,6 +174,13 @@ describe("docsSkeletonGaps", () => {
     expect(docsSkeletonGaps(repo)).toEqual([]);
   });
 
+  it("reads a fence inside a comment as part of the comment", async () => {
+    await writeSkeleton();
+    await write(CONCEPT, `<!--\n\`\`\`\nTODO example\n-->\n${conceptDoc}`);
+
+    expect(docsSkeletonGaps(repo)).toEqual([]);
+  });
+
   it("does not count a field inside a tilde block, or inside a block that a shorter fence cannot close", async () => {
     await writeSkeleton();
     await write(
