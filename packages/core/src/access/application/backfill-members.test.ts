@@ -120,6 +120,7 @@ describe("backfillMembers", () => {
         role: "guardian",
         accounts: [
           "agents:ep-atlas",
+          "email:owner@example.com",
           "rome-cloud-email:owner@example.com",
           "slack:T1:U1",
           "telegram:42",
@@ -129,13 +130,13 @@ describe("backfillMembers", () => {
         name: null,
         avatarUrl: null,
         role: "member",
-        accounts: ["rome-cloud-email:ada@example.com"],
+        accounts: ["email:ada@example.com", "rome-cloud-email:ada@example.com"],
       },
       {
         name: null,
         avatarUrl: null,
         role: "member",
-        accounts: ["rome-cloud-email:lin@example.com"],
+        accounts: ["email:lin@example.com", "rome-cloud-email:lin@example.com"],
       },
     ]);
 
@@ -434,7 +435,9 @@ describe("backfillMembers", () => {
     expect(guardian?.role).toBe("guardian");
     expect(guardian?.accounts.map((a) => `${a.platform}:${a.accountId}`)).toEqual([
       "agents:ep-atlas",
+      "email:new@example.com",
       "email:olive@example.com",
+      "email:owner@example.com",
       "rome-cloud-email:new@example.com",
       "rome-cloud-email:owner@example.com",
       "slack:T1:U1",
@@ -442,7 +445,7 @@ describe("backfillMembers", () => {
     ]);
   });
 
-  it("moves each member's email account to the sign-in platform, and a second run changes nothing", async () => {
+  it("gives each member's email account its sign-in, and a second run changes nothing", async () => {
     testDb = createTestDb();
     const { db } = testDb;
     seed(db);
@@ -456,21 +459,21 @@ describe("backfillMembers", () => {
 
     await backfillMembers(db);
 
-    expect(
-      await roleOfAccount(ctx, { platform: "email", accountId: "ada@example.com" }),
-    ).toBeNull();
     const member = (await listMembers(ctx)).find((m) => m.person.id === ada.id);
     expect(member).toEqual({
       person: { id: ada.id, name: null, avatarUrl: "https://example.com/ada.png" },
       role: "member",
-      accounts: [{ platform: "rome-cloud-email", accountId: "ada@example.com" }],
+      accounts: [
+        { platform: "email", accountId: "ada@example.com" },
+        { platform: "rome-cloud-email", accountId: "ada@example.com" },
+      ],
     });
     const first = snapshot(db);
     await backfillMembers(db);
     expect(snapshot(db)).toEqual(first);
   });
 
-  it("takes the seat's address as an email account from the guardian, unless People links it", async () => {
+  it("keeps the seat's address as the guardian's email account, whether People links it or not", async () => {
     for (const linkedByPeople of [false, true]) {
       testDb?.close();
       testDb = createTestDb();
@@ -500,7 +503,7 @@ describe("backfillMembers", () => {
       );
       expect(accounts).toEqual([
         "agents:ep-atlas",
-        ...(linkedByPeople ? ["email:owner@example.com"] : []),
+        "email:owner@example.com",
         "rome-cloud-email:owner@example.com",
         "slack:T1:U1",
         "telegram:42",

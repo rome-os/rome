@@ -45,12 +45,6 @@ beforeEach(async () => {
   registry = new ActionRegistryImpl();
   const events = registerAgentNameAction(registry, {
     settingsRepo: settings,
-    ownerOfChat: async (chatId) =>
-      chatId === "visitor-chat"
-        ? "visitor:visitor"
-        : chatId === "guardian-chat"
-          ? "guardian"
-          : null,
   });
   emit = rs.fn();
   unsubscribe = events.subscribe(emit);
@@ -97,40 +91,19 @@ describe("core:set_agent_name", () => {
     }
   });
 
-  it("accepts an autonomous turn in a guardian-owned chat", async () => {
-    expect(
-      (
-        await rename("Pebble", {
-          channelContext: { channel: "webchat", threadId: "guardian-chat" },
-        })
-      ).status,
-    ).toBe("ok");
-  });
-
   for (const [label, context] of [
-    ["visitor actor", { actor: visitor }],
+    ["member", { actor: visitor }],
     [
-      "visitor actor in the guardian chat",
-      { actor: visitor, channelContext: { channel: "webchat", threadId: "guardian-chat" } },
-    ],
-    [
-      "visitor-owned chat without an actor",
+      "turn no one started in a member's chat",
       { channelContext: { channel: "webchat", threadId: "visitor-chat" } },
     ],
-    [
-      "visitor-owned chat with a guardian actor",
-      { actor: guardian, channelContext: { channel: "webchat", threadId: "visitor-chat" } },
-    ],
-    ["deleted chat", { channelContext: { channel: "webchat", threadId: "deleted" } }],
-    ["anonymous actor", { actor: { kind: "anonymous" } }],
     ["unattributed caller", {}],
   ] satisfies Array<[string, ActionRunContext]>) {
-    it(`rejects a ${label} without writes or events`, async () => {
-      expect(await rename("Pebble", context)).toMatchObject({
-        status: "error",
-        error: "Only the guardian can change the agent name.",
+    it(`renames for a ${label}`, async () => {
+      expect(await rename("Pebble", context)).toEqual({
+        status: "ok",
+        data: { agentName: "Pebble" },
       });
-      await unchanged();
     });
   }
 

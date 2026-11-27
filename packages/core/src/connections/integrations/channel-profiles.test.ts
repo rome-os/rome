@@ -85,7 +85,6 @@ const CASES: ChannelCase[] = [
     descriptor: makeEmailDescriptor({
       provider: stub,
       settingsRepo: stub,
-      peopleRepo: stub,
     }),
     grant: "inbox",
     full: { address: "slug@romeos.cc" },

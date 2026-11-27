@@ -534,7 +534,7 @@ function setup(
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
     /** Where the turn ran, when not the dashboard chat `chatId`. */
-    threadContext?: { channel: string; threadId: string; senderBondLevel?: string };
+    threadContext?: { channel: string; threadId: string };
   }) => {
     if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
@@ -782,11 +782,7 @@ describe("Concierge tools", () => {
       if (stored) s.sessions.set(id, stored);
       return id;
     };
-    const there = (
-      s: ReturnType<typeof setup>,
-      chatId: string,
-      senderBondLevel: string | undefined,
-    ): SessionToolContext => ({
+    const there = (s: ReturnType<typeof setup>, chatId: string): SessionToolContext => ({
       ...s.context(),
       channelThreadKey: "discord_app:900",
       getThreadContext: () => ({
@@ -794,7 +790,6 @@ describe("Concierge tools", () => {
         threadId: "900",
         romeSessionId: chatId,
         threadType: "group",
-        ...(senderBondLevel ? { senderBondLevel } : {}),
       }),
     });
     const run = async (
@@ -815,7 +810,7 @@ describe("Concierge tools", () => {
       process.env.PANTHEON_INSTANCE_ORIGIN = "https://ray.romeos.test";
       let result: Awaited<ReturnType<typeof run>>;
       try {
-        result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+        result = await run(there(s, chatId), s, "chat_start", {
           title: "Flights",
           brief: "Find flights to Tokyo",
         });
@@ -840,7 +835,7 @@ describe("Concierge tools", () => {
         delete process.env[key];
       }
       try {
-        const result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+        const result = await run(there(s, chatId), s, "chat_start", {
           title: "Flights",
           brief: "Find flights to Tokyo",
         });
@@ -860,21 +855,17 @@ describe("Concierge tools", () => {
       s.deps.webchatRepo.getTurnChatMessages = (async () => [
         { id: "800000000000000001", role: "user" },
       ]) as never;
-      const result = await run(there(s, chatId, "guardian"), s, "react", { emoji: "👍" });
+      const result = await run(there(s, chatId), s, "react", { emoji: "👍" });
       expect(result.isError).toBeFalsy();
       expect(reacted).toEqual([["discord_app", "900", "800000000000000001", "👍"]]);
       // The model sees no message ids there: an id it guessed, such as the
       // channel's, reacts to the turn's message all the same.
-      await run(there(s, chatId, "guardian"), s, "react", { emoji: "❤️", message_id: "900" });
+      await run(there(s, chatId), s, "react", { emoji: "❤️", message_id: "900" });
       expect(reacted[1]).toEqual(["discord_app", "900", "800000000000000001", "❤️"]);
       reacted.splice(1);
       // A member's message takes one too, and one cannot be taken back here.
-      expect(
-        (await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError,
-      ).toBeFalsy();
-      expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
-        true,
-      );
+      expect((await run(there(s, chatId), s, "react", { emoji: "👍" })).isError).toBeFalsy();
+      expect((await run(there(s, chatId), s, "react", { emoji: null })).isError).toBe(true);
       expect(reacted).toHaveLength(2);
     });
 
@@ -893,7 +884,7 @@ describe("Concierge tools", () => {
           content: JSON.stringify([{ type: "text", content: "@Rome hi" }]),
         },
       ]) as never;
-      const result = await run(there(s, chatId, "guardian"), s, "say", { text: "Hey!" });
+      const result = await run(there(s, chatId), s, "say", { text: "Hey!" });
       expect(result.isError).toBeFalsy();
       expect(JSON.parse(result.content[0]!.text)).toMatchObject({
         messageId: "800000000000000009",
@@ -913,9 +904,9 @@ describe("Concierge tools", () => {
       expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
       // A second message of the turn quotes nothing, and an id the model
       // guessed, such as the channel's, quotes nothing either.
-      await run(there(s, chatId, "guardian"), s, "say", { text: "Anything else?" });
+      await run(there(s, chatId), s, "say", { text: "Anything else?" });
       expect((said[1] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
-      await run(there(s, chatId, "guardian"), s, "say", { text: "Sure", replyTo: "900" });
+      await run(there(s, chatId), s, "say", { text: "Sure", replyTo: "900" });
       expect((said[2] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
     });
 
@@ -924,17 +915,7 @@ describe("Concierge tools", () => {
       const chatId = await connectionChat(s);
       s.deps.sayInChat = async () => "1";
       s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
-      expect(
-        (await run(there(s, chatId, "acquaintance"), s, "say", { text: "Hi" })).isError,
-      ).toBeFalsy();
-      expect(
-        (await run(there(s, chatId, undefined), s, "say", { text: "Hm" })).isError,
-      ).toBeFalsy();
-      // A task's report, which Rome runs.
-      s.service.runsSystemTurnIn = (id: string) => id === chatId;
-      expect(
-        (await run(there(s, chatId, undefined), s, "say", { text: "Done" })).isError,
-      ).toBeFalsy();
+      expect((await run(there(s, chatId), s, "say", { text: "Hi" })).isError).toBeFalsy();
     });
 
     it("refuses private there", async () => {
@@ -942,7 +923,7 @@ describe("Concierge tools", () => {
       const chatId = await connectionChat(s);
       s.deps.sayInChat = async () => "1";
       s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
-      const secret = await run(there(s, chatId, "guardian"), s, "say", {
+      const secret = await run(there(s, chatId), s, "say", {
         text: "1234",
         private: true,
       });
@@ -973,16 +954,6 @@ describe("Concierge tools", () => {
         chatId,
         text: "done",
         threadContext: where,
-      });
-      expect(s.backendTurns).toHaveLength(1);
-      // A reminder runs with no sender, so only the guardian's turn, or a
-      // report, gets one: never another person's.
-      await s.finish({
-        turnId: "c-3",
-        agentName: CONCIERGE_AGENT_ID,
-        chatId,
-        text: "hi",
-        threadContext: { ...where, senderBondLevel: "acquaintance" },
       });
       expect(s.backendTurns).toHaveLength(1);
     });
@@ -1023,7 +994,7 @@ describe("Concierge tools", () => {
         agentName: CONCIERGE_AGENT_ID,
         chatId,
         text: "done",
-        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+        threadContext: { channel: "discord_app", threadId: "900" },
       });
       expect(
         (await s.service.deps.tasks.messageStatusesOf(chatId, ["800000000000000001"])).get(
@@ -1054,44 +1025,16 @@ describe("Concierge tools", () => {
         agentName: CONCIERGE_AGENT_ID,
         chatId,
         text: "done",
-        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+        threadContext: { channel: "discord_app", threadId: "900" },
       });
       await rs.waitFor(() => expect(reacted).toEqual([["900", "800000000000000002", "✅"]]));
     });
 
-    it("refuses the task tools to anyone but the guardian", async () => {
+    it("lets any turn there use the task tools", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
-      const result = await run(there(s, chatId, "other"), s, "chat_start", {
-        title: "Flights",
-        brief: "Find flights",
-      });
-      expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain("Only the guardian");
-    });
-
-    it("counts a turn it runs there, such as a report, as Rome's own only while it runs", async () => {
-      const s = setup();
-      const chatId = await connectionChat(s);
-      let during = false;
-      s.onBackendTurn(() => {
-        during = s.service.runsSystemTurnIn(chatId);
-        return "completed";
-      });
-      expect(await s.service.runSystemTurn(chatId, "report")).toBe(true);
-      expect(during).toBe(true);
-      expect(s.service.runsSystemTurnIn(chatId)).toBe(false);
-    });
-
-    it("lets a task's report, which Rome runs, read the chat's tasks, and no other turn without a sender", async () => {
-      const s = setup();
-      const chatId = await connectionChat(s);
-      // A turn with no sender that Rome does not run is anyone's.
-      const stray = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
-      expect(stray.isError).toBe(true);
-      s.service.runsSystemTurnIn = (id: string) => id === chatId;
-      const report = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
-      expect(report.isError).toBeFalsy();
+      const result = await run(there(s, chatId), s, "chat_list", { here: true });
+      expect(result.isError).toBeFalsy();
     });
 
     it("never takes a dashboard chat, also a channel row, for a chat on a connection", async () => {

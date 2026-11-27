@@ -27,7 +27,37 @@ describe("fetchAppIdentity", () => {
       name: "Recipes",
       url: `${ORIGIN}/full/apps/%40me%2Frecipes`,
       icon: Buffer.from("png"),
+      shareTarget: null,
     });
+  });
+
+  it("reads the page that takes shared text, and ignores one that is not an app page", async () => {
+    const shared = await fetchAppIdentity(
+      server({
+        name: "Translate",
+        start_url: "/full/apps/translate",
+        share_target: { action: "/full/apps/translate/quick", params: { text: "text" } },
+        rome_share_panel: { width: 380, height: 460 },
+      }),
+      ORIGIN,
+      "translate",
+    );
+    expect(shared.shareTarget).toEqual({
+      url: `${ORIGIN}/full/apps/translate/quick`,
+      param: "text",
+      width: 380,
+      height: 460,
+    });
+    const elsewhere = await fetchAppIdentity(
+      server({
+        name: "Translate",
+        start_url: "/full/apps/translate",
+        share_target: { action: "https://evil.example/full/apps/x", params: { text: "text" } },
+      }),
+      ORIGIN,
+      "translate",
+    );
+    expect(elsewhere.shareTarget).toBeNull();
   });
 
   it("refuses a page or icon on another site, or a page that is not an app page", async () => {

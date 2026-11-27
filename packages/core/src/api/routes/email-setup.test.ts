@@ -262,7 +262,6 @@ function makeSetupApp() {
     makeEmailDescriptor({
       provider: makeMailProvider(provisionMock),
       settingsRepo,
-      peopleRepo,
       ownerEmailResolver: async () => undefined,
     }),
   );

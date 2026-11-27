@@ -3,6 +3,7 @@ import {
   Globe,
   GitFork,
   Info,
+  Keyboard,
   Maximize2,
   MessageCircle,
   MonitorDown,
@@ -26,8 +27,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { type AppLifecycle, canChatWithApp } from "@/hooks/use-app-lifecycle";
-import { addAppToDesktop } from "@/lib/add-to-desktop";
-import { desktopApps } from "@/lib/electron-shell";
+import { addAppToDesktop, assignShareShortcut } from "@/lib/add-to-desktop";
+import { desktopApps, desktopShareShortcut } from "@/lib/electron-shell";
 import { cn } from "@/lib/utils";
 
 // One installed app's actions menu as data, shared by every surface that
@@ -149,6 +150,18 @@ export function getAppActionMenuEntries({
       label: t("installed.addToDesktop"),
       icon: MonitorDown,
       onSelect: () => addAppToDesktop(desktop, app, t),
+    });
+  }
+  // An app that takes shared text can be the one the Mac app's share shortcut
+  // opens with the selection.
+  const shareShortcut = desktopShareShortcut();
+  if (shareShortcut && embeddedHref && app.acceptsSharedText) {
+    entries.push({
+      type: "action",
+      key: "share-shortcut",
+      label: t("installed.useWithShareShortcut"),
+      icon: Keyboard,
+      onSelect: () => assignShareShortcut(shareShortcut, app, t),
     });
   }
   if (embeddedHref) {

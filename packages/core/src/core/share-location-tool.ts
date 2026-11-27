@@ -2,18 +2,6 @@ import type { RomeTool, TurnFacts, WidgetDrawing } from "../agent/index.js";
 import { parseShareLocationInput, shareLocationToolOutput } from "../webchat/location-card.js";
 
 /**
- * Whether the guardian's own message started the running turn: the guardian,
- * proven by their signed-in session. A turn something else started (a
- * followed event, a routine, a task's result, another agent) acts for the
- * guardian only by loopback, so its card never shares by itself.
- */
-export function startedByGuardian(turn: TurnFacts): boolean {
-  // The actor is a SessionActor, which says how guardianship was proven.
-  const actor = turn.actor() as { kind: string; via?: string } | undefined;
-  return actor?.kind === "guardian" && actor.via === "cookie";
-}
-
-/**
  * `share_location`, served with the session's own tools. Where cards show, the
  * turn waits on the share-location card; anywhere else the handler says why it
  * cannot ask, for the model to pass on. A session with no speaker (a fork)
@@ -56,9 +44,7 @@ export function shareLocationTools(input: {
           content: [
             {
               type: "text",
-              text: JSON.stringify(
-                shareLocationToolOutput(parsed.reason, startedByGuardian(input.turn)),
-              ),
+              text: JSON.stringify(shareLocationToolOutput(parsed.reason)),
             },
           ],
         };

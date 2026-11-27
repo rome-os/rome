@@ -4,7 +4,7 @@ import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
-import type { JournalEntry } from "./replay.js";
+import { approvedEntrySequence, type JournalEntry } from "./replay.js";
 import type { ApprovalSessionRunner } from "./session-runner.js";
 import { createLogger } from "../../logger.js";
 import { withoutSessionActor, type SessionActor } from "../../access/session-actor.js";
@@ -14,6 +14,8 @@ const log = createLogger("approval-handler");
 interface ApprovalPayload {
   actionName: string;
   args: Record<string, unknown>;
+  /** The journal entry this card owns; older payloads derive it from the snapshot. */
+  journalSequence?: number;
   rootActionName: string;
   rootArgs: Record<string, unknown>;
   rootExecutionId: string;
@@ -69,6 +71,9 @@ export function formatResultForAgent(result: ActionResult): string {
 }
 
 export class ApprovalHandler {
+  /** Tail of each root's approval replays, so they run one at a time. */
+  private replayChains = new Map<string, Promise<unknown>>();
+
   constructor(
     private approvalsRepo: ApprovalsRepository,
     private journalRepo: ExecutionJournalRepository,
@@ -193,6 +198,19 @@ export class ApprovalHandler {
     return withoutSessionActor(() => this.runApprovedAction(approvalId, payload, emit));
   }
 
+  /** Replays of one root must not interleave: each must load the journal
+   *  only after the previous one finished writing it. */
+  private serializeRootReplay<T>(rootExecutionId: string, run: () => Promise<T>): Promise<T> {
+    const result = (this.replayChains.get(rootExecutionId) ?? Promise.resolve()).then(run);
+    const tail = result.catch(() => {});
+    this.replayChains.set(rootExecutionId, tail);
+    void tail.then(() => {
+      if (this.replayChains.get(rootExecutionId) === tail)
+        this.replayChains.delete(rootExecutionId);
+    });
+    return result;
+  }
+
   private async runApprovedAction(
     approvalId: string,
     payload: ApprovalPayload,
@@ -218,24 +236,37 @@ export class ApprovalHandler {
       // so approving replays the root and resumes at the approved call. It
       // runs for the person who asked, not the guardian who approved.
       const requester = await this.requesterOf(payload.rootExecutionId);
-      const runContext: ActionRunContext = {
-        initiator: `approval:${approvalId}`,
-        ...(requester ? { actor: requester } : {}),
-        replayJournal: payload.replayJournal,
-        replayRootExecutionId: payload.rootExecutionId,
-        channelContext: payload.channelContext,
-        sharedContext: payload.sharedContext,
-        sessionId: payload.sessionId,
-        agentName: payload.agentName,
-        channelThreadKey: payload.channelThreadKey,
-        ...(payload.turnId ? { turnId: payload.turnId } : {}),
-        ...(payload.audience ? { audience: payload.audience } : {}),
-      };
-      const result = await this.actionEngine.run(
-        payload.rootActionName,
-        payload.rootArgs,
-        runContext,
-      );
+      const approvedSequence = approvedEntrySequence(payload);
+      if (approvedSequence === undefined) {
+        throw new Error("approval could not be bound to a journal entry");
+      }
+      const result = await this.serializeRootReplay(payload.rootExecutionId, async () => {
+        // Replay the live journal, not the card's snapshot, so a sibling
+        // resolved since then serves its recorded outcome instead of running
+        // again. The snapshot covers a journal not yet persisted.
+        const live = await this.journalRepo.loadJournal(payload.rootExecutionId);
+        const runContext: ActionRunContext = {
+          initiator: `approval:${approvalId}`,
+          ...(requester ? { actor: requester } : {}),
+          replayJournal: live.length >= payload.replayJournal.length ? live : payload.replayJournal,
+          replayRootExecutionId: payload.rootExecutionId,
+          approvedSequence,
+          channelContext: payload.channelContext,
+          sharedContext: payload.sharedContext,
+          sessionId: payload.sessionId,
+          agentName: payload.agentName,
+          channelThreadKey: payload.channelThreadKey,
+          ...(payload.turnId ? { turnId: payload.turnId } : {}),
+          ...(payload.audience ? { audience: payload.audience } : {}),
+        };
+        return this.actionEngine.run(payload.rootActionName, payload.rootArgs, runContext);
+      });
+      // The replay can end before it reaches the approved row, as when the
+      // root returns early after a refused sibling. Nothing ran for this card.
+      const journal = await this.journalRepo.loadJournal(payload.rootExecutionId);
+      if (journal.some((e) => e.sequence === approvedSequence && e.status === "pending_approval")) {
+        throw new Error("the replay did not reach the approved call");
+      }
 
       emit?.({
         type: "tool_result",

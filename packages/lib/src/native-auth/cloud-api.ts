@@ -4,6 +4,7 @@ import type {
   CloudInstance,
   CloudInstanceAuthorization,
   InstanceAuthorizationRequest,
+  VisitorAuthorizationRequest,
 } from "./types.js";
 import { NativeAuthError } from "./types.js";
 import {
@@ -68,16 +69,38 @@ export class CloudApi {
     return instances;
   }
 
-  async createInstanceAuthorization(
+  /** The owner grant: a code the instance redeems for a guardian session. */
+  createInstanceAuthorization(
     instance: CloudInstance,
     request: InstanceAuthorizationRequest,
+    credential: CloudCredential,
+  ): Promise<CloudInstanceAuthorization> {
+    return this.authorize(instance, "authorizations", request, credential);
+  }
+
+  /**
+   * The visitor grant: an identity-only code the instance redeems for a
+   * visitor session once its own allow-list names the account.
+   */
+  createVisitorAuthorization(
+    instance: CloudInstance,
+    request: VisitorAuthorizationRequest,
+    credential: CloudCredential,
+  ): Promise<CloudInstanceAuthorization> {
+    return this.authorize(instance, "visitor-authorizations", request, credential);
+  }
+
+  private async authorize(
+    instance: CloudInstance,
+    grant: "authorizations" | "visitor-authorizations",
+    request: InstanceAuthorizationRequest | VisitorAuthorizationRequest,
     credential: CloudCredential,
   ): Promise<CloudInstanceAuthorization> {
     if (instance.status !== "running") {
       throw new NativeAuthError("instance_not_ready", "This service is not running");
     }
     const response = await this.authenticatedRequest(
-      `/v1/instances/${encodeURIComponent(instance.id)}/authorizations`,
+      `/v1/instances/${encodeURIComponent(instance.id)}/${grant}`,
       credential,
       {
         method: "POST",
@@ -88,8 +111,15 @@ export class CloudApi {
     if (response.status === 409) {
       throw new NativeAuthError("instance_not_ready", "This service is not ready for sign-in");
     }
-    if (response.status === 403) {
+    // The owner grant also answers 404 for a Rome this account does not own.
+    if (response.status === 403 || response.status === 404) {
       throw new NativeAuthError("access_denied", "This service is no longer available");
+    }
+    if (response.status === 429) {
+      throw new NativeAuthError(
+        "session_rejected",
+        "Too many sign-in attempts. Try again in a minute.",
+      );
     }
     if (!response.ok) {
       throw new NativeAuthError("session_rejected", "Rome Cloud rejected the service session");

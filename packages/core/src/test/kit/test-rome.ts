@@ -384,6 +384,8 @@ async function buildHarness(
           // names only the approved call is its own root, with nothing to replay.
           rootActionName: payload.actionName,
           rootArgs: payload.args,
+          rootExecutionId: randomUUID(),
+          journalSequence: 0,
           replayJournal: [],
           ...payload,
         },

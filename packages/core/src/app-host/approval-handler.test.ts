@@ -117,6 +117,67 @@ describe("ApprovalHandler", () => {
       expect(row!.executedAt).not.toBeNull();
     });
 
+    it("runs overlapping approval replays of one root one at a time", async () => {
+      let releaseA!: () => void;
+      const unblockA = new Promise<void>((resolve) => (releaseA = resolve));
+      const childA = recordingAction("child_a", {
+        requiresApproval: true,
+        execute: async () => {
+          await unblockA;
+          return { status: "ok" };
+        },
+      });
+      const childB = recordingAction("child_b", { requiresApproval: true });
+      const parent = buildAction("parent", {
+        execute: async () => {
+          const results = [await callAction("child_a", {}), await callAction("child_b", {})];
+          return { status: "ok", data: results.map((r) => r.status) };
+        },
+      });
+      await setup({ actions: [childA.action, childB.action, parent] });
+      await rome.actionEngine.run("parent", {}, { initiator: "agent:main" });
+      const cards = await rome.repos.approvals.findPending();
+      for (const card of cards) {
+        await rome.repos.approvals.resolvePending(card.id, "approve", "test-guardian");
+      }
+
+      const runs = Promise.all(cards.map((card) => rome.approvalHandler.onApproved(card.id)));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(childB.calls).toEqual([]);
+      releaseA();
+      await runs;
+
+      expect([childA.calls.length, childB.calls.length]).toEqual([1, 1]);
+      for (const card of cards) {
+        expect((await rome.repos.approvals.findById(card.id))!.executionState).toBe("succeeded");
+      }
+    });
+
+    it("marks a card failed when its replay never reaches the approved call", async () => {
+      const childA = recordingAction("child_a", { requiresApproval: true });
+      const childB = recordingAction("child_b", { requiresApproval: true });
+      const parent = buildAction("parent", {
+        execute: async () => {
+          const rA = await callAction("child_a", {});
+          if (rA.status === "error") return rA;
+          return callAction("child_b", {});
+        },
+      });
+      await setup({ actions: [childA.action, childB.action, parent] });
+      await rome.actionEngine.run("parent", {}, { initiator: "agent:main" });
+      const cardOf = async (name: string) =>
+        (await rome.repos.approvals.findPending()).find(
+          (c) => (c.payload as { actionName: string }).actionName === name,
+        )!;
+      const [cardA, cardB] = [await cardOf("child_a"), await cardOf("child_b")];
+      await rome.repos.approvals.resolvePending(cardA.id, "reject", "test-guardian");
+      await rome.repos.approvals.resolvePending(cardB.id, "approve", "test-guardian");
+
+      await rome.approvalHandler.onApproved(cardB.id);
+      expect(childB.calls).toEqual([]);
+      expect((await rome.repos.approvals.findById(cardB.id))!.executionState).toBe("failed");
+    });
+
     it("propagates replayRootExecutionId and channelContext into the replayed execution", async () => {
       let observed: { rootExecutionId?: string; channelContext?: ThreadContext } = {};
       const probe = buildAction("probe", {

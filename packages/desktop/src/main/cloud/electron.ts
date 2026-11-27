@@ -5,14 +5,20 @@ import { CloudAccount, type InstanceCookieStore } from "./account";
 import { EncryptedFileStore } from "./credential-store";
 import { computerPlatform } from "./sign-in";
 
-const SESSION_COOKIE = "rome_session";
+const SESSION_COOKIES = ["rome_session", "rome_visitor"] as const;
 
 /**
  * The instance session as a host-only, Secure, HttpOnly cookie in the session
- * the main window uses, so the dashboard loads already signed in.
+ * the main window uses, so the dashboard loads already signed in. The window
+ * holds one of the guardian's and a visitor's at a time for each origin.
  */
 const windowCookies: InstanceCookieStore = {
   async install(instanceSession) {
+    for (const name of SESSION_COOKIES) {
+      if (name !== instanceSession.cookieName) {
+        await session.defaultSession.cookies.remove(instanceSession.origin, name);
+      }
+    }
     await session.defaultSession.cookies.set({
       url: instanceSession.origin,
       name: instanceSession.cookieName,
@@ -25,7 +31,9 @@ const windowCookies: InstanceCookieStore = {
     });
   },
   async clear(origin) {
-    await session.defaultSession.cookies.remove(origin, SESSION_COOKIE);
+    for (const name of SESSION_COOKIES) {
+      await session.defaultSession.cookies.remove(origin, name);
+    }
   },
 };
 

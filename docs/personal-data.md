@@ -148,7 +148,7 @@ The input and the reply follow the iPhone's live `health.stats`, so an agent tha
 ## What is and is not enforced
 
 - A turn that an action starts through a worker, such as `system:summon` or the reply to a channel message, takes the audience Rome read for the turn or chat that ran the action. Only a first-party action's chat is trusted for that, and only a first-party action passes it on, so a third-party action's turn is shared. Rome reads who sent a direct message from People itself, never from what the caller says. A session the turn opens gets the same value in its shell, but a session already live keeps the one it opened with.
-- A shell reaches a device through `rome-node device run`, which runs any capability in any chat.
+- `system:run_on_device`, like its older name `core:device_run`, refuses an operation of a personal capability (one its device reports `personal`, such as Health) in a shared turn before it calls the device, with the same `personal_data_private_only`. A shell reaches a device through `rome-node device run`, which runs any capability in any chat.
 - Any turn can send what it read elsewhere, with `send_message` or an email, including a Concierge turn woken by outside content, such as a mail it follows. Content that tells the agent to send Health data on can therefore reach it, and only the system prompt guards against that.
 - The store lives in Rome's database, which an agent's shell can read.
 - An installed app's page runs in the guardian's browser with their session, so it can call these routes as the guardian. No route returns a reading, but such a page can read the catalog and the ingest log, ingest, or delete an origin.
