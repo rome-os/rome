@@ -16,7 +16,6 @@ import { getSession, listChatAgents } from "@/lib/chat-api";
 const session: ChatSession = {
   id: "s1",
   name: "Planning the launch",
-  personaId: null,
   projectName: "default",
   agentName: "replay",
   archivedAt: null,

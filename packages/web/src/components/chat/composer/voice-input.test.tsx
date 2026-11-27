@@ -138,7 +138,6 @@ function mockFetch(info: VoiceInputInfo) {
     const path = new URL(String(input), "http://rome.test").pathname;
     if (path === "/api/voice-input") return Response.json(info);
     if (path === "/api/settings") return Response.json({});
-    if (path === "/api/people") return Response.json({ people: [], counts: {} });
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
 }

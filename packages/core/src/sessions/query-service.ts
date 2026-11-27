@@ -440,7 +440,6 @@ export class SessionQueryService {
       id: session.id,
       name: session.name,
       displayTitle: sessionDisplayTitle(session, owner),
-      personaId: session.personaId,
       largeModelSelection: session.largeModelSelection,
       projectName: session.projectName,
       projectPath: session.projectPath,

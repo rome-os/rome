@@ -132,7 +132,6 @@ const FORK_SESSION = {
   id: "feedback-fork-session",
   name: "feedback: original chat",
   displayTitle: "Feedback",
-  personaId: null,
   largeModelSelection: null,
   projectName: "default",
   projectPath: "default",

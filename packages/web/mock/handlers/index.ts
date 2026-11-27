@@ -1269,7 +1269,6 @@ const session = (
   return {
     id,
     name,
-    personaId: null,
     projectName,
     agentName: agentName ?? null,
     createdAt,

@@ -87,7 +87,6 @@ type SessionSeed = Partial<RomeSessionExplorerRecord> &
 
 const record = (seed: SessionSeed): RomeSessionExplorerRecord => ({
   name: seed.displayTitle,
-  personaId: null,
   largeModelSelection: null,
   projectName: "default",
   projectPath: "default",

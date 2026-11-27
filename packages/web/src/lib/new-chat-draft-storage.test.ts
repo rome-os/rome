@@ -15,7 +15,6 @@ const empty: NewChatDraft = {
   projectPath: "default",
   agentMention: null,
   skill: null,
-  personaId: "",
 };
 afterEach(() => {
   rs.restoreAllMocks();
@@ -30,7 +29,6 @@ describe("new-chat draft storage", () => {
       ...empty,
       text: "  中文🙂\n  ",
       projectPath: "project",
-      personaId: "person",
       agentMention: { appId: "app", agentName: "agent", appLabel: "App" },
       skill: { name: "skill", iconUrl: null },
     };
