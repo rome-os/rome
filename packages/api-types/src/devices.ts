@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export const deviceCapabilitySchema = z.object({
+  id: z.string(),
+  prefix: z.string(),
+  title: z.string(),
+  state: z.enum(["on", "needs_permission", "off"]),
+  personal: z.boolean(),
+  actions: z.array(z.string()),
+});
+export type DeviceCapability = z.infer<typeof deviceCapabilitySchema>;
+
 export const devicesStatusSchema = z.object({
   connection: z.enum([
     "not_running",
@@ -20,6 +30,8 @@ export const devicesStatusSchema = z.object({
       name: z.string(),
       platform: z.string().nullable(),
       status: z.enum(["connected", "not_connected", "unknown"]),
+      actions: z.array(z.string()).optional(),
+      capabilities: z.array(deviceCapabilitySchema).optional(),
       /** The device's own audit log. While unavailable, the device refuses remote actions. */
       audit: z
         .object({

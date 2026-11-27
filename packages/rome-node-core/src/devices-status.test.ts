@@ -28,8 +28,87 @@ it("distinguishes replies, unavailable targets, and timeouts", async () => {
     "not_connected",
     "unknown",
   ]);
+  for (const device of result.devices) {
+    expect(device).not.toHaveProperty("actions");
+    expect(device).not.toHaveProperty("capabilities");
+  }
   expect(run).toHaveBeenCalledTimes(3);
   expect(run).toHaveBeenCalledWith("online", "system.info", {}, 3000);
+});
+
+const windowControl = {
+  id: "computer_use",
+  prefix: "computer",
+  title: "Window Control",
+  state: "on",
+  personal: true,
+  actions: ["computer.windows"],
+} as const;
+
+it.each([
+  "on",
+  "needs_permission",
+  "off",
+] as const)("reports CLI actions and Window Control when its state is %s", async (state) => {
+  const actions = ["exec", "fs.list"];
+  const capability = { ...windowControl, state, actions: [...windowControl.actions] };
+  const reader = new DeviceStatusReader({
+    getStatus: () => "online",
+    list: async () => ({ items: [{ id: "mac" }] }),
+    run: async () => ({
+      type: "response",
+      ok: true,
+      result: { actions, capabilities: [capability] },
+    }),
+  });
+
+  const [device] = (await reader.read()).devices;
+  expect(device).toMatchObject({ status: "connected", actions, capabilities: [capability] });
+  expect(device.actions).not.toBe(actions);
+});
+
+it.each([
+  { name: "limited host", result: { actions: [] }, fields: { actions: [] } },
+  { name: "empty capabilities", result: { capabilities: [] }, fields: { capabilities: [] } },
+  { name: "legacy host", result: {}, fields: {} },
+  { name: "non-record reply", result: null, fields: {} },
+  {
+    name: "malformed fields",
+    result: { actions: ["exec", 42], capabilities: {} },
+    fields: {},
+  },
+  {
+    name: "only malformed capabilities",
+    result: {
+      actions: "exec",
+      capabilities: [
+        null,
+        { ...windowControl, id: 42 },
+        { ...windowControl, prefix: null },
+        { ...windowControl, title: 42 },
+        { ...windowControl, state: "ready" },
+        { ...windowControl, personal: "yes" },
+        { ...windowControl, actions: "computer.windows" },
+        { ...windowControl, actions: ["computer.windows", 42] },
+      ],
+    },
+    fields: {},
+  },
+  {
+    name: "mixed capabilities",
+    result: { capabilities: [{ ...windowControl, state: "ready" }, windowControl] },
+    fields: { capabilities: [windowControl] },
+  },
+])("handles $name in system.info", async ({ result, fields }) => {
+  const reader = new DeviceStatusReader({
+    getStatus: () => "online",
+    list: async () => ({ items: [{ id: "mac" }] }),
+    run: async () => ({ type: "response", ok: true, result }),
+  });
+
+  expect((await reader.read()).devices).toEqual([
+    { id: "mac", name: "mac", platform: null, status: "connected", ...fields },
+  ]);
 });
 
 it("passes on the audit status each device reports in system.info", async () => {
@@ -67,7 +146,11 @@ describe("shared device checks", () => {
       maximum = Math.max(maximum, active);
       await delay(5);
       active--;
-      return { type: "response", ok: true, result: {} };
+      return {
+        type: "response",
+        ok: true,
+        result: { actions: ["exec"], capabilities: [windowControl] },
+      };
     });
     const reader = new DeviceStatusReader({ list, run, getStatus: () => connection });
     const results = await Promise.all([reader.read(), reader.read(), reader.read()]);
@@ -78,7 +161,12 @@ describe("shared device checks", () => {
     expect(run).toHaveBeenCalledTimes(12);
     connection = "retrying";
     reader.invalidate();
-    expect((await reader.read()).devices.every((device) => device.status === "unknown")).toBe(true);
+    const { devices } = await reader.read();
+    expect(devices.every((device) => device.status === "unknown")).toBe(true);
+    for (const device of devices) {
+      expect(device).not.toHaveProperty("actions");
+      expect(device).not.toHaveProperty("capabilities");
+    }
     expect(list).toHaveBeenCalledTimes(2);
   });
 

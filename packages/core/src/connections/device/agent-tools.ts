@@ -35,7 +35,7 @@ const deviceId = z.string().describe("The device's id, from system:read_devices.
 export const readDevices = agentTool({
   name: READ_DEVICES_TOOL,
   description:
-    "See Rome's devices, such as a phone and computers, whether each is online, and what each lets Rome read or do, such as Apple Health or the phone's status, with the operations system:run_on_device runs. Use it when someone asks which devices there are, whether a device is online, or what Rome can reach on a device, and before reading or doing something on a device. Turn on something a device offers with connect_service",
+    "See Rome's devices, such as a phone and computers, whether each is online, and what each lets Rome read or do. Use it when someone asks which devices there are, whether a device is online, or what Rome can reach on a device, and before reading or doing something on a device. capabilities lists device connections, such as Apple Health or the phone's status, with operations system:run_on_device runs; turn those on with connect_service. When an online device also exposes direct rome-node access not covered by capabilities, nodeActions and nodeCapabilities list what a task chat can run through rome-node (with each capability's state: on, needs_permission, or off) — do not call nodeActions with system:run_on_device or offer connect_service for them, and do not read an empty capabilities list as having no capabilities when nodeActions or nodeCapabilities are present",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps, turn }) => {
@@ -45,8 +45,9 @@ export const readDevices = agentTool({
         "devices_unavailable: Rome could not read the devices in time. Tell the guardian, and try again in a minute.",
       );
     }
+    const connections = deps.connections.list();
     const reach = describeDevices(
-      deps.connections.list(),
+      connections,
       (deps.now ?? Date.now)(),
       askingDeviceOf(turn.channelContext),
     );
@@ -54,6 +55,22 @@ export const readDevices = agentTool({
     const devices = status.devices.map((device) => {
       const entry = reported.get(device.id);
       reported.delete(device.id);
+      const deviceConnections = connections.filter(
+        (connection) => connection.device.id === device.id,
+      );
+      const coveredCapabilityIds = new Set(deviceConnections.map(({ capability }) => capability));
+      const coveredOperations = new Set(
+        deviceConnections.flatMap(({ operations }) => operations.map(({ name }) => name)),
+      );
+      const nodeCapabilities = device.capabilities?.filter(
+        ({ id }) => !coveredCapabilityIds.has(id),
+      );
+      const nodeActions =
+        coveredOperations.size === 0
+          ? device.actions
+          : device.actions?.filter(
+              (action) => action !== "system.info" && !coveredOperations.has(action),
+            );
       return {
         deviceId: device.id,
         name: device.name,
@@ -65,6 +82,12 @@ export const readDevices = agentTool({
         ...(entry?.asking ? { asking: true } : {}),
         ...(entry?.stale ? { stale: true } : {}),
         capabilities: entry?.capabilities ?? [],
+        ...(nodeActions && (coveredOperations.size === 0 || nodeActions.length > 0)
+          ? { nodeActions }
+          : {}),
+        ...(nodeCapabilities && (coveredCapabilityIds.size === 0 || nodeCapabilities.length > 0)
+          ? { nodeCapabilities }
+          : {}),
       };
     });
     // A device that reports what it offers but is missing from the account's
