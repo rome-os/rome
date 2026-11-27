@@ -685,7 +685,7 @@ export async function buildConciergeTools(
     // message there: nothing said there is private.
     if (onConnection && isPrivate) {
       throw new Error(
-        "Nothing here is private: others may read this chat. Say it without the secret, or tell the guardian to ask you for it on the dashboard.",
+        "This chat has no private messages. Say it without the secret, or tell them to ask you for it on the dashboard.",
       );
     }
     // On a connection the model sees no message ids: a replyTo that names

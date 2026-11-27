@@ -928,7 +928,7 @@ describe("Concierge tools", () => {
         private: true,
       });
       expect(secret.isError).toBe(true);
-      expect(secret.content[0]!.text).toContain("Nothing here is private");
+      expect(secret.content[0]!.text).toContain("This chat has no private messages");
     });
 
     it("reminds a turn there that ended on text outside say, once, and not one that ended on done", async () => {
