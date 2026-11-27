@@ -4,7 +4,7 @@
 
 A PR either refactors or changes behavior, never both. A reviewer checks a refactor by asking whether anything changed, and a behavior change by asking whether the new behavior is right. One PR cannot be read both ways.
 
-Try to keep a PR under 400 changed lines, not counting lockfiles, generated files and snapshots. Past that, split it before opening, as a stack if the parts depend on each other.
+Try to keep a PR under 400 changed lines, not counting lockfiles, generated files and snapshots. Past that, split it before opening, as a stack if the parts depend on each other. Small PRs let bots and people review every new line, and keep us from adding code too fast. A PR that only deletes a deprecated feature may be larger, because it adds no new code to review.
 
 Each PR leaves `main` working once it and the PRs below it have landed. A PR that only works once a later one lands is not finished.
 

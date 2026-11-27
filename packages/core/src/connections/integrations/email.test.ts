@@ -23,7 +23,6 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../kinds/email/rome-cloud-mail.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../kinds/email/email-control.js";
 import { createTestDb } from "../../test/db.js";
@@ -128,16 +127,6 @@ function makeSettingsRepo(
   } as SettingsRepository & { store: Record<string, unknown> };
 }
 
-/** A person-mapping fake: no guardian person exists, so linkGuardianToAccount is a
- *  no-op — keeps start() off any write path in the descriptor tests. */
-function makePersonMappingRepo(): PeopleRepository {
-  return {
-    byAccount: async () => null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [],
-  } as unknown as PeopleRepository;
-}
-
 function makeDeps(
   provider: MailProvider,
   overrides: Partial<EmailDescriptorDeps> = {},
@@ -145,7 +134,6 @@ function makeDeps(
   return {
     provider,
     settingsRepo: makeSettingsRepo(),
-    peopleRepo: makePersonMappingRepo(),
     // Never hit the real whoami during tests; guardian stays unresolved
     // unless a test's settings row carries it.
     ownerEmailResolver: async () => undefined,

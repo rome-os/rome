@@ -32,7 +32,6 @@ describe("sendApprovalCard", () => {
         channel: "telegram_user",
         threadId: "t1",
         threadType: "private",
-        senderBondLevel: "guardian",
       },
     } as never);
 
@@ -53,7 +52,7 @@ describe("sendApprovalCard", () => {
     });
   });
 
-  it("keeps the preview off a card someone other than the guardian may read", async () => {
+  it("keeps the preview off a card in a group, or a chat of no known kind", async () => {
     const preview = {
       kind: "sensitive_message",
       channel: "telegram",
@@ -61,18 +60,7 @@ describe("sendApprovalCard", () => {
       text: "My private notes",
     };
     for (const channelContext of [
-      {
-        channel: "telegram_user",
-        threadId: "t1",
-        threadType: "group",
-        senderBondLevel: "guardian",
-      },
-      {
-        channel: "telegram_user",
-        threadId: "t1",
-        threadType: "private",
-        senderBondLevel: "acquaintance",
-      },
+      { channel: "telegram_user", threadId: "t1", threadType: "group" },
       { channel: "telegram_user", threadId: "t1" },
     ]) {
       const target = channels(true);
@@ -88,6 +76,20 @@ describe("sendApprovalCard", () => {
     }
   });
 
+  it("shows the preview in a direct chat, whoever sent the message", async () => {
+    const target = channels(true);
+    const preview = { kind: "generic", title: "Send a note", summary: "My notes" };
+
+    await sendApprovalCard(target, {
+      ...approval,
+      preview,
+      channelContext: { channel: "telegram_user", threadId: "t1", threadType: "private" },
+    } as never);
+
+    const [, , message] = target.send.mock.calls[0] ?? [];
+    expect(message?.parts?.[0]).toMatchObject({ preview });
+  });
+
   it("keeps the preview off a card in an email thread, which every recipient reads", async () => {
     const target = {
       list: async () => [{ name: "gmail", platform: "email", sendable: true }],
@@ -101,7 +103,6 @@ describe("sendApprovalCard", () => {
         channel: "gmail",
         threadId: "t1",
         threadType: "private",
-        senderBondLevel: "guardian",
       },
     } as never);
 
