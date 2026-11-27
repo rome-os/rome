@@ -16,7 +16,11 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderLogin(url: string, method: "cloud" | "local" = "cloud") {
+function renderLogin(
+  url: string,
+  method: "cloud" | "local" = "cloud",
+  dashboardVisitorAccess = true,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData<AuthState>(AUTH_QUERY_KEY, {
     ready: true,
@@ -25,7 +29,7 @@ function renderLogin(url: string, method: "cloud" | "local" = "cloud") {
       phase: "needs-signin",
       method,
       localPasswordAvailable: true,
-      dashboardVisitorAccess: true,
+      dashboardVisitorAccess,
     },
   });
   return render(
@@ -164,6 +168,30 @@ describe("auto sign-in from Rome Cloud", () => {
 
     await screen.findByRole("alert");
     expect(visitorStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("does not start the visitor sign-in on a box that lets no visitors in", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=visitor", "cloud", false);
+
+    await screen.findByRole("button", { name: "Continue with Rome Cloud" });
+    expect(visitorStartCalls(fetchSpy)).toBe(0);
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("keeps the cloud button busy while the visitor sign-in starts", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((() => new Promise<Response>(() => {})) as typeof fetch);
+
+    renderLogin("/login?via=visitor");
+
+    const busy = await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+    fireEvent.click(busy);
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
+    ).toBe(0);
   });
 
   it("does not start on a local-first box", async () => {

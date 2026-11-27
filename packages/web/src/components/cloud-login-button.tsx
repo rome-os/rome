@@ -12,9 +12,12 @@ import { beginCloudLogin } from "@/lib/cloud-login";
 export function CloudLoginButton({
   onStartError,
   autoStart = false,
+  busy = false,
 }: {
   onStartError: (message: string) => void;
   autoStart?: boolean;
+  /** Another sign-in the page started is under way, so this one must not start too. */
+  busy?: boolean;
 }) {
   const { t } = useTranslation("auth");
   const [starting, setStarting] = useState(false);
@@ -39,7 +42,7 @@ export function CloudLoginButton({
 
   return (
     <AuthActionButton
-      busy={starting}
+      busy={starting || busy}
       busyLabel={t("cloud.connecting")}
       onClick={() => void start()}
     >

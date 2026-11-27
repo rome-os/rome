@@ -232,7 +232,14 @@ export default function LoginPage() {
     body = (
       <>
         <div hidden={showLocalForm} className="w-full">
-          <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
+          <CloudLoginButton
+            onStartError={(message) => {
+              setCloudError(message);
+              setVisitorError("");
+            }}
+            autoStart={autoStartCloud}
+            busy={visitorStarting}
+          />
           {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
           {localPasswordAvailable &&
             switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
