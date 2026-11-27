@@ -274,17 +274,6 @@ export const contextCrossings: ListedCrossing[] = [
       why,
     })),
   ),
-  ...[
-    ["instance/guardian-profile/actions/agent-name.ts", "apps/actions/types.ts"],
-    ["instance/guardian-profile/actions/agent-name.test.ts", "apps/actions/engine.ts"],
-    ["instance/guardian-profile/actions/agent-name.test.ts", "apps/actions/registry.ts"],
-  ].map(([from, to]) => ({
-    rule: "instance-never-imports-apps",
-    from,
-    to,
-    ticket: "rome-os/rome#2721",
-    why: "The agent renames itself through core:set_agent_name, and Apps defines what an action is. The guardian profile left People with the action unchanged, until the action moves to a context that registers actions.",
-  })),
   {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",

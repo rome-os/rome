@@ -1,7 +1,7 @@
-import type { ActionRegistry } from "../../../apps/actions/types.js";
-import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { LiveEventEmit } from "../../../lib/live-event.js";
-import { applyAgentName } from "../application/guardian-profile.js";
+import type { ActionRegistry } from "../apps/actions/types.js";
+import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { LiveEventEmit } from "../lib/live-event.js";
+import { applyAgentName } from "../instance/guardian-profile/index.js";
 
 export interface AgentNameEvents {
   subscribe(emit: LiveEventEmit): () => void;
