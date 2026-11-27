@@ -130,8 +130,6 @@ import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
-import { appPeople } from "./people/app-people.js";
-import { appAccess } from "./apps/app-access-port.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
@@ -2037,7 +2035,6 @@ async function main() {
     conversationSettings: appChatSettings,
     capabilityDiscovery,
     personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
-    people: appPeople(appAccess(db)),
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
