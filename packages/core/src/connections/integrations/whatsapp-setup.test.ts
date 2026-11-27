@@ -146,7 +146,6 @@ describe("WhatsApp setup discovery", () => {
   function makeRegistry(): SetupRegistry {
     const descriptor = createWhatsAppDescriptor({
       syncSink: { upsertContacts: rs.fn(), upsertChats: rs.fn(), insertMessages: rs.fn() } as never,
-      onAccountConnected: () => {},
       openPairing: () => makePairingFake(new Promise<string>(() => {})),
     });
     return {

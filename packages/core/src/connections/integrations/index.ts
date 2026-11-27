@@ -44,8 +44,6 @@ export interface BuiltinConnectionDeps {
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The commands a Discord Connection's bot offers. */
   discordCommandsOf?: (connectionId: string) => Commands;
-  /** Told the WhatsApp account's canonical self JID each time it connects. */
-  onWhatsAppAccountConnected: (selfJid: string) => void;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
@@ -94,7 +92,6 @@ export function registerBuiltinConnections(
   registry.register(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
-      onAccountConnected: deps.onWhatsAppAccountConnected,
     }),
   );
   // Rome Cloud-OAuth provider connection state (github/slack/

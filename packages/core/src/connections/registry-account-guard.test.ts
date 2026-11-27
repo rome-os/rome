@@ -2,9 +2,7 @@
 // Connection of the service already holds, directly and through a SetupManager
 // setup. Observed through the ledger and the setup state.
 
-import { linkGuardianOnConnect } from "../people/guardian-mapping.js";
 import { describe, expect, it } from "@rstest/core";
-import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/db.js";
 import { platformOf } from "@rome/api-types/platform";
@@ -351,51 +349,6 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
         status: "done",
         grant: { connectionId: next!.id, ended: first.id },
       });
-    } finally {
-      close();
-    }
-  });
-
-  it("keeps the guardian's People link to the account a fix ended", async () => {
-    // Shaped like WhatsApp: the account the setup pairs is the guardian's own,
-    // and the setup reports it without asking for an add-only mapping.
-    const pairOwn: SetupFn = async (interact) => {
-      const { token, botId } = await interact.prompt({
-        fields: [
-          { name: "token", label: "Token", secret: true },
-          { name: "botId", label: "Account id", secret: false },
-        ],
-      });
-      return {
-        credential: credentialFor(token!),
-        profile: { botId },
-        connectedBy: { id: botId },
-      };
-    };
-    const { db, registry, close } = setupRegistry(pairOwn);
-    try {
-      const people = new DrizzlePeopleRepository(db);
-      await people.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
-      const manager = new SetupManager({ registry, participant: linkGuardianOnConnect(people) });
-      const first = await registry.connect(SERVICE);
-      const connect = await manager.start(
-        { connectionKind: SERVICE, connectionId: first.id },
-        "bot",
-      );
-      await manager.provideInput(connect.cid, { token: "t-1", botId: "100" });
-
-      const fix = await manager.start({ connectionKind: SERVICE, connectionId: first.id }, "bot");
-      const outcome = await manager.provideInput(fix.cid, { token: "t-9", botId: "900" });
-
-      expect(outcome?.state).toMatchObject({ status: "done", grant: { ended: first.id } });
-      const guardian = await people.byId("guardian");
-      const platform = platformOf(SERVICE);
-      expect(
-        guardian!.links
-          .filter((link) => link.platform === platform)
-          .map((link) => link.id)
-          .sort(),
-      ).toEqual(["100", "900"]);
     } finally {
       close();
     }

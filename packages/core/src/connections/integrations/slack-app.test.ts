@@ -145,8 +145,9 @@ describe("connecting Rome's Slack app (R1)", () => {
       botUserId: "U_BOT",
       depositKey: "key-1",
     });
-    // The member who approved is the guardian there from their first message.
-    expect(grant.connectedBy).toEqual({ id: "T_A/U_GUARDIAN", stableId: true });
+    // The member who approved connected the app, but their account is not the
+    // bot's, so it is not the guardian's until they send an account code.
+    expect(grant.connectedBy).toEqual({ id: "T_A/U_GUARDIAN" });
     expect(slackAppAccountId(grant.profile ?? {})).toBe("T_A/U_BOT");
   });
 

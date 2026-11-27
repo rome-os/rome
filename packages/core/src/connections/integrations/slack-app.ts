@@ -51,7 +51,7 @@ export const slackAppGrantProfileSchema = z
     botUserId: z.string().min(1),
     /** Kept by a grant made before the Slack gateway Worker. */
     appId: z.string().min(1).optional(),
-    /** The workspace member who approved the app: the guardian there. */
+    /** The workspace member who approved the app. */
     installerUserId: z.string().min(1).optional(),
   })
   .strict();
@@ -238,10 +238,7 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       profile,
       ...(workspace.installerUserId
         ? {
-            connectedBy: {
-              id: `${workspace.teamId}/${workspace.installerUserId}`,
-              stableId: true,
-            },
+            connectedBy: { id: `${workspace.teamId}/${workspace.installerUserId}` },
           }
         : {}),
       summary: {

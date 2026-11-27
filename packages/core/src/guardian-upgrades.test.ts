@@ -31,8 +31,7 @@ const noSources: LiveEventSources = {
   subscribeChatSession: () => () => {},
   subscribeAppCatalog: () => () => {},
   subscribeConciergeActivity: () => () => {},
-  hasChatTasks: async () => false,
-  subscribeChatTasks: () => () => {},
+  chatTasks: async () => null,
 };
 
 // Signed in to Rome Cloud, so the voice input socket is served.
