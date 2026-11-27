@@ -220,6 +220,33 @@ describe("docsSkeletonGaps", () => {
     ]);
   });
 
+  it("reports a folder named under Not parts with no reason", async () => {
+    await writeSkeleton();
+    await write("packages/web/src/main.ts", "");
+    await write(
+      "docs/target/parts.md",
+      `- [Connections](../../${PART})\n\n## Not parts\n\n- \`packages/web/\`\n`,
+    );
+
+    expect(docsSkeletonGaps(repo)).toEqual([
+      'docs/target/parts.md: "Not parts" names packages/web with no reason',
+    ]);
+  });
+
+  it("does not follow a link that sits in inline code, for a part or for a concept", async () => {
+    await writeSkeleton();
+    await write(
+      "docs/target/parts.md",
+      `- [Connections](../../${PART})\n- \`[UI](../../packages/ui/AGENTS.md)\`\n`,
+    );
+    await write(CONCEPT, conceptDoc.replace(/(\[Connections\]\(.*\))/, "`$1`"));
+
+    expect(docsSkeletonGaps(repo)).toEqual([
+      'docs/target/parts.md: part "`[UI](../../packages/ui/AGENTS.md)`" has no link to its AGENTS.md',
+      `${CONCEPT}: "Carried by" links to no part of docs/target/parts.md`,
+    ]);
+  });
+
   it("reads a link that opens with a slash from the repo root", async () => {
     await writeSkeleton();
     await write("docs/target/parts.md", `- [Connections](/${PART})\n`);

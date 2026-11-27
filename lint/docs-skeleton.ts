@@ -102,8 +102,10 @@ function fieldsOf(text: string): Map<string, string> {
  * at the repo root. A link to a URL or to a place in the same doc is left out.
  */
 function linkedFiles(file: string, text: string): string[] {
+  // A link inside inline code is an example, not a link a reader can follow.
   const links = proseLines(text)
     .join("\n")
+    .replace(/`[^`\n]*`/g, "")
     .matchAll(/\[[^\]]*\]\(([^)\s#]+)(?:#[^)]*)?\)/g);
   return [...links]
     .map((link) => link[1])
@@ -133,10 +135,13 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
   const listed = split === -1 ? lines : lines.slice(0, split);
   const items = listed.flatMap((line) => /^[-*]\s+(.+)$/.exec(line)?.[1] ?? []);
   if (items.length === 0) gaps.push(`${PARTS}: lists no part`);
-  const notParts = (split === -1 ? [] : lines.slice(split + 1)).flatMap(
-    (line) => /^[-*]\s+`([^`]+?)\/?`/.exec(line)?.[1] ?? [],
-  );
-  const covering = [...notParts];
+  const covering: string[] = [];
+  for (const line of split === -1 ? [] : lines.slice(split + 1)) {
+    const named = /^[-*]\s+`([^`]+?)\/?`(.*)$/.exec(line);
+    if (!named) continue;
+    covering.push(named[1]);
+    if (!/\w/.test(named[2])) gaps.push(`${PARTS}: "Not parts" names ${named[1]} with no reason`);
+  }
 
   for (const item of items) {
     const name = (/^\[([^\]]+)\]/.exec(item)?.[1] ?? item).trim();
