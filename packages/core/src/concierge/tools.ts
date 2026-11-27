@@ -1002,7 +1002,7 @@ export async function buildConciergeTools(
             return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
           }
           if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
-            throw new Error(`No message ${messageId} from a person in this chat.`);
+            throw new Error(`Could not react to message ${messageId} in this chat.`);
           }
           // A reaction is how the turn handles the message, so it never shows
           // working (docs/domains/chats.md#status).
