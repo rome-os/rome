@@ -13,15 +13,19 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
+import { SoleSlotScope } from "@/components/connection-slot-card";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   rs.restoreAllMocks();
+  if (i18n.language !== "en") {
+    await i18n.changeLanguage("en");
+  }
 });
 
 function unconnected(grant: string): ConnectionSlot {
@@ -371,6 +375,158 @@ describe("ChannelConnectCard — custom components", () => {
     );
     const img = (await screen.findByAltText("Feishu QR")) as HTMLImageElement;
     expect(img.src).toBe("data:image/png;base64,QQ==");
+  });
+
+  it("localizes the Feishu QR alt text and links in zh-CN", async () => {
+    await i18n.changeLanguage("zh-CN");
+    stubFetch((url) =>
+      url === "/api/setups/feishu-cid"
+        ? new Response(
+            JSON.stringify({
+              state: {
+                status: "presenting",
+                view: {
+                  id: "feishu.qr",
+                  params: { expiresAt: "2026-11-27T18:00:00.000Z" },
+                  title: "Scan to create the agent app",
+                  body: [
+                    "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+                    "The QR code expires at 2026-11-27T18:00:00.000Z.",
+                  ],
+                  links: [
+                    {
+                      id: "openCreatePage",
+                      label: "Open the app-creation page",
+                      url: "https://accounts.feishu.cn/qr/1",
+                    },
+                    { id: "qrCode", label: "QR code", url: "data:image/png;base64,QQ==" },
+                  ],
+                },
+              },
+            }),
+            { status: 200 },
+          )
+        : null,
+    );
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.feishu}
+        slot={{ ...unconnected("app"), activeSetupCid: "feishu-cid" }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+
+    const img = (await screen.findByAltText("二维码")) as HTMLImageElement;
+    expect(img.src).toBe("data:image/png;base64,QQ==");
+    expect(screen.getByText("扫码创建应用")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "打开应用创建页面" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
+  });
+
+  it("returns to the initial Connect state when a setup is cancelled", async () => {
+    stubFetch((url) => {
+      if (url === "/api/setups/feishu-cid") {
+        return new Response(
+          JSON.stringify({
+            state: {
+              status: "presenting",
+              view: {
+                title: "Scan to authorize",
+                links: [{ label: "Feishu QR", url: "data:image/png;base64,QQ==" }],
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "/api/setups/feishu-cid/cancel") {
+        return new Response(JSON.stringify({ state: { status: "cancelled" } }), { status: 200 });
+      }
+      return null;
+    });
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.feishu}
+        slot={{ ...unconnected("app"), activeSetupCid: "feishu-cid" }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("button", { name: "Connect" })).toBeTruthy();
+    expect(screen.queryByTestId("setup-cancelled")).toBeNull();
+  });
+
+  it("returns to Reconnect when cancelling a broken connection's reconnect setup", async () => {
+    stubFetch((url) => {
+      if (url === "/api/connections/conn-1/grants/app/setup") {
+        return new Response(
+          JSON.stringify({
+            cid: "reconnect-cid",
+            reattached: false,
+            state: {
+              status: "presenting",
+              view: { title: "Reconnecting…" },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "/api/setups/reconnect-cid/cancel") {
+        return new Response(JSON.stringify({ state: { status: "cancelled" } }), { status: 200 });
+      }
+      return null;
+    });
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.feishu}
+        slot={{ ...connected("app", "Rome Bot"), state: "broken" }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.queryByTestId("setup-cancelled")).toBeNull();
+  });
+
+  it("wraps active setup in a card container inside SoleSlotScope, without nesting in multi-slot cards", async () => {
+    stubFetch();
+    const { unmount } = renderCard(
+      <SoleSlotScope>
+        <ChannelConnectCard
+          config={CHANNEL_CONFIGS.discord}
+          slot={unconnected("bot")}
+          role="primary"
+          onRefresh={() => {}}
+        />
+      </SoleSlotScope>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    const soleInput = await screen.findByTestId("setup-input");
+    expect(soleInput.parentElement?.className).toContain("rounded-12");
+    expect(soleInput.parentElement?.className).toContain("border-border");
+    expect(soleInput.parentElement?.className).toContain("bg-surface");
+    unmount();
+
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.telegram}
+        slot={unconnected("bot")}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    const multiInput = await screen.findByTestId("setup-input");
+    expect(multiInput.parentElement?.tagName).toBe("SECTION");
+    expect(multiInput.parentElement?.className).toContain("border-dashed");
   });
 });
 

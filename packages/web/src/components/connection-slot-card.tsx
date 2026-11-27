@@ -50,6 +50,11 @@ export function SoleSlotScope({ children }: { children: ReactNode }) {
   return <SoleSlotContext.Provider value={true}>{children}</SoleSlotContext.Provider>;
 }
 
+/** True when rendered inside a `SoleSlotScope` where `ConnectionSlotCard` omits its outer border/surface. */
+export function useIsSoleSlot(): boolean {
+  return useContext(SoleSlotContext);
+}
+
 /** Whether a slot's credential is held (drives ✓ vs + and the border style). */
 export type SlotCardState = "connected" | "unconnected";
 

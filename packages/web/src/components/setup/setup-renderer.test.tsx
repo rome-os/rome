@@ -8,11 +8,15 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SetupRenderer, type SetupRenderProps } from "@/components/setup/setup-renderer";
+import i18n from "@/i18n";
 import type { SetupState } from "@/lib/setup-api";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   delete window.rome;
+  if (i18n.language !== "en") {
+    await i18n.changeLanguage("en");
+  }
 });
 
 /** What `isElectronShell` reads: the desktop preload's bridge, absent in a browser. */
@@ -235,5 +239,111 @@ describe("setup view links", () => {
     for (const name of ["Open Rome's browser", "Open @BotFather"]) {
       expect(screen.getByRole("link", { name }).getAttribute("target")).toBe("_blank");
     }
+  });
+});
+
+describe("setup form option labels and i18n", () => {
+  it("renders labeled select options and submits the underlying value", async () => {
+    const onSubmit = rs.fn();
+    const user = userEvent.setup();
+    renderState(
+      {
+        status: "awaiting-input",
+        form: {
+          fields: [
+            {
+              name: "domain",
+              label: "Domain",
+              secret: false,
+              options: [
+                { value: "feishu", label: "Feishu (China · feishu.com)" },
+                { value: "lark", label: "Lark (Global · larksuite.com)" },
+              ],
+            },
+          ],
+        },
+      },
+      { onSubmit },
+    );
+
+    await user.click(screen.getByLabelText("Domain"));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", {
+        name: "Lark (Global · larksuite.com)",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(onSubmit).toHaveBeenCalledWith({ domain: "lark" });
+  });
+
+  it("localizes Feishu mode form and views in zh-CN while submitting raw option values", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const onSubmit = rs.fn();
+    const user = userEvent.setup();
+    renderState(
+      {
+        status: "awaiting-input",
+        form: {
+          id: "feishu.mode",
+          instructions: "English fallback instructions",
+          fields: [
+            {
+              name: "mode",
+              label: "Setup method",
+              secret: false,
+              options: [
+                { value: "agent-ready", label: "Agent-ready (scan QR code)" },
+                { value: "manual", label: "Manual (App ID & App Secret)" },
+              ],
+            },
+            {
+              name: "domain",
+              label: "Domain",
+              secret: false,
+              options: [
+                { value: "feishu", label: "Feishu (China · feishu.com)" },
+                { value: "lark", label: "Lark (Global · larksuite.com)" },
+              ],
+            },
+          ],
+        },
+      },
+      { onSubmit },
+    );
+
+    expect(screen.getByText(/选择连接方式：自动创建会通过扫码在你的飞书/)).toBeTruthy();
+
+    await user.click(screen.getByLabelText("连接方式"));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", {
+        name: "自动创建（扫码创建应用）",
+      }),
+    );
+    await user.click(screen.getByLabelText("服务区域"));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByRole("option", {
+        name: "飞书（中国大陆 · feishu.com）",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "继续" }));
+    expect(onSubmit).toHaveBeenCalledWith({ mode: "agent-ready", domain: "feishu" });
+  });
+
+  it("localizes parameterized setup views in zh-CN", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderState({
+      status: "done",
+      grant: {
+        summary: {
+          id: "feishu.connected",
+          params: { appId: "cli_123" },
+          title: "Feishu connected",
+          body: ["App cli_123 is live."],
+        },
+      },
+    });
+
+    expect(screen.getByText("飞书已连接")).toBeTruthy();
+    expect(screen.getByText(/应用 cli_123 已就绪/)).toBeTruthy();
   });
 });

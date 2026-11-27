@@ -4,7 +4,7 @@ import { ArrowUpRight, User } from "lucide-react";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
-import { ConnectionSlotCard } from "@/components/connection-slot-card";
+import { ConnectionSlotCard, useIsSoleSlot } from "@/components/connection-slot-card";
 import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import {
   SetupRenderer,
@@ -37,16 +37,21 @@ import {
  * encodes and hands everything else to the standard renderer.
  */
 function FeishuPresenting(props: SetupRenderProps) {
+  const { t } = useTranslation("settings");
   const { state } = props;
   if (state.status !== "presenting") return <StandardSetupRenderer {...props} />;
   const qr = state.view.links?.find((link) => link.url.startsWith("data:image/"));
   if (!qr) return <StandardSetupRenderer {...props} />;
   const view = { ...state.view, links: state.view.links?.filter((link) => link !== qr) };
+  const qrAlt =
+    state.view.id && qr.id
+      ? t(`connections.setup.views.${state.view.id}.links.${qr.id}`, { defaultValue: qr.label })
+      : qr.label;
   return (
     <div className="flex flex-col gap-3 sm:flex-row">
       <img
         src={qr.url}
-        alt={qr.label}
+        alt={qrAlt}
         className="size-40 rounded-4 border border-border bg-white p-2"
       />
       <div className="min-w-0 flex-1">
@@ -199,6 +204,7 @@ export function ChannelConnectCard({
   onConnected,
 }: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
+  const soleSlot = useIsSoleSlot();
   const connected = slot.state !== null;
   // A broken connection is fixed in place: disconnecting would remove the
   // account, and an account that connects again starts with no history.
@@ -263,6 +269,10 @@ export function ChannelConnectCard({
     if (slot.state === "working" && setupStatus === "done") reset();
   }, [slot.state, setupStatus, reset]);
 
+  // A cancelled setup returns the card straight to Connect / Reconnect, matching
+  // OAuthConnectionSection instead of parking on a dead "Cancelled + Try again" view.
+  const activeSetup = setup.state && setup.state.status !== "cancelled" ? setup.state : null;
+
   async function handleDisconnect() {
     if (!slot.connectionId || !slot.grant) return;
     setDisconnecting(true);
@@ -294,7 +304,7 @@ export function ChannelConnectCard({
     </Button>
   ) : undefined;
   const disconnectAction =
-    broken && !setup.state ? (
+    broken && !activeSetup ? (
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={() => setup.start(true)} disabled={setup.busy}>
           {setup.busy ? t("common.connecting") : t("channels.reconnect")}
@@ -311,6 +321,18 @@ export function ChannelConnectCard({
 
   // A card with its own connected view draws the account and its action itself.
   const ownView = Boolean(config.connectedSection) && connected && !broken;
+
+  const setupRenderer = activeSetup ? (
+    <SetupRenderer
+      state={activeSetup}
+      busy={setup.busy}
+      error={setup.error}
+      onSubmit={setup.submit}
+      onCancel={setup.cancel}
+      onRetry={() => begin(true)}
+      renderPresenting={config.renderPresenting}
+    />
+  ) : null;
 
   return (
     <ConnectionSlotCard
@@ -342,10 +364,10 @@ export function ChannelConnectCard({
         }}
       />
 
-      {broken && setup.error && !setup.state ? (
+      {broken && setup.error && !activeSetup ? (
         <p className="text-aux text-destructive-fg">{setup.error}</p>
       ) : null}
-      {connected && !(broken && setup.state) ? (
+      {connected && !(broken && activeSetup) ? (
         config.connectedSection && !broken ? (
           <config.connectedSection
             onDisconnect={() =>
@@ -354,16 +376,12 @@ export function ChannelConnectCard({
             disconnecting={disconnecting}
           />
         ) : null
-      ) : setup.state ? (
-        <SetupRenderer
-          state={setup.state}
-          busy={setup.busy}
-          error={setup.error}
-          onSubmit={setup.submit}
-          onCancel={setup.cancel}
-          onRetry={() => begin(true)}
-          renderPresenting={config.renderPresenting}
-        />
+      ) : setupRenderer ? (
+        soleSlot ? (
+          <div className="rounded-12 border border-border bg-surface p-4">{setupRenderer}</div>
+        ) : (
+          setupRenderer
+        )
       ) : (
         <div
           className={
