@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Check, Copy, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "@/components/settings-group";
@@ -11,12 +11,68 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 const setupMethods = ["desktop", "cli", "container"] as const;
 type SetupMethod = (typeof setupMethods)[number];
 
 const CONTAINER_DOCS_URL =
   "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker";
+
+export const ROME_NODE_DOCKER_COMPOSE = `services:
+  rome-node:
+    image: ghcr.io/rome-os/rome-node:latest
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:4310:4310"
+    # Optional: set a Web UI password for remote access.
+    # environment:
+    #   ROME_NODE_UI_PASSWORD: "your-custom-password"
+    volumes:
+      - rome-node:/var/lib/rome-node
+volumes:
+  rome-node:`;
+
+function ContainerConnectionGuide() {
+  const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
+  const { copiedText, copy } = useCopyFeedback();
+  const [copyRefused, setCopyRefused] = useState(false);
+  const copied = copiedText === ROME_NODE_DOCKER_COMPOSE;
+
+  async function handleCopy() {
+    setCopyRefused(!(await copy(ROME_NODE_DOCKER_COMPOSE)));
+  }
+
+  return (
+    <>
+      <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>
+      <pre className="select-text overflow-x-auto rounded-8 bg-muted p-4 font-mono text-aux text-foreground">
+        <code>{ROME_NODE_DOCKER_COMPOSE}</code>
+      </pre>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => void handleCopy()}>
+          {copied ? (
+            <Check data-icon="inline-start" aria-hidden className="text-success-fg" />
+          ) : (
+            <Copy data-icon="inline-start" aria-hidden />
+          )}
+          {copied ? t("copiedCompose") : t("copyCompose")}
+        </Button>
+        <Button variant="outline" size="sm" asChild>
+          <a href={CONTAINER_DOCS_URL} target="_blank" rel="noopener noreferrer">
+            {t("containerInstructions")}
+          </a>
+        </Button>
+      </div>
+      {copyRefused && (
+        <p role="alert" className="text-aux text-destructive-fg">
+          {t("copyComposeRefused")}
+        </p>
+      )}
+    </>
+  );
+}
 
 function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
@@ -34,16 +90,7 @@ function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   }
 
   if (method === "container") {
-    return (
-      <>
-        <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>
-        <Button variant="outline" size="sm" asChild>
-          <a href={CONTAINER_DOCS_URL} target="_blank" rel="noopener noreferrer">
-            {t("containerInstructions")}
-          </a>
-        </Button>
-      </>
-    );
+    return <ContainerConnectionGuide />;
   }
 
   return (

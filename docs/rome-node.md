@@ -96,7 +96,7 @@ lives in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`), so mounting one Docker
 volume keeps the device credential, Web UI preferences, and the
 [device audit log](#device-audit-log) across container replacements.
 
-**Settings → Devices** links directly to this section from its empty-state **Rome Node container** card and from **Link device → Rome Node container**.
+**Settings → Devices** shows the same Compose configuration and links to this section from its empty-state **Rome Node container** card and from **Link device → Rome Node container**.
 
 ```yaml
 services:
