@@ -39,6 +39,7 @@ import {
   persistInstanceToken,
 } from "../../instance/instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";
@@ -57,10 +58,9 @@ const log = createLogger("api:cloud-login");
 //   - Bound (instance token present): request scope `openid`. The token leg
 //     returns just the `id_token`.
 //
-// Ownership is enforced *server-side at `/authorize`* — Rome Cloud only ever
-// issues a code to the account that owns this instance. Both legs still check
-// the verified `sub` against an existing guardian seat: a seat bound to an
-// account signs in only that account. Visitors never use these endpoints: the
+// Rome Cloud proves who signed in; Rome decides the role from its own guardian
+// seat (`seatRefuses`). Both legs check the verified `sub` against it, and
+// sign-in never moves the seat. Visitors never use these endpoints: the
 // phone signs them in through the visitor grant. A token that fails verification
 // (bad signature, wrong `iss`/`aud`, nonce mismatch, expiry) fails the
 // sign-in closed; the local password fallback covers a Rome Cloud outage, so
@@ -314,7 +314,8 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         return c.json({ error: "unverified_identity" }, 401);
       }
 
-      if (await seatRefuses(identity.accountId, "native")) {
+      // The phone carries no guardian session, so it never links a seat.
+      if (await seatRefuses(identity.accountId, "native", false)) {
         return c.json({ error: "not_owner" }, 403);
       }
       const guardian = await getGuardianAuthState(deps.db);
@@ -435,7 +436,8 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
 
       // Checked before a vanilla box persists the instance token, so a refused
       // account never links the box either.
-      if (await seatRefuses(accountId, "browser")) return notOwnerRedirect(c);
+      const guardianSignedIn = (await resolveGuardianSession(c, deps.db)) !== null;
+      if (await seatRefuses(accountId, "browser", guardianSignedIn)) return notOwnerRedirect(c);
 
       // Vanilla: the token leg also minted the durable instance token. Persist it
       // before issuing the session so an enrolled box never lacks its credential.
@@ -455,10 +457,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         log.info("cloud login enrolled instance", { accountId });
       }
 
-      // The seat is bound to this account or to none. Stamp it as the
-      // explicit-login binding (repairing a null recorded owner); on an existing
-      // username/password instance this IS the implicit link — the accountId
-      // lands on the guardian row, the local password stays.
+      // The seat is bound to this account, or it has none and the guardian is
+      // signed in. Stamp it as the explicit-login binding; on an existing
+      // username/password instance this IS the link — the accountId lands on
+      // the guardian row, the local password stays.
       await setGuardianAccount(deps.db, accountId, accountEmail, accountAvatarUrl);
       await reloadDashboardAccess();
       return await finishSignedIn(c, identity);
@@ -471,15 +473,19 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     }
   });
 
-  // Rome Cloud issues a code only to the owner, but the instance checks the
-  // account itself: an existing seat signs in only the account it is bound to,
-  // and a refusal never rebinds it. A seat with no recorded account takes the
-  // verified one.
-  async function seatRefuses(accountId: string, channel: PendingLogin["channel"]) {
+  // Rome decides the role from its own records, and sign-in never moves the
+  // seat. The seat's account signs in as the guardian. A seat with no recorded
+  // account (a password-only Rome) is linked only while the guardian is signed
+  // in, so a bare Rome Cloud sign-in cannot claim it. A Rome with no seat is a
+  // first connect, and its first account becomes the guardian.
+  async function seatRefuses(
+    accountId: string,
+    channel: PendingLogin["channel"],
+    guardianSignedIn: boolean,
+  ) {
     const guardian = await getGuardianAuthState(deps.db);
-    if (!guardian.exists || guardian.accountId === null || guardian.accountId === accountId) {
-      return false;
-    }
+    if (!guardian.exists || guardian.accountId === accountId) return false;
+    if (guardian.accountId === null && guardianSignedIn) return false;
     // The seat's account beside the refused one lets support tell a stale
     // binding from a real non-owner.
     log.warn("cloud login refused: account does not own this instance", {
