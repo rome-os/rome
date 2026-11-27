@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listPackage } from "@electron/asar";
@@ -42,6 +42,24 @@ function checkHelper() {
   }
 }
 
+export function checkTemplatePermissions(
+  path,
+  executable = join(path, "Contents/MacOS/RomeComputerUse"),
+) {
+  const info = lstatSync(path);
+  const directory = info.isDirectory();
+  assert.ok(directory || info.isFile(), `Expected a regular file or directory: ${path}`);
+  const required = directory || path === executable || (info.mode & 0o111) !== 0 ? 0o555 : 0o444;
+  assert.equal(
+    info.mode & required,
+    required,
+    `Helper template requires a+${required === 0o555 ? "rx" : "r"}: ${path}`,
+  );
+  if (directory) {
+    for (const name of readdirSync(path)) checkTemplatePermissions(join(path, name), executable);
+  }
+}
+
 export function beforePack(context) {
   if (shipsHelper(context)) checkHelper();
 }
@@ -62,5 +80,6 @@ export function afterPack(context) {
   assert.ok(!existsSync(destination), "The Helper must come from the arm64 pack hook.");
   if (shipsHelper(context)) {
     execFileSync("/usr/bin/ditto", [helper, destination], { stdio: "inherit" });
+    checkTemplatePermissions(destination);
   }
 }

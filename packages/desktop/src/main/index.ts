@@ -1,6 +1,12 @@
 import { join } from "node:path";
 import { release } from "os";
 import {
+  APP_NAME,
+  type EnsureComputerUseHelper,
+  findInstalledHelper,
+  stagedHelperPath,
+} from "@rome-os/node-core/host";
+import {
   app,
   BrowserWindow,
   dialog,
@@ -44,6 +50,7 @@ import type { Runtime } from "./runtime/runtime";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
 import { createComputerUseSettings } from "./computer-use-settings";
+import { createStagedComputerUseHelper } from "./computer-use-staging";
 import { adoptLoginShellPath } from "./cloud/login-path";
 import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
@@ -112,18 +119,30 @@ async function bootstrap() {
     if (audit.state.state === "unavailable")
       log.warn(`Audit log unavailable: ${audit.state.message}`);
     registerAuditHandlers(audit);
-    const computerUseHelperPath =
-      process.platform === "darwin"
-        ? join(
-            app.isPackaged
-              ? process.resourcesPath
-              : join(__dirname, "../../../rome-node-core-darwin-arm64/dist"),
-            "native/Rome Computer Use.app",
-          )
-        : undefined;
-    const computerUseSettings = computerUseHelperPath
-      ? createComputerUseSettings(computerUseHelperPath, readDeviceEnabled)
-      : undefined;
+    let ensureComputerUseHelper: EnsureComputerUseHelper | undefined;
+    let computerUseHelperPath: string | undefined;
+    let computerUseSettings: ReturnType<typeof createComputerUseSettings> | undefined;
+    if (process.platform === "darwin") {
+      if (app.isPackaged) {
+        const stagedPath = stagedHelperPath();
+        const templatePath = join(process.resourcesPath, "native", APP_NAME);
+        const helper = createStagedComputerUseHelper({ templatePath, stagedPath, log });
+        ensureComputerUseHelper = helper.ensureHelper;
+        await ensureComputerUseHelper();
+        computerUseHelperPath = stagedPath;
+        computerUseSettings = createComputerUseSettings(stagedPath, readDeviceEnabled, helper);
+      } else {
+        computerUseHelperPath = join(
+          __dirname,
+          "../../../rome-node-core-darwin-arm64/dist/native",
+          APP_NAME,
+        );
+        computerUseSettings = createComputerUseSettings(
+          () => findInstalledHelper({ bundledAppPath: computerUseHelperPath }),
+          readDeviceEnabled,
+        );
+      }
+    }
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
     const deviceListeners = new Set<() => void>();
@@ -138,6 +157,8 @@ async function bootstrap() {
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
           computerUseHelperPath,
+          ensureComputerUseHelper,
+          strictBundledAppPath: process.platform === "darwin" && app.isPackaged,
           audit,
           // Rome Cloud also sends each push to the desktop apps of the person it is for.
           onNotification: (notification) =>

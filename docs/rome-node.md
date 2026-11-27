@@ -1052,10 +1052,14 @@ macOS arm64, npm installs the helper through `@rome-os/node-core-darwin-arm64`,
 an optional dependency of `@rome-os/node-core`. The host never downloads the
 helper at runtime.
 
-On macOS, the host checks `ROME_NODE_COMPUTER_USE_HELPER` first when set. A
-missing override returns `computer_use_helper_missing`. Otherwise, the host
-checks the Desktop resource, the optional platform package, `/Applications`,
-and `~/Applications`, in that order. A host running under Rosetta can use a
+Packaged Rome Desktop uses only `~/.rome/computer-use/Rome Computer Use.app`.
+If the copy is missing, Desktop stages it again from its signed template.
+
+On macOS, the CLI and unpackaged Desktop check `ROME_NODE_COMPUTER_USE_HELPER`
+first when set. A missing override returns `computer_use_helper_missing`.
+Otherwise, they check the Desktop resource (if supplied), then
+`~/.rome/computer-use/Rome Computer Use.app`, the optional platform package,
+`/Applications`, and `~/Applications`. A host running under Rosetta can use a
 helper installed in either Applications directory.
 
 The host verifies the signature at launch before asking for local session

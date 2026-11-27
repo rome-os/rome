@@ -10,7 +10,7 @@ rs.mock("electron", () => ({
   shell: { openExternal: rs.fn(), showItemInFolder: rs.fn() },
 }));
 
-const helperPath = "/Rome.app/Contents/Resources/native/Rome Computer Use.app";
+const helperPath = "/Users/test/.rome/computer-use/Rome Computer Use.app";
 
 beforeEach(() => {
   rs.resetAllMocks();
@@ -80,4 +80,46 @@ it("opens the macOS privacy pane when the helper is missing or fails to launch",
     4,
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   );
+});
+
+it.each([
+  "setup",
+  "open",
+  "revealHelper",
+] as const)("repairs a deleted staged helper on %s", async (action) => {
+  rs.mocked(existsSync).mockReturnValue(false);
+  const ensureHelper = rs.fn(async () => {
+    rs.mocked(existsSync).mockReturnValue(true);
+    return true;
+  });
+  const settings = createComputerUseSettings(helperPath, () => true, { ensureHelper });
+  expect(settings.status().helperPresent).toBe(false);
+  expect(ensureHelper).not.toHaveBeenCalled();
+  if (action === "open") await settings.open("screenRecording");
+  else await settings[action]();
+  expect(ensureHelper).toHaveBeenCalledTimes(1);
+  if (action === "revealHelper") expect(shell.showItemInFolder).toHaveBeenCalledWith(helperPath);
+  else
+    expect(launchPermissionSetup).toHaveBeenCalledWith(
+      action === "setup"
+        ? { appPath: helperPath }
+        : { appPath: helperPath, pane: "screen-recording" },
+    );
+  expect(shell.openExternal).not.toHaveBeenCalled();
+});
+
+it("keeps a rejected staged bundle unavailable when repair fails", async () => {
+  rs.mocked(existsSync).mockReturnValue(true);
+  const settings = createComputerUseSettings(helperPath, () => true, {
+    helperReady: () => false,
+    ensureHelper: async () => {
+      throw new Error("unsafe directory");
+    },
+  });
+  expect(settings.status().helperPresent).toBe(false);
+  await settings.revealHelper();
+  await settings.open("screenRecording");
+  expect(shell.showItemInFolder).not.toHaveBeenCalled();
+  expect(launchPermissionSetup).not.toHaveBeenCalled();
+  expect(shell.openExternal).toHaveBeenCalledWith(expect.stringContaining("Privacy_ScreenCapture"));
 });
