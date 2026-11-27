@@ -25,7 +25,6 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/core/subagent-call-ports.ts": 1,
   "packages/core/src/db/repositories/routines.ts": 6,
   "packages/core/src/index.ts": 5,
-  "packages/core/src/people/guardian-profile/actions/agent-name.ts": 3,
   "packages/core/src/routines/engine.ts": 4,
   "packages/core/src/webchat/task-input-actor.ts": 1,
 };
