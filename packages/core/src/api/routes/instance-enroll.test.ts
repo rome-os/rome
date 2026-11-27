@@ -3,17 +3,14 @@ import { Hono } from "hono";
 import { instanceEnrollRoutes } from "./instance-enroll.js";
 import {
   clearInstanceToken,
-  getInstanceIdentityEpoch,
   getInstanceToken,
   hydrateInstanceToken,
   INSTANCE_KEY_SETTING_KEY,
   INSTANCE_TOKEN_SETTING_KEY,
   isInstanceLinked,
-  persistInstanceToken,
+  recheckInstanceIdentity,
   setInstanceTokenInMemory,
 } from "../../instance/instance-identity.js";
-import { runInstanceIdentityHeartbeatTick } from "../../instance/instance-identity-heartbeat.js";
-import { RELAY_SETTING_KEY } from "../../relay/settings.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -152,6 +149,32 @@ describe("POST /instance/enroll/start", () => {
     expect(store.data.get("instanceToken")).toBe(TOKEN);
     expect(getInstanceToken()).toBe(TOKEN);
   });
+
+  it("refuses new starts with 429 at pending capacity without evicting live states", async () => {
+    let time = 0;
+    const fetchImpl = rs.fn(async () => successfulExchange());
+    const app = mount(depsWithStore(memoryStore()), { fetchImpl, now: () => time });
+
+    const firstPath = await startCallbackPath(app);
+    for (let count = 1; count < 64; count++) {
+      await startCallbackPath(app);
+    }
+
+    const overflow = await app.request("/instance/enroll/start", { method: "POST" });
+    expect(overflow.status).toBe(429);
+    expect(await overflow.json()).toEqual({ error: "too_many_pending_enrollments" });
+
+    // The first live pending state was not evicted and still completes normally.
+    const callback = await app.request(firstPath);
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("location")).toBe("/?enroll=success");
+
+    // Once pending states expire, new starts are accepted again (after clearing token).
+    setInstanceTokenInMemory(null);
+    time += 10 * 60_000;
+    const afterExpiry = await app.request("/instance/enroll/start", { method: "POST" });
+    expect(afterExpiry.status).toBe(200);
+  });
 });
 
 describe("GET /instance/enroll/callback", () => {
@@ -242,7 +265,7 @@ describe("GET /instance/enroll/callback", () => {
     expect(firstResponse.headers.get("location")).toBe("/?enroll=success");
     expect(duplicateResponse.headers.get("location")).toBe("/?enroll=success");
     for (const response of restResponses) {
-      expect(response.headers.get("location")).toBe("/connect?enroll=error&reason=state");
+      expect(response.headers.get("location")).toBe("/?enroll=success");
     }
     expect(fetchImpl).toHaveBeenCalledTimes(64);
   });
@@ -295,7 +318,7 @@ describe("GET /instance/enroll/callback", () => {
   it.each([
     ["a different token", "romeinst_replacement_token"],
     ["the same token", TOKEN],
-  ])("rejects the old completed state after a heartbeat clear and re-enrollment with %s", async (_, replacementToken) => {
+  ])("rejects the old completed state after a clear and re-enrollment with %s", async (_, replacementToken) => {
     const store = memoryStore();
     const fetchImpl = rs
       .fn(async () => Response.json({ instanceToken: replacementToken, instanceId: "inst_2" }))
@@ -419,7 +442,6 @@ describe("GET /instance/enroll/callback", () => {
     });
     try {
       const firstPath = await startCallbackPath(app);
-      const beforeEnrollment = getInstanceIdentityEpoch();
       const first = await app.request(firstPath);
       expect(first.headers.get("location")).toBe("/?enroll=success");
       expect(register).toHaveBeenCalledTimes(1);
@@ -427,7 +449,6 @@ describe("GET /instance/enroll/callback", () => {
       expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
       expect(getInstanceToken()).toBeNull();
       expect(isInstanceLinked()).toBe(true);
-      expect(getInstanceIdentityEpoch()).toBe(beforeEnrollment + 1);
 
       time = 2 * 60_000 - 1;
       const duplicate = await app.request(firstPath);
@@ -464,67 +485,54 @@ describe("GET /instance/enroll/callback", () => {
     }
   });
 
-  it("keeps the newer signer enrollment linked when an older concurrent callback finishes late with 401", async () => {
+  it("keeps a signer callback replayable across a deferred key registration retry", async () => {
     const store = memoryStore();
     const signer = await startFakeSigner({ aud: "https://rome-cloud.example" });
     rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
-    const fetchImpl = rs
-      .fn(async () => Response.json({ instanceToken: "romeinst_second", instanceId: "inst_2" }))
-      .mockImplementationOnce(async () =>
-        Response.json({ instanceToken: "romeinst_first", instanceId: "inst_1" }),
-      );
+    const fetchImpl = rs.fn(async () => successfulExchange());
     const app = mount(depsWithStore(store), { fetchImpl, now: () => 0 });
-
-    let firstWhoamiStarted!: () => void;
-    const firstWhoamiEntered = new Promise<void>((resolve) => {
-      firstWhoamiStarted = resolve;
-    });
-    let releaseFirstWhoami!: () => void;
-    let whoamiCount = 0;
+    let allowRegistration = false;
     let registered = false;
     const cloudFetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       switch (new URL(String(input)).pathname) {
         case "/api/instance/key":
+          if (!allowRegistration) {
+            throw new TypeError("cloud temporarily unreachable");
+          }
           registered = true;
           return Response.json({});
         case "/api/instance/whoami":
-          whoamiCount++;
-          if (whoamiCount === 1) {
-            firstWhoamiStarted();
-            await new Promise<void>((resolve) => {
-              releaseFirstWhoami = resolve;
-            });
-            return Response.json({ error: "invalid_instance_token" }, { status: 401 });
-          }
           return registered
-            ? Response.json({ instanceId: "inst_2", account: { id: "acct_1" } })
+            ? Response.json({ instanceId: "inst_new", account: { id: "acct_1" } })
             : Response.json({ error: "invalid_instance_token" }, { status: 401 });
         default:
           throw new Error(`unexpected request: ${input}`);
       }
     });
     try {
-      const firstPath = await startCallbackPath(app);
-      const firstPromise = app.request(firstPath);
-      await firstWhoamiEntered;
+      const path = await startCallbackPath(app);
+      const first = await app.request(path);
+      expect(first.headers.get("location")).toBe("/?enroll=success");
+      expect(isInstanceLinked()).toBe(false);
+      expect(getInstanceToken()).toBe(TOKEN);
 
+      // Replay works while the one-time token is waiting for the retry.
+      const beforeRetryReplay = await app.request(path);
+      expect(beforeRetryReplay.headers.get("location")).toBe("/?enroll=success");
+
+      // Once the retry registers the key and drops the one-time token, replay still works.
+      allowRegistration = true;
+      await recheckInstanceIdentity(store);
+      expect(isInstanceLinked()).toBe(true);
+      expect(getInstanceToken()).toBeNull();
+      const afterRetryReplay = await app.request(path);
+      expect(afterRetryReplay.headers.get("location")).toBe("/?enroll=success");
+
+      // Revoking the registered key invalidates the completed state.
       await clearInstanceToken(store);
-      const secondPath = await startCallbackPath(app);
-      const second = await app.request(secondPath);
-      expect(second.headers.get("location")).toBe("/?enroll=success");
-      expect(isInstanceLinked()).toBe(true);
-      expect(store.data.get(INSTANCE_KEY_SETTING_KEY)).toBe("jkt-1");
-
-      releaseFirstWhoami();
-      const first = await firstPromise;
-      expect(first.headers.get("location")).toBe("/connect?enroll=error&reason=state");
-
-      expect(isInstanceLinked()).toBe(true);
-      expect(store.data.get(INSTANCE_KEY_SETTING_KEY)).toBe("jkt-1");
-      const secondReplay = await app.request(secondPath);
-      expect(secondReplay.headers.get("location")).toBe("/?enroll=success");
-      const firstReplay = await app.request(firstPath);
-      expect(firstReplay.headers.get("location")).toBe("/connect?enroll=error&reason=state");
+      const afterClearReplay = await app.request(path);
+      expect(afterClearReplay.headers.get("location")).toBe("/connect?enroll=error&reason=state");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
     } finally {
       cloudFetch.mockRestore();
       rs.unstubAllEnvs();
@@ -558,6 +566,41 @@ describe("GET /instance/enroll/callback", () => {
     } finally {
       globalThis.fetch = realFetch;
       rs.unstubAllEnvs();
+      await signer.close();
+    }
+  });
+
+  it("preserves callback behavior when signer key registration returns revoked without recording a replay", async () => {
+    const store = memoryStore();
+    const signer = await startFakeSigner({ aud: "https://rome-cloud.example" });
+    rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
+    const cloudFetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      switch (new URL(String(input)).pathname) {
+        case "/api/instance/key":
+          return Response.json({ error: "instance_revoked" }, { status: 403 });
+        case "/api/instance/whoami":
+          return Response.json({ error: "invalid_instance_token" }, { status: 401 });
+        default:
+          throw new Error(`unexpected request: ${input}`);
+      }
+    });
+    try {
+      const app = mount(depsWithStore(store), {
+        fetchImpl: async () => successfulExchange(),
+      });
+      const path = await startCallbackPath(app);
+      const first = await app.request(path);
+      expect(first.headers.get("location")).toBe("/?enroll=success");
+      expect(isInstanceLinked()).toBe(false);
+      expect(getInstanceToken()).toBeNull();
+
+      // Because no credential remained linked, replaying the state does not report success.
+      const replay = await app.request(path);
+      expect(replay.headers.get("location")).toBe("/connect?enroll=error&reason=state");
+    } finally {
+      cloudFetch.mockRestore();
+      rs.unstubAllEnvs();
+      await clearInstanceToken(store);
       await signer.close();
     }
   });
@@ -610,305 +653,6 @@ describe("GET /instance/enroll/callback", () => {
       rs.unstubAllEnvs();
       await clearInstanceToken(store);
       await signer.close();
-    }
-  });
-
-  it("rejects an in-flight callback when identity is cleared before the exchange completes", async () => {
-    const store = memoryStore();
-    let releaseExchange!: (res: Response) => void;
-    const fetchImpl = rs.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          releaseExchange = resolve;
-        }),
-    );
-    const provisionAfterLink = rs.fn(async () => {});
-    const app = mount(depsWithStore(store, { provisionAfterLink }), {
-      fetchImpl,
-      now: () => 0,
-    });
-
-    const callbackPath = await startCallbackPath(app);
-    const callbackPromise = app.request(callbackPath);
-    await Promise.resolve();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-
-    await clearInstanceToken(store);
-    releaseExchange(successfulExchange());
-
-    const callback = await callbackPromise;
-    expect(callback.headers.get("location")).toBe("/connect?enroll=error&reason=state");
-    expect(provisionAfterLink).not.toHaveBeenCalled();
-    expect(getInstanceToken()).toBeNull();
-    expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
-  });
-
-  it("does not resurrect a cleared token when clearInstanceToken races a slow store write", async () => {
-    const base = memoryStore();
-    let setStarted!: () => void;
-    const setEntered = new Promise<void>((resolve) => {
-      setStarted = resolve;
-    });
-    let releaseSet!: () => void;
-    const store = {
-      ...base,
-      async set(key: string, value: unknown): Promise<void> {
-        if (key === INSTANCE_TOKEN_SETTING_KEY) {
-          setStarted();
-          await new Promise<void>((resolve) => {
-            releaseSet = resolve;
-          });
-        }
-        await base.set(key, value);
-      },
-    };
-    const provisionAfterLink = rs.fn(async () => {});
-    const app = mount(depsWithStore(store, { provisionAfterLink }), {
-      fetchImpl: async () => successfulExchange(),
-      now: () => 0,
-    });
-
-    const callbackPath = await startCallbackPath(app);
-    const callbackPromise = app.request(callbackPath);
-    await setEntered;
-
-    const clearPromise = clearInstanceToken(store);
-    releaseSet();
-
-    const [callback] = await Promise.all([callbackPromise, clearPromise]);
-    expect(callback.headers.get("location")).toBe("/connect?enroll=error&reason=state");
-    expect(provisionAfterLink).not.toHaveBeenCalled();
-    expect(getInstanceToken()).toBeNull();
-    expect(base.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
-
-    await hydrateInstanceToken(base);
-    expect(getInstanceToken()).toBeNull();
-  });
-
-  it("rolls back a superseded store write if the superseding write fails", async () => {
-    const base = memoryStore();
-    let firstWriteStarted!: () => void;
-    const firstWriteEntered = new Promise<void>((resolve) => {
-      firstWriteStarted = resolve;
-    });
-    let releaseFirstWrite!: () => void;
-    const store = {
-      ...base,
-      async set(key: string, value: unknown): Promise<void> {
-        if (key === INSTANCE_TOKEN_SETTING_KEY && value === "romeinst_first") {
-          firstWriteStarted();
-          await new Promise<void>((resolve) => {
-            releaseFirstWrite = resolve;
-          });
-        }
-        if (key === INSTANCE_TOKEN_SETTING_KEY && value === "romeinst_second") {
-          throw new Error("disk full");
-        }
-        await base.set(key, value);
-      },
-    };
-
-    const firstPersist = persistInstanceToken(store, "romeinst_first");
-    await firstWriteEntered;
-    const secondPersist = persistInstanceToken(store, "romeinst_second").catch((err) => err);
-    releaseFirstWrite();
-
-    await firstPersist;
-    expect(await secondPersist).toBeInstanceOf(Error);
-    expect(getInstanceToken()).toBeNull();
-    expect(base.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
-
-    await hydrateInstanceToken(base);
-    expect(getInstanceToken()).toBeNull();
-  });
-
-  it("ignores a stale revoked check on /start after a newer identity already enrolled", async () => {
-    const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: "romeinst_old" });
-    await hydrateInstanceToken(store);
-    let proveStarted!: () => void;
-    const proveEntered = new Promise<void>((resolve) => {
-      proveStarted = resolve;
-    });
-    let releaseProve!: () => void;
-
-    const app = mount(depsWithStore(store), {
-      now: () => 0,
-      proveIdentity: async () => {
-        proveStarted();
-        await new Promise<void>((resolve) => {
-          releaseProve = resolve;
-        });
-        return { status: "revoked" };
-      },
-    });
-
-    const staleStartPromise = app.request("/instance/enroll/start", { method: "POST" });
-    await proveEntered;
-
-    await persistInstanceToken(store, "romeinst_fresh");
-    expect(getInstanceToken()).toBe("romeinst_fresh");
-
-    releaseProve();
-    const staleStart = await staleStartPromise;
-    expect(staleStart.status).toBe(409);
-    expect(getInstanceToken()).toBe("romeinst_fresh");
-    expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe("romeinst_fresh");
-  });
-
-  it("waits for rejected-state relay cleanup to finish before another /start can proceed", async () => {
-    const base = memoryStore({
-      [INSTANCE_TOKEN_SETTING_KEY]: "romeinst_revoked",
-      [RELAY_SETTING_KEY]: { url: "https://old-relay.example" },
-    });
-    await hydrateInstanceToken(base);
-    let relayDeleteStarted!: () => void;
-    const relayDeleteEntered = new Promise<void>((resolve) => {
-      relayDeleteStarted = resolve;
-    });
-    let releaseRelayDelete!: () => void;
-    let relayDeleteDone = false;
-    const store = {
-      ...base,
-      async delete(key: string): Promise<void> {
-        if (key === RELAY_SETTING_KEY) {
-          relayDeleteStarted();
-          await new Promise<void>((resolve) => {
-            releaseRelayDelete = resolve;
-          });
-          relayDeleteDone = true;
-        }
-        await base.delete(key);
-      },
-    };
-    const reload = rs.fn(async () => {});
-    const app = mount(depsWithStore(store, { relayDrainer: { reload } as never }), {
-      now: () => 0,
-      proveIdentity: async () => ({ status: "revoked" }),
-    });
-
-    const firstStartPromise = app.request("/instance/enroll/start", { method: "POST" });
-    await relayDeleteEntered;
-
-    let secondStartResolved = false;
-    const secondStartPromise = Promise.resolve(
-      app.request("/instance/enroll/start", { method: "POST" }),
-    ).then((res) => {
-      secondStartResolved = true;
-      return res;
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(secondStartResolved).toBe(false);
-    expect(relayDeleteDone).toBe(false);
-
-    releaseRelayDelete();
-    const [firstStart, secondStart] = await Promise.all([firstStartPromise, secondStartPromise]);
-    expect(firstStart.status).toBe(200);
-    expect(secondStart.status).toBe(200);
-    expect(relayDeleteDone).toBe(true);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(base.data.has(RELAY_SETTING_KEY)).toBe(false);
-  });
-
-  it("blocks a second /start until in-flight signer registration settles and returns 409", async () => {
-    const store = memoryStore();
-    const signer = await startFakeSigner({ aud: "https://rome-cloud.example" });
-    rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
-    let registerStarted!: () => void;
-    const registerEntered = new Promise<void>((resolve) => {
-      registerStarted = resolve;
-    });
-    let releaseRegister!: () => void;
-    let registered = false;
-    const cloudFetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      switch (new URL(String(input)).pathname) {
-        case "/api/instance/key":
-          registerStarted();
-          await new Promise<void>((resolve) => {
-            releaseRegister = resolve;
-          });
-          registered = true;
-          return Response.json({});
-        case "/api/instance/whoami":
-          return registered
-            ? Response.json({ instanceId: "inst_1", account: { id: "acct_1" } })
-            : Response.json({ error: "invalid_instance_token" }, { status: 401 });
-        default:
-          throw new Error(`unexpected request: ${input}`);
-      }
-    });
-    try {
-      const app = mount(depsWithStore(store), {
-        fetchImpl: async () => successfulExchange(),
-        now: () => 0,
-        proveIdentity: async () => ({
-          status: "ok",
-          identity: { accountId: "acct_1", instanceId: "inst_1" },
-        }),
-      });
-      const firstPath = await startCallbackPath(app);
-      const firstPromise = app.request(firstPath);
-      await registerEntered;
-      expect(isInstanceLinked()).toBe(false);
-
-      let secondStartResolved = false;
-      const secondStartPromise = Promise.resolve(
-        app.request("/instance/enroll/start", { method: "POST" }),
-      ).then((res) => {
-        secondStartResolved = true;
-        return res;
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(secondStartResolved).toBe(false);
-
-      releaseRegister();
-      const [first, secondStart] = await Promise.all([firstPromise, secondStartPromise]);
-      expect(first.headers.get("location")).toBe("/?enroll=success");
-      expect(secondStart.status).toBe(409);
-      const replay = await app.request(firstPath);
-      expect(replay.headers.get("location")).toBe("/?enroll=success");
-    } finally {
-      cloudFetch.mockRestore();
-      rs.unstubAllEnvs();
-      await clearInstanceToken(store);
-      await signer.close();
-    }
-  });
-
-  it("does not clear a newly enrolled legacy token when a stale heartbeat returns 403", async () => {
-    const store = memoryStore({ [INSTANCE_TOKEN_SETTING_KEY]: "romeinst_old" });
-    await hydrateInstanceToken(store);
-    let whoamiStarted!: () => void;
-    const whoamiEntered = new Promise<void>((resolve) => {
-      whoamiStarted = resolve;
-    });
-    let releaseWhoami!: () => void;
-    const cloudFetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (new URL(String(input)).pathname === "/api/instance/whoami") {
-        whoamiStarted();
-        await new Promise<void>((resolve) => {
-          releaseWhoami = resolve;
-        });
-        return Response.json({ error: "instance_revoked" }, { status: 403 });
-      }
-      throw new Error(`unexpected request: ${input}`);
-    });
-    try {
-      const heartbeatPromise = runInstanceIdentityHeartbeatTick({ store });
-      await whoamiEntered;
-
-      await persistInstanceToken(store, "romeinst_fresh");
-      expect(getInstanceToken()).toBe("romeinst_fresh");
-
-      releaseWhoami();
-      await heartbeatPromise;
-
-      expect(getInstanceToken()).toBe("romeinst_fresh");
-      expect(store.data.get(INSTANCE_TOKEN_SETTING_KEY)).toBe("romeinst_fresh");
-    } finally {
-      cloudFetch.mockRestore();
-      await clearInstanceToken(store);
     }
   });
 });

@@ -5,12 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { AUTH_QUERY_KEY, type AuthState } from "@/lib/auth-state";
-import { beginCloudLogin } from "@/lib/cloud-login";
-import { beginDashboardVisitorLogin } from "@/lib/visitor-login";
 import LoginPage from "./LoginPage";
-
-rs.mock("@/lib/cloud-login", { spy: true });
-rs.mock("@/lib/visitor-login", { spy: true });
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
@@ -263,7 +258,6 @@ describe.each([
     method: "local",
     buttonLabel: "Open shared dashboard",
     endpoint: "/api/auth/visitor/start",
-    begin: beginDashboardVisitorLogin,
     startError: "Could not start shared dashboard sign-in. Please try again.",
   },
   {
@@ -271,10 +265,9 @@ describe.each([
     method: "cloud",
     buttonLabel: "Continue with Rome Cloud",
     endpoint: "/api/auth/cloud/start",
-    begin: beginCloudLogin,
     startError: "Could not start sign-in. Please try again.",
   },
-] as const)("$name sign-in button", ({ method, buttonLabel, endpoint, begin, startError }) => {
+] as const)("$name sign-in button", ({ method, buttonLabel, endpoint, startError }) => {
   it("starts once on rapid clicks and stays locked on success", async () => {
     const { promise, resolve } = Promise.withResolvers<Response>();
     const fetchSpy = rs.spyOn(globalThis, "fetch").mockReturnValue(promise);
@@ -297,18 +290,10 @@ describe.each([
     );
   });
 
-  it.each([
-    "rejection",
-    "throw",
-  ])("unlocks and allows retry after an unexpected %s", async (failure) => {
-    const start = rs.mocked(begin);
-    const error = new Error("unexpected sign-in failure");
-    start.mockImplementationOnce(() => {
-      if (failure === "throw") throw error;
-      return Promise.reject(error);
-    });
+  it("unlocks and allows retry after a start failure", async () => {
     const fetchSpy = rs
       .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }))
       .mockImplementation(async () => Response.json({ authorizeUrl: window.location.href }));
     renderLogin("/login", method);
     const button = screen.getByRole("button", { name: buttonLabel });
@@ -325,9 +310,6 @@ describe.each([
     });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
-      endpoint,
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });

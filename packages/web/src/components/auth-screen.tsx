@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { RomeLogo } from "@/components/logo";
@@ -44,13 +44,11 @@ export function AuthActionButton({
 }: {
   busy: boolean;
   busyLabel: string;
-  onClick: () => void | PromiseLike<unknown>;
+  onClick: () => void;
   variant?: "default" | "outline";
   className?: string;
   children: ReactNode;
 }) {
-  const inFlightRef = useRef(false);
-
   return (
     <Button
       type="button"
@@ -60,22 +58,7 @@ export function AuthActionButton({
       aria-disabled={busy || undefined}
       aria-busy={busy || undefined}
       onClick={() => {
-        if (busy || inFlightRef.current) return;
-        inFlightRef.current = true;
-        const unlock = () => {
-          inFlightRef.current = false;
-        };
-        try {
-          const result = onClick();
-          if (typeof result?.then === "function") {
-            void result.then(unlock, unlock);
-            return;
-          }
-          unlock();
-        } catch (error) {
-          unlock();
-          throw error;
-        }
+        if (!busy) onClick();
       }}
     >
       {busy ? (

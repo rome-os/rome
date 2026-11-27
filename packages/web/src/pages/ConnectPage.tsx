@@ -42,12 +42,7 @@ export default function ConnectPage() {
     inFlight.current = true;
     setStarting(true);
     setStartError("");
-    let result;
-    try {
-      result = await beginInstanceEnroll();
-    } catch {
-      result = { ok: false, reason: "start" } as const;
-    }
+    const result = await beginInstanceEnroll();
     // On success the browser navigates away to Rome Cloud; we only land here on
     // failure, so re-enable the button and surface why.
     if (!result.ok) {
@@ -59,7 +54,11 @@ export default function ConnectPage() {
 
   return (
     <AuthScreen title={t("connect.title")}>
-      <AuthActionButton busy={starting} busyLabel={t("connect.connecting")} onClick={startEnroll}>
+      <AuthActionButton
+        busy={starting}
+        busyLabel={t("connect.connecting")}
+        onClick={() => void startEnroll()}
+      >
         {t("connect.connect")}
       </AuthActionButton>
       {error && <AuthError>{error}</AuthError>}

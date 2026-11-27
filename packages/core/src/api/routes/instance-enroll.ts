@@ -5,9 +5,10 @@ import { Hono } from "hono";
 import {
   clearInstanceToken,
   getIdentityIssue,
-  getInstanceIdentityEpoch,
   getInstanceToken,
+  instanceCredentialId,
   isInstanceLinked,
+  onInstanceTokenChanged,
   persistInstanceToken,
   proveIdentity,
   type ProveIdentityResult,
@@ -45,20 +46,11 @@ const CONNECT_PATH = "/connect";
 interface PendingEnroll {
   verifier: string;
   expiresAt: number;
-  epoch: number;
 }
 
 function sweepExpired(entries: Map<string, { expiresAt: number }>, now: number): void {
   for (const [state, entry] of entries) {
     if (entry.expiresAt <= now) entries.delete(state);
-  }
-}
-
-function rememberState<T>(entries: Map<string, T>, state: string, entry: T): void {
-  entries.set(state, entry);
-  if (entries.size > MAX_ENROLL_STATES) {
-    const oldest = entries.keys().next();
-    if (!oldest.done) entries.delete(oldest.value);
   }
 }
 
@@ -87,12 +79,8 @@ async function clearRejectedInstanceState(
   deps: ApiDeps,
   reason: "revoked" | "unknown" | "key_conflict",
 ) {
-  const clearPromise = clearInstanceToken(deps.settingsRepo);
-  const clearEpoch = getInstanceIdentityEpoch();
-  await clearPromise;
-  if (getInstanceIdentityEpoch() !== clearEpoch) return;
+  await clearInstanceToken(deps.settingsRepo);
   await deps.settingsRepo.delete(RELAY_SETTING_KEY);
-  if (getInstanceIdentityEpoch() !== clearEpoch) return;
   try {
     await deps.relayDrainer.reload([]);
   } catch (err) {
@@ -105,14 +93,11 @@ async function clearRejectedInstanceState(
 }
 
 async function checkExistingEnrollment(
+  deps: ApiDeps,
   seams: InstanceEnrollSeams,
-  waitForCleanup: () => Promise<void>,
-  clearRejected: (reason: "revoked" | "unknown" | "key_conflict") => Promise<void>,
 ): Promise<EnrollStartGate> {
-  await waitForCleanup();
   if (!isInstanceLinked()) return { ok: true };
 
-  const checkEpoch = getInstanceIdentityEpoch();
   let auth: ProveIdentityResult;
   try {
     auth = await (seams.proveIdentity ?? proveIdentity)({
@@ -132,16 +117,8 @@ async function checkExistingEnrollment(
     case "revoked":
     case "unknown":
     case "key_conflict":
-      await waitForCleanup();
-      if (getInstanceIdentityEpoch() !== checkEpoch) {
-        return isInstanceLinked()
-          ? { ok: false, status: 409, error: "already_enrolled" }
-          : { ok: true };
-      }
-      await clearRejected(auth.status);
-      return isInstanceLinked()
-        ? { ok: false, status: 409, error: "already_enrolled" }
-        : { ok: true };
+      await clearRejectedInstanceState(deps, auth.status);
+      return { ok: true };
     case "no_token":
       return { ok: true };
     case "unconfigured":
@@ -160,51 +137,56 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
   const app = new Hono();
   const fetchImpl = seams.fetchImpl ?? globalThis.fetch;
   const now = seams.now ?? Date.now;
+  // state nonce -> PKCE verifier. In-process and short-lived: the flow completes
+  // in one browser round-trip, and stale entries are swept on the next access.
   const pending = new Map<string, PendingEnroll>();
   const inFlight = new Map<string, Promise<string>>();
-  let lastCompleted: { state: string; expiresAt: number; epoch: number } | null = null;
-  let activeCleanup: Promise<void> | null = null;
-  let activePersist: { epoch: number; promise: Promise<void> } | null = null;
+  let lastCompleted: { state: string; expiresAt: number } | null = null;
+  let unsubscribeCompleted: (() => void) | null = null;
+
   const clearCompleted = () => {
     lastCompleted = null;
+    unsubscribeCompleted?.();
+    unsubscribeCompleted = null;
   };
-  const waitForCleanup = async () => {
-    while (activeCleanup) {
-      try {
-        await activeCleanup;
-      } catch {
-        // The initiating request handles its own cleanup failure.
-      }
-    }
-  };
-  const waitForSettled = async () => {
-    while (true) {
-      const pendingOp =
-        activeCleanup ??
-        (activePersist && activePersist.epoch === getInstanceIdentityEpoch()
-          ? activePersist.promise
-          : null);
-      if (!pendingOp) return;
-      try {
-        await pendingOp;
-      } catch {
-        // The initiating request handles its own failure.
-      }
-    }
-  };
-  const runCleanup = async (reason: "revoked" | "unknown" | "key_conflict") => {
+
+  // Remember the most recent completed state briefly so duplicate browser/Cloud
+  // redirects land on success instead of a misleading state mismatch, while
+  // clearing automatically if the enrolled credential is later revoked or replaced.
+  const recordCompleted = (state: string, expiresAt: number) => {
     clearCompleted();
-    const cleanup = clearRejectedInstanceState(deps, reason).finally(() => {
-      if (activeCleanup === cleanup) activeCleanup = null;
+    lastCompleted = { state, expiresAt };
+    let credentialId = instanceCredentialId();
+    let token = getInstanceToken();
+    unsubscribeCompleted = onInstanceTokenChanged(() => {
+      const currentCredential = instanceCredentialId();
+      const currentToken = getInstanceToken();
+      if (credentialId === null && currentCredential !== null) {
+        // Signer retry finished registering the key; keep tracking the linked key.
+        credentialId = currentCredential;
+        token = currentToken;
+        return;
+      }
+      if (currentCredential !== credentialId) {
+        clearCompleted();
+        return;
+      }
+      if (currentCredential === null) {
+        if (currentToken === null || currentToken !== token) clearCompleted();
+        return;
+      }
+      if (currentToken !== null && currentToken !== token) {
+        clearCompleted();
+        return;
+      }
+      token = currentToken;
     });
-    activeCleanup = cleanup;
-    await cleanup;
   };
 
   // The verifier never leaves this process; only the challenge rides the
   // browser leg.
   app.post("/instance/enroll/start", async (c) => {
-    const enrollment = await checkExistingEnrollment(seams, waitForSettled, runCleanup);
+    const enrollment = await checkExistingEnrollment(deps, seams);
     if (!enrollment.ok) {
       return c.json({ error: enrollment.error }, enrollment.status);
     }
@@ -212,11 +194,6 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     const origin = getRomeCloudOrigin();
     if (!origin) {
       return c.json({ error: "pantheon_origin_unconfigured" }, 503);
-    }
-
-    await waitForSettled();
-    if (isInstanceLinked()) {
-      return c.json({ error: "already_enrolled" }, 409);
     }
 
     // Where Rome Cloud sends the browser back with the auth code. The instance
@@ -232,13 +209,13 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     const startedAt = now();
     sweepExpired(pending, startedAt);
     if (lastCompleted && lastCompleted.expiresAt <= startedAt) clearCompleted();
+    if (pending.size >= MAX_ENROLL_STATES) {
+      return c.json({ error: "too_many_pending_enrollments" }, 429);
+    }
+
     const pkce = createPkce();
     const state = randomBytes(16).toString("base64url");
-    rememberState(pending, state, {
-      verifier: pkce.verifier,
-      expiresAt: startedAt + PENDING_TTL_MS,
-      epoch: getInstanceIdentityEpoch(),
-    });
+    pending.set(state, { verifier: pkce.verifier, expiresAt: startedAt + PENDING_TTL_MS });
 
     const authorizeUrl = new URL("/instance/authorize", origin);
     authorizeUrl.searchParams.set("redirect_uri", redirectUri);
@@ -263,12 +240,6 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     const active = inFlight.get(state);
     if (active) return c.redirect(await active);
 
-    if (activeCleanup) {
-      await waitForCleanup();
-      const activeAfterCleanup = inFlight.get(state);
-      if (activeAfterCleanup) return c.redirect(await activeAfterCleanup);
-    }
-
     const requestedAt = now();
     // The first callback for an expired pending state still reports expiry.
     const entry = pending.get(state);
@@ -279,7 +250,6 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     if (completedEntry) {
       if (
         completedEntry.expiresAt > requestedAt &&
-        completedEntry.epoch === getInstanceIdentityEpoch() &&
         (isInstanceLinked() || getInstanceToken() !== null)
       ) {
         return c.redirect(enrolledRedirect());
@@ -293,9 +263,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     if (entry.expiresAt <= requestedAt) {
       return c.redirect(errorRedirect("expired"));
     }
-    if (entry.epoch !== getInstanceIdentityEpoch()) {
-      return c.redirect(errorRedirect("state"));
-    }
+
     const code = c.req.query("code");
     const oauthError = c.req.query("error");
     if (oauthError || !code) {
@@ -337,29 +305,8 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
             return errorRedirect("malformed");
           }
 
-          if (activeCleanup) await waitForCleanup();
-          if (entry.epoch !== getInstanceIdentityEpoch()) {
-            return errorRedirect("state");
-          }
-
-          const persistPromise = persistInstanceToken(deps.settingsRepo, token, {
-            expectedEpoch: entry.epoch,
-          });
-          const enrollmentEpoch = getInstanceIdentityEpoch();
-          const trackedPersist = persistPromise
-            .then(
-              () => undefined,
-              () => undefined,
-            )
-            .finally(() => {
-              if (activePersist?.promise === trackedPersist) activePersist = null;
-            });
-          activePersist = { epoch: enrollmentEpoch, promise: trackedPersist };
-          const linked = await persistPromise;
+          const linked = await persistInstanceToken(deps.settingsRepo, token);
           if (linked?.status === "key_conflict") return errorRedirect("key_conflict");
-          if (enrollmentEpoch === entry.epoch || getInstanceIdentityEpoch() !== enrollmentEpoch) {
-            return errorRedirect("state");
-          }
           if (linked && linked.status !== "ok") {
             log.warn("instance enrolled but the signer key is not registered yet", {
               status: linked.status,
@@ -367,11 +314,9 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
           }
           void deps.provisionAfterLink?.();
           log.info("instance enrolled via in-app OAuth", { instanceId });
-          lastCompleted = {
-            state,
-            expiresAt: now() + COMPLETED_TTL_MS,
-            epoch: enrollmentEpoch,
-          };
+          if (isInstanceLinked() || getInstanceToken() !== null) {
+            recordCompleted(state, now() + COMPLETED_TTL_MS);
+          }
           return enrolledRedirect();
         } catch (err) {
           log.warn("token exchange errored", {

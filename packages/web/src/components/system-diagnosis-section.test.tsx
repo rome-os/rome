@@ -5,10 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FormRows } from "@rome-os/ui/layout-form";
 import i18n from "@/i18n";
-import { beginInstanceEnroll } from "@/lib/instance-enroll";
 import { SystemDiagnosisRow } from "./system-diagnosis-section";
-
-rs.mock("@/lib/instance-enroll", { spy: true });
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -228,18 +225,13 @@ describe("SystemDiagnosisRow reconnect", () => {
 
   it.each([
     "HTTP failure",
-    "rejection",
-    "throw",
+    "network error",
   ])("shows an error and allows retry after %s", async (failure) => {
     const start = mockReconnect();
     if (failure === "HTTP failure") {
       start.mockResolvedValueOnce(Response.json({}, { status: 503 }));
     } else {
-      rs.mocked(beginInstanceEnroll).mockImplementationOnce(() => {
-        const error = new Error("unexpected enrollment failure");
-        if (failure === "throw") throw error;
-        return Promise.reject(error);
-      });
+      start.mockRejectedValueOnce(new TypeError("network down"));
     }
     renderSection();
     const button = await screen.findByRole("button", { name: "Reconnect" });
@@ -260,6 +252,6 @@ describe("SystemDiagnosisRow reconnect", () => {
     const busy = screen.getByRole("button", { name: "Reconnecting…" });
     expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(busy.getAttribute("aria-disabled")).toBe("true");
-    expect(start).toHaveBeenCalledTimes(failure === "HTTP failure" ? 2 : 1);
+    expect(start).toHaveBeenCalledTimes(2);
   });
 });

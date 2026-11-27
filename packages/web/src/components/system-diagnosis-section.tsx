@@ -78,12 +78,7 @@ export function SystemDiagnosisRow({ details }: { details?: ReactNode }) {
     reconnectInFlight.current = true;
     setReconnecting(true);
     setReconnectError("");
-    let result;
-    try {
-      result = await beginInstanceEnroll();
-    } catch {
-      result = { ok: false, reason: "start" } as const;
-    }
+    const result = await beginInstanceEnroll();
     // Success navigates away to Rome Cloud; we only land here on failure.
     if (!result.ok) {
       reconnectInFlight.current = false;

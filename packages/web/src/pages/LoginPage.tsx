@@ -115,12 +115,7 @@ export default function LoginPage() {
     visitorInFlight.current = true;
     setVisitorStarting(true);
     setVisitorError("");
-    let result;
-    try {
-      result = await beginDashboardVisitorLogin();
-    } catch {
-      result = { ok: false, reason: "start" } as const;
-    }
+    const result = await beginDashboardVisitorLogin();
     if (!result.ok) {
       visitorInFlight.current = false;
       setVisitorError(
@@ -254,7 +249,7 @@ export default function LoginPage() {
               className="mt-3"
               busy={visitorStarting}
               busyLabel={t("visitorDashboard.connecting")}
-              onClick={startDashboardVisitorLogin}
+              onClick={() => void startDashboardVisitorLogin()}
             >
               {t("visitorDashboard.signIn")}
             </AuthActionButton>

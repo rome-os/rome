@@ -34,12 +34,7 @@ export function CloudLoginButton({
       inFlight.current = true;
       setStarting(true);
       onStartError("");
-      let result;
-      try {
-        result = await beginCloudLogin(options);
-      } catch {
-        result = { ok: false, reason: "start" } as const;
-      }
+      const result = await beginCloudLogin(options);
       if (!result.ok) {
         onStartError(result.reason === "network" ? t("networkError") : t("cloud.errorStart"));
         inFlight.current = false;
@@ -57,7 +52,11 @@ export function CloudLoginButton({
 
   return (
     <>
-      <AuthActionButton busy={starting} busyLabel={t("cloud.connecting")} onClick={() => start()}>
+      <AuthActionButton
+        busy={starting}
+        busyLabel={t("cloud.connecting")}
+        onClick={() => void start()}
+      >
         {t("cloud.signIn")}
       </AuthActionButton>
       {chooseAccount && (
