@@ -22,7 +22,7 @@ import {
   outputTitle,
   pageHrefOf,
   outputTypeOf,
-  previewOf,
+  fileKindOf,
   readPrefix,
 } from "./OutputsPanel";
 import { outputOfLink } from "./chat-outputs";
@@ -99,7 +99,7 @@ function output(id: string, extra: Partial<ChatOutputDto>): ChatOutputDto {
     id,
     kind: "written",
     name: `${id}.txt`,
-    path: `/projects/demo/${id}.txt`,
+    path: `/projects/demo/${extra.name ?? `${id}.txt`}`,
     link: `/projects/demo/${id}.txt`,
     mimeType: "text/plain",
     at: earlierToday(),
@@ -438,7 +438,7 @@ describe("OutputsPanel", () => {
     files[outputs[0].contentUrl!] =
       "# Plan\n\n[Reference](https://example.com/reference)\n\n![Chart](https://example.com/chart.png)\n\n<img src=x onerror=alert(1)>\n\n- one";
     renderPanel({ selectedId: "notes" });
-    const markdown = await screen.findByTestId("output-markdown");
+    const markdown = await screen.findByTestId("output-preview");
     await waitFor(() =>
       expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
     );
@@ -478,7 +478,7 @@ describe("OutputsPanel", () => {
         "# Architecture\n\n```mermaid\nflowchart TD\n    W[Web React / Vite] --> RPC[认证 WebSocket RPC + HTTP]\n```";
       renderPanel({ selectedId: "report" });
 
-      const markdown = await screen.findByTestId("output-markdown");
+      const markdown = await screen.findByTestId("output-preview");
       await waitFor(() => expect(markdown.querySelector("svg.pele-flowchart")).not.toBeNull());
       expect(markdown.querySelector("svg.pele-flowchart")?.textContent).toContain(
         "Web React / Vite",
@@ -515,7 +515,7 @@ describe("OutputsPanel", () => {
     expect(download.getAttribute("download")).toBe("bundle.zip");
   });
 
-  it("sends a page to a new tab, since it never runs in the panel", async () => {
+  it("draws a page with nothing in it running, and opens it in a new tab to run", async () => {
     const user = userEvent.setup();
     outputs = [
       output("map", {
@@ -531,11 +531,14 @@ describe("OutputsPanel", () => {
         links: ["/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.html"],
       }),
     ];
+    files[outputs[0].contentUrl!] = "<h1>Trip</h1><script>alert(1)</script>";
+    files[outputs[1].contentUrl!] = "<p>Copy</p>";
     renderPanel();
     await user.click(await screen.findByRole("button", { name: "Trip map" }));
-    expect(
-      screen.getByText("This page does not run here. Open it in a new tab to see it."),
-    ).toBeTruthy();
+    const frame = await screen.findByTitle("trip-map.html");
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toBe("<h1>Trip</h1><script>alert(1)</script>");
+    expect(frame.getAttribute("src")).toBeNull();
     const open = screen.getByRole("link", { name: "Open in new tab" });
     expect(open.getAttribute("href")).toBe("/projects/demo/trip-map.html");
     expect(open.getAttribute("target")).toBe("_blank");
@@ -544,8 +547,37 @@ describe("OutputsPanel", () => {
 
     // A copy of a file outside both folders only downloads, so it has nowhere to open.
     await user.click(screen.getByRole("button", { name: "Copy" }));
-    expect(screen.getByText("This file has no preview.")).toBeTruthy();
+    expect((await screen.findByTitle("copy.html")).getAttribute("sandbox")).toBe("");
     expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
+  });
+
+  it("previews video, audio, PDF and SVG as the projects viewer does", async () => {
+    const user = userEvent.setup();
+    outputs = [
+      output("clip", { name: "clip.mp4", mimeType: "video/mp4", fileKind: "video" }),
+      output("song", { name: "song.mp3", mimeType: "audio/mpeg", fileKind: "audio" }),
+      output("paper", { name: "paper.pdf", mimeType: "application/pdf", fileKind: "pdf" }),
+      // An older server names no kind: the MIME type says it.
+      output("logo", { name: "logo.svg", mimeType: "image/svg+xml" }),
+    ];
+    const { container } = renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Clip" }));
+    expect(container.querySelector("video source")?.getAttribute("src")).toBe(
+      outputs[0].contentUrl,
+    );
+    await user.click(screen.getByRole("button", { name: "Back to outputs" }));
+    await user.click(screen.getByRole("button", { name: "Song" }));
+    expect(container.querySelector("audio source")?.getAttribute("src")).toBe(
+      outputs[1].contentUrl,
+    );
+    await user.click(screen.getByRole("button", { name: "Back to outputs" }));
+    await user.click(screen.getByRole("button", { name: "Paper" }));
+    expect(container.querySelector("object")?.getAttribute("data")).toBe(outputs[2].contentUrl);
+    await user.click(screen.getByRole("button", { name: "Back to outputs" }));
+    await user.click(screen.getByRole("button", { name: "Logo" }));
+    expect(screen.getByRole("img", { name: "logo.svg" }).getAttribute("src")).toBe(
+      outputs[3].contentUrl,
+    );
   });
 
   it("says quietly while earlier outputs are still being read back", async () => {
@@ -803,16 +835,20 @@ describe("projectPathOf", () => {
 
 describe("outputTypeOf and outputTitle", () => {
   it("sorts files into the filters' kinds and names them without the extension", () => {
-    expect(outputTypeOf({ name: "a.pdf", mimeType: "application/pdf" })).toBe("document");
-    expect(outputTypeOf({ name: "a.tsv", mimeType: null })).toBe("spreadsheet");
-    expect(outputTypeOf({ name: "a.html", mimeType: "text/html" })).toBe("page");
-    expect(outputTypeOf({ name: "a.png", mimeType: "image/png" })).toBe("image");
-    expect(outputTypeOf({ name: "a.ts", mimeType: null })).toBe("code");
-    expect(outputTypeOf({ name: "a.pptx", mimeType: null })).toBe("document");
-    expect(outputTypeOf({ name: "a.wav", mimeType: "audio/wav" })).toBe("audio");
-    expect(outputTypeOf({ name: "a.mp4", mimeType: "video/mp4" })).toBe("video");
-    expect(outputTypeOf({ name: "a.diff", mimeType: null })).toBe("code");
-    expect(outputTypeOf({ name: "a.zip", mimeType: "application/zip" })).toBe("file");
+    expect(outputTypeOf({ name: "a.pdf", path: "a.pdf", mimeType: "application/pdf" })).toBe(
+      "document",
+    );
+    expect(outputTypeOf({ name: "a.tsv", path: "a.tsv", mimeType: null })).toBe("spreadsheet");
+    expect(outputTypeOf({ name: "a.html", path: "a.html", mimeType: "text/html" })).toBe("page");
+    expect(outputTypeOf({ name: "a.png", path: "a.png", mimeType: "image/png" })).toBe("image");
+    expect(outputTypeOf({ name: "a.ts", path: "a.ts", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.pptx", path: "a.pptx", mimeType: null })).toBe("document");
+    expect(outputTypeOf({ name: "a.wav", path: "a.wav", mimeType: "audio/wav" })).toBe("audio");
+    expect(outputTypeOf({ name: "a.mp4", path: "a.mp4", mimeType: "video/mp4" })).toBe("video");
+    expect(outputTypeOf({ name: "a.diff", path: "a.diff", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.zip", path: "a.zip", mimeType: "application/zip" })).toBe(
+      "file",
+    );
     expect(outputTitle("weekly-news_digest.md")).toBe("Weekly news digest");
     expect(outputTitle("Rome 发布摘要.md")).toBe("Rome 发布摘要");
   });
@@ -848,16 +884,17 @@ describe("kindsThatFit", () => {
   });
 });
 
-describe("previewOf", () => {
-  it("never previews a page that could run", () => {
-    expect(previewOf({ name: "a.html", mimeType: "text/html" })).toBe("file");
-    expect(previewOf({ name: "a.svg", mimeType: "image/svg+xml" })).toBe("file");
-    expect(previewOf({ name: "a.json", mimeType: "application/json" })).toBe("text");
+describe("fileKindOf", () => {
+  it("takes the server's kind, else the MIME type's, else the path's", () => {
+    expect(fileKindOf({ path: "a.bin", mimeType: null, fileKind: "video" })).toBe("video");
+    expect(fileKindOf({ path: "a", mimeType: "application/pdf" })).toBe("pdf");
+    expect(fileKindOf({ path: "/api/assets/a.docx", mimeType: null })).toBe("docx");
+    expect(fileKindOf({ path: "a.zip", mimeType: "application/zip" })).toBe("binary");
   });
 });
 
 describe("pageHrefOf", () => {
-  const page = { name: "trip map.html", mimeType: "text/html" };
+  const page = { name: "trip map.html", path: "trip map.html", mimeType: "text/html" };
 
   it("opens a written page in the projects folder on its own page", () => {
     expect(
@@ -901,6 +938,7 @@ describe("pageHrefOf", () => {
     expect(
       pageHrefOf({
         name: "bundle.zip",
+        path: "bundle.zip",
         mimeType: "application/zip",
         link: "/projects/demo/bundle.zip",
       }),
@@ -999,7 +1037,7 @@ describe("OutputFile", () => {
     outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
     files[outputs[0].contentUrl!] = "# Plan";
     const { actions } = renderFile({ id: "notes", link: outputs[0].link });
-    const markdown = await screen.findByTestId("output-markdown");
+    const markdown = await screen.findByTestId("output-preview");
     await waitFor(() =>
       expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
     );
@@ -1016,7 +1054,7 @@ describe("OutputFile", () => {
     outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
     files[outputs[0].contentUrl!] = "# Plan";
     renderFile({ id: "notes", link: outputs[0].link }, false);
-    await screen.findByTestId("output-markdown");
+    await screen.findByTestId("output-preview");
     expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
   });
 

@@ -2,6 +2,7 @@ import { type FileHandle, lstat, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setImmediate as nextTick } from "node:timers/promises";
 import type { ChatOutputDto, ChatOutputSource } from "@rome/api-types/chat-outputs";
+import { describeFile } from "@rome/api-types/file-kinds";
 import { openRegularFile, resolveShowablePath } from "../../assets/store.js";
 import { createLogger } from "../../logger.js";
 import { getAssetsDir, getProfileMemoryDir, getProjectsRoot } from "../../paths.js";
@@ -323,6 +324,7 @@ export class ChatOutputs {
       link: this.link(entry),
       links,
       mimeType: row.mimeType,
+      fileKind: describeFile(row.path).kind,
       at: row.createdAt.toISOString(),
       turnId: row.turnId,
       messageId: row.messageId,

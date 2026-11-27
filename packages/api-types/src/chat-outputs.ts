@@ -2,6 +2,8 @@
 // server is packages/core/src/chats/outputs and the clients are packages/web
 // and the iOS app. Fields are only ever added. docs/domains/chats.md#outputs
 
+import type { FileKind } from "./file-kinds.js";
+
 /** How the agent produced a file: wrote it with a tool, or showed it in the chat. */
 export const CHAT_OUTPUT_KINDS = ["written", "shown"] as const;
 export type ChatOutputKind = (typeof CHAT_OUTPUT_KINDS)[number];
@@ -36,6 +38,12 @@ export interface ChatOutputDto {
   links?: string[];
   /** Null when the extension says nothing. */
   mimeType: string | null;
+  /**
+   * What the file previews as, by its path's extension (`describeFile`).
+   * Absent from servers that only give `mimeType`; a client reads the kind
+   * from `mimeType` then (`fileKindOfMimeType`).
+   */
+  fileKind?: FileKind;
   /** When it was written or shown, ISO 8601. */
   at: string;
   turnId: string | null;

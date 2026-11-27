@@ -208,9 +208,11 @@ describe("ChatOutputs", () => {
     expect(list[0]).toMatchObject({
       link: "/projects/demo/notes.md",
       mimeType: "text/markdown",
+      fileKind: "text",
       missing: false,
       from: null,
     });
+    expect(list[1].fileKind).toBe("image");
     expect(list[0].contentUrl).toBe(`/api/chat/sessions/chat-1/outputs/${list[0].id}/content`);
     expect(list[1].link).toBe(`/api/assets/${ID_A}.png`);
     expect(await read("chat-1", list[0].id)).toEqual({ name: "notes.md", text: "# Notes" });

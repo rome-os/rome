@@ -3,7 +3,7 @@ import type { ChatOutputSource, ChatOutputsResponse } from "@rome/api-types/chat
 import { Hono } from "hono";
 import { ChatOutputs } from "../../chats/outputs/chat-outputs.js";
 import { ChatOutputsRepository } from "../../chats/outputs/repository.js";
-import { describeFile } from "../../lib/file-browser-server.js";
+import { describeFile, parseRangeHeader } from "../../lib/file-browser-server.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { isConciergeChat } from "../../webchat/privacy.js";
@@ -68,24 +68,43 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     if (!file) return notFound();
     const described = describeFile(file.path);
     const inline = INLINE_KINDS.has(described.kind);
+    const headers: Record<string, string> = {
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "private, no-cache",
+      "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
+      "Content-Disposition": inline ? "inline" : "attachment",
+      "Content-Type": described.mimeType,
+      "X-Content-Type-Options": "nosniff",
+    };
+    // A player asks for parts of a video or audio file as it plays and seeks.
+    const rangeHeader = c.req.header("range");
+    const range = rangeHeader && file.size > 0 ? parseRangeHeader(rangeHeader, file.size) : null;
+    if (rangeHeader && file.size > 0 && !range) {
+      await file.handle.close();
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-store",
+          "Content-Range": `bytes */${file.size}`,
+        },
+      });
+    }
+    const start = range?.start ?? 0;
+    const end = range?.end ?? file.size - 1;
     // Streams the descriptor that was checked, never the path opened again,
     // and only the bytes fstat counted.
     let body: ReadableStream | null = null;
     if (file.size === 0) await file.handle.close();
     else {
-      body = Readable.toWeb(
-        file.handle.createReadStream({ start: 0, end: file.size - 1 }),
-      ) as ReadableStream;
+      body = Readable.toWeb(file.handle.createReadStream({ start, end })) as ReadableStream;
     }
     return new Response(body, {
-      status: 200,
+      status: range ? 206 : 200,
       headers: {
-        "Cache-Control": "private, no-cache",
-        "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
-        "Content-Disposition": inline ? "inline" : "attachment",
-        "Content-Length": String(file.size),
-        "Content-Type": described.mimeType,
-        "X-Content-Type-Options": "nosniff",
+        ...headers,
+        "Content-Length": String(file.size === 0 ? 0 : end - start + 1),
+        ...(range ? { "Content-Range": `bytes ${start}-${end}/${file.size}` } : {}),
       },
     });
   });

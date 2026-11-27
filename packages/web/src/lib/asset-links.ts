@@ -1,25 +1,16 @@
+import { describeFile, type FileKind } from "@rome/api-types/file-kinds";
 import { getInternalRawPath, isInternalHref } from "./internal-href";
 
-export type AssetKind = "image" | "video" | "audio" | "pdf" | "file";
-
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "svg"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov"]);
-const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "wav", "ogg"]);
-
-/** What a file shows as in chat, by its extension. */
-export function assetKind(extension: string): AssetKind {
-  const ext = extension.toLowerCase();
-  if (IMAGE_EXTENSIONS.has(ext)) return "image";
-  if (VIDEO_EXTENSIONS.has(ext)) return "video";
-  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
-  return ext === "pdf" ? "pdf" : "file";
+/** What a file shows as in chat, by its extension: the server's `describeFile` rule. */
+export function assetKind(extension: string): FileKind {
+  return describeFile(`file.${extension}`).kind;
 }
 
 /** The kind of media a `src` plays as, ignoring its query, or null for anything else. */
 export function mediaKindOfSrc(src: string): "video" | "audio" | null {
   const path = src.split(/[?#]/)[0] ?? "";
   const extension = /\.([a-z0-9]{1,8})$/i.exec(path)?.[1];
-  const kind = extension ? assetKind(extension) : "file";
+  const kind = extension ? assetKind(extension) : null;
   return kind === "video" || kind === "audio" ? kind : null;
 }
 
@@ -29,7 +20,7 @@ const ASSET_PATH = /^\/api\/assets\/[0-9a-f]{32}\.([a-z0-9]{1,8})$/;
  * A link to a file in the asset store (`/api/assets/<id>.<ext>`, relative or
  * on this origin), as its path and kind; null for any other href.
  */
-export function parseAssetHref(href: string | undefined): { path: string; kind: AssetKind } | null {
+export function parseAssetHref(href: string | undefined): { path: string; kind: FileKind } | null {
   if (!isInternalHref(href)) return null;
   const raw = getInternalRawPath(href);
   if (raw === null) return null;
@@ -43,7 +34,7 @@ export interface UploadLink {
   label: string;
   /** `/api/assets/<id>.<ext>` */
   url: string;
-  kind: AssetKind;
+  kind: FileKind;
 }
 
 const UPLOAD_LINE = /^- File \d+: \[(.*)\]\(<(\/api\/assets\/[0-9a-f]{32}\.([a-z0-9]{1,8}))>\)$/;

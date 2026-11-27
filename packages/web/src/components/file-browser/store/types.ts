@@ -1,3 +1,4 @@
+import type { FileKind } from "@rome/api-types/file-kinds";
 import type { TFunction } from "i18next";
 import type { QueryClient } from "@tanstack/react-query";
 import type { MouseEvent, ReactNode } from "react";
@@ -24,7 +25,7 @@ export interface BrowserFile {
   assetUrl: string | null;
   content: string | null;
   editable: boolean;
-  kind: "text" | "image" | "video" | "audio" | "pdf" | "docx" | "binary";
+  kind: FileKind;
   mimeType: string;
   path: string;
   size: number;
