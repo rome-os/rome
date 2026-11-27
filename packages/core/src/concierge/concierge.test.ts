@@ -1153,10 +1153,13 @@ describe("Concierge tools", () => {
         threadId: "901",
       });
       expect(await s.service.deliveryChat(id, "guardian")).toBe(id);
+      // A task a member started there reports there too.
+      expect(await s.service.deliveryChat(id, "visitor:acct-ann")).toBe(id);
       // An account main answers is no Concierge chat: its tasks report to the main chat.
       answering = "core:main";
       expect(await s.service.connectionChat(id)).toBeNull();
       expect(await s.service.deliveryChat(id, "guardian")).not.toBe(id);
+      expect(await s.service.deliveryChat(id, "visitor:acct-ann")).not.toBe(id);
     });
 
     it("sends a task's report to the main chat once that chat is gone", async () => {

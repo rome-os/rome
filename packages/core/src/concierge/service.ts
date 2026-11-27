@@ -624,8 +624,8 @@ export class ConciergeService {
   ): Promise<string | null> {
     if (chatId && (await this.conciergeChat(chatId))) return chatId;
     // A task started in a chat on one of Rome's connected accounts reports
-    // there while that chat is the Concierge's. Such a chat is the guardian's.
-    if (chatId && owner === GUARDIAN_OWNER && (await this.connectionChat(chatId))) return chatId;
+    // there while that chat is live, whichever member started it.
+    if (chatId && (await this.connectionChat(chatId))) return chatId;
     return this.findChatId(owner);
   }
 
