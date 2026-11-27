@@ -221,11 +221,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       snapshot.overrides.routing?.agentName === null
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
-    // A recorded message names its sender, so the wake gate decides here,
-    // before typing shows. Without one, `inbox:message_handler` asks the gate.
-    const sender = "sender" in event ? event.sender : undefined;
+    // The wake gate decides a recorded message here, before typing shows.
+    // For a message heard on a channel itself, `inbox:message_handler` asks it.
     let wake: "wake" | undefined;
-    if (sender && this.options.wakeGateFor) {
+    if (recorded && this.options.wakeGateFor) {
       const gate = await this.options.wakeGateFor({ chat: ref });
       const decision = gate({
         connectionId,

@@ -358,8 +358,8 @@ export function createMessageHandlerAction(
           return { status: "ok", data: { action: "silent" } };
         }
 
-        // The hook asked the wake gate already when the host named the
-        // message's sender; otherwise ask it here.
+        // The hook asked the wake gate already for a recorded message;
+        // otherwise ask it here.
         const wake =
           args.wake === "wake"
             ? args.wake

@@ -207,7 +207,8 @@ describe("wake: in the hook", () => {
     enabled: boolean;
     accountAgent: string | null | undefined;
     recorded: boolean;
-    /** The wake gate's answer, for a recorded message that names its sender. */
+    /** The wake gate's answer for a recorded message. Unset, it wakes
+     *  whatever an enabled chat hears, as core's gate does. */
     gate?: ReturnType<WakeGate>;
   }) {
     const run = rs.fn(async () => ({ status: "ok" as const }));
@@ -247,7 +248,7 @@ describe("wake: in the hook", () => {
       {
         accountAgentOf: () => options.accountAgent,
         ...(options.recorded ? { messagesSaid } : {}),
-        wakeGateFor: async () => () => options.gate ?? "wake",
+        wakeGateFor: async () => () => options.gate ?? (options.enabled ? "wake" : "quiet"),
       },
     );
     await hook.register();
@@ -271,17 +272,15 @@ describe("wake: in the hook", () => {
       await recordedHandler?.({
         ...event,
         recorded: { chatRecordId: "chat-1", messageId: "recorded-1" },
-        ...(options.gate ? { sender: { person: null, label: "not linked" } } : {}),
       });
     } else {
       await handler?.(event);
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const args = run.mock.calls[0]?.[1] as { wake?: string; sender?: unknown } | undefined;
+    const args = run.mock.calls[0]?.[1] as { wake?: string } | undefined;
     return {
       heard: run.mock.calls.length > 0 ? "handled" : "quiet",
       wake: args?.wake,
-      sender: args?.sender,
       typing: typing.mock.calls.length > 0,
     };
   }
@@ -298,24 +297,22 @@ describe("wake: in the hook", () => {
       { ...row, recorded: true },
       { ...row, recorded: false },
     ]),
-  )("with no sender named: recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
+  )("recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
     heard,
     agent: _label,
     ...options
   }) => {
     const result = await hear(options);
     expect(result.heard).toBe(heard);
-    expect(result.sender).toBeUndefined();
   });
 
-  // The hook asks the gate once the host names the sender with the message, so
-  // a message that wakes nobody shows no typing. Before the wake gate, the hook
-  // showed typing for it and Inbox dropped it after.
+  // The hook asks the gate for a recorded message, so a message that wakes
+  // nobody shows no typing.
   it.each([
     { gate: "wake", heard: "handled", wake: "wake", typing: true },
     { gate: "quiet", heard: "quiet", wake: undefined, typing: false },
     { gate: "block", heard: "quiet", wake: undefined, typing: false },
-  ] as const)("with the sender named, the gate says $gate → $heard", async ({
+  ] as const)("for a recorded message, the gate says $gate → $heard", async ({
     gate,
     heard,
     wake,

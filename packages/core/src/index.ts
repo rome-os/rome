@@ -2489,7 +2489,6 @@ async function main() {
     recording: inboundRecorder,
     events: chatsEvents,
     wakes: chatsWired.links,
-    labels: chatsWired.labels,
   });
   // A hook may also hear a channel itself. The host appends to this list too.
   const hookHeardChannels = enteredChannels(hookChannels);

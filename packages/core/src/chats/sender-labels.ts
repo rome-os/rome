@@ -2,7 +2,7 @@
 // their role, as Identity and Access answer. Vocabulary:
 // docs/domains/participation.md#projection and docs/domains/access.md.
 
-import type { Account, SaidSender } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
 import type { NamedMember } from "../access/application/members.js";
 import type { PromptMessage, UnseenMessage } from "../agent/index.js";
 import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
@@ -12,28 +12,23 @@ import type { ContextLine, UnseenLine } from "../sessions/turn-links.js";
 export type MemberOfAccount = (account: Account) => Promise<NamedMember | null>;
 
 /**
- * Who said a message from an account of `member`: the person and their
- * role, or nobody. An agent's account in the guardian's Rome Cloud account is
- * the guardian's, so it names the guardian. Never built from the name the
- * message showed, which the sender chose.
+ * Who said a message from an account of `member`, as the agent reads it: the
+ * person's name and role, such as "Ana Lopez, guardian", "ana@example.com,
+ * member" or "not linked". An agent's account in the guardian's Rome Cloud
+ * account is the guardian's, so it names the guardian. Never built from the
+ * name the message showed, which the sender chose.
  */
-export function whoIs(member: NamedMember | null): SaidSender {
-  if (!member) return { person: null, label: "not linked" };
-  return {
-    person: {
-      id: member.personId,
-      name: member.name ?? member.role,
-    },
-    label: member.name ? `${member.name}, ${member.role}` : member.role,
-  };
+export function whoIs(member: NamedMember | null): string {
+  if (!member) return "not linked";
+  return member.name ? `${member.name}, ${member.role}` : member.role;
 }
 
 /**
- * Who a message's sender is, as the agent reads it: {@link whoIs}'s label.
+ * Who a message's sender is, as the agent reads it: {@link whoIs}'s answer.
  * Null for a message with no account, such as one of Rome's own.
  */
 export function whoSaid(line: ContextLine, member: NamedMember | null): string | null {
-  return line.account ? whoIs(member).label : null;
+  return line.account ? whoIs(member) : null;
 }
 
 /**
@@ -43,11 +38,6 @@ export function whoSaid(line: ContextLine, member: NamedMember | null): string |
  */
 export class SenderLabels {
   constructor(private readonly memberOf: MemberOfAccount) {}
-
-  /** Who said a message from `account`, asking now. */
-  async sender(account: Account): Promise<SaidSender> {
-    return whoIs(await this.memberOf(account));
-  }
 
   /** `lines` as the agent reads them, in the same order. */
   async read(lines: readonly ContextLine[]): Promise<PromptMessage[]> {

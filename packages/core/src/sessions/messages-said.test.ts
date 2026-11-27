@@ -9,8 +9,6 @@ import type {
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
-import type { NamedMember } from "../access/application/members.js";
-import { SenderLabels } from "../chats/sender-labels.js";
 import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
 import { markArrival } from "../participation/entrance.js";
 import { ChatEvents } from "../chats/storage/events.js";
@@ -116,7 +114,6 @@ describe("messagesSaid", () => {
     overrides: {
       sessions?: Pick<WebChatRepository, "ensureChannelChat">;
       wakes?: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
-      labels?: Pick<SenderLabels, "sender">;
       /** More channels to record, such as an account's new one. */
       channels?: readonly Channel[];
     } = {},
@@ -143,7 +140,6 @@ describe("messagesSaid", () => {
       recording,
       events,
       wakes,
-      ...(overrides.labels ? { labels: overrides.labels } : {}),
     });
   }
 
@@ -826,112 +822,5 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session)).toHaveLength(0);
     await said.decided(heardOther.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
-  });
-
-  describe("who said it", () => {
-    const ALICE: NamedMember = { personId: "p-alice", name: "Alice Liddell", role: "member" };
-    /** Alice's accounts: two of her own, and her agent's, which is hers too. */
-    const ALICE_ACCOUNTS = ["alice-tg", "alice-tg-2", "alice-bot"];
-    /** Identity and Access, answering Alice for her accounts and nobody for
-     *  any other, and counting each question. */
-    function people() {
-      const asked: string[] = [];
-      const labels = new SenderLabels(async (account) => {
-        asked.push(account.id);
-        return ALICE_ACCOUNTS.includes(account.id) ? ALICE : null;
-      });
-      return { labels, asked };
-    }
-    async function hear(
-      labels: Pick<SenderLabels, "sender"> | undefined,
-      ...said: Partial<ChannelMessage>[]
-    ): Promise<SaidInboundEvent[]> {
-      const port = build(labels ? { labels } : {});
-      const heard: SaidInboundEvent[] = [];
-      port.subscribe(async (event) => {
-        heard.push(event);
-      });
-      for (const [i, overrides] of (said.length > 0 ? said : [{}]).entries()) {
-        await telegram.deliver(message({ messageId: `tg-${i}`, ...overrides }));
-      }
-      await settled();
-      return heard;
-    }
-
-    it("names the person and role behind an account, apart from the shown name", async () => {
-      const [event] = await hear(people().labels, { senderDisplayName: "Ally" });
-
-      expect(event?.message.senderDisplayName).toBe("Ally");
-      expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell" },
-        label: "Alice Liddell, member",
-      });
-    });
-
-    it("names nobody for an account nobody holds, whatever name it shows", async () => {
-      const [event] = await hear(people().labels, {
-        senderId: "mallory-tg",
-        senderDisplayName: "Alice Liddell",
-      });
-
-      expect(event?.sender).toEqual({ person: null, label: "not linked" });
-    });
-
-    it("names the same person for both of one person's accounts", async () => {
-      const heard = await hear(
-        people().labels,
-        { senderId: "alice-tg" },
-        { senderId: "alice-tg-2", senderDisplayName: "A." },
-      );
-
-      expect(heard.map((event) => event.sender?.person?.id)).toEqual(["p-alice", "p-alice"]);
-    });
-
-    it("names the person for their agent's account, as for any account of theirs", async () => {
-      const [event] = await hear(people().labels, { senderId: "alice-bot" });
-
-      expect(event?.sender).toEqual({
-        person: { id: "p-alice", name: "Alice Liddell" },
-        label: "Alice Liddell, member",
-      });
-    });
-
-    it("asks once for a message every hook hears", async () => {
-      const { labels, asked } = people();
-      const port = build({ labels });
-      const heard: SaidInboundEvent[] = [];
-      port.subscribe(async (event) => {
-        heard.push(event);
-      });
-      port.subscribe(async (event) => {
-        heard.push(event);
-      });
-      await telegram.deliver(message());
-      await settled();
-
-      expect(heard.map((event) => event.sender?.label)).toEqual([
-        "Alice Liddell, member",
-        "Alice Liddell, member",
-      ]);
-      expect(asked).toEqual(["alice-tg"]);
-    });
-
-    it("hands the message over without a sender on a host that cannot say who said it", async () => {
-      const [event] = await hear(undefined);
-
-      expect(event?.message.text).toBe("Hello");
-      expect(event && "sender" in event).toBe(false);
-    });
-
-    it("hands the message over without a sender when nobody can be asked", async () => {
-      const [event] = await hear({
-        sender: async () => {
-          throw new Error("database is locked");
-        },
-      });
-
-      expect(event?.message.text).toBe("Hello");
-      expect(event && "sender" in event).toBe(false);
-    });
   });
 });

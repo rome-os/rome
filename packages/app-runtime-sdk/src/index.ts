@@ -2214,28 +2214,6 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
-  /**
-   * Who said the message: the person the account it came from belongs to,
-   * the same answer Rome's own turns read. The name the message showed stays
-   * on {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
-   * host that predates it, and when the host could not be asked.
-   */
-  readonly sender?: SaidSender;
-}
-
-/** Who said a message: the person the account it came from belongs to. An
- *  agent's account in the guardian's Rome Cloud account is the guardian's, and
- *  its message is named as the guardian's. */
-export interface SaidSender {
-  /** The guardian or a member the account belongs to, or null when it
-   *  belongs to nobody with a role. */
-  readonly person: {
-    readonly id: string;
-    readonly name: string;
-  } | null;
-  /** The answer as Rome's own turns read it, such as "Ana Lopez, guardian",
-   *  "ana@example.com, member" or "not linked". */
-  readonly label: string;
 }
 
 /**
