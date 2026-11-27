@@ -389,14 +389,22 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Approval already resolved", approval: resolveResult.approval }, 409);
     }
 
+    const dispatchApproved = () => {
+      deps.approvalHandler.onApproved(approvalId).catch((err) => {
+        log.error("approval execution failed", {
+          approvalId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    };
+
     // Re-confirm that connection/policy state still matches the card preview
-    // immediately before persisting grants.
+    // immediately before persisting grants. Always dispatch onApproved after a
+    // successful claim so the agent's suspended turn resumes with the error
+    // instead of remaining orphaned.
     const confirmedRequest = await resolveConnectionAccessRequest(requestDeps, args);
     if (!confirmedRequest.ok || !matchesConnectionAccessPreview(confirmedRequest.value, preview)) {
-      const reason = confirmedRequest.ok
-        ? "This request changed or was already answered."
-        : confirmedRequest.error;
-      await deps.approvalsRepo.markExecutionFailed?.(approvalId, reason);
+      dispatchApproved();
       return stale();
     }
 
@@ -404,17 +412,11 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       expiresAt,
     });
     if (!granted.ok) {
-      await deps.approvalsRepo.markExecutionFailed?.(approvalId, granted.error);
+      dispatchApproved();
       return c.json({ error: granted.error }, 409);
     }
 
-    deps.approvalHandler.onApproved(approvalId).catch((err) => {
-      log.error("approval execution failed", {
-        approvalId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
+    dispatchApproved();
     return c.json({ ok: true, grantedOperations: granted.grantedOperations }, 202);
   });
 

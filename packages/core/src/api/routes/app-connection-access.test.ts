@@ -909,4 +909,63 @@ describe("Connection-scoped App access", () => {
       h.close();
     }
   });
+
+  it("dispatches onApproved when state changes after claim so the agent continuation is not orphaned", async () => {
+    const onApproved = rs.fn(async () => {});
+    let appEnabled = true;
+    const payload = {
+      actionName: "core:request_connection_access",
+      args: {
+        appId: "notes",
+        connectionKind: "fake-docs",
+        preset: "read_and_write",
+        reason: "Read and create notes",
+      },
+      preview: {
+        kind: "connection_access",
+        appId: "notes",
+        appName: "notes",
+        connectionId: "connection-1",
+        connectionKind: "fake-docs",
+        connectionLabel: "Docs",
+        identity: "account",
+        grantEpoch: "grant-1",
+        preset: "read_and_write",
+        operations: [
+          { name: "documents.get", sideEffect: "read-only" },
+          { name: "documents.create", sideEffect: "write", approvalRequired: true },
+        ],
+        reason: "Read and create notes",
+        title: "Allow notes to access Docs",
+        summary: "Read and create notes",
+      },
+    };
+    const h = makeApp({
+      appEnabled: () => appEnabled,
+      approvalsRepo: {
+        findById: async (id: string) =>
+          id === "appr-post-claim"
+            ? { id, type: "action_execution", status: "pending", payload }
+            : null,
+        resolvePending: async (id: string) => {
+          // Simulate app getting disabled concurrently right as the approval is claimed.
+          appEnabled = false;
+          return { outcome: "resolved", approval: { id, status: "approved", payload } };
+        },
+      },
+      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
+    });
+    try {
+      const res = await h.request("/app-connection-access/approvals/appr-post-claim/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(409);
+      expect(onApproved).toHaveBeenCalledWith("appr-post-claim");
+      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
 });

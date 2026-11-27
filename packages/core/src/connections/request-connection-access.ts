@@ -281,16 +281,11 @@ export function matchesConnectionAccessPreview(
   if (preview.grantEpoch !== undefined && preview.grantEpoch !== resolved.grantEpoch) {
     return false;
   }
-  if (preview.operations.length !== resolved.missingOperations.length) {
-    return false;
-  }
-  const previewOps = [...preview.operations].sort((a, b) => a.name.localeCompare(b.name));
-  const resolvedOps = [...resolved.missingOperations].sort((a, b) => a.name.localeCompare(b.name));
-  for (let i = 0; i < previewOps.length; i += 1) {
-    const expected = previewOps[i]!;
-    const actual = resolvedOps[i]!;
+  const previewByName = new Map(preview.operations.map((op) => [op.name, op]));
+  for (const actual of resolved.missingOperations) {
+    const expected = previewByName.get(actual.name);
     if (
-      expected.name !== actual.name ||
+      !expected ||
       expected.sideEffect !== actual.appAccess?.sideEffects ||
       Boolean(expected.approvalRequired) !== Boolean(actual.appAccess?.approvalRequired)
     ) {

@@ -449,4 +449,100 @@ describe("core:request_connection_access", () => {
       close();
     }
   });
+
+  it("preserves /documentId constraints and applies the new expiry when renewing an expired policy", async () => {
+    const { deps, access, close } = makeFixture();
+    try {
+      const pastExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+      await access.put({
+        appId: "lark",
+        connectionId: "feishu-1",
+        identity: "app",
+        operation: "feishu.document.read",
+        sideEffects: "read-only",
+        approval: "not_required",
+        constraints: [{ inputPointer: "/documentId", allowedValues: ["docA"] }],
+        grantEpoch: "epoch-1",
+        expiresAt: pastExpiry,
+      });
+
+      const resolved = await resolveConnectionAccessRequest(deps, {
+        appId: "lark",
+        connectionKind: "feishu",
+        reason: "Renew expired read access",
+      });
+      expect(resolved.ok).toBe(true);
+      if (!resolved.ok) return;
+      expect(resolved.value.missingOperations.map((op) => op.name)).toEqual([
+        "feishu.document.read",
+        "feishu.wiki.spaces",
+      ]);
+
+      const renewedExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 + 7 * 86_400_000);
+      const granted = await grantConnectionAccessOperations(deps, resolved.value, {
+        expiresAt: renewedExpiry,
+      });
+      expect(granted.ok).toBe(true);
+
+      const docPolicy = await access.get("lark", "feishu-1", "app", "feishu.document.read");
+      expect(docPolicy?.constraints).toEqual([
+        { inputPointer: "/documentId", allowedValues: ["docA"] },
+      ]);
+      expect(docPolicy?.expiresAt?.toISOString()).toBe(renewedExpiry.toISOString());
+    } finally {
+      close();
+    }
+  });
+
+  it("allows approval when a subset of previewed operations was already granted elsewhere", async () => {
+    const { deps, access, close } = makeFixture();
+    try {
+      const preview = await createRequestConnectionAccessAction(deps).preview!({
+        appId: "lark",
+        connectionKind: "feishu",
+        reason: "Read docs",
+      });
+      expect(preview?.kind).toBe("connection_access");
+
+      // Guardian grants feishu.document.read manually in Settings before clicking Allow on the card.
+      await access.put({
+        appId: "lark",
+        connectionId: "feishu-1",
+        identity: "app",
+        operation: "feishu.document.read",
+        sideEffects: "read-only",
+        approval: "not_required",
+        constraints: [{ inputPointer: "/documentId", allowedValues: ["docA"] }],
+        grantEpoch: "epoch-1",
+        expiresAt: null,
+      });
+
+      const guardedAction = createRequestConnectionAccessAction({
+        ...deps,
+        findApproval: async () => ({
+          status: "approved",
+          payload: { preview },
+        }),
+      });
+      const result = await actionExecutionContext.run(
+        { executionId: "exec-1", rootExecutionId: "root-1", initiator: "approval:appr-subset" },
+        () =>
+          guardedAction.execute(
+            { appId: "lark", connectionKind: "feishu", reason: "Read docs" },
+            { emitActionEvent() {} },
+          ),
+      );
+      expect(result).toMatchObject({
+        status: "ok",
+        data: { newlyGranted: ["feishu.wiki.spaces"] },
+      });
+      // Existing Settings grant and its allowlist stay untouched.
+      const docPolicy = await access.get("lark", "feishu-1", "app", "feishu.document.read");
+      expect(docPolicy?.constraints).toEqual([
+        { inputPointer: "/documentId", allowedValues: ["docA"] },
+      ]);
+    } finally {
+      close();
+    }
+  });
 });

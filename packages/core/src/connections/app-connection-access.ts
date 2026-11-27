@@ -287,25 +287,20 @@ export class AppConnectionAccessRepository {
           const input = { appId, ...entry };
           let nextInput = input;
           if (preserveExistingConstraints || preserveExistingExpiry) {
-            const active = tx
+            const unrevoked = tx
               .select()
               .from(appConnectionAccess)
-              .where(
-                and(
-                  policyKey(input),
-                  isNull(appConnectionAccess.revokedAt),
-                  or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
-                ),
-              )
+              .where(and(policyKey(input), isNull(appConnectionAccess.revokedAt)))
               .get();
-            if (active) {
+            if (unrevoked) {
+              const isActive = unrevoked.expiresAt === null || unrevoked.expiresAt > now;
               nextInput = {
                 ...input,
                 ...(preserveExistingConstraints
-                  ? { constraints: toAccessRecord(active).constraints }
+                  ? { constraints: toAccessRecord(unrevoked).constraints }
                   : {}),
-                ...(preserveExistingExpiry
-                  ? { expiresAt: mergeExpiry(input.expiresAt ?? null, active.expiresAt) }
+                ...(preserveExistingExpiry && isActive
+                  ? { expiresAt: mergeExpiry(input.expiresAt ?? null, unrevoked.expiresAt) }
                   : {}),
               };
             }
