@@ -147,16 +147,37 @@ export function ConnectionAppAccess({ connectionId }: { connectionId: string }) 
     return null;
   }
 
+  const refresh = () => {
+    apps.retry();
+    void detail.refetch();
+  };
+
   return (
     <Section aria-labelledby={headingId}>
-      <SectionHeader className="flex-wrap gap-2">
+      <SectionHeader className="items-center gap-2">
         <SectionHeading>
-          <h3 id={headingId} data-slot="section-title" className="text-section text-foreground">
+          <h3
+            id={headingId}
+            data-slot="section-title"
+            className="text-section [text-wrap-style:balance] text-foreground"
+          >
             {t("title")}
           </h3>
         </SectionHeading>
         {detail.isSuccess && (
           <SectionActions>
+            {tab === "access" && (
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t("refresh")}
+                disabled={detail.isFetching}
+                onClick={refresh}
+              >
+                <RefreshCw className="size-3.5 text-muted-foreground" aria-hidden />
+              </Button>
+            )}
             <SegmentedControl<TabValue>
               size="sm"
               aria-label={t("title")}
@@ -172,7 +193,7 @@ export function ConnectionAppAccess({ connectionId }: { connectionId: string }) 
       </SectionHeader>
 
       {detail.isError ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-12 border border-border-subtle bg-surface px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3">
           <p role="alert" className="text-ui text-destructive-fg">
             {t("loadFailed")}
           </p>
@@ -186,15 +207,7 @@ export function ConnectionAppAccess({ connectionId }: { connectionId: string }) 
           </Button>
         </div>
       ) : tab === "access" ? (
-        <AccessManager
-          endpoint={endpoint}
-          detail={detail.data}
-          apps={apps}
-          refresh={() => {
-            apps.retry();
-            void detail.refetch();
-          }}
-        />
+        <AccessManager endpoint={endpoint} detail={detail.data} apps={apps} />
       ) : (
         <AuditLog endpoint={endpoint} detail={detail.data} apps={apps.apps ?? []} />
       )}
@@ -206,12 +219,10 @@ function AccessManager({
   endpoint,
   detail,
   apps,
-  refresh,
 }: {
   endpoint: string;
   detail: ConnectionAppAccessDto;
   apps: ReturnType<typeof useAppsList>;
-  refresh: () => void;
 }) {
   const { t } = useTranslation("settings", { keyPrefix: "connectionAppAccess" });
   const client = useQueryClient();
@@ -329,7 +340,6 @@ function AccessManager({
           setActiveAppId(null);
         }}
         change={change}
-        refresh={refresh}
         policiesForScopes={currentPoliciesForScopes}
       />
     );
@@ -338,7 +348,7 @@ function AccessManager({
   return (
     <div className="space-y-3">
       {apps.error && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-12 border border-border-subtle bg-surface px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3">
           <p role="alert" className="text-ui text-muted-foreground">
             {apps.error.message}
           </p>
@@ -349,7 +359,7 @@ function AccessManager({
       )}
 
       {identity.actState !== "available" && (
-        <p className="rounded-12 border border-border-subtle bg-surface px-4 py-2.5 text-aux text-muted-foreground">
+        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
           {t(`identityState.${identity.actState}`)}
         </p>
       )}
@@ -365,77 +375,65 @@ function AccessManager({
       )}
 
       {authorizedApps.length > 0 ? (
-        <div className="space-y-2">
-          <List className="overflow-hidden rounded-12 border border-border-subtle bg-surface">
-            {authorizedApps.map(({ app, policies }) => {
-              const hasAttention =
-                !app.isEnabled || policies.some((policy) => policy.grantStatus !== "current");
-              return (
-                <ListRow key={app.id} asChild interactive>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      change.reset();
-                      setShowAddPanel(false);
-                      setActiveAppId(app.id);
-                    }}
-                  >
-                    <AppMonogram app={app} />
-                    <ListRowContent>
-                      <ListRowTitle className="flex flex-wrap items-center gap-2 font-medium">
-                        <span className="truncate">{app.displayName}</span>
-                        {!app.isEnabled && (
-                          <Badge variant="muted" className="font-normal">
-                            {t("disabled")}
-                          </Badge>
-                        )}
-                        {hasAttention && app.isEnabled && (
-                          <Badge variant="warning" className="font-normal">
-                            {t("needsAttention")}
-                          </Badge>
-                        )}
-                      </ListRowTitle>
-                      <ListRowDescription>{summarizePolicies(policies, t)}</ListRowDescription>
-                    </ListRowContent>
-                    <ChevronRight className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
-                  </button>
-                </ListRow>
-              );
-            })}
-          </List>
+        <List className="overflow-hidden rounded-12 border border-border-subtle bg-surface">
+          {authorizedApps.map(({ app, policies }) => {
+            const hasAttention =
+              !app.isEnabled || policies.some((policy) => policy.grantStatus !== "current");
+            return (
+              <ListRow key={app.id} asChild interactive>
+                <button
+                  type="button"
+                  onClick={() => {
+                    change.reset();
+                    setShowAddPanel(false);
+                    setActiveAppId(app.id);
+                  }}
+                >
+                  <AppMonogram app={app} />
+                  <ListRowContent>
+                    <ListRowTitle className="flex flex-wrap items-center gap-2">
+                      <span className="truncate">{app.displayName}</span>
+                      {!app.isEnabled && (
+                        <Badge variant="muted" className="font-normal">
+                          {t("disabled")}
+                        </Badge>
+                      )}
+                      {hasAttention && app.isEnabled && (
+                        <Badge variant="warning" className="font-normal">
+                          {t("needsAttention")}
+                        </Badge>
+                      )}
+                    </ListRowTitle>
+                    <ListRowDescription>{summarizePolicies(policies, t)}</ListRowDescription>
+                  </ListRowContent>
+                  <ChevronRight className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+                </button>
+              </ListRow>
+            );
+          })}
 
           {unauthorizedApps.length > 0 && !showAddPanel && (
-            <div className="flex items-center justify-between px-1">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="-ml-2 gap-1.5 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowAddPanel(true)}
-              >
-                <Plus className="size-3.5" aria-hidden />
-                {t("addApp")}
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t("refresh")}
-                onClick={refresh}
-              >
-                <RefreshCw className="size-3.5 text-muted-foreground" aria-hidden />
-              </Button>
-            </div>
+            <ListRow asChild interactive>
+              <button type="button" onClick={() => setShowAddPanel(true)}>
+                <span
+                  aria-hidden
+                  className="flex h-5 w-8 shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  <Plus className="size-4" />
+                </span>
+                <ListRowContent>{t("addApp")}</ListRowContent>
+              </button>
+            </ListRow>
           )}
-        </div>
+        </List>
       ) : (
-        <div className="rounded-12 border border-border-subtle bg-surface px-4 py-5">
+        <div className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-4">
           <div className="flex items-start gap-3">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-8 bg-muted text-muted-foreground">
               <ShieldCheck className="size-4" aria-hidden />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
-              <p className="text-ui font-medium text-foreground">{t("emptyAuthorizedTitle")}</p>
+              <p className="text-ui text-foreground">{t("emptyAuthorizedTitle")}</p>
               <p className="text-aux text-muted-foreground">
                 {apps.loading
                   ? t("loadingApps")
@@ -646,7 +644,6 @@ function AppDetailView({
   onSelectIdentity,
   onBack,
   change,
-  refresh,
   policiesForScopes,
 }: {
   endpoint: string;
@@ -656,7 +653,6 @@ function AppDetailView({
   onSelectIdentity: (identity: string) => void;
   onBack: () => void;
   change: ReturnType<typeof useMutation<void, Error, PolicyChangeRequest[]>>;
-  refresh: () => void;
   policiesForScopes: Map<string, AppConnectionAccessPolicyDto>;
 }) {
   const { t } = useTranslation("settings", { keyPrefix: "connectionAppAccess" });
@@ -739,27 +735,15 @@ function AppDetailView({
               {t("revokeAll")}
             </Button>
           )}
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label={t("refresh")}
-            disabled={busy}
-            onClick={refresh}
-          >
-            <RefreshCw className="size-3.5 text-muted-foreground" aria-hidden />
-          </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-12 border border-border-subtle bg-surface px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3">
         <div className="flex min-w-0 items-center gap-3">
           <AppMonogram app={app} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="truncate text-ui font-medium text-foreground">
-                {app.displayName}
-              </span>
+              <span className="truncate text-ui text-foreground">{app.displayName}</span>
               <span className="truncate font-mono text-aux text-muted-foreground">{app.id}</span>
               {!app.isEnabled && (
                 <Badge variant="muted" className="font-normal">
@@ -793,7 +777,7 @@ function AppDetailView({
       </div>
 
       {identity.actState !== "available" && (
-        <p className="rounded-12 border border-border-subtle bg-surface px-4 py-2.5 text-aux text-muted-foreground">
+        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
           {t(`identityState.${identity.actState}`)}
         </p>
       )}
@@ -821,7 +805,7 @@ function AppDetailView({
         <div className="space-y-4">
           {groupedOperations.map(({ key, operations }) => (
             <div key={key} className="space-y-1.5">
-              <h4 className="px-1 text-aux font-medium text-muted-foreground">
+              <h4 className="px-[var(--row-px-md)] text-aux text-muted-foreground">
                 {t(`groups.${key}`)}
               </h4>
               <List
@@ -915,7 +899,7 @@ function OperationRow({
       <ListRow size="md" className="items-center">
         <ListRowContent>
           <ListRowTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-medium text-foreground">{title}</span>
+            <span className="text-foreground">{title}</span>
             {needsApproval && (
               <Badge variant="outline" className="font-normal text-muted-foreground">
                 {t("approvalRequiredShort")}
@@ -1050,7 +1034,7 @@ function OperationConfigTray({
   };
 
   return (
-    <div className="space-y-3 border-t border-border-subtle bg-background/60 px-4 py-3">
+    <div className="space-y-3 border-t border-border-subtle bg-background/60 px-[var(--row-px-md)] py-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-aux text-muted-foreground">
         <code className="font-mono text-foreground/80">{operation.name}</code>
         <span>·</span>
@@ -1248,9 +1232,14 @@ function ProviderScopes({
   return (
     <div className="overflow-hidden rounded-12 border border-border-subtle bg-surface">
       <ListRow size="md">
-        <StatusIcon className={`size-4 shrink-0 ${statusIconClass}`} aria-hidden />
+        <div
+          aria-hidden
+          className="flex size-8 shrink-0 items-center justify-center rounded-8 bg-muted"
+        >
+          <StatusIcon className={`size-4 ${statusIconClass}`} />
+        </div>
         <ListRowContent>
-          <ListRowTitle className="font-medium">{t("providerScopesTitle")}</ListRowTitle>
+          <ListRowTitle>{t("providerScopesTitle")}</ListRowTitle>
           <ListRowDescription>
             {status === "checked" && scopeRows.length > 0
               ? missingCount > 0
@@ -1262,7 +1251,7 @@ function ProviderScopes({
               : t("providerScopesSubtitle")}
           </ListRowDescription>
         </ListRowContent>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-3">
           {primaryLink && (
             <a
               href={primaryLink.url}
@@ -1307,7 +1296,7 @@ function ProviderScopes({
       {status && expanded && (
         <div
           role="status"
-          className="space-y-2 border-t border-border-subtle bg-background/50 px-4 py-3"
+          className="space-y-2 border-t border-border-subtle bg-background/50 px-[var(--row-px-md)] py-3"
         >
           <div className="flex flex-wrap items-center justify-between gap-2 text-aux">
             <span className="text-foreground">{t(`scopeStatus.${status}`)}</span>
@@ -1455,7 +1444,7 @@ function AuditLog({
 
       {audit.isPending && <p className="text-ui text-muted-foreground">{t("loadingAudit")}</p>}
       {audit.isError && (
-        <div className="flex flex-wrap items-center gap-2 rounded-12 border border-border-subtle bg-surface px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3">
           <p role="alert" className="text-ui text-destructive-fg">
             {audit.error.message}
           </p>
@@ -1467,7 +1456,7 @@ function AuditLog({
         </div>
       )}
       {audit.isSuccess && entries.length === 0 && (
-        <p className="rounded-12 border border-border-subtle bg-surface px-4 py-5 text-center text-ui text-muted-foreground">
+        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-5 text-center text-ui text-muted-foreground">
           {t("emptyAudit")}
         </p>
       )}
@@ -1508,7 +1497,7 @@ function AuditLog({
                       <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotClass}`} />
                       <ListRowContent>
                         <ListRowTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="font-medium text-foreground">
+                          <span className="text-foreground">
                             {appLabel} · {opTitle}
                           </span>
                           {outcome === "outcome_unknown" && (
@@ -1548,7 +1537,7 @@ function AuditLog({
                   </ListRow>
 
                   {isExpanded && (
-                    <div className="space-y-1 border-t border-border-subtle bg-background/60 px-4 py-2.5 text-aux text-muted-foreground">
+                    <div className="space-y-1 border-t border-border-subtle bg-background/60 px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
                       <p className="break-all font-mono text-foreground/80">{entry.operation}</p>
                       {outcome === "failed" && (
                         <p className="break-all text-destructive-fg">

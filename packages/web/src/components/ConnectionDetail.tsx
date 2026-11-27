@@ -79,12 +79,12 @@ export function ConnectionDetailBody({
           </div>
         );
       })}
+      <AccountControls card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
       {card.slots.map((slot) =>
         slot.connectionId ? (
           <ConnectionAppAccess key={slot.connectionId} connectionId={slot.connectionId} />
         ) : null,
       )}
-      <AccountControls card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
       {chatRuleSlots.map((slot) => (
         <ConnectionChatRules
           key={slot.connectionId}
