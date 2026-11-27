@@ -15,7 +15,13 @@ import {
 } from "@rome-os/ui/list-row";
 import { Section, SectionActions, SectionHeader, SectionHeading } from "@rome-os/ui/page";
 import { SegmentedControl } from "@rome-os/ui/segmented-control";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  QueryClientContext,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -29,7 +35,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useContext, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -124,6 +130,12 @@ function formatShortDate(iso: string, language: string): string {
 }
 
 export function ConnectionAppAccess({ connectionId }: { connectionId: string }) {
+  const queryClient = useContext(QueryClientContext);
+  if (!queryClient) return null;
+  return <ConnectionAppAccessPanel connectionId={connectionId} />;
+}
+
+function ConnectionAppAccessPanel({ connectionId }: { connectionId: string }) {
   const { t } = useTranslation("settings", { keyPrefix: "connectionAppAccess" });
   const headingId = useId();
   const [tab, setTab] = useState<TabValue>("access");
@@ -359,7 +371,7 @@ function AccessManager({
       )}
 
       {identity.actState !== "available" && (
-        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
+        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3 text-aux text-muted-foreground">
           {t(`identityState.${identity.actState}`)}
         </p>
       )}
@@ -449,7 +461,7 @@ function AccessManager({
                     variant="outline"
                     onClick={() => setShowAddPanel(true)}
                   >
-                    <Plus className="mr-1.5 size-3.5" aria-hidden />
+                    <Plus className="mr-1 size-3.5" aria-hidden />
                     {t("authorizeManually")}
                   </Button>
                 </div>
@@ -599,7 +611,7 @@ function ManualAuthorizePanel({
         )}
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <span className="block text-aux text-muted-foreground">{t("presetLabel")}</span>
         <SegmentedControl<QuickGrantPreset>
           size="sm"
@@ -700,7 +712,7 @@ function AppDetailView({
           {t("back")}
         </Button>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           {missingReadOperations.length > 0 && (
             <Button
               type="button"
@@ -777,7 +789,7 @@ function AppDetailView({
       </div>
 
       {identity.actState !== "available" && (
-        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
+        <p className="rounded-12 border border-border-subtle bg-surface px-[var(--row-px-md)] py-3 text-aux text-muted-foreground">
           {t(`identityState.${identity.actState}`)}
         </p>
       )}
@@ -804,7 +816,7 @@ function AppDetailView({
       ) : (
         <div className="space-y-4">
           {groupedOperations.map(({ key, operations }) => (
-            <div key={key} className="space-y-1.5">
+            <div key={key} className="space-y-2">
               <h4 className="px-[var(--row-px-md)] text-aux text-muted-foreground">
                 {t(`groups.${key}`)}
               </h4>
@@ -928,7 +940,7 @@ function OperationRow({
           )}
         </ListRowContent>
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
             size="icon-sm"
@@ -1335,7 +1347,7 @@ function ProviderScopes({
                                 {t("scopeOr")}
                               </span>
                             )}
-                            <code className="whitespace-nowrap rounded bg-muted px-1.5 py-0.5 text-aux">
+                            <code className="whitespace-nowrap rounded-4 bg-muted px-2 py-0 text-aux">
                               {scope}
                             </code>
                           </span>
@@ -1537,7 +1549,7 @@ function AuditLog({
                   </ListRow>
 
                   {isExpanded && (
-                    <div className="space-y-1 border-t border-border-subtle bg-background/60 px-[var(--row-px-md)] py-2.5 text-aux text-muted-foreground">
+                    <div className="space-y-1 border-t border-border-subtle bg-background/60 px-[var(--row-px-md)] py-3 text-aux text-muted-foreground">
                       <p className="break-all font-mono text-foreground/80">{entry.operation}</p>
                       {outcome === "failed" && (
                         <p className="break-all text-destructive-fg">

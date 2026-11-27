@@ -82,15 +82,15 @@ export function ConnectionAccessCard({
       tabIndex={-1}
       data-chat-card
       data-chat-pending-card={pending ? "approval" : undefined}
-      className="mb-3 w-full max-w-md rounded-12 border border-border bg-surface px-4 py-3.5"
+      className="mb-3 w-full max-w-md rounded-12 border border-border bg-surface px-4 py-3"
     >
       {header ? <div className="flex min-w-0 flex-col pb-2">{header}</div> : null}
 
       <div className="flex items-start gap-3">
-        <ConnectionBrandBadge connection={preview.connectionKind} className="mt-0.5 h-8 w-8" />
+        <ConnectionBrandBadge connection={preview.connectionKind} className="h-8 w-8" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-section font-medium text-foreground wrap-anywhere">
+            <span className="text-section text-foreground wrap-anywhere">
               {t("approvals.connectionAccess.title", {
                 appName: preview.appName,
                 connectionLabel: preview.connectionLabel,
@@ -99,9 +99,9 @@ export function ConnectionAccessCard({
           </div>
           <p className="mt-1 text-ui text-muted-foreground wrap-anywhere">{preview.reason}</p>
 
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {grouped.map(({ key }) => (
-              <Badge key={key} variant="muted" className="font-normal">
+              <Badge key={key} variant="muted">
                 {tSettings(`groups.${key}`)}
               </Badge>
             ))}
@@ -111,7 +111,7 @@ export function ConnectionAccessCard({
           </div>
 
           {writeCount > 0 && (
-            <p className="mt-2 flex items-center gap-1.5 text-aux text-muted-foreground">
+            <p className="mt-2 flex items-center gap-2 text-aux text-muted-foreground">
               <ShieldCheck className="size-3.5 shrink-0 text-subtle-foreground" aria-hidden />
               <span>{t("approvals.connectionAccess.writeApprovalNote")}</span>
             </p>
@@ -140,7 +140,7 @@ export function ConnectionAccessCard({
               </button>
 
               {expanded && (
-                <ul className="mt-2 space-y-1.5 rounded-8 border border-border-subtle bg-background/60 px-3 py-2">
+                <ul className="mt-2 space-y-1 rounded-8 border border-border-subtle bg-background/60 px-3 py-2">
                   {preview.operations.map((op) => {
                     const key = operationI18nKey(op.name);
                     const label = key

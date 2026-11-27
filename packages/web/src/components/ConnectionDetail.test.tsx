@@ -650,4 +650,36 @@ describe("ConnectionDetailBody — App Connection Access & Audit", () => {
       `${endpoint}/audit?appId=app-a`,
     );
   });
+
+  it("omits App Access without fetching when rendered outside a QueryClientProvider", () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
+    const discord = cardFor(
+      [
+        connection({
+          id: "storybook-discord",
+          connectionKind: "discord",
+          grants: { bot: "authorized" },
+          display: { bot: grantDisplay({ displayName: "Rome Bot" }) },
+        }),
+      ],
+      "discord",
+    );
+    render(
+      <MemoryRouter>
+        <ConnectionDetailBody
+          card={discord}
+          composio={null}
+          onRefresh={() => {}}
+          onFlash={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "App Access" })).toBeNull();
+    expect(
+      fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes("/api/app-connection-access/")),
+    ).toEqual([]);
+  });
 });
