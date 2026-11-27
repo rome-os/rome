@@ -25,10 +25,8 @@ memory/
 │       └── PROJECT.md                # High-level project summary + deeper notes
 │
 └── relationship/                     # People and relationships
-    ├── BONDS.md                      # Tier definitions + people lists
-    ├── GUARDIAN.md                    # Guardian's profile
-    ├── TEMPLATE.md                  # Template for new person profiles
-    └── <person-id>.md               # Individual person profiles
+    ├── GUARDIAN.md                   # Guardian's profile
+    └── <person-id>.md                # Individual person profiles
 ```
 
 ## How Memory Files Are Used
@@ -38,19 +36,17 @@ The agent reads memory files at the start of each session to build context:
 1. **MEMORY.md** is loaded first and in full, so it is kept lean: only frequently-used facts inline, plus a one-line pointer to each topic file. Its privacy config determines what the agent is forbidden from storing. Key facts and preferences provide session continuity.
 2. **IDENTITY.md** defines the agent's personality and communication style.
 3. **GUARDIAN.md** provides the guardian's profile, timezone, and communication preferences.
-4. **BONDS.md** tells the agent who people are and how much to remember about them based on their tier.
-5. **Topic files** (`topics/<topic>.md`) hold the durable, per-subject knowledge that MEMORY.md only points to. They are loaded on-demand when the agent works on that subject, so they can hold more than MEMORY.md.
-6. **Project summaries** (`projects/<project-name>/PROJECT.md`) contribute their first paragraph to the main agent's always-loaded context. The rest of each file is for deeper reference and maintenance.
-7. **Person profiles** (`<person-id>.md`) are loaded on-demand when the agent interacts with or discusses a specific person.
-8. **Journal entries** hold details and events, loaded on-demand for recent context (e.g., the last few days). Durable takeaways are distilled up into a topic file or MEMORY.md.
+4. **Topic files** (`topics/<topic>.md`) hold the durable, per-subject knowledge that MEMORY.md only points to. They are loaded on-demand when the agent works on that subject, so they can hold more than MEMORY.md.
+5. **Project summaries** (`projects/<project-name>/PROJECT.md`) contribute their first paragraph to the main agent's always-loaded context. The rest of each file is for deeper reference and maintenance.
+6. **Person profiles** (`<person-id>.md`) are loaded on-demand when the agent interacts with or discusses a specific person.
+7. **Journal entries** hold details and events, loaded on-demand for recent context (e.g., the last few days). Durable takeaways are distilled up into a topic file or MEMORY.md.
 
 ### Memory Writing Flow
 
 1. The agent decides something should be remembered (based on skill instructions or conversation context).
 2. Checks `MEMORY.md` privacy config — skips if the topic is blocked.
-3. Checks `BONDS.md` to determine how much to remember for a person's tier.
-4. Writes to the appropriate file: details and events to the journal, per-subject knowledge to a topic file (with a one-line pointer in `MEMORY.md`), a person to their profile. Only frequently-used facts go inline in `MEMORY.md`.
-5. Git commits the change with a descriptive message.
+3. Writes to the appropriate file: details and events to the journal, per-subject knowledge to a topic file (with a one-line pointer in `MEMORY.md`), a person to their profile. Only frequently-used facts go inline in `MEMORY.md`.
+4. Git commits the change with a descriptive message.
 
 ## How the Guardian Can Edit Memory
 
@@ -64,7 +60,6 @@ Common things the guardian might want to edit:
 - Add privacy restrictions in `MEMORY.md`
 - Correct facts or preferences the agent got wrong
 - Add or update project summaries in `projects/`
-- Promote or demote people between relationship tiers in `BONDS.md`
 - Add or update person profiles in `relationship/`
 - Update their own profile in `GUARDIAN.md`
 
@@ -127,7 +122,7 @@ One file per day. Sections for key events, interactions, notes, and reminders.
 
 ### Person Profile (`memory/relationship/<person-id>.md`)
 
-One file per known person. See `TEMPLATE.md` in the relationship directory for the full format. The `person-id` is a URL-safe slug derived from the person's name (e.g., `john-doe.md`).
+One file per known person. The `person-id` is a URL-safe slug derived from the person's name (e.g., `john-doe.md`).
 
 ### Project Summary (`memory/projects/<project-name>/PROJECT.md`)
 
