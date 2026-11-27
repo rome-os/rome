@@ -22,6 +22,7 @@ import {
   accountCodesVoidedIn,
 } from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
+import { botsOfPersons } from "./identity/bots-of-persons.js";
 import { createIdentity } from "./identity/identity.js";
 import { ownAgentAccount } from "./access/application/own-agent-account.js";
 import { dirname, join } from "node:path";
@@ -324,7 +325,6 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { botsOfPeople } from "./people/bots-of-people.js";
 import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -780,7 +780,7 @@ async function main() {
   const entrance = entranceOf<TeamActor>({
     enter: accountEntry({ db }),
   });
-  const readBotsOfPeople = botsOfPeople(peopleRepo);
+  const readBotsOfPersons = botsOfPersons(createIdentity(db));
   // The platform a message's sender is on. A grant that recorded no account
   // still names its platform by its channel.
   const senderPlatformOf = (connectionId: string, message: ChannelMessage): string =>
@@ -810,7 +810,7 @@ async function main() {
     // reads as the guardian's.
     const ownAgent = connectionKind === AGENTS_KIND ? ownAccountAgentOf(message) : null;
     if (ownAgent) giveOwnAgent(ownAgent);
-    await readBotsOfPeople(senderPlatformOf(connectionId, message), message);
+    await readBotsOfPersons(senderPlatformOf(connectionId, message), message);
     // A code said in a chat switched off is still voided.
     if (!(await heardAccountCode(connectionId, connectionKind, message))) return false;
     return heardInChat(connectionId, connectionKind, message);
