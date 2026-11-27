@@ -60,6 +60,7 @@ function fakeHelper() {
   let disconnect: Disconnect | undefined;
   const helper = {
     instanceId: randomUUID(),
+    helperPid: process.pid,
     closed: false,
     onCancelRequested: rs.fn<ComputerUseBridge["onCancelRequested"]>(),
     onDisconnect: (listener: Disconnect) => {
@@ -970,6 +971,41 @@ it("keeps holding windows on unconfirmed local revocation even after sessionTtlM
   helper.close(new ComputerUseError("session_stopped"));
   expect(await run("computer.cancel", undefined)).toMatchObject({ result: confirmed });
   expect(await run("computer.bind", { window: 1 }, other)).toMatchObject({ ok: true });
+});
+
+it.each([
+  "local",
+  "remote",
+])("releases windows after an unconfirmed %s stop when the helper exits", async (stop) => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValue(fakeHelper());
+  const isProcessAlive = rs.fn(() => true);
+  const host = new ComputerUseHost({ isProcessAlive, stopPollMs: 5 });
+  cleanups.push(() => host.disconnect());
+  await authorizeHost(host);
+  await authorizeHost(host, other);
+  expect(await runHost(host, "computer.bind", { window: 1 })).toMatchObject({ ok: true });
+
+  if (stop === "local") {
+    helper.onCancelRequested.mock.calls[0][0]();
+    helper.close();
+  } else {
+    helper.status.mockResolvedValue({ instance: helper.instanceId, ...canceled });
+    expect(await runHost(host, "computer.cancel")).toMatchObject({ result: canceled });
+  }
+  await expect.poll(() => helper.closed, { timeout: 3_000 }).toBe(true);
+  await expect.poll(() => isProcessAlive.mock.calls.length).toBeGreaterThan(0);
+  expect(isProcessAlive).toHaveBeenCalledWith(helper.helperPid);
+  expect(await runHost(host, "computer.cancel")).toMatchObject({ result: canceled });
+  expect(await runHost(host, "computer.bind", { window: 1 }, other)).toMatchObject(
+    error("window_already_bound"),
+  );
+  expect(await runHost(host, "computer.request_access")).toMatchObject(error("session_stopped"));
+
+  isProcessAlive.mockReturnValue(false);
+  await expect.poll(() => runHost(host, "computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await runHost(host, "computer.bind", { window: 1 }, other)).toMatchObject({ ok: true });
+  expect(await runHost(host, "computer.request_access")).toMatchObject({ ok: true });
 });
 
 it("coalesces requests, keeps status private and read-only, and starts the lease only when ready", async () => {

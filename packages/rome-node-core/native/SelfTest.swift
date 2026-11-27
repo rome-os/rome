@@ -1285,6 +1285,18 @@ final class SelfTest {
         try rejects("authentication_failed") { try peer.requireSameHelper() }
         let admission = Admission()
         let channel = try Connection(fd: pair[0], listener: listener, peer: peer, admission: admission)
+        func greet(trusted: Bool, recording: Bool) throws {
+            try sendBytes(client, ExecutionHandoff.greeting)
+            try ExecutionHandoff.acceptGreeting(on: channel) {
+                try ExecutionHandoff.checkAccess(DesktopAccess(), trusted: trusted, recording: recording, console: true)
+            }
+        }
+        try rejects("accessibility_permission_required") { try greet(trusted: false, recording: true) }
+        try rejects("screen_recording_permission_required") { try greet(trusted: true, recording: false) }
+        var ready = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+        try expect(poll(&ready, 1, 0) == 0, "the execution helper waits for both grants before signalling ready")
+        try greet(trusted: true, recording: true)
+        try expect(try readBytes(client, count: 1) == Data([1]), "the execution helper acknowledged both grants")
         let execution = ExecutionHandoff(channel: channel, listener: listener, onExit: {})
         let starts = EndedBindings()
         let checks = PermissionChecks(missing: { ["screen_recording"] },

@@ -567,8 +567,8 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     defer {
         _ = admission.stop()
         worker.sync { windows.stopAll(); admission.updateBindings(false) }
+        permissions?.waitForExecutionExit()
         if admission.locallyStopped {
-            permissions?.waitForExecutionExit()
             if admission.status()["stop"] as? String == "stop_confirmed" {
                 connection.notifyLocalStop()
             }

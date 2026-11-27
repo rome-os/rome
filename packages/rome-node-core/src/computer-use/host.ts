@@ -60,6 +60,7 @@ type Bridge = Pick<
   | "accessStatus"
   | "openPermissionGuide"
   | "instanceId"
+  | "helperPid"
   | "closed"
   | "windows"
   | "bind"
@@ -83,6 +84,8 @@ interface HostDeps {
   terminalTtlMs: number;
   sessionTtlMs: number;
   now: () => number;
+  isProcessAlive: (pid: number) => boolean;
+  stopPollMs: number;
 }
 
 interface Binding {
@@ -164,6 +167,16 @@ export class ComputerUseHost {
       terminalTtlMs: TERMINAL_TTL_MS,
       sessionTtlMs: SESSION_TTL_MS,
       now: () => performance.now(),
+      isProcessAlive: (pid) => {
+        if (!Number.isInteger(pid) || pid <= 0) return false;
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch (cause) {
+          return (cause as NodeJS.ErrnoException).code === "EPERM";
+        }
+      },
+      stopPollMs: 200,
       ...deps,
     };
   }
@@ -586,8 +599,12 @@ export class ComputerUseHost {
       session.bridge = bridge;
       bridge.onDisconnect((cause) => {
         this.permissionProbes.delete(appPath);
-        if (session.stop && cause.code === "session_stopped")
-          this.finishStop(session, bridge, stopConfirmed);
+        if (session.stop)
+          this.finishStop(
+            session,
+            bridge,
+            cause.code === "session_stopped" ? stopConfirmed : stopRequested,
+          );
         else this.failed(session, cause);
       });
       bridge.onCancelRequested(() => {
@@ -604,9 +621,7 @@ export class ComputerUseHost {
           timeoutMs: Math.ceil(session.expiresAt - this.deps.now()) + 15_000,
           signal: session.launch.signal,
         });
-        // Older helpers return the current revision immediately after authorization.
-        if (next.revision === access.revision)
-          await delay(2_000, undefined, { signal: session.launch.signal, ref: false });
+        if (next.revision <= access.revision) throw new ComputerUseError("invalid_frame");
         access = next;
       }
     } catch (cause) {
@@ -772,13 +787,28 @@ export class ComputerUseHost {
   }
 
   private finishStop(session: Session, bridge: Bridge, result: StopResult): void {
-    if (session.stopped?.stop === "stop_confirmed") return;
+    if (this.sessions.get(session.peer) !== session || session.stopped?.stop === "stop_confirmed")
+      return;
     session.stopped = result;
     bridge.close();
     if (result.stop === "stop_confirmed") {
       this.releaseWindows(session);
       this.scheduleStopCleanup(session);
+    } else {
+      this.watchHelperExit(session, bridge);
     }
+  }
+
+  private watchHelperExit(session: Session, bridge: Bridge): void {
+    if (session.timer) return;
+    session.timer = setTimeout(() => {
+      session.timer = undefined;
+      if (this.sessions.get(session.peer) !== session || session.stopped?.stop === "stop_confirmed")
+        return;
+      if (bridge.helperPid > 0 && this.deps.isProcessAlive(bridge.helperPid))
+        this.watchHelperExit(session, bridge);
+      else this.finishStop(session, bridge, stopConfirmed);
+    }, this.deps.stopPollMs).unref();
   }
 
   private releaseBinding(session: Session, id: string): void {

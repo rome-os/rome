@@ -63,7 +63,7 @@ extension Windows {
 }
 
 final class ExecutionHandoff: Sendable {
-    private static let greeting = Data("Rome approved execution v1\n".utf8)
+    static let greeting = Data("Rome approved execution v1\n".utf8)
     private let channel: Connection
     private let listener: Listener
     private let exited: DispatchSourceProcess
@@ -142,7 +142,13 @@ final class ExecutionHandoff: Sendable {
 
     func stop() { shutdown(channel.fd, SHUT_RDWR) }
 
-    func waitForExit() { _ = childFinished.wait(timeout: .now() + .seconds(2)) }
+    func waitForExit() {
+        if childFinished.wait(timeout: .now() + .seconds(2)) == .timedOut,
+           (try? channel.peer.identity.verify()) != nil {
+            kill(channel.peer.identity.pid, SIGKILL)
+            _ = childFinished.wait(timeout: .now() + .seconds(1))
+        }
+    }
 
     // The original helper's window worker owns both directions of this stream.
     func execute(_ body: Data) throws -> (Data, Int) {
@@ -169,6 +175,25 @@ final class ExecutionHandoff: Sendable {
         return watchdog
     }
 
+    static func acceptGreeting(on channel: Connection, check: () throws -> Void) throws {
+        let fd = channel.fd
+        var timeout = timeval(tv_sec: 8, tv_usec: 0)
+        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout))) == 0,
+              try readBytes(fd, count: greeting.count) == greeting else { throw Failure("authentication_failed") }
+        try check()
+        try channel.sendNow(Data([1]))
+        timeout.tv_sec = 0
+        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout))) == 0
+        else { throw Failure("socket_unavailable") }
+    }
+
+    static func checkAccess(_ access: DesktopAccess, trusted: Bool = AXIsProcessTrusted(),
+                            recording: Bool = CGPreflightScreenCaptureAccess(),
+                            console: @autoclosure () -> Bool = DesktopAccess.consoleAvailable(Windows.onScreen())) throws {
+        try DesktopAccess.require(trusted: trusted, console: console())
+        try access.recording(granted: recording, required: true)
+    }
+
     static func serve(path: String, parent: pid_t) throws {
         let state = try StateDirectory(path)
         guard let socket = state.socketIdentity() else { throw Failure("socket_unavailable") }
@@ -187,20 +212,13 @@ final class ExecutionHandoff: Sendable {
         let worker = DispatchQueue(label: "rome.computer-use.approved-window")
         let check = {
             try channel.verify()
-            try access.check()
+            try checkAccess(access)
         }
         let finished = DispatchGroup()
         finished.enter()
         let watchdog = watchParent(channel, until: finished)
         defer { watchdog.cancel(); finished.leave() }
-        var timeout = timeval(tv_sec: 8, tv_usec: 0)
-        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout))) == 0,
-              try readBytes(fd, count: greeting.count) == greeting else { throw Failure("authentication_failed") }
-        try check()
-        try channel.sendNow(Data([1]))
-        timeout.tv_sec = 0
-        guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout.size(ofValue: timeout))) == 0
-        else { throw Failure("socket_unavailable") }
+        try acceptGreeting(on: channel, check: check)
         let accessWatchdog = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
         accessWatchdog.setEventHandler {
             guard PermissionChecks.system.missing().isEmpty else { channel.end(); return }
