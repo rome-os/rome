@@ -65,7 +65,7 @@ export type MessageQuery = Omit<ChannelMessageQuery, "after"> & {
 const DEFAULT_QUERY_LIMIT = 100;
 export const MAX_QUERY_LIMIT = 1_000;
 
-/** What a People timeline entry says about a message beyond the line itself. */
+/** What a timeline entry says about a message beyond the line itself. */
 export type MessageDetail = Pick<Message, "sender" | "conversation" | "attachments">;
 
 /**
@@ -212,14 +212,14 @@ export interface Messages {
   readonly live?: boolean;
 
   /**
-   * The reads a People timeline makes per person, where the channel keeps a
-   * copy that can answer them at a directory's scale. Null where it does not.
+   * The reads an account's timeline makes, where the channel keeps a copy
+   * that can answer them at a directory's scale. Null where it does not.
    */
   readonly byAccount: AccountMessages | null;
 }
 
 /**
- * One store asked for a set of accounts: what a People timeline reads.
+ * One store asked for a set of accounts: what a timeline reads.
  *
  * A set of accounts is read as one history: a person holds several accounts and
  * an account several addresses, and the caller wants the messages merged, not

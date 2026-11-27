@@ -129,7 +129,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
@@ -525,10 +524,8 @@ async function main() {
   // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
   // The platform a channel's accounts live on, for a row that still names a
-  // channel. People keys its links by platform, and reads every such row
-  // through this.
+  // channel.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -764,8 +761,7 @@ async function main() {
     settings: { get: (ref) => chatSettings.get(ref) },
     rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
   });
-  // Every sender is admitted: Rome never asks a sender to pair
-  // (docs/domains/people.md#stranger). Only an account code is taken out of
+  // Every sender is admitted: Rome never asks a sender to pair. Only an account code is taken out of
   // the chat, and every message said in a chat switched off but a stop said to
   // Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
@@ -2855,7 +2851,6 @@ async function main() {
       chatSettings,
       actionEngine,
       actionLoader,
-      peopleRepo,
       guardianPerson: async () => (await guardianWithAccounts(memberContext(db)))?.person ?? null,
       channels,
       platformOfChannel,

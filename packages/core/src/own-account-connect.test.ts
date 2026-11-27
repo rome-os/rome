@@ -84,7 +84,7 @@ describe("ownAccountConnected", () => {
     expect(await roleOfAccount(members, owner)).toBe("guardian");
   });
 
-  it("makes the account a connection is signed in as the guardian's at once, writing nothing to People", async () => {
+  it("makes the account a connection is signed in as the guardian's at once, in Identity alone", async () => {
     const { db, members, run } = await connect(setupReaching("self-7", "self-7"));
 
     expect(await run()).toBe("done");

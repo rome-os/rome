@@ -335,7 +335,7 @@ export interface ContextLine {
   readonly id: number;
   /** What the message called its sender, as the platform showed it. */
   readonly senderName: string | null;
-  /** The account that said a message to Rome, which People can say who is
+  /** The account that said a message to Rome, which Identity can say who is
    *  behind. Null on Rome's own messages and on one the record kept no
    *  account for. */
   readonly account: Account | null;

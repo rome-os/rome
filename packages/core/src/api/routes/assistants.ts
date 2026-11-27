@@ -89,8 +89,8 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     } satisfies TimelinePage);
   });
 
-  /** Write to the assistant as the guardian, answered as on the People
-   *  surface: 200 once the channel took it, and the channel's own error when
+  /** Write to the assistant as the guardian, answered as every send to an
+   *  account is: 200 once the channel took it, and the channel's own error when
    *  it refused, so the page shows the error and the guardian sends again. */
   app.post("/assistants/:agentId/messages", async (c) => {
     const address = addressOf(c);
@@ -120,7 +120,7 @@ function unknownAssistant(c: Context) {
 }
 
 /** The prefix a timeline gives Rome's transcript rows, so a message keeps the
- *  ref the People timeline gave it. */
+ *  ref an earlier timeline gave it. */
 const REF_PREFIX = "agent:";
 
 /** A message as the timeline wire shows it. */

@@ -303,7 +303,7 @@ export class WhatsAppAdapter {
 
   /**
    * Seed (or refresh) our own contact so the notes-to-self chat shows a real
-   * name in the People tab. WhatsApp's history sync leaves the self contact
+   * name. WhatsApp's history sync leaves the self contact
    * nameless, and the LID-form self has no contact row at all — canonicalization
    * folds both onto the phone-number JID, which this row backs.
    */
@@ -413,7 +413,7 @@ export class WhatsAppAdapter {
    * notes-to-self chat in particular shows up under all three. We strip the
    * `:device` suffix from every private JID (so a send never targets one linked
    * device, and echoes reconcile) and fold every form of "me" onto one canonical
-   * self JID (the phone-number form, which is also the People-tab contact key) so
+   * self JID (the phone-number form, which is also the self contact's key) so
    * the self-chat stays unified instead of fragmenting across three threads.
    * Groups pass through untouched.
    */

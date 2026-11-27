@@ -43,14 +43,14 @@ describe("whoSaid", () => {
 });
 
 describe("whoIs", () => {
-  it("answers the guardian as the guardian bond level", () => {
+  it("answers the guardian by name and role", () => {
     expect(whoIs(ANA)).toEqual({
       person: { id: "p-ana", name: "Ana Lopez" },
       label: "Ana Lopez, guardian",
     });
   });
 
-  it("answers a member with the lowest bond level, and a nameless one by role", () => {
+  it("answers a member by role, and a nameless one by role alone", () => {
     expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toEqual({
       person: { id: "p-bo", name: "member" },
       label: "member",

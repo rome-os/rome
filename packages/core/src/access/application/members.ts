@@ -243,7 +243,7 @@ export function guardianRenamedWithinTx({ identity, access }: SyncMemberContext,
  * rebind to the ones it names now: takes from the guardian each `previous`
  * account that is not `current`, with its mail account, then gives it `current` as
  * {@link guardianSeatCreated} does. An account the guardian holds that is not
- * in `previous`, such as one carried from People's links, stays, even when it
+ * in `previous`, such as one carried from an earlier build's `links`, stays, even when it
  * is an email other than the seat's. Safe to call again with the same input.
  */
 export async function guardianSeatRebound(

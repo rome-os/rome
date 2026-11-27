@@ -9,13 +9,12 @@ The guardian is the single human user that a Rome instance serves. They control 
 **Contracts:**
 
 - One Rome instance serves exactly one guardian. There is no multi-guardian mode.
-- The guardian is always the highest-trust [bond level](people.md#bond-levels). No person can outrank them.
 - Only the guardian can approve or reject an [approval-gated action](messaging.md#approvals).
 - The guardian's full access is inherent. Every other authenticated caller is a [visitor](#visitor) whose access is granted and revocable.
 
 **Not to be confused with:**
 
-- **[Person](people.md#person)** — a person is someone the guardian knows. The guardian is the one the instance serves.
+- **[Person](../domains/identity.md#person)** — a person is whoever is behind a set of accounts. The guardian is the one the instance serves.
 - **[Visitor](#visitor)** — a visitor holds scoped access the guardian granted. The guardian owns the instance and can never be outranked by one.
 - **The agent's identity** — the agent has its own name and personality, stored separately from the guardian's profile.
 
@@ -34,7 +33,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 **Not to be confused with:**
 
 - **[Guardian](#guardian)** — the guardian owns the instance and holds full access. A visitor holds scoped access the guardian granted.
-- **[Person](people.md#person)** — a person is someone the guardian knows, carrying a bond level. A visitor is an authenticated caller, and the two are orthogonal — a visitor need not be a tracked person.
+- **[Person](../domains/identity.md#person)** — a person is whoever is behind a set of accounts. A visitor is an authenticated caller, and the two are orthogonal — a visitor need not be a person Rome knows.
 
 ## Dashboard admin
 

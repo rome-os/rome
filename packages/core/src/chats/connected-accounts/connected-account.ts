@@ -11,8 +11,8 @@
  * `inbound`, and Rome's own synced tables may back its `accounts` and
  * `messages`, but what backs a port is the channel's business and no caller
  * can tell. The read ports answer with no transport connected: a channel that
- * had to be live to be asked about would make every People read depend on
- * whether the guardian's phone is reachable.
+ * had to be live to be asked about would make every read depend on whether
+ * the guardian's phone is reachable.
  */
 
 import type {

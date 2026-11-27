@@ -33,7 +33,7 @@ import {
   type TestDb,
   type TestDeps,
 } from "../../test/helpers.js";
-import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
+import { seedBaseline } from "../../test/seeds.js";
 import type {
   AgentSession,
   SessionOpening,
@@ -50,8 +50,6 @@ import {
   chatMessages,
   conciergeMessageTurns,
   guardianAuth,
-  links,
-  persons,
   romeSessions,
   taskChats,
   webchatProjects,
@@ -133,7 +131,6 @@ describe("Webchat API", () => {
         OR id = ${where.sessionId ?? null}`);
   }
   let deps: TestDeps;
-  let baseline: BaselineIds;
   let projectsRoot: string;
 
   beforeEach(async () => {
@@ -141,7 +138,7 @@ describe("Webchat API", () => {
     process.env.ROME_PROJECTS_ROOT = projectsRoot;
     testDb = createTestDb();
     deps = await buildTestDeps(testDb.db);
-    baseline = await seedBaseline(testDb.db);
+    await seedBaseline(testDb.db);
   });
 
   afterEach(() => {
@@ -2732,7 +2729,7 @@ describe("Webchat API", () => {
     const res = await app.request("/chat/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Persona", personaId: baseline.persons.innerCircleId }),
+      body: JSON.stringify({ name: "Persona", personaId: "a-person" }),
     });
 
     expect(res.status).toBe(200);
@@ -3379,8 +3376,6 @@ describe("Webchat API", () => {
   });
 
   it("opens a background turn's runtime for the guardian's person in Identity", async () => {
-    await testDb.db.delete(links);
-    await testDb.db.delete(persons);
     const opened: Array<SessionOpening | undefined> = [];
     deps.agentSessionManager = {
       open: rs.fn(async (_key: unknown, init?: SessionOpening) => {
@@ -3576,11 +3571,6 @@ describe("Webchat API", () => {
       return { events, sendMessageRun, sessionId: session.id, app };
     };
 
-    const emptyPeople = async () => {
-      await testDb.db.delete(links);
-      await testDb.db.delete(persons);
-    };
-
     const sentSender = async () => {
       const { sendMessageRun } = await runScriptedStream(
         () =>
@@ -3601,7 +3591,6 @@ describe("Webchat API", () => {
     };
 
     it("names the guardian's person in Identity as the sender of their message", async () => {
-      await emptyPeople();
       const guardian = await guardianSeatCreated(memberContext(testDb.db), {
         accounts: [],
         name: "Ada Lovelace",
@@ -3614,7 +3603,6 @@ describe("Webchat API", () => {
     });
 
     it("names the sender Guardian while Rome has no guardian", async () => {
-      await emptyPeople();
       expect(await sentSender()).toEqual({
         channelUserId: "guardian",
         displayName: "Guardian",

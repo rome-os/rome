@@ -79,7 +79,7 @@ Apps consume three supported packages published under the `@rome-os/` scope: `@r
 **Contracts:**
 
 - These three packages are the entire supported app-author surface. Rome also publishes internal packages for its own cross-repository use. Apps must not depend on them.
-- Apps defines what an app receives from `@rome-os/app-runtime` and runs the app, without depending on the contexts that supply it. The app host builds each part of that surface from Chats, People, Routines, Connections and the other contexts. It may depend on any of them, and none of them depends on it.
+- Apps defines what an app receives from `@rome-os/app-runtime` and runs the app, without depending on the contexts that supply it. The app host builds each part of that surface from Chats, Identity, Routines, Connections and the other contexts. It may depend on any of them, and none of them depends on it.
 
 **Not to be confused with:**
 

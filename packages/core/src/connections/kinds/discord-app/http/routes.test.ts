@@ -25,7 +25,7 @@ function app(over: Partial<DiscordAppCloud> = {}) {
 }
 
 describe("the dashboard's routes for Rome's Discord bot", () => {
-  it("lists the servers as Discord shows them and the guardian's accounts by their People names", async () => {
+  it("lists the servers as Discord shows them and the guardian's accounts by their persons' names", async () => {
     const response = await app().request("/connections/discord-app/servers");
     expect(await response.json()).toEqual({
       servers: [

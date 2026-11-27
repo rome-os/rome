@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { guardianAuth, persons } from "../db/schema.js";
+import { guardianAuth } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { proveIdentity, type ProveIdentityResult } from "../instance/instance-identity.js";
 import { createLogger } from "../logger.js";
@@ -133,7 +133,7 @@ export async function setGuardianAccount(
 // email takes the guardian's person with it at once: the old email would
 // otherwise still answer guardian. Only the seat's values
 // from before the write are taken away, because Identity cannot tell a seat's
-// email from the same address carried from People.
+// email from the same address carried from an earlier build's `links`.
 async function guardianFollowsSeat(db: DrizzleDb, before: { email: string | null }): Promise<void> {
   const [after] = await db.select({ email: guardianAuth.email }).from(guardianAuth).limit(1);
   const previous = seatAccounts(before);

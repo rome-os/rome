@@ -38,7 +38,6 @@
     "./account-agents": "./src/account-agents.ts",
     "./assistants": "./src/assistants.ts",
     "./platform": "./src/platform.ts",
-    "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
     "./voice-input": "./src/voice-input.ts",
     "./voice-conversation": "./src/voice-conversation.ts",

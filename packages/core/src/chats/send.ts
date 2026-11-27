@@ -4,8 +4,8 @@
 // (`@rome/api-types/message`).
 //
 // A send names a place, never an account. Reaching an account directly is
-// finding the place first, which `chats/direct-place.ts` does for the People and
-// assistants surfaces.
+// finding the place first, which `chats/direct-place.ts` does for the
+// assistants surface.
 //
 // Chats owns the answer and which side says the message; it says nothing
 // itself. A platform Rome serves itself, such as the dashboard's, supplies its

@@ -260,8 +260,8 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   }
 
   // An agent's id is both how Cloud reaches it and the conversation
-  // its messages arrive in, so Rome can write to a dot first, from the People
-  // page, as well as answer one. An address that is not an agent id, such as
+  // its messages arrive in, so Rome can write to a dot first as well as answer
+  // one. An address that is not an agent id, such as
   // a link left from before agent ids, offers nothing to write to.
   const features: TalkFeatures = {
     inboundMedia,

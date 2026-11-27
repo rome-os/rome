@@ -6,7 +6,6 @@ export * from "./chat-settings.js";
 export * from "./dashboard-access.js";
 export * from "./favors.js";
 export * from "./rome-credits.js";
-export * from "./persons.js";
 export * from "./projects.js";
 export * from "./sessions.js";
 export * from "./trace-segments.js";

@@ -1,25 +1,19 @@
-// Sending to a person: which of their accounts a message may go to, and
-// everything that has to be true before one is handed to a channel.
-//
-// Vocabulary: docs/concepts/people.md. The wire shapes are the message
-// contract's (`@rome/api-types/message`).
+// Sending to an account: everything that has to be true before a message is
+// handed to a channel. Vocabulary: docs/concepts/messaging.md#sending. The wire
+// shapes are the message contract's (`@rome/api-types/message`).
 //
 // Saying the message is `chats/send.ts`'s, which takes a place. This module
 // finds the place: the direct message that reaches the account a send names.
 //
 // A send names its account. There is no entry point here that takes a person
-// and picks for them, because every rule that could pick decides who receives
-// a message on evidence too thin to carry it — a timeline entry names its
-// channel and not its address, so "reply where they last wrote" cannot
-// separate two numbers on one channel, and reaching for another channel when
-// one is down sends somewhere nobody chose. `defaultSendAccount` in the
-// contract offers surfaces a preselected account; it is a default rendered on
-// screen, not a decision taken off it.
+// and picks one of their accounts, because every rule that could pick decides
+// who receives a message on evidence too thin to carry it: reaching for another
+// channel when one is down sends somewhere nobody chose.
 //
-// Nor does Rome pick among its own accounts on one platform. A link names the
-// platform, and a send to it goes out from the one account Rome holds there
-// (`sendersOf`), or from the one the send names. With several and none named,
-// the send is refused rather than sent from an account nobody chose.
+// Nor does Rome pick among its own accounts on one platform. A send goes out
+// from the one account Rome holds on the account's platform (`sendersOf`), or
+// from the one the send names. With several and none named, the send is
+// refused rather than sent from an account nobody chose.
 //
 // Whether a channel can be sent to at all is the channel's own declaration:
 // its `send` port's `direct`. A channel whose sending cannot reach an account
@@ -27,7 +21,6 @@
 // through anything.
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
-import type { AccountSendState } from "@rome/api-types/message";
 import { AccountNotConnected, type ChannelSend } from "./connected-accounts/connected-account.js";
 import { chatKey, placeIn, type Place } from "./place.js";
 import type { RefusedState, Sender, SendResult } from "./send.js";
@@ -40,17 +33,6 @@ import {
 } from "../connections/send.js";
 
 export { sendersOf, type SendDeps };
-
-/**
- * `deps` with its senders cut to the guardian's own accounts: an account's
- * send state and last activity count only the guardian's own chats with it.
- */
-export function asGuardian<Deps extends SendDeps>(
-  deps: Deps,
-  guardians: (channel: string) => boolean,
-): Deps {
-  return { ...deps, sendersOn: (platform: string) => sendersOf(deps, platform).filter(guardians) };
-}
 
 /** A resolved target: the channel it is on, that channel's send port, and the
  *  conversation on it that reaches this account. It names the channel, not
@@ -82,8 +64,8 @@ async function sendStateOf(
 ): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
   const senders = from === undefined ? sendersOf(deps, account.platform) : [from];
   // With no sender named, Rome holds no account on the platform, or several.
-  // No Connection answers for the link as such, and connecting or removing
-  // an account is what settles it, so it reads as not connected.
+  // No Connection answers for the account as such, and connecting or removing
+  // one of Rome's accounts is what settles it, so it reads as not connected.
   const name = senders.length === 1 ? senders[0] : undefined;
   if (name === undefined) return { state: "not-connected" };
   const channel = deps.channels.find((candidate) => candidate.name === name);
@@ -94,10 +76,8 @@ async function sendStateOf(
   if (!send || !direct) return { state: "unsupported" };
 
   // A channel that throws asking for a thread is a channel that could not
-  // produce one, which is the same answer as null and the same answer the
-  // person read already gives for this account. Letting it escape would make
-  // the send path report a 500 where the read reported `no-conversation`, so
-  // the two would disagree about one condition.
+  // produce one, which is the same answer as null: `no-conversation`, not a
+  // 500.
   let chatId: ChatId | null;
   try {
     chatId = await direct.chatFor(account.id);
@@ -127,49 +107,10 @@ export async function resolveSendTarget(
 }
 
 /**
- * Whether Rome can send to each of the given accounts, positionally: yes
- * when any of Rome's accounts on its platform can, and otherwise the first
- * one's reason.
- *
- * Only `chatFor` can reach a provider, and it is asked once per account and
- * sender — cheap on the channels in play, and the reason a channel that keys
- * threads separately has to be priced before it is added to a listing read. A
- * listing must not fail because one account of one person could not be priced.
- */
-export async function readSendStates(
-  deps: SendDeps,
-  accounts: readonly Account[],
-): Promise<AccountSendState[]> {
-  // A listing names a handful of platforms across many links, and each answer
-  // reads the channel records, so each platform is asked once.
-  const senders = new Map<string, string[]>();
-  const sendersOn = (platform: string) => {
-    let found = senders.get(platform);
-    if (!found) {
-      found = sendersOf(deps, platform);
-      senders.set(platform, found);
-    }
-    return found;
-  };
-  return await Promise.all(
-    accounts.map(async (account) => {
-      // Whether any of Rome's accounts there can reach it: a send names one,
-      // and the page offers each.
-      const states = await Promise.all(
-        sendersOn(account.platform).map(
-          async (from) => (await sendStateOf(deps, account, from)).state,
-        ),
-      );
-      return states.includes("yes") ? "yes" : (states[0] ?? "not-connected");
-    }),
-  );
-}
-
-/**
  * The direct message that reaches `account`, as a place a send can name, and
  * `as`, the sender whose channel found it. Absent `from`, Rome has to hold one
- * account on the platform. Refused with the same state the person read
- * carries, or `invalid` when `from` is none of Rome's accounts there.
+ * account on the platform. Refused with the account's send state, or
+ * `invalid` when `from` is none of Rome's accounts there.
  *
  * Its key is the address the sender's channel holds for the direct message,
  * which is the platform's own id for it over today's storage, so the send has

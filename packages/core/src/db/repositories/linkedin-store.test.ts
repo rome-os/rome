@@ -755,8 +755,8 @@ describe("LinkedInStoreRepository", () => {
     });
   });
 
-  // The People surface reads a participant as a person-shaped row: who they
-  // are, what was last said, and how much of it there is. "What was said" is
+  // A participant reads as a row: who they are, what was last said, and how
+  // much of it there is. "What was said" is
   // the direct threads only — a timeline entry names no sender, so a group
   // thread's messages cannot be attributed to one of its members.
   describe("participant activity", () => {

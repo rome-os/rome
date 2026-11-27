@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/db.js";
-import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
+import { createIdentity, type Identity } from "../../identity/identity.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
 import type { LinkedInHistoryMessage } from "../../connections/kinds/linkedin/linkedin-sync.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -27,17 +26,17 @@ async function readHistory(rows: LinkedInHistoryMessage[]): Promise<ChannelMessa
 }
 
 /**
- * The promotion bridge: a mirrored participant that a guardian turned into a
- * person is recognised on their next message with nothing else wired up. That
- * only holds if both sides name the account the same way — the bare member id.
+ * A person who holds a LinkedIn account is recognised on their mirrored
+ * messages with nothing else wired up. That only holds if both sides name the
+ * account the same way: the bare member id.
  */
 describe("LinkedIn message addressing", () => {
   let testDb: TestDb;
-  let people: PeopleRepository;
+  let identity: Identity;
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new DrizzlePeopleRepository(testDb.db);
+    identity = createIdentity(testDb.db);
   });
 
   afterEach(() => {
@@ -49,27 +48,27 @@ describe("LinkedIn message addressing", () => {
     expect(message.senderId).toBe("ACoAAAda0001");
   });
 
-  it("resolves a promoted participant to their person", async () => {
-    await people.create({
-      displayName: "Ada Lovelace",
-      bondLevel: "acquaintance",
-      links: [{ platform: "linkedin", id: "ACoAAAda0001" }],
+  it("resolves a participant to the person holding their account", async () => {
+    const ada = await identity.createPerson({
+      name: "Ada Lovelace",
+      accounts: [{ platform: "linkedin", accountId: "ACoAAAda0001" }],
     });
 
     const [message] = await readHistory([historyMessage()]);
-    const person = await people.byAccount({ platform: "linkedin", id: message.senderId });
+    const person = await identity.personOf({ platform: "linkedin", accountId: message.senderId });
 
-    expect(person?.id).toBe("ada-lovelace");
+    expect(person?.id).toBe(ada.id);
   });
 
-  it("does not resolve a participant nobody promoted", async () => {
+  it("resolves a participant nobody holds to nobody", async () => {
     const [message] = await readHistory([historyMessage()]);
-    expect(await people.byAccount({ platform: "linkedin", id: message.senderId })).toBeNull();
+    expect(
+      await identity.personOf({ platform: "linkedin", accountId: message.senderId }),
+    ).toBeNull();
   });
 
-  // The guardian's own mapping is granted at connect time from their public
-  // profile URL, which carries a vanity handle and no member id. Falling back to
-  // the URL keeps that mapping resolving instead of stranding it.
+  // A profile URL with a vanity handle carries no member id. Falling back to
+  // the URL still names the sender by an account rather than stranding them.
   it("falls back to the profile URL when it carries no member id", async () => {
     const [message] = await readHistory([
       historyMessage({ senderProfileUrl: "https://www.linkedin.com/in/ada-lovelace/" }),

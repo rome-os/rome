@@ -5,12 +5,11 @@ This is the concepts index — the single source of truth for entity definitions
 Browse by domain:
 
 - [`access.md`](access.md) — Guardian, Visitor, Dashboard admin, Team. *Who Rome serves.*
-- [`people.md`](people.md) — Persons, Accounts, Addresses, Links, Sending, Bond levels. *Who Rome interacts with.*
 - [`deployment.md`](deployment.md) — Profiles, Instances. *How a deployment names itself for data isolation and for telemetry.*
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*
 - [`sessions.md`](sessions.md) — Sessions, Model pin, Turns, Events, Blocks, Deltas, Owning app, Forked turns. *The durable boundary around agent work.*
-- [`messaging.md`](messaging.md) — Policies, Approvals. *How the system decides what to do with an inbound message.* What a message, a chat and an account are is in [`../domains/`](../domains/README.md).
+- [`messaging.md`](messaging.md) — Policies, Approvals, Addresses, Sending. *How the system decides what to do with an inbound message, and how it sends to an account.* What a message, a chat and an account are is in [`../domains/`](../domains/README.md).
 - [`apps.md`](apps.md) — Rome Apps (incl. ids, SDKs, caller identity, lockfile, install sources, app store, handles, app data, hooks). *The extensibility surface.*
 - [`actions.md`](actions.md) — Actions, Action results, Suspensions, Actor. *The primary unit of executable behavior, its result envelope, and the session identity accountable for it.*
 - [`host-execution.md`](host-execution.md) — Host jobs. *Privileged scripts whose lifetime belongs to the host service outside Rome.*

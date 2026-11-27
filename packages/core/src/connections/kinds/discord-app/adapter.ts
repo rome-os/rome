@@ -137,7 +137,7 @@ export class DiscordAppAdapter {
     try {
       const raw = JSON.parse(new TextDecoder().decode(body));
       // Worker v2 uses sender so a v1 instance refuses it instead of linking everyone as guardian.
-      // Reading a v1 deposit here is safe: this adapter never changes People.
+      // Reading a v1 deposit here is safe: this adapter never says whose an account is.
       deposit = raw && typeof raw === "object" ? { ...raw, sender: raw.sender ?? raw.author } : raw;
     } catch {
       return { status: 400 };

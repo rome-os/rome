@@ -38,7 +38,13 @@ describe("an agent in the guardian's own Rome Cloud account", () => {
     testDb = createTestDb();
     const { db } = testDb;
     db.insert(guardianAuth)
-      .values({ id: "seat", userId: "u", passwordHash: "x", email: SEAT_EMAIL, createdAt: new Date() })
+      .values({
+        id: "seat",
+        userId: "u",
+        passwordHash: "x",
+        email: SEAT_EMAIL,
+        createdAt: new Date(),
+      })
       .run();
     guardianId = (
       await guardianSeatCreated(memberContext(db), {

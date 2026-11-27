@@ -34,8 +34,6 @@ import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../apps/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../apps/repositories/action-executions.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";
@@ -109,7 +107,6 @@ export interface TestRomeRepos {
   executionJournal: ExecutionJournalRepository;
   actionExecutions: ActionExecutionsRepository;
   settings: SettingsRepository;
-  people: PeopleRepository;
   policies: PoliciesRepository;
 }
 
@@ -221,14 +218,12 @@ async function buildHarness(
   const db = testDb.db;
 
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const people = new DrizzlePeopleRepository(db);
   const repos: TestRomeRepos = {
     sessions: new DrizzleSessionRepository(db),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    people,
     policies: new PoliciesRepository(db),
   };
 

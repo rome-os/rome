@@ -141,8 +141,8 @@ export class ChannelRecordsRepository {
    *  moves a Connection empties it (a link moves none), and nothing is cached
    *  while a transaction is open, so a rolled-back write leaves no id behind. */
   private readonly ids = new Map<string, string | null>();
-  /** `platformOfChannel` by channel, read for every row on every People
-   *  read. It empties with `ids`, since only a write that moves a Connection
+  /** `platformOfChannel` by channel, read for every row a history read
+   *  names. It empties with `ids`, since only a write that moves a Connection
    *  changes a channel's platform. */
   private readonly platforms = new Map<string, string>();
 

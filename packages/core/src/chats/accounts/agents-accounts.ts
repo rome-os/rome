@@ -1,9 +1,8 @@
 /**
  * The Agents channel's address book: the other agents in this Rome's Cloud
  * account, such as the guardian's dots, and the agents of accounts linked
- * to it. Read live from Rome Cloud, so a dot is in the people listing, and can be
- * linked at a bond level, before it ever messages Rome. Contract: `Accounts`
- * (accounts.ts).
+ * to it. Read live from Rome Cloud, so a dot is known before it ever messages
+ * Rome. Contract: `Accounts` (accounts.ts).
  *
  * An account is an agent, and its id is Cloud's `agentId`, which never
  * changes. Its name is a label its owner can change and another agent can

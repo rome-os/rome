@@ -88,7 +88,7 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
     expect(thread.where.thread).toEqual({ parentChatId: "777777777777777777" });
   });
 
-  it("hands the original sender to Rome without changing People, and acknowledges it", async () => {
+  it("hands the original sender to Rome and acknowledges it", async () => {
     const bot = adapter();
     const delivered: Message[] = [];
     bot.start((message) => {

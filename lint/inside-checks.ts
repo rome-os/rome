@@ -201,13 +201,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     ],
     why: "labels usage by whether a person pressed Run",
   },
-  "packages/core/src/people/infrastructure/drizzle-people-repository.ts": {
-    lines: [
-      'if (protectedPersonReason(source) === "guardian") {',
-      'if (protectedPersonReason(row) === "guardian") return { deleted: false, reason: "guardian" };',
-    ],
-    why: "the guardian's person is never merged or deleted away",
-  },
   "packages/core/src/core/guardian-channel.ts": {
     lines: ["export function isGuardianFacingChannel("],
     why: "a list of channels, it names no person",

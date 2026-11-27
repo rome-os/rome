@@ -34,7 +34,7 @@ const scan: ImportScan = {
     "favors/constants.ts",
     "index.ts",
     "logger.ts",
-    "people/isolated.ts",
+    "routines/isolated.ts",
   ],
   imports,
 };
@@ -60,7 +60,7 @@ describe("importsOf", () => {
       api: [{ from: "api/routes/favors.ts", line: 4, to: "favors/a.ts" }],
       ".": [{ from: "index.ts", line: 1, to: "favors/b.ts" }],
     });
-    expect(report.folders).toEqual([".", "api", "apps", "chats", "people"]);
+    expect(report.folders).toEqual([".", "api", "apps", "chats", "routines"]);
     expect(report.unresolved).toEqual([{ from: "favors/b.ts", line: 5, specifier: "./gone.js" }]);
   });
 
@@ -83,8 +83,8 @@ describe("formatImportsOf", () => {
     expect(text).toContain(
       "  apps: 1 import(s) in 1 file(s)\n    favors/a.ts:2 → apps/actions/state.ts",
     );
-    expect(text).toContain("The set imports nothing from: api, chats, people");
-    expect(text).toContain("Nothing in these imports the set: apps, chats, people");
+    expect(text).toContain("The set imports nothing from: api, chats, routines");
+    expect(text).toContain("Nothing in these imports the set: apps, chats, routines");
     expect(text).toContain(
       "1 import(s) in the set do not resolve and are not counted:\n  favors/b.ts:5 → ./gone.js",
     );

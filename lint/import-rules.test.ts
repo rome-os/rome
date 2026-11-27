@@ -110,7 +110,7 @@ write(
   'import "../http/items.js";\nimport "../application/edit.js";\n',
 );
 write("src/shop/orders/index.ts", "export const orders = 1;\n");
-write("src/people/link-code/index.ts", "export const code = 1;\n");
+write("src/identity/account-code/index.ts", "export const code = 1;\n");
 write(
   "src/chats/shop-probe.ts",
   [
@@ -122,7 +122,10 @@ write(
 write("src/chats/shop-probe.test.ts", 'import "../shop/cart/index.js";\n');
 write("src/api/routes/shop/cart.ts", 'import "../../../shop/cart/index.js";\n');
 write("src/index.ts", 'import "./shop/cart/index.js";\n');
-write("src/connections/kinds/discord/discord.ts", 'import "../../../people/link-code/index.js";\n');
+write(
+  "src/connections/kinds/discord/discord.ts",
+  'import "../../../identity/account-code/index.js";\n',
+);
 
 write("src/connections/registry.ts", 'import "./kinds/slack/index.js";\n');
 write("src/connections/registry.test.ts", 'import "./kinds/slack/slack.js";\n');
@@ -197,7 +200,7 @@ describe("checkImports with the context rules", () => {
     expect(lines).toEqual([
       "agent/infrastructure/apps-probe.ts:1 → ../../apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
       "agent/infrastructure/apps-probe.ts:2 → @/apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
-      "connections/kinds/discord/discord.ts:1 → ../../../people/link-code/index.js (people/link-code/index.ts) [connections-never-imports-people]",
+      "connections/kinds/discord/discord.ts:1 → ../../../identity/account-code/index.js (identity/account-code/index.ts) [connections-never-imports-identity]",
     ]);
   });
 });
@@ -218,12 +221,12 @@ describe("checkImports with the rules around a connection's message", () => {
   put("src/chats/connected-accounts/connection-ports.ts", 'import "./channel-message.js";\n');
   put("src/chats/history/reader.ts", 'import "../connected-accounts/channel-message.js";\n');
   put("src/participation/addressing.ts", "export const addressing = 1;\n");
-  put("src/people/person.ts", "export const person = 1;\n");
+  put("src/identity/person.ts", "export const person = 1;\n");
   put(
     "src/connections/kinds/x/x.ts",
     [
       'import "../../../participation/addressing.js";',
-      'import "../../../people/person.js";',
+      'import "../../../identity/person.js";',
       'import "../../../chats/connected-accounts/channel-message.js";',
       "",
     ].join("\n"),
@@ -241,10 +244,10 @@ describe("checkImports with the rules around a connection's message", () => {
     .map(formatImportViolation)
     .map((line) => line.replace(/ \(.*\)/, "").replace(/: .*$/, ""));
 
-  it("rejects a connection that imports Participation, People or Chats, and lets its tests reach Chats", () => {
+  it("rejects a connection that imports Participation, Identity or Chats, and lets its tests reach Chats", () => {
     expect(lines.filter((line) => line.startsWith("connections/"))).toEqual([
       "connections/kinds/x/x.ts:1 → ../../../participation/addressing.js [connections-never-imports-participation]",
-      "connections/kinds/x/x.ts:2 → ../../../people/person.js [connections-never-imports-people]",
+      "connections/kinds/x/x.ts:2 → ../../../identity/person.js [connections-never-imports-identity]",
       "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [connections-never-imports-chats]",
       "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [channel-message-built-in-one-place]",
     ]);

@@ -60,7 +60,7 @@ holds<Equals<Extract<DeepKeys<ChatsMessage>, Decided>, never>>();
 
 // (f) The connection's message holds platform facts only: every value at the
 // end of its fields is a string, the time or a flag, and no field is named
-// for a Chats or People type such as a place, a ref or a person.
+// for a Chats or Identity type such as a place, a ref or a person.
 holds<Equals<Leaves<Message> extends string | boolean | Date ? true : false, true>>();
 holds<Equals<Extract<DeepKeys<Message>, "place" | "ref" | "chatRef" | "messageRef">, never>>();
 

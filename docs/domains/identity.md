@@ -50,7 +50,6 @@ How an account nobody holds becomes a person's. A signed-in guardian or member g
 
 ## Decided against
 
-- **Identity inside People.** People grades how close someone is to the guardian. Who a person is and which accounts are theirs is asked by parts that grade nothing, such as Access deciding who is a member.
 - **Roles in Identity.** Identity would then answer two questions, and every part that only asks who a sender is would depend on roles.
 - **A link that carries the secret.** It proved only that the person confirming held the link, and a link can be passed on.
 - **The Rome Cloud id as the account.** It needed a step where an invited email is claimed by the Rome Cloud account that signs in with it, and an exception for the guardian. The costs accepted instead: an address that passes to someone else carries its access until that person is removed, and a member who changes their Rome Cloud email must be invited again (Ouou, 2026-11-25).

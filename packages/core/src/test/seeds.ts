@@ -1,13 +1,11 @@
 import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
-import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
 /**
  * Unified, deterministic baseline seed.
@@ -17,7 +15,7 @@ import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
  * branch on. Tests call `seedBaseline(db)` once in `beforeEach`, then make
  * assertions **incrementally** against the ids it returns:
  *
- *   ✓ expect(rows.map(r => r.id)).toContain(baseline.persons.guardianId)
+ *   ✓ expect(rows.map(r => r.id)).toContain(baseline.approvals.pendingId)
  *   ✗ expect(rows.length).toBe(3)   // fragile — adding one row breaks N tests
  *
  * Specialized state-machine nodes (e.g. a webhook invocation with a FAILED
@@ -30,12 +28,6 @@ import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
  */
 
 export interface BaselineIds {
-  persons: {
-    guardianId: string;
-    innerCircleId: string;
-    acquaintanceId: string;
-    otherId: string;
-  };
   approvals: {
     pendingId: string;
     approvedId: string;
@@ -62,7 +54,6 @@ export interface BaselineIds {
 }
 
 export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
-  const persons = await seedPersonsBaseline(db);
   const approvals = await seedApprovalsBaseline(db);
   const sentinelLog = await seedSentinelLogBaseline(db);
   const webhookInvocations = await seedWebhookInvocationsBaseline(db);
@@ -70,7 +61,6 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
   const settings = await seedSettingsBaseline(db);
 
   return {
-    persons,
     approvals,
     sentinelLog,
     webhookInvocations,
@@ -80,39 +70,6 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 }
 
 // Baseline builders (internal — tests should call seedBaseline instead)
-
-async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new DrizzlePeopleRepository(db);
-
-  const guardianId = "guardian";
-  await repo.createWithId(guardianId, {
-    displayName: "Guardian",
-    bondLevel: "guardian",
-    profilePath: GUARDIAN_PROFILE_PATH,
-  });
-  repo.linkStated({ platform: "telegram", id: "tg-guardian" }, guardianId);
-  repo.linkStated({ platform: "webchat", id: "web-guardian" }, guardianId);
-
-  const innerCircleId = await repo.create({
-    displayName: "Alice Inner",
-    bondLevel: "inner-circle",
-    links: [{ platform: "telegram", id: "tg-alice" }],
-  });
-
-  const acquaintanceId = await repo.create({
-    displayName: "Bob Acquaintance",
-    bondLevel: "acquaintance",
-    links: [{ platform: "telegram", id: "tg-bob" }],
-  });
-
-  const otherId = await repo.create({
-    displayName: "Carol Other",
-    bondLevel: "other",
-    links: [{ platform: "whatsapp", id: "wa-carol" }],
-  });
-
-  return { guardianId, innerCircleId, acquaintanceId, otherId };
-}
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
   const repo = new ApprovalsRepository(db);
