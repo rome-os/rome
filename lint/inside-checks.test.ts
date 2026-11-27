@@ -34,24 +34,20 @@ describe("checks inside Rome", () => {
     expect(lines(text)).toEqual([]);
   });
 
-  it("fails a new line, and a count that dropped without its baseline", () => {
+  it("fails every line that is not allowed", () => {
     const file = "packages/core/src/x.ts";
-    const hits = (...texts: string[]) => new Map([[file, texts]]);
-    expect(judge(hits("a", "b"), { [file]: 2 }, {})).toEqual([]);
-    expect(judge(hits("a", "b", "c"), { [file]: 2 }, {})).toHaveLength(1);
-    expect(judge(hits("a"), { [file]: 2 }, {})).toHaveLength(1);
-    expect(judge(new Map(), { [file]: 2 }, {})).toHaveLength(1);
-    expect(judge(hits("a"), {}, {})).toHaveLength(1);
+    expect(judge(new Map([[file, ["a"]]]), {})).toHaveLength(1);
+    expect(judge(new Map(), {})).toEqual([]);
   });
 
   it("allows Access, and each line listed as allowed, by its text", () => {
     const file = "packages/core/src/x.ts";
     const allowed = { [file]: { why: "labels", lines: ["label"] } };
-    expect(judge(new Map([["packages/core/src/access/team.ts", ["a"]]]), {}, {})).toEqual([]);
-    expect(judge(new Map([[file, ["label"]]]), {}, allowed)).toEqual([]);
-    expect(judge(new Map([[file, ["label", "check"]]]), {}, allowed)).toHaveLength(1);
+    expect(judge(new Map([["packages/core/src/access/team.ts", ["a"]]]), {})).toEqual([]);
+    expect(judge(new Map([[file, ["label"]]]), allowed)).toEqual([]);
+    expect(judge(new Map([[file, ["label", "check"]]]), allowed)).toHaveLength(1);
     // A check in place of an allowed line is new, and the allowed line is gone.
-    expect(judge(new Map([[file, ["check"]]]), {}, allowed)).toHaveLength(2);
-    expect(judge(new Map(), {}, allowed)).toHaveLength(1);
+    expect(judge(new Map([[file, ["check"]]]), allowed)).toHaveLength(2);
+    expect(judge(new Map(), allowed)).toHaveLength(1);
   });
 });
