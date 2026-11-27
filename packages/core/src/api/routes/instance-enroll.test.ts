@@ -215,35 +215,6 @@ describe("GET /instance/enroll/callback", () => {
     expect(provisionAfterLink).toHaveBeenCalledTimes(ok ? 1 : 0);
   });
 
-  it("rejects new exchanges at capacity while sharing an active exchange", async () => {
-    let finish!: () => void;
-    const exchange = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const fetchImpl = rs.fn(() => exchange.then(successfulExchange));
-    const app = mount(depsWithStore(memoryStore()), { fetchImpl });
-    const firstPath = await startCallbackPath(app);
-    const callbacks = [app.request(firstPath)];
-    for (let count = 1; count < 64; count++) {
-      callbacks.push(app.request(await startCallbackPath(app)));
-    }
-
-    const overflow = app.request(await startCallbackPath(app));
-    const duplicate = app.request(firstPath);
-    await Promise.resolve();
-    finish();
-
-    const [firstResponse, overflowResponse, duplicateResponse, ...restResponses] =
-      await Promise.all([callbacks[0], overflow, duplicate, ...callbacks.slice(1)]);
-    expect(overflowResponse.headers.get("location")).toBe("/connect?enroll=error&reason=exchange");
-    expect(firstResponse.headers.get("location")).toBe("/?enroll=success");
-    expect(duplicateResponse.headers.get("location")).toBe("/?enroll=success");
-    for (const response of restResponses) {
-      expect(response.headers.get("location")).toBe("/?enroll=success");
-    }
-    expect(fetchImpl).toHaveBeenCalledTimes(64);
-  });
-
   it.each([
     "&state=forged",
     "&state=",

@@ -31,7 +31,6 @@ const log = createLogger("api:instance-enroll");
 const CALLBACK_PATH = "/api/instance/enroll/callback";
 const PENDING_TTL_MS = 10 * 60_000;
 const COMPLETED_TTL_MS = 2 * 60_000;
-const MAX_IN_FLIGHT = 64;
 const INSTANCE_CHECK_TIMEOUT_MS = 5_000;
 // The callback only ever redirects to one of these two constant internal paths —
 // never anything derived from the request — so it can't be turned into an open
@@ -228,11 +227,6 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     const origin = getRomeCloudOrigin();
     if (!origin) {
       return c.redirect(errorRedirect("unconfigured"));
-    }
-
-    if (inFlight.size >= MAX_IN_FLIGHT) {
-      log.warn("instance enrollment exchange capacity reached");
-      return c.redirect(errorRedirect("exchange"));
     }
 
     // Publish the promise before the exchange starts so duplicates share its result.
