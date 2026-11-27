@@ -39,7 +39,10 @@ async function freePort() {
   }
 }
 
-async function fixture(dropReply = false) {
+async function fixture(
+  dropReply = false,
+  reply?: (action: string, args: Record<string, unknown>) => unknown,
+) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-shared-"));
   cleanup.push(() =>
     rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
@@ -70,7 +73,7 @@ async function fixture(dropReply = false) {
         JSON.stringify({
           id: request.id,
           from: request.to,
-          payload: {
+          payload: reply?.(request.payload.action, request.payload.args) ?? {
             type: "response",
             ok: true,
             result: { action: request.payload.action, args: request.payload.args },
@@ -182,6 +185,42 @@ async function until(predicate: () => boolean) {
 }
 
 describe("CLI and JavaScript clients sharing one caller daemon", () => {
+  it("runs access and status through the CLI and preserves structured window errors", async () => {
+    const requestId = "92b47a6e-0980-4363-8cd9-268bc45a7799";
+    const details = { requestId, revision: 1, expiresInMs: 180000 };
+    const pending = {
+      type: "response",
+      ok: true,
+      result: { status: "pending_consent", ...details },
+    };
+    const refusal = {
+      type: "response",
+      ok: false,
+      error: { code: "pending_consent", message: "pending_consent", details },
+    };
+    const f = await fixture(false, (action, args) => {
+      if (action === "computer.request_access" && Object.keys(args).length === 0) return pending;
+      if (action === "computer.status" && args.requestId === requestId) return pending;
+      if (action === "computer.windows") return refusal;
+    });
+    const request = await f.cli("device", "run", "target", "computer.request_access");
+    expect(request.code).toBe(0);
+    expect(JSON.parse(request.stdout)).toEqual(pending);
+    const status = await f.cli(
+      "device",
+      "run",
+      "target",
+      "computer.status",
+      "--args",
+      JSON.stringify({ requestId }),
+    );
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout)).toEqual(pending);
+    const windows = await f.cli("device", "run", "target", "computer.windows");
+    expect(windows.code).toBe(1);
+    expect(JSON.parse(windows.stdout)).toEqual(refusal);
+  }, 30000);
+
   it("starts from the JS API without a CLI entrypoint, shares one Gateway connection, and survives client exit", async () => {
     const f = await fixture();
     const client = createNodeClient(f.config);

@@ -390,7 +390,7 @@ export function createExecutor(
     };
     try {
       const seq =
-        action === "system.info"
+        action === "system.info" || action === "computer.status"
           ? 0
           : await audit
               .start(

@@ -297,10 +297,11 @@ ComputerUseBridge.launch = (options) => launch({
           case "hello": {
             const context = { secret: Buffer.from(bootstrap.secret, "hex"), nonce: Buffer.from(params.nonce, "base64"), hostPid: bootstrap.hostPid };
             if (!verifyProof(params.proof, context, "host")) throw new ComputerUseError("authentication_failed");
-            result = { instance, helperPid: process.pid, helperProof: createProof(context, "helper", process.pid, instance), locale: "en", auth: "session" };
+            result = { instance, helperPid: process.pid, helperProof: createProof(context, "helper", process.pid, instance), locale: "en", auth: "session", access: { status: "authorized", revision: 1 } };
             break;
           }
           case "windows": result = { windows: [window] }; break;
+          case "access_status": return;
           case "bind": result = { binding, window }; break;
           case "observe": {
             result = { binding, tree, truncated: false, refTTLms: 15000 };
@@ -353,6 +354,8 @@ it.skipIf(process.platform === "win32")(
           "computer.act": expect.stringContaining("actionId"),
         },
         actions: expect.arrayContaining([
+          "computer.request_access",
+          "computer.status",
           "computer.windows",
           "computer.bind",
           "computer.unbind",
@@ -375,6 +378,33 @@ it.skipIf(process.platform === "win32")(
       expect(reply.code).toBe(code);
       return JSON.parse(reply.stdout.toString());
     };
+    expect(await run("windows", {}, [], 1)).toMatchObject({
+      error: { code: "consent_required" },
+    });
+    async function authorize() {
+      const access = await run("request_access");
+      expect(access).toMatchObject({
+        ok: true,
+        result: {
+          status: expect.stringMatching(/^(pending_consent|authorized)$/),
+          requestId: expect.any(String),
+        },
+      });
+      const requestId = access.result.requestId;
+      if (access.result.status !== "authorized") {
+        let authorized = false;
+        for (let i = 0; i < 50; i++) {
+          const current = await run("status", { requestId });
+          if (current.result?.status === "authorized") {
+            authorized = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(authorized).toBe(true);
+      }
+    }
+    await authorize();
     expect(await run("windows")).toMatchObject({ result: { windows: [{ window: 9 }] } });
     const {
       result: { binding },
@@ -403,7 +433,7 @@ it.skipIf(process.platform === "win32")(
     expect(await run("cancel")).toMatchObject({ result: { stop: "cancel_requested" } });
     expect(await run("cancel")).toMatchObject({ result: { stop: "stop_confirmed" } });
     expect(await run("act", act, [], 1)).toMatchObject({ error: { code: "session_stopped" } });
-    const unavailable = await f.cli(["device", "run", f.deviceB, "computer.windows"]);
+    const unavailable = await f.cli(["device", "run", f.deviceB, "computer.request_access"]);
     expect(unavailable.code).toBe(1);
     expect(JSON.parse(unavailable.stdout.toString())).toMatchObject({
       error: {
@@ -438,6 +468,10 @@ it.skipIf(process.platform === "win32")(
       activity.close();
     }
     await f.reconnect();
+    expect(await run("bind", { window: 9 }, [], 1)).toMatchObject({
+      error: { code: "consent_required" },
+    });
+    await authorize();
     const rebound = await run("bind", { window: 9 });
     expect(rebound.result.binding).not.toBe(binding);
     const stateDir = await readFile(join(f.root, "helper-state-path"), "utf8");

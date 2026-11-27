@@ -12,6 +12,7 @@ import {
   controllerFingerprint,
   createProof,
   type JsonObject,
+  type HelperAccess,
   makeRequest,
   type Method,
   parseResponse,
@@ -40,6 +41,8 @@ type ObserveResult = Omit<Results["observe"], "screenshot"> & {
 interface BridgeOptions extends LaunchOptions {
   handshakeTimeoutMs?: number;
   consentTimeoutMs?: number;
+  consentDialogTimeoutMs?: number;
+  includeAccess?: boolean;
   requestTimeoutMs?: number;
   locale?: string;
   consentMode?: ConsentMode;
@@ -82,11 +85,14 @@ function closesConnection(error: ComputerUseError): boolean {
 
 export class ComputerUseBridge {
   #instanceId = "";
+  #initialAccess?: HelperAccess;
   #helperPid = 0;
   #failure?: ComputerUseError;
   #lastId = 0n;
   #requests = new Map<string, PendingRequest>();
   #listeners = new Set<(error: ComputerUseError) => void>();
+  #cancelRequested = false;
+  #onCancelRequested?: () => void;
 
   private constructor(
     private readonly socket: Socket,
@@ -118,15 +124,19 @@ export class ComputerUseBridge {
   }
 
   static async launch(options: BridgeOptions): Promise<ComputerUseBridge> {
+    const start = performance.now();
     const requestTimeout = options.requestTimeoutMs ?? 10_000;
     const handshakeTimeout = options.handshakeTimeoutMs ?? 4_000;
     // A session-only hello waits for consent before the helper sends its proof.
-    const consentTimeout = options.consentTimeoutMs ?? 65_000;
+    const consentTimeout = options.consentTimeoutMs ?? 195_000;
     const { controller, locale, consentMode } = options;
     if (
       !validTimeout(requestTimeout) ||
       !validTimeout(handshakeTimeout) ||
       !validTimeout(consentTimeout) ||
+      (options.consentDialogTimeoutMs !== undefined &&
+        (!validTimeout(options.consentDialogTimeoutMs) ||
+          options.consentDialogTimeoutMs > 180_000)) ||
       (controller !== undefined && typeof controller?.sign !== "function") ||
       (options.startupTimeoutMs !== undefined && !validTimeout(options.startupTimeoutMs))
     ) {
@@ -156,6 +166,11 @@ export class ComputerUseBridge {
           proof: createProof(context, "host"),
           locale,
           consentMode,
+          includeAccess: options.includeAccess,
+          consentTimeoutMs:
+            options.consentDialogTimeoutMs === undefined
+              ? undefined
+              : Math.max(1, Math.ceil(start + options.consentDialogTimeoutMs - performance.now())),
           controller: claim,
         },
         { timeoutMs: controller ? handshakeTimeout : consentTimeout },
@@ -192,6 +207,7 @@ export class ComputerUseBridge {
           { signature: Buffer.from(signature).toString("base64") },
           { timeoutMs: consentTimeout },
           (grant) => {
+            bridge.#initialAccess = grant.access;
             if (
               grant.fingerprint !== result.fingerprint ||
               grant.scope !== claim.scope ||
@@ -205,7 +221,11 @@ export class ComputerUseBridge {
         );
       } else if (claim) {
         throw new ComputerUseError("auth_failed");
+      } else {
+        bridge.#initialAccess = result.access;
       }
+      if (options.includeAccess && !bridge.#initialAccess)
+        throw new ComputerUseError("method_unavailable");
       if (bridge.#failure) throw bridge.#failure;
       bridge.#instanceId = result.instance;
       bridge.#helperPid = result.helperPid;
@@ -217,6 +237,10 @@ export class ComputerUseBridge {
       abort?.[Symbol.dispose]();
       secret.fill(0);
     }
+  }
+
+  get initialAccess(): HelperAccess | undefined {
+    return this.#initialAccess;
   }
 
   get instanceId(): string {
@@ -235,6 +259,23 @@ export class ComputerUseBridge {
     const { result } = await this.#request("status", undefined, options, ({ instance }) => {
       if (instance !== this.instanceId) throw new ComputerUseError("invalid_frame");
     });
+    return result;
+  }
+
+  async accessStatus(
+    afterRevision?: number,
+    options?: RequestOptions,
+  ): Promise<Results["access_status"]> {
+    const { result } = await this.#request(
+      "access_status",
+      afterRevision === undefined ? undefined : { afterRevision },
+      options,
+    );
+    return result;
+  }
+
+  async openPermissionGuide(): Promise<Results["open_permission_guide"]> {
+    const { result } = await this.#request("open_permission_guide", undefined);
     return result;
   }
 
@@ -313,6 +354,11 @@ export class ComputerUseBridge {
     };
   }
 
+  onCancelRequested(listener: () => void): void {
+    if (this.#cancelRequested) listener();
+    else this.#onCancelRequested = listener;
+  }
+
   #disconnect(error: ComputerUseError): void {
     if (this.#failure) return;
     this.#failure = error;
@@ -333,6 +379,13 @@ export class ComputerUseBridge {
     if (this.#failure) throw this.#failure;
     if (message.id === null) {
       const error = parseResponse(message);
+      if (!error.ok && error.error.code === "cancel_requested") {
+        return () => {
+          this.#cancelRequested = true;
+          this.#onCancelRequested?.();
+          this.#onCancelRequested = undefined;
+        };
+      }
       if (!error.ok) throw new ComputerUseError(error.error.code);
     }
     const pending = typeof message.id === "string" ? this.#requests.get(message.id) : undefined;

@@ -18,6 +18,10 @@ const wireErrorCodes = [
   "auth_required",
   "auth_failed",
   "consent_denied",
+  "consent_expired",
+  "cancelled",
+  "needs_system_permission",
+  "permissions_expired",
   "key_store_unavailable",
   "trusted_key_limit",
   "key_revoked",
@@ -27,6 +31,7 @@ const wireErrorCodes = [
   "accessibility_permission_required",
   "screen_recording_permission_required",
   "session_stopped",
+  "cancel_requested",
   "busy",
   "window_unavailable",
   "window_already_bound",
@@ -49,6 +54,8 @@ const wireErrorCodes = [
 
 type WireErrorCode = (typeof wireErrorCodes)[number];
 type ErrorCode =
+  | "consent_required"
+  | "pending_consent"
   | WireErrorCode
   | "computer_use_unsupported_platform"
   | "computer_use_helper_missing"
@@ -128,11 +135,13 @@ interface ConsentChallenge {
 }
 
 interface SessionGrant {
+  access?: HelperAccess;
   auth: "session";
   locale: Locale;
 }
 
 interface ControllerGrant {
+  access?: HelperAccess;
   auth: "session" | "persistent";
   locale: Locale;
   fingerprint: string;
@@ -171,15 +180,25 @@ interface TreeNode {
 type StopResult = { stop: "cancel_requested" | "stop_confirmed"; reason: WireErrorCode };
 type StopStatus = { stop: "running"; reason?: never } | StopResult;
 
+export type MissingPermission = "accessibility" | "screen_recording";
+export type HelperAccess = { revision: number } & (
+  | { status: "authorized" }
+  | { status: "needs_system_permission"; missing: MissingPermission[]; guideOpened: boolean }
+);
+
 export interface RequestParams {
   hello: {
     nonce: string;
     proof: string;
     locale?: string;
     consentMode?: ConsentMode;
+    consentTimeoutMs?: number;
+    includeAccess?: boolean;
     controller?: ControllerClaim;
   };
   authorize: { signature: string };
+  access_status: { afterRevision: number } | undefined;
+  open_permission_guide: undefined;
   status: undefined;
   windows: { application?: string } | undefined;
   bind: { window: number };
@@ -193,6 +212,8 @@ export interface RequestParams {
 export interface Results {
   hello: HelperIdentity & (SessionGrant | ConsentChallenge);
   authorize: ControllerGrant;
+  access_status: HelperAccess;
+  open_permission_guide: HelperAccess;
   status: { instance: string } & StopStatus;
   windows: { windows: WindowRecord[] };
   bind: { binding: string; window: WindowRecord };
@@ -447,6 +468,23 @@ function isScreenshot(value: unknown): value is ScreenshotDescriptor {
   );
 }
 
+function isHelperAccess(result: unknown): result is HelperAccess {
+  if (!isObject(result)) return false;
+  if (!isPositiveInteger(result.revision)) return false;
+  if (result.status === "authorized") return hasOnlyKeys(result, "revision", "status");
+  const { missing } = result;
+  return (
+    result.status === "needs_system_permission" &&
+    hasOnlyKeys(result, "revision", "status", "missing", "guideOpened") &&
+    typeof result.guideOpened === "boolean" &&
+    Array.isArray(missing) &&
+    missing.length > 0 &&
+    missing.length <= 2 &&
+    new Set(missing).size === missing.length &&
+    missing.every((pane) => pane === "accessibility" || pane === "screen_recording")
+  );
+}
+
 const resultValidators: Record<Method, (result: JsonObject) => boolean> = {
   hello: (result) => {
     const { instance, helperPid, helperProof, locale, auth, status, challenge, fingerprint } =
@@ -463,12 +501,24 @@ const resultValidators: Record<Method, (result: JsonObject) => boolean> = {
       ? hasOnlyKeys(result, ...keys, "status", "challenge", "fingerprint") &&
           !!decodeBase64(challenge) &&
           isFingerprint(fingerprint)
-      : hasOnlyKeys(result, ...keys, "auth") && auth === "session";
+      : hasOnlyKeys(result, ...keys, "auth", "access") &&
+          auth === "session" &&
+          (result.access === undefined || isHelperAccess(result.access));
   },
   authorize: (result) => {
     const { auth, locale, fingerprint, enrolled, label, scope } = result;
     return (
-      hasOnlyKeys(result, "auth", "locale", "fingerprint", "enrolled", "label", "scope") &&
+      hasOnlyKeys(
+        result,
+        "auth",
+        "locale",
+        "fingerprint",
+        "enrolled",
+        "label",
+        "scope",
+        "access",
+      ) &&
+      (result.access === undefined || isHelperAccess(result.access)) &&
       (auth === "session" || auth === "persistent") &&
       locales.has(locale) &&
       isFingerprint(fingerprint) &&
@@ -478,6 +528,8 @@ const resultValidators: Record<Method, (result: JsonObject) => boolean> = {
       isScope(scope)
     );
   },
+  access_status: isHelperAccess,
+  open_permission_guide: isHelperAccess,
   status: (result) =>
     isUuid(result.instance) &&
     (result.stop === "running" ? result.reason === undefined : isStopped(result)),
@@ -498,16 +550,34 @@ const resultValidators: Record<Method, (result: JsonObject) => boolean> = {
 const paramsValidators: Record<Method, (params: unknown) => boolean> = {
   hello: (params) =>
     isObject(params) &&
-    hasOnlyKeys(params, "nonce", "proof", "locale", "consentMode", "controller") &&
+    hasOnlyKeys(
+      params,
+      "nonce",
+      "proof",
+      "locale",
+      "consentMode",
+      "controller",
+      "consentTimeoutMs",
+      "includeAccess",
+    ) &&
     !!decodeBase64(params.nonce) &&
     !!decodeBase64(params.proof) &&
     (params.locale === undefined || isString(params.locale)) &&
+    (params.includeAccess === undefined || typeof params.includeAccess === "boolean") &&
+    (params.consentTimeoutMs === undefined ||
+      isPositiveInteger(params.consentTimeoutMs, 180_000)) &&
     (params.consentMode === undefined || consentModes.has(params.consentMode)) &&
     (params.controller === undefined
       ? params.consentMode === undefined || params.consentMode === "session_only"
       : isController(params.controller)),
   authorize: (params) =>
     isObject(params) && hasOnlyKeys(params, "signature") && !!decodeBase64(params.signature, 64),
+  access_status: (params) =>
+    params === undefined ||
+    (isObject(params) &&
+      hasOnlyKeys(params, "afterRevision") &&
+      isPositiveInteger(params.afterRevision)),
+  open_permission_guide: (params) => params === undefined,
   status: (params) => params === undefined,
   windows: (params) =>
     params === undefined ||
