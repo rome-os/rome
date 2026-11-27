@@ -135,6 +135,32 @@ describe("docsSkeletonGaps", () => {
 
     expect(docsSkeletonGaps(repo)).toEqual([`${CONCEPT}: no "Story"`]);
   });
+
+  it("does not count a field inside a tilde block, or inside a block that a shorter fence cannot close", async () => {
+    await writeSkeleton();
+    await write(
+      CONCEPT,
+      conceptDoc
+        .replace("**Purpose.**", "~~~\n**Purpose.** An example.\n~~~\n")
+        .replace("**Story.**", "````\n```\n**Story.** An example.\n```\n````\n"),
+    );
+
+    expect(docsSkeletonGaps(repo)).toEqual([`${CONCEPT}: no "Purpose"`, `${CONCEPT}: no "Story"`]);
+  });
+
+  it("reads an indented item of the parts list as a note, not as a part", async () => {
+    await writeSkeleton();
+    await write("docs/target/parts.md", `- [Connections](../../${PART})\n  - owns accounts\n`);
+
+    expect(docsSkeletonGaps(repo)).toEqual([]);
+  });
+
+  it("reads a link that opens with a slash from the repo root", async () => {
+    await writeSkeleton();
+    await write("docs/target/parts.md", `- [Connections](/${PART})\n`);
+
+    expect(docsSkeletonGaps(repo)).toEqual([]);
+  });
 });
 
 describe("judge", () => {

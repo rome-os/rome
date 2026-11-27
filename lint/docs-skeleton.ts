@@ -28,15 +28,22 @@ function read(root: string, file: string): string | null {
   return existsSync(full) && statSync(full).isFile() ? readFileSync(full, "utf8") : null;
 }
 
-/** The lines of a doc outside fenced code blocks, where an example may hold a label or a link. */
+/**
+ * The lines of a doc outside fenced code blocks, where an example may hold a
+ * label or a link. A block closes on a fence of the same character that is at
+ * least as long as the one that opened it.
+ */
 function proseLines(text: string): string[] {
-  let fenced = false;
+  let open: string | null = null;
   return text.split("\n").filter((line) => {
-    if (line.trimStart().startsWith("```")) {
-      fenced = !fenced;
-      return false;
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open === null) {
+      if (fence) open = fence[1];
+      return !fence;
     }
-    return !fenced;
+    const closes = fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
+    if (closes) open = null;
+    return false;
   });
 }
 
@@ -58,7 +65,10 @@ function fieldsOf(text: string): Map<string, string> {
   return fields;
 }
 
-/** The repo-relative files a doc links to. A link to a URL or to a place in the same doc is left out. */
+/**
+ * The repo-relative files a doc links to. A target that opens with `/` starts
+ * at the repo root. A link to a URL or to a place in the same doc is left out.
+ */
 function linkedFiles(file: string, text: string): string[] {
   const links = proseLines(text)
     .join("\n")
@@ -66,7 +76,11 @@ function linkedFiles(file: string, text: string): string[] {
   return [...links]
     .map((link) => link[1])
     .filter((target) => !/^[a-z][a-z0-9+.-]*:/i.test(target))
-    .map((target) => path.posix.normalize(path.posix.join(path.posix.dirname(file), target)));
+    .map((target) =>
+      target.startsWith("/")
+        ? path.posix.normalize(target.slice(1))
+        : path.posix.normalize(path.posix.join(path.posix.dirname(file), target)),
+    );
 }
 
 function missingFields(file: string, text: string, names: string[]): string[] {
@@ -81,7 +95,8 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
   const text = read(root, PARTS);
   if (text === null) return { gaps: [`${PARTS}: missing`], parts };
 
-  const items = proseLines(text).flatMap((line) => /^\s*[-*]\s+(.+)$/.exec(line)?.[1] ?? []);
+  // A part is a top-level item. An indented item is a note under its part.
+  const items = proseLines(text).flatMap((line) => /^[-*]\s+(.+)$/.exec(line)?.[1] ?? []);
   if (items.length === 0) gaps.push(`${PARTS}: lists no part`);
 
   for (const item of items) {
