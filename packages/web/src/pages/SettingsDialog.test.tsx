@@ -109,13 +109,13 @@ describe("SettingsDialog", () => {
       pathname: "/apps",
       search: "?tab=mine",
       hash: "#top",
-      state: { from: "/people" },
+      state: { from: "/memory" },
     });
     act(() => navigateTo("/settings/advanced"));
     expect(read("behind")).toBe("/apps?tab=mine");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(location()).toBe("/apps?tab=mine#top");
-    expect(read("state")).toBe(JSON.stringify({ from: "/people" }));
+    expect(read("state")).toBe(JSON.stringify({ from: "/memory" }));
   });
 
   it("shows the main chat behind a fresh load and returns there", () => {

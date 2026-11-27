@@ -158,9 +158,6 @@ export default function App() {
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
             <Route path="/assistants" element={<AssistantsPage />} />
-            {/* The dashboard has no People pages; old links land on the home
-                page. */}
-            <Route path="/people/*" element={<Navigate to="/" replace />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
