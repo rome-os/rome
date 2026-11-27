@@ -35,7 +35,6 @@ import {
   EmailAdapter,
   type EmailInboxCoordinates,
 } from "../kinds/email/email.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
 import { z } from "zod";
@@ -105,7 +104,6 @@ export interface EmailInboxMaterial {
 export interface EmailDescriptorDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  peopleRepo: PeopleRepository;
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
@@ -256,7 +254,7 @@ export async function autoConnectEmail(deps: {
 
 /**
  * Build the Email descriptor. `deps` carries the adapter's runtime
- * dependencies (Rome Cloud mail client, settings/person-mapping repos) so the
+ * dependencies (Rome Cloud mail client, settings repo) so the
  * wire stage can thread them from index.ts where they're constructed.
  */
 export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescriptor {
@@ -290,7 +288,6 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           const adapter = new EmailAdapter({
             provider: deps.provider,
             settingsRepo: deps.settingsRepo,
-            peopleRepo: deps.peopleRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
           });

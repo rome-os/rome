@@ -207,7 +207,10 @@ describe("resolveAndRecordAccount", () => {
       await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
     ).toBeNull();
     expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-      [{ platform: "rome-cloud-email", accountId: "new@example.com" }],
+      [
+        { platform: "email", accountId: "new@example.com" },
+        { platform: "rome-cloud-email", accountId: "new@example.com" },
+      ],
     ]);
   });
 
@@ -322,7 +325,11 @@ describe("setGuardianAccount", () => {
       await roleOfAccount(ctx, { platform: "rome-cloud-email", accountId: "old@example.com" }),
     ).toBeNull();
     expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-      [{ platform: "rome-cloud-email", accountId: "new@example.com" }, linked],
+      [
+        { platform: "email", accountId: "new@example.com" },
+        { platform: "rome-cloud-email", accountId: "new@example.com" },
+        linked,
+      ],
     ]);
   });
 });

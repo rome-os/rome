@@ -2384,7 +2384,6 @@ async function main() {
     },
     settingsRepo,
     chatSettings,
-    peopleRepo,
     whatsAppSyncSink: refreshingAfter(
       whatsAppStoreRepo,
       ["upsertContacts", "upsertChats"],

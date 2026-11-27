@@ -11,7 +11,6 @@ import {
   callMain,
   setWorkerRpcInProcessDispatcher,
 } from "../../../apps/actions/worker-rpc-client.js";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import {
   MAIL_REQUEST_TIMEOUT_MS,
@@ -82,11 +81,6 @@ async function harness(overrides: Partial<MailProvider> = {}) {
     settingsRepo: {
       get: async () => ({ enabled: true, guardianEmail: GUARDIAN }),
     } as unknown as SettingsRepository,
-    peopleRepo: {
-      byAccount: async () => null,
-      isDismissed: async () => false,
-      byBondLevel: async () => [],
-    } as unknown as PeopleRepository,
     config: { address: "rome@example.com", inboundSecret: "secret" },
   });
   await adapter.start();

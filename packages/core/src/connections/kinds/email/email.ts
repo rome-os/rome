@@ -18,8 +18,6 @@ import {
   replyToShaped,
 } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
-import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
@@ -58,8 +56,9 @@ export const EMAIL_SETTINGS_KEY = "email";
  * The provisioned inbox address + inbound HMAC secret are credential material and
  * live only on the `inbox` grant, never here. `enabled` and `guardianEmail` are
  * durable operator choices that deliberately survive a disconnect/revoke:
- * `guardianEmail` seeds the `guardian email → guardian` channel mapping and is
- * the trust anchor for the inbound gate.
+ * `guardianEmail` is the address a send to `"guardian"` goes to. It says
+ * nothing about whose mail is whose: a sign-in's email is its person's
+ * account here (docs/domains/access.md).
  */
 export interface EmailSettings {
   enabled: boolean;
@@ -79,7 +78,6 @@ export interface EmailInboxCoordinates {
 export interface EmailAdapterDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  peopleRepo: PeopleRepository;
   config: EmailInboxCoordinates;
   /**
    * Resolve the account owner's (guardian's) email from Rome Cloud when none is
@@ -147,7 +145,6 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
 export class EmailAdapter {
   private readonly provider: MailProvider;
   private readonly settingsRepo: SettingsRepository;
-  private readonly peopleRepo: PeopleRepository;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
   private readonly inboundDedup = new InboundDedup();
 
@@ -172,7 +169,6 @@ export class EmailAdapter {
   constructor(deps: EmailAdapterDeps) {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
-    this.peopleRepo = deps.peopleRepo;
     this.address = deps.config.address;
     this.inboundSecret = deps.config.inboundSecret;
     // guardianEmail is durable settings config, resolved from the settings row
@@ -203,8 +199,8 @@ export class EmailAdapter {
     // No guardian address configured → fall back to the account owner's email
     // from Rome Cloud. The signed-up account email is the guardian's,
     // so this drops the manual-entry step; a dashboard-configured address always
-    // wins (we only reach here when none was set). Persist it so the mapping
-    // below and later reboots reuse it. Best-effort: a miss just leaves the gate
+    // wins (we only reach here when none was set). Persist it so later
+    // reboots reuse it. Best-effort: a miss just leaves the gate
     // closed (all inbound → sentinel), never blocks startup.
     if (!this.guardianEmail) {
       try {
@@ -227,17 +223,6 @@ export class EmailAdapter {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-    }
-
-    // Preset the guardian mapping so authenticated mail from the guardian's
-    // known address lands on the trusted path. The inbound gate still enforces
-    // authentication before honoring this mapping (see ingestInbound).
-    if (this.guardianEmail) {
-      await linkGuardianToAccount(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
-        log.warn("failed to preset guardian email mapping", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
     }
 
     log.info("email channel started", { address: this.address });
