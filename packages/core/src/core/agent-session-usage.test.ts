@@ -363,7 +363,7 @@ describe("AgentSession turn usage", () => {
       };
     };
     // A web chat shows cards and faces the guardian.
-    const session = await manager.open(key, { drawsCards: true, guardianFacing: true });
+    const session = await manager.open(key, { drawsCards: true, takesWakeUps: true });
     await drain((await startAfter(session, { prompt: "first" })).events());
     await drain(session.fork!({ prompt: "side question", mode: "exact" }));
 

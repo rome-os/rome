@@ -61,13 +61,15 @@ export function readSpreadsheetPreview(data: ArrayBuffer): SpreadsheetSheetPrevi
 
 interface SpreadsheetPreviewPaneProps {
   assetUrl: string;
-  size: number;
+  /** In bytes; null reads it from the response before the body. */
+  size: number | null;
   title: string;
 }
 
 export function SpreadsheetPreviewPane({ assetUrl, size, title }: SpreadsheetPreviewPaneProps) {
   const { t } = useTranslation("files");
-  const tooLarge = size > MAX_SPREADSHEET_PREVIEW_BYTES;
+  const [tooLargeServed, setTooLargeServed] = useState(false);
+  const tooLarge = (size ?? 0) > MAX_SPREADSHEET_PREVIEW_BYTES || tooLargeServed;
   const [sheets, setSheets] = useState<SpreadsheetSheetPreview[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -82,6 +84,11 @@ export function SpreadsheetPreviewPane({ assetUrl, size, title }: SpreadsheetPre
       try {
         const response = await fetch(assetUrl, { signal: abortController.signal });
         if (!response.ok) throw new Error(`Failed to fetch spreadsheet: ${response.status}`);
+        if (Number(response.headers.get("content-length")) > MAX_SPREADSHEET_PREVIEW_BYTES) {
+          abortController.abort();
+          setTooLargeServed(true);
+          return;
+        }
         const parsed = readSpreadsheetPreview(await response.arrayBuffer());
         if (!abortController.signal.aborted) setSheets(parsed);
       } catch (error) {

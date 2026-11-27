@@ -59,7 +59,7 @@ export interface RunTurnRequest {
   key: AgentSessionKey;
   init?: Omit<
     SessionOpening,
-    "resetPolicy" | "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes"
+    "resetPolicy" | "drawsCards" | "takesWakeUps" | "toolEnv" | "spanAttributes"
   > & {
     /** The chat the caller names, which the bridge records as having the session. */
     romeSessionId?: string;

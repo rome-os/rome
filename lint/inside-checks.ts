@@ -4,16 +4,13 @@
 // and the audience of a chat. It reads source text, so a hit is a line that
 // names one of those, with comments, imports and types left out.
 //
-// A hit is allowed for good when Access answers who the guardian is, or when
-// ALLOWED names its line and why it stays. Every other hit is counted in
-// inside-checks-baseline.ts, which only shrinks: a file with more such lines
-// than listed fails, and so does one with fewer, until its count is lowered.
+// A hit is allowed when Access answers who the guardian is, or when ALLOWED
+// names its line and why it stays. Every other hit fails.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { BASELINE } from "./inside-checks-baseline.js";
 
 /** Words that decide by whether someone is the guardian, then by personal data or the audience. */
 const LOOKS: readonly RegExp[] = [
@@ -56,6 +53,10 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
   "packages/core/src/api/routes/device-connections.ts": {
     lines: ['if (!reads && actor.kind !== "guardian") {'],
     why: "devices are reported by the guardian's phone",
+  },
+  "packages/core/src/connections/device/actions.ts": {
+    lines: ["personal: connection.personal,"],
+    why: "passes on what a phone reports about its capabilities",
   },
   "packages/core/src/api/routes/apps.ts": {
     lines: [
@@ -189,21 +190,19 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
       'case "visitor":',
       'actor?.kind === "guardian" &&',
       'actor.via === "loopback" &&',
+      'actorKind === "visitor" ||',
+      '(actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);',
       'actor?.kind === "guardian" && !saidBy',
       'return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;',
       'return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");',
     ],
-    why: "logs who acted, labels an automated sender, names whom a turn acts for and whose phone it pushes to or asks",
+    why: "logs who acted, labels an automated sender, labels whether an automated send was its owner's request, names whom a turn acts for and whose phone it pushes to or asks",
   },
   "packages/core/src/routines/engine.ts": {
     lines: [
       'presser?.kind === "visitor" || (presser?.kind === "guardian" && presser.via === "cookie");',
     ],
     why: "labels usage by whether a person pressed Run",
-  },
-  "packages/core/src/core/guardian-channel.ts": {
-    lines: ["export function isGuardianFacingChannel("],
-    why: "a list of channels, it names no person",
   },
 };
 
@@ -257,11 +256,10 @@ export function hitsIn(text: string): Hit[] {
 /** What fails, given the text of each file's hits. */
 export function judge(
   hits: ReadonlyMap<string, readonly string[]>,
-  baseline: Readonly<Record<string, number>> = BASELINE,
   allowed: Readonly<Record<string, Allowed>> = ALLOWED,
 ): string[] {
   const findings: string[] = [];
-  for (const file of new Set([...hits.keys(), ...Object.keys(baseline), ...Object.keys(allowed)])) {
+  for (const file of new Set([...hits.keys(), ...Object.keys(allowed)])) {
     if (file.startsWith(ACCESS)) continue;
     const left = [...(hits.get(file) ?? [])];
     for (const text of allowed[file]?.lines ?? []) {
@@ -272,14 +270,9 @@ export function judge(
           `${file}: \`${text}\` is gone. Take it off ALLOWED in lint/inside-checks.ts.`,
         );
     }
-    const listed = baseline[file] ?? 0;
-    if (left.length > listed) {
+    if (left.length > 0) {
       findings.push(
-        `${file}: ${left.length - listed} new line(s) decide by the guardian, personal data or the audience. Access answers that once, at the boundary.`,
-      );
-    } else if (left.length < listed) {
-      findings.push(
-        `${file}: ${listed - left.length} fewer line(s) than listed. Lower its count in lint/inside-checks-baseline.ts to ${left.length}.`,
+        `${file}: ${left.length} line(s) decide by the guardian, personal data or the audience. Access answers that once, at the boundary.`,
       );
     }
   }

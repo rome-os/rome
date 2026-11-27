@@ -61,7 +61,7 @@ export const BASELINE = {
     "text-[#f59e0b]": 1,
     "text-black": 1,
   },
-  "packages/web/src/components/file-browser/FileView.tsx": { "bg-white": 1 },
+  "packages/web/src/components/file-preview.tsx": { "bg-white": 2 },
   "packages/web/src/components/setup/setup-renderer.tsx": { "bg-white": 1 },
   "packages/web/src/components/ui/safari.tsx": {
     "bg-[#28c840]": 1,

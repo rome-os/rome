@@ -287,6 +287,7 @@ final class DemoBackend: RomeBackend {
 
     /// A stored picture by its logical path, else a short trip plan as text.
     func linkedFile(_ file: LinkedFile) async throws -> Data {
+        if file.apiPath.hasPrefix("/chat/sessions/") { return try await chatOutputFile(path: file.apiPath) }
         try await pause(0.2)
         var components = URLComponents()
         components.percentEncodedQuery = file.query
@@ -648,7 +649,8 @@ final class DemoBackend: RomeBackend {
         return ChatOutputsResponse(outputs: Self.outputs(chatId: chatId))
     }
 
-    func chatOutputFile(path: String) async throws -> Data {
+    /// An output's bytes, by its `contentUrl` after `/api`.
+    private func chatOutputFile(path: String) async throws -> Data {
         try await pause(0.2)
         guard let output = Self.outputs(chatId: conciergeChatID).first(where: { $0.contentUrl == "/api" + path }) else { throw APIError.notFound }
         if let link = output.link, let data = assets[String(link.dropFirst())] { return data }

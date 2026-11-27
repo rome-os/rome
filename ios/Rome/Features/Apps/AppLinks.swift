@@ -189,6 +189,10 @@ struct LinkedFile: Hashable, Sendable {
     var logicalPath: String? = nil
     /// The dashboard's page for it, which a folder opens.
     var page: URL? = nil
+    /// What it previews as, when the server said; else its name says.
+    var kind: FileKind? = nil
+
+    var previewKind: FileKind { kind ?? FileKind(name: name) }
 }
 
 /// What a linked project or memory path names on the instance.

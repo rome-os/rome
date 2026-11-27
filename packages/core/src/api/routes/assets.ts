@@ -13,12 +13,10 @@ import { getAssetsDir } from "../../paths.js";
 
 const ASSET_NAME = /^([0-9a-f]{32})\.([a-z0-9]{1,8})$/;
 
-// Only these open in the browser. The route is same-origin with the dashboard,
-// so html, xml, js and anything unknown must download instead of running.
-const INLINE_EXTENSIONS = new Set([
-  ...["png", "jpg", "jpeg", "gif", "webp", "avif", "svg"],
-  ...["mp4", "webm", "mov", "mp3", "m4a", "wav", "ogg", "pdf"],
-]);
+// Only these kinds open in the browser, as on the outputs content route. The
+// route is same-origin with the dashboard, so html, xml, js and anything
+// unknown must download instead of running.
+const INLINE_KINDS = new Set(["image", "video", "audio", "pdf"]);
 
 const CSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
 
@@ -48,7 +46,7 @@ export function assetsRoutes(): Hono {
     }
 
     const file = describeFile(name);
-    const inline = INLINE_EXTENSIONS.has(extension);
+    const inline = INLINE_KINDS.has(file.kind);
     const requestedWidth = c.req.query("w");
     const width =
       requestedWidth !== undefined &&

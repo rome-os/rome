@@ -6054,7 +6054,7 @@ describe("Concierge tasks started for a guardian message", () => {
           for (const answers of ["no-such-message", "auto", "said"]) {
             const result = await s.tool("chat_send", { chatId, text: "Faster", answers });
             expect(result.isError).toBe(true);
-            expect(result.content[0].text).toContain(`No guardian message ${answers}`);
+            expect(result.content[0].text).toContain(`No message ${answers} from a person`);
           }
           expect(s.posted).toHaveLength(sent);
           expect(await startKeyOf(s, taskId)).toBe("g1");
@@ -7367,7 +7367,7 @@ describe("Concierge react", () => {
     for (const message_id of [said.messageId, "nope", "elsewhere"]) {
       const refused = await react(s, { emoji: "👍", message_id });
       expect(refused.isError).toBe(true);
-      expect(refused.content[0].text).toContain("No guardian message");
+      expect(refused.content[0].text).toContain("from a person in this chat");
     }
     expect(s.reactions.size).toBe(0);
   });
