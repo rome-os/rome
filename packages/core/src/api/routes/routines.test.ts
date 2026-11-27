@@ -149,7 +149,7 @@ describe("Routines API", () => {
     expect(body.trigger).toEqual(trigger);
   });
 
-  it("works for the chat whose card turns it on, the caller's own only", async () => {
+  it("works for the chat whose card turns it on", async () => {
     await new ChatsWebChatRepository(testDb.db).createSession("chat-a", "Topic A");
     const entered = new Hono().use("*", entryStep(["v@example.com"])).route("/", app);
     const guardian = { kind: "guardian" as const, userId: "g", via: "cookie" as const };
@@ -175,8 +175,6 @@ describe("Routines API", () => {
       );
     const repo = new RoutinesRepository(testDb.db);
 
-    // Another owner's chat, or none, does not exist to the caller.
-    expect((await turnOn(visitor, "chat-a")).status).toBe(404);
     expect((await turnOn(guardian, "no-such-chat")).status).toBe(404);
     expect(await repo.findByChat("chat-a")).toEqual([]);
 
@@ -185,7 +183,11 @@ describe("Routines API", () => {
     const sends = (await (
       await turnOn(guardian, "chat-a", "send_message", { threadId: "chat-b", text: "hi" })
     ).json()) as { id: string };
-    expect((await repo.findByChat("chat-a")).map((row) => row.id)).toEqual([made.id]);
+    // Any member turns one on in any chat.
+    const theirs = (await (await turnOn(visitor, "chat-a")).json()) as { id: string };
+    expect((await repo.findByChat("chat-a")).map((row) => row.id).sort()).toEqual(
+      [made.id, theirs.id].sort(),
+    );
     expect((await repo.findByChat("chat-b")).map((row) => row.id)).toEqual([sends.id]);
   });
 

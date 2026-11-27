@@ -5,9 +5,7 @@
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: a
 // dashboard admin gets every topic the guardian gets. `concierge.activity`
-// carries the caller's own Concierge chats, `chat.tasks:<id>` only the
-// caller's own Concierge chat, and another owner's Concierge or task chat is
-// not found.
+// carries the caller's own Concierge chats.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too. The phone app marks its socket with
@@ -56,10 +54,9 @@ export interface LiveEventSources {
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
   /** Emits `concierge_activity` for each of one owner's Concierge chats, then for every change. */
   subscribeConciergeActivity(owner: string, emit: LiveEventEmit): Unsubscribe;
-  /** Resolves false unless the id names one of the owner's own Concierge chats. */
-  hasChatTasks(chatId: string, owner: string): Promise<boolean>;
-  /** Emits `tasks_changed` whenever one Concierge chat's task list may have changed. */
-  subscribeChatTasks(chatId: string, owner: string, emit: LiveEventEmit): Unsubscribe;
+  /** Resolves null when the id names no Concierge chat. Subscribed, it emits
+   *  `tasks_changed` whenever that chat's task list may have changed. */
+  chatTasks(chatId: string): Promise<((emit: LiveEventEmit) => Unsubscribe) | null>;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -159,14 +156,20 @@ export function attachLiveEventsServer(
     // A dashboard holds back only its own person's pushes; a phone's
     // activity frames count for nothing.
     const activity = phone ? undefined : dashboardActivity?.open(owner);
-    const exists = async (topic: Topic): Promise<boolean> =>
-      topic.kind === "chat.tasks"
-        ? sources.hasChatTasks(topic.sessionId, owner)
-        : topic.kind === "chat.session" || topic.kind === "chat.watch"
-          ? sources.hasChatSession(topic.sessionId)
+    // How to subscribe to `topic`, or null when it names a chat that is not there.
+    const found = async (topic: Topic): Promise<((emit: LiveEventEmit) => Unsubscribe) | null> => {
+      if (topic.kind === "chat.tasks") return sources.chatTasks(topic.sessionId);
+      const there =
+        topic.kind === "chat.session" || topic.kind === "chat.watch"
+          ? await sources.hasChatSession(topic.sessionId)
           : true;
+      return there ? (emit) => open(topic, emit) : null;
+    };
 
-    const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
+    const open = (
+      topic: Exclude<Topic, { kind: "chat.tasks" }>,
+      emit: LiveEventEmit,
+    ): Unsubscribe => {
       switch (topic.kind) {
         case "chat.status":
           return sources.subscribeChatStatus(emit);
@@ -176,8 +179,6 @@ export function attachLiveEventsServer(
           return sources.subscribeConciergeActivity(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
-        case "chat.tasks":
-          return sources.subscribeChatTasks(topic.sessionId, owner, emit);
         case "chat.watch":
           // The chat on its person's phone: what the Concierge says there is
           // read on the phone, so it is not pushed to it. A dashboard's watch
@@ -207,16 +208,16 @@ export function attachLiveEventsServer(
       }
       const entry: { unsubscribe: Unsubscribe | null } = { unsubscribe: null };
       subscriptions.set(name, entry);
-      exists(topic)
-        .then((found) => {
+      found(topic)
+        .then((open) => {
           if (closed || subscriptions.get(name) !== entry) return;
-          if (!found) {
+          if (!open) {
             subscriptions.delete(name);
             sendError("Not found", name);
             return;
           }
           send({ type: "subscribed", topic: name });
-          entry.unsubscribe = open(topic, (event, data) =>
+          entry.unsubscribe = open((event, data) =>
             send({ type: "event", topic: name, event, data }),
           );
         })

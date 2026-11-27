@@ -39,7 +39,6 @@ import {
   isConciergeAgent,
   isConciergeChat,
   isMainConciergeChat,
-  privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
@@ -311,8 +310,8 @@ export async function buildConciergeTools(
           (await webchatRepo.listProjects()).map((stored) => stored.path),
         );
 
-  // Whose Concierge this turn is: the owner of the chat it runs in. Every
-  // chat and row the tools reach is that owner's.
+  // Whose Concierge this turn is: the owner of the chat it runs in. The
+  // chats and rows its lists show are that owner's, and so is what it makes.
   const ownerHere = async () => {
     const { chatId } = currentTurn();
     // A chat on a connection is the guardian's Concierge's.
@@ -324,11 +323,7 @@ export async function buildConciergeTools(
 
   const requireTaskChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (
-      !chat ||
-      chat.triggerKind !== TASK_CHAT_TRIGGER_KIND ||
-      privateOwnerOf(chat) !== (await ownerHere())
-    ) {
+    if (chat?.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
       throw new Error(`No task chat ${chatId}. Use chat_list to find your task chats.`);
     }
     return chat;
@@ -356,15 +351,10 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // A chat the Concierge may read: one of its task chats, or another of its
-  // Concierge chats.
+  // A chat the Concierge may read: a task chat or a Concierge chat.
   const requireReadableChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (
-      !chat ||
-      (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat)) ||
-      privateOwnerOf(chat) !== (await ownerHere())
-    ) {
+    if (!chat || (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat))) {
       throw new Error(`No task chat or Concierge chat ${chatId}. Use chat_list to find them.`);
     }
     return chat;
