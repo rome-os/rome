@@ -1,5 +1,6 @@
 import type { EventCatalogEntry, EventFilterCondition } from "@rome-os/app-runtime";
 import { matchesSource } from "../routines/event-bus-trigger-provider.js";
+import { COMPUTER_CONSENT_EVENT } from "./computer-consent.js";
 import type { RomeAppEventSource } from "../apps/types.js";
 import { createLogger } from "../logger.js";
 
@@ -47,6 +48,7 @@ export class EventSources {
 
   /** The source that declares `eventName`, if any. The first match wins. */
   sourceFor(eventName: string): DeclaredEventSource | undefined {
+    if (eventName === COMPUTER_CONSENT_EVENT) return undefined;
     const matches = this.deps.listSources().filter((s) => matchesSource(s.events, eventName));
     if (matches.length > 1) {
       log.warn("several apps declare one event; using the first", {

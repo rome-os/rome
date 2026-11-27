@@ -17,6 +17,7 @@ import {
   type CreateRoutineInput,
 } from "./create.js";
 import type { RoutineEngine } from "./engine.js";
+import { validateConsentWatch } from "../events/computer-consent.js";
 import { isSyncedRoutineKey } from "./synced-routine-key.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";
@@ -49,6 +50,14 @@ export async function updateRoutine(
   const row = await deps.routines.findById(id);
   if (!row) return { status: "not-found" };
 
+  if (changes.trigger || changes.args || (changes.enabled ?? row.enabled)) {
+    const current = toRoutine(row);
+    const consent = validateConsentWatch(
+      changes.trigger ?? current.trigger,
+      changes.args ?? current.args,
+    );
+    if ("error" in consent) return { status: "refused", error: consent.error };
+  }
   if (changes.enabled === true) {
     const error = cannotResume({ ...toRoutine(row), ...changes });
     if (error) return { status: "refused", error };
@@ -126,7 +135,7 @@ export async function changeRoutine(
     changes.args = args;
   }
   if (request.trigger) {
-    const trigger = await checkRoutineTrigger(deps, request.trigger);
+    const trigger = await checkRoutineTrigger(deps, request.trigger, request.args ?? routine.args);
     if (!trigger.ok) return { status: "refused", error: trigger.error };
     changes.trigger = trigger.value;
   }

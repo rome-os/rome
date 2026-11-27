@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig, BackendTurnRunner } from "@rome-os/app-runtime";
 import { createResumeSessionAction } from "../../../../rome_apps/system/src/actions/resume-session/index.js";
+import { createCreateRoutineAction } from "../../../../rome_apps/system/src/actions/create-routine/index.js";
+import { ComputerConsentWatcher } from "../events/computer-consent.js";
+import { routineCreationService } from "../routines/create.js";
 import { runDefer, type DeferContext } from "../routines/defer.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
@@ -9,7 +12,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { RoutineEngine } from "../routines/engine.js";
 import type { Trigger } from "../routines/types.js";
-import { createTestRome, type TestRome } from "../test/kit/index.js";
+import { buildAction, createTestRome, type TestRome } from "../test/kit/index.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 const resumeSessionConfig = {
@@ -222,5 +225,129 @@ describe("defer session continuity", () => {
     expect((await routinesRepo.findById(routineId))?.enabled).toBe(false);
     expect(provider.isActive(routineId)).toBe(false);
     provider.stop();
+  });
+
+  it.each([
+    "before defer",
+    "during polling",
+  ])("resumes the same chat on consent %s and watches the next revision across a restart", async (consentAt) => {
+    rome = await createTestRome({ keepAliveAcrossTurns: true });
+    const runtime = rome;
+    const routines = new RoutinesRepository(runtime.db);
+    const runs = new RoutineRunsRepository(runtime.db);
+    const requestId = "request-1";
+    const deviceId = "studio-mac";
+    const expiresInMs = 60_000;
+    const permissions = {
+      status: "needs_system_permission",
+      revision: 2,
+      missing: ["screen_recording"],
+      guideOpened: true,
+    };
+    const grant = { status: "authorized", revision: 3 };
+    let status: Record<string, unknown> =
+      consentAt === "before defer" ? permissions : { status: "pending_consent", revision: 1 };
+    const devices = {
+      runAction: rs.fn(async () => ({
+        ok: true as const,
+        result: { requestId, expiresInMs, ...status },
+      })),
+    };
+    function startEngine() {
+      const engine = new RoutineEngine(routines, runs, runtime.actionEngine, 0, systemClock);
+      const bus = new EventBus();
+      engine.registerProvider(
+        "event-bus",
+        new EventBusTriggerProvider(bus, routines, new ComputerConsentWatcher(devices, bus)),
+      );
+      return engine;
+    }
+    let engine = startEngine();
+    runtime.actionRegistry.register(
+      createCreateRoutineAction(buildAction("system:create_routine").config, {
+        routineCreation: routineCreationService({
+          routinesRepo: routines,
+          routineEngine: engine,
+          actionRegistry: runtime.actionRegistry,
+          resolveOneOffDate: async (trigger) => trigger,
+        }),
+      }),
+    );
+    runtime.actionRegistry.register(
+      createResumeSessionAction(resumeSessionConfig, {
+        backendTurnRunner: createBackendTurnRunner({
+          agentRunner: runtime.agentRunner,
+          channel: (name) => runtime.channels.find((channel) => channel.name === name) ?? null,
+        }),
+      } as never),
+    );
+
+    const initialPrompt = "Find the Notes window on my Mac.";
+    const note = "Run computer.windows with application Notes on studio-mac.";
+    const waitIds: string[] = [];
+    const modelRun = runtime.model.run.bind(runtime.model);
+    rs.spyOn(runtime.model, "run").mockImplementation(async function* (params) {
+      const first = params.prompt.includes(initialPrompt);
+      if (first || params.prompt.includes('"status": "needs_system_permission"')) {
+        const reply = await params.tools.callTool("ask_user", "defer", {
+          name: "Notes window access",
+          note,
+          event: {
+            eventName: "computer.consent.changed",
+            sourcePattern: "rome-node",
+            filter: [
+              { field: "deviceId", equals: deviceId },
+              { field: "requestId", equals: requestId },
+            ],
+            afterRevision: first ? 1 : 2,
+            expiresInMs,
+          },
+        });
+        if (reply.isError) throw new Error(reply.content[0].text);
+        waitIds.push(JSON.parse(reply.content[0].text).routineId);
+      }
+      yield* modelRun(params);
+    });
+
+    try {
+      const initial = await runtime.runAgent({
+        prompt: initialPrompt,
+        channelThreadKey: "webchat:mac-access",
+        threadContext: { channel: "webchat", threadId: "mac-access", channelUserId: "guardian" },
+      });
+      const sessionId = initial.find((message) => message.type === "session_init")?.sessionId;
+      expect(sessionId).toBeDefined();
+      expect(initial.filter((message) => message.type === "error")).toEqual([]);
+      status = permissions;
+      await rs.waitFor(() => expect(waitIds).toHaveLength(2), { timeout: 5_000 });
+      await rs.waitFor(async () =>
+        expect((await runs.findByRoutineId(waitIds[0]))[0]?.status).toBe("success"),
+      );
+      expect(runtime.model.lastPrompt()).toContain('"guideOpened": true');
+      expect(runtime.model.lastPrompt()).toContain("screen_recording");
+      expect((await routines.findEnabled()).map((row) => row.id)).toEqual([waitIds[1]]);
+
+      engine.stop();
+      if (consentAt === "during polling") status = grant;
+      engine = startEngine();
+      await engine.start();
+      if (consentAt === "before defer") {
+        expect((await routines.findEnabled()).map((row) => row.id)).toEqual([waitIds[1]]);
+        status = grant;
+      }
+      await rs.waitFor(
+        async () => expect((await runs.findByRoutineId(waitIds[1]))[0]?.status).toBe("success"),
+        { timeout: 5_000 },
+      );
+      expect(runtime.model.prompts()).toHaveLength(3);
+      expect(runtime.model.lastPrompt()).toContain(note);
+      expect(runtime.model.lastPrompt()).toContain('"status": "authorized"');
+      expect((await runtime.repos.sessions.current("webchat:mac-access", "core:main"))?.id).toBe(
+        sessionId,
+      );
+      expect(await routines.findEnabled()).toEqual([]);
+    } finally {
+      engine.stop();
+    }
   });
 });

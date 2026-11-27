@@ -262,6 +262,26 @@ describe("the prompts and device connections", () => {
       /`computer\.windows`.*`computer\.bind`.*`computer\.observe`.*`computer\.act`.*`computer\.unbind`/,
     );
     expect(prompt).toContain("`screenshot: true` and pass `--output <path>`");
+    for (const term of [
+      "rome-node device run <id> computer.request_access",
+      "consent_required",
+      "pending_consent",
+      "needs_system_permission",
+      "guideOpened",
+      "rome-node computer-use setup",
+      "computer.consent.changed",
+      "deviceId",
+      "requestId",
+      "event.afterRevision",
+      "event.expiresInMs",
+      "authorized",
+      "consent_denied",
+      "consent_expired",
+      "permissions_expired",
+      "cancelled",
+      "not_found",
+    ])
+      expect(prompt).toContain(term);
     expect(prompt).toContain(
       "prefer an observed `element` with `press`, `set_value`, `increment` or `decrement`",
     );

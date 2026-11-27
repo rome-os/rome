@@ -35,9 +35,11 @@ const DEFER_EVENT_CATALOG =
 
 const DEFER_EVENTS =
   "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
-  "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
-  "only sees future events: after an event defer, check the current state once more, and if what you're " +
-  "waiting for already happened, handle it now. ";
+  "at the provider and fails with the reason if it can't. App subscriptions only see future events: " +
+  "after deferring on an app event, check the current state once more, and if what you're " +
+  "waiting for already happened, handle it now. For computer.consent.changed, Rome checks computer.status " +
+  "as soon as the wait is registered. Set sourcePattern to rome-node, filter by deviceId and requestId " +
+  "only, copy revision to event.afterRevision and copy expiresInMs to event.expiresInMs. ";
 
 const DEFER_WAKE =
   "When you wake you're pinged back in this thread with the whole conversation still in context, so " +
@@ -65,7 +67,7 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
       (defer.taskChecks ? DEFER_WAKE_TASK_CHECK : DEFER_WAKE) +
       (defer.taskChecks
         ? "An event wait also needs `waitingFor` and a `deadline`, when it wakes anyway if the event never came. "
-        : "An event wait has no timeout. ") +
+        : "Computer consent waits end five seconds after expiresInMs. Other event waits have no timeout. ") +
       (defer.finalText === "private" ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
@@ -120,6 +122,18 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
               type: "string",
               description:
                 "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+            },
+            afterRevision: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "For computer.consent.changed, the revision already seen. Wake on a higher revision or not_found.",
+            },
+            expiresInMs: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "For computer.consent.changed, copy the host's remaining time in milliseconds. Rome adds five seconds for the last check unless you supply a deadline.",
             },
             ...(defer.taskChecks
               ? {

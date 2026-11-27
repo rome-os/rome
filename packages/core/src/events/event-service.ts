@@ -7,6 +7,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { EventBus } from "./event-bus.js";
+import { COMPUTER_CONSENT_EVENT } from "./computer-consent.js";
 import { inferPayloadSchema, searchCatalogEntries, type EventCatalog } from "../event-catalog.js";
 import { matchToFilter, type EventSources, type RunEnsureAction } from "./event-sources.js";
 
@@ -38,6 +39,10 @@ export class EventService implements EventPublisher, EventCatalogReader {
     source: string;
     payload?: Record<string, unknown>;
   }): Promise<{ accepted: true }> {
+    // Apps choose their own source string. Only a read from the Mac can settle consent.
+    if (event.name === COMPUTER_CONSENT_EVENT) {
+      throw new Error(`${COMPUTER_CONSENT_EVENT} is reserved for Rome Node`);
+    }
     this.bus.publish({
       name: event.name,
       source: event.source,

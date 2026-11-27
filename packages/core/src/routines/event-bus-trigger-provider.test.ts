@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { Cron } from "croner";
 import {
   EventBusTriggerProvider,
@@ -6,6 +6,7 @@ import {
   matchesFilter,
 } from "./event-bus-trigger-provider.js";
 import { EventBus, type BusEvent } from "../events/event-bus.js";
+import { COMPUTER_CONSENT_EVENT, ComputerConsentWatcher } from "../events/computer-consent.js";
 import type { Routine, Trigger } from "./types.js";
 
 function buildRoutine(overrides: Partial<Routine> & { trigger: Trigger }): Routine {
@@ -67,6 +68,75 @@ describe("EventBusTriggerProvider", () => {
     bus = new EventBus();
     repo = fakeRepo();
     provider = new EventBusTriggerProvider(bus, repo);
+  });
+
+  it("refuses invalid recovered consent watches before polling or delivering events", async () => {
+    const read = rs.fn(async () => ({
+      ok: true as const,
+      result: { status: "not_found", requestId: "a" },
+    }));
+    const fire = rs.fn(async () => {});
+    provider = new EventBusTriggerProvider(
+      bus,
+      repo,
+      new ComputerConsentWatcher({ runAction: read }, bus),
+    );
+    const trigger = {
+      type: "event-bus" as const,
+      eventName: COMPUTER_CONSENT_EVENT,
+      once: true,
+      sourcePattern: "rome-node",
+      filter: [
+        { field: "deviceId", equals: "mac" },
+        { field: "requestId", equals: "a" },
+      ],
+    };
+    const deadline = new Date(Date.now() + 60_000).toISOString();
+    for (const routine of [
+      { trigger: { ...trigger, filter: undefined }, args: { deadline } },
+      { trigger: { ...trigger, sourcePattern: "*" }, args: { deadline } },
+      { trigger: { ...trigger, once: false }, args: { deadline } },
+      { trigger, args: {} },
+      { trigger, args: { deadline: "invalid" } },
+      { trigger, args: { deadline: new Date(Date.now() + 86_400_000).toISOString() } },
+      { trigger, args: { deadline, afterRevision: -1 } },
+    ]) {
+      await provider.activate(buildRoutine(routine), fire);
+      expect(provider.isActive("r-1")).toBe(false);
+    }
+    const validFire = rs.fn(async () => {});
+    await provider.activate(buildRoutine({ id: "valid", trigger, args: { deadline } }), validFire);
+    await flush();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(validFire).toHaveBeenCalledTimes(1);
+    expect(fire).not.toHaveBeenCalled();
+    provider.stop();
+  });
+
+  it("does not deliver a consent payload without an active watcher", async () => {
+    const trigger = {
+      type: "event-bus" as const,
+      eventName: COMPUTER_CONSENT_EVENT,
+      once: true,
+      sourcePattern: "rome-node",
+      filter: [
+        { field: "deviceId", equals: "mac" },
+        { field: "requestId", equals: "a" },
+      ],
+    };
+    const fire = rs.fn(async () => {});
+    await provider.activate(
+      buildRoutine({ trigger, args: { deadline: new Date(Date.now() + 60_000).toISOString() } }),
+      fire,
+    );
+    publish(bus, {
+      name: COMPUTER_CONSENT_EVENT,
+      source: "rome-node",
+      payload: { deviceId: "mac", requestId: "a", status: "authorized", revision: 2 },
+    });
+    await flush();
+    expect(fire).not.toHaveBeenCalled();
+    provider.stop();
   });
 
   it("ends a once wait at its deadline when no event came, and never fires it twice", async () => {
