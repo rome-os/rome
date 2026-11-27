@@ -906,6 +906,16 @@ final class SelfTest {
             try expect(dockPermissionPanel(size: panel, settings: rect, visible: visible) == point,
                        "docks or clamps within the visible screen")
         }
+        try expect(PermissionStep.accessibility.title(macOSMajor: 15) == .setupAccessibility,
+                   "macOS 15 uses Accessibility label")
+        try expect(PermissionStep.accessibility.title(macOSMajor: 26) == .setupAccessibility,
+                   "macOS 26 uses Accessibility label")
+        try expect(PermissionStep.accessibility.title(macOSMajor: 27) == .setupDeviceControl,
+                   "macOS 27+ uses Device Control and Data Access label")
+        try expect(PermissionStep.screenRecording.title(macOSMajor: 13) == .setupScreenRecording,
+                   "pre-Sonoma uses Screen Recording label")
+        try expect(PermissionStep.screenRecording.title(macOSMajor: 14) == .setupScreenAndAudioRecording,
+                   "macOS 14+ uses Screen & System Audio Recording label")
     }
 
     private func authorizationOptions() throws {

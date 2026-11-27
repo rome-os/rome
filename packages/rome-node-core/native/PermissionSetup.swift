@@ -6,9 +6,15 @@ enum PermissionStep: String, CaseIterable {
     case screenRecording = "screen-recording"
 
     var title: HelperLocale.Text {
+        title(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+    }
+
+    func title(macOSMajor: Int) -> HelperLocale.Text {
         switch self {
-        case .accessibility: return .setupAccessibility
-        case .screenRecording: return .setupScreenRecording
+        case .accessibility:
+            return macOSMajor >= 27 ? .setupDeviceControl : .setupAccessibility
+        case .screenRecording:
+            return macOSMajor >= 14 ? .setupScreenAndAudioRecording : .setupScreenRecording
         }
     }
 
