@@ -912,7 +912,7 @@ export async function buildConciergeTools(
       name: "say",
       description: onConnection
         ? "Send one message to this chat. This is the only way anyone here hears you: text you write outside this tool is private. " +
-          "One call is one message. Others may read this chat: nothing here is private, and private is refused."
+          "One call is one message. This chat has no private messages, so private is refused."
         : "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
           "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
           "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",

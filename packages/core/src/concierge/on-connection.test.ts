@@ -50,6 +50,21 @@ describe("the Concierge on a connection", () => {
     }
   });
 
+  it("helps every member who writes as it helps the guardian, keeping secrets and what a member asked to keep out", () => {
+    expect(CONNECTION_PROMPT).toContain("Everyone who writes to you here is a member of this Rome");
+    expect(CONNECTION_PROMPT).toContain("help each of them as you help the guardian");
+    expect(CONNECTION_PROMPT).toContain("When a member asks about personal data or a device");
+    expect(CONNECTION_PROMPT).toContain("leave out anything a member asked you to keep out of it");
+    // No line refuses a member because others can read the chat, or names it the guardian's.
+    for (const text of [
+      "Others may read this chat",
+      "the guardian's agent",
+      "Someone other than the guardian",
+    ]) {
+      expect(CONNECTION_PROMPT).not.toContain(text);
+    }
+  });
+
   it("runs tasks for whoever asks with the tools it keeps, and approves nothing itself", () => {
     for (const name of CONNECTION_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
     expect(CONNECTION_PROMPT).not.toContain("Only the guardian may ask for one");
