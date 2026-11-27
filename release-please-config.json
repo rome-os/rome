@@ -20,10 +20,12 @@
   ],
   "packages": {
     "packages/app-runtime-sdk": {
-      "package-name": "@rome-os/app-runtime"
+      "package-name": "@rome-os/app-runtime",
+      "release-as": "0.11.7"
     },
     "packages/app-web-sdk": {
-      "package-name": "@rome-os/app-web-sdk"
+      "package-name": "@rome-os/app-web-sdk",
+      "release-as": "0.4.2"
     },
     "packages/ui": {
       "package-name": "@rome-os/ui"

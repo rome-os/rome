@@ -391,6 +391,11 @@ import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./app-host/repositories.js";
 import {
+  deprecatedGuardianProfile,
+  deprecatedPolicyEngine,
+  deprecatedPortsFor,
+} from "./app-host/deprecated-app-ports.js";
+import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
   parseLegacyArtifactBindings,
@@ -639,6 +644,13 @@ async function main() {
         open: (input) => openChannelChat({ records: sessionRecords, speakers: appSpeakers }, input),
       },
     },
+    // `routineEngine` is built further down; the closure only runs on a
+    // profile write, which happens after boot.
+    guardianProfile: deprecatedGuardianProfile({
+      db,
+      settingsRepo,
+      reactivateFloating: () => routineEngine.reactivateFloating(),
+    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
@@ -1178,6 +1190,8 @@ async function main() {
     favorService,
     appConnections,
   };
+  // Read on each hook load, so the `agentRunner` filled in below counts too.
+  lifecycleAppRuntimeServices.forApp = deprecatedPortsFor(lifecycleAppRuntimeServices);
   const appTurnHooks = new AppTurnHooks({ appRuntimeServices: lifecycleAppRuntimeServices });
   // Rome's own listeners hear each turn before the app hooks do.
   const turnListeners = new TurnListeners(appTurnHooks);
@@ -2013,6 +2027,10 @@ async function main() {
     capabilityDiscovery,
     sentinelLogRepo,
     approvalsRepo,
+    policyEngine: deprecatedPolicyEngine({
+      policies: () => policiesRepo.findAll(),
+      connectionKindOf: connectionKindOfChannel,
+    }),
     wakeGateFor,
     routinesRepo,
     routineEngine,
