@@ -108,10 +108,11 @@ following fields as UTF-8, joined by one LF byte with no final newline.
 | 6 | | Returned `instance` UUID |
 
 The helper waits up to 10 seconds for the declared host and 5 seconds for
-`hello`. Each challenge and each consent dialog has its own 60-second
-deadline. A consent denial, dialog timeout, lock, stop
-signal or disconnect ends the session. The helper sends `consent_denied`
-when the socket can still carry the reply.
+`hello`. Each controller challenge expires after 60 seconds. The consent dialog
+counts down from 180 seconds by default. The host can shorten that deadline
+with `hello.params.consentTimeoutMs` (1 through 180000). Deny returns
+`consent_denied`, a dialog timeout returns `consent_expired`, and an
+interrupted consent returns `cancelled` while the socket can carry the reply.
 
 A socket or directory replacement, peer identity change or transport loss
 seals admission and ends the helper. The helper samples the kernel process
@@ -197,6 +198,37 @@ The `authorize` reply includes `auth` (`session` or `persistent`),
 `fingerprint`, `enrolled`, `label`, `scope`, and `locale`. The
 `enrolled` field is true when the helper saves a new or changed grant.
 
+### System permission after approval
+
+With `hello.params.includeAccess` set to true, the helper checks Accessibility
+and Screen Recording and returns the permission snapshot in `result.access`.
+A missing grant blocks window operations for up to five minutes. If the user
+approved this connection in the local dialog, the helper opens
+`--setup-permissions all` and reports the result in `guideOpened`. A connection
+that reused a Keychain grant reports `guideOpened: false` and cannot open or
+refocus the guide. Clients that omit `includeAccess` receive permission errors
+from individual window operations.
+
+| Method | Parameters | Result |
+| --- | --- | --- |
+| `access_status` | Omit for a snapshot. Pass `{afterRevision}` to wait for a change, including after authorization. | `{status: "authorized", revision}` or `{status: "needs_system_permission", revision, missing, guideOpened}` |
+| `open_permission_guide` | Omit | The same snapshot after an attempt to open or focus the guide if a grant is missing. |
+
+`missing` contains `accessibility`, `screen_recording`, or both. Each helper
+connection accepts one outstanding watch. When the permission deadline
+expires, the helper sends a terminal `permissions_expired` error with a null
+ID and closes the socket. Locking the Mac, putting it to sleep, or stopping
+the session locally seals input. An opted-in host immediately receives a
+`cancel_requested` error with a null ID. The helper sends
+`session_stopped` once cleanup is confirmed and closes the socket.
+
+A fresh Screen Recording probe can see a grant before the serving process.
+In that case the approved helper starts another instance through LaunchServices.
+The two instances check each other's kernel socket peer, process generation,
+signing requirement, team and code hash. The fresh instance verifies its own
+grants before it accepts window operations. It exits when the approved
+helper closes the private socket or exits.
+
 ### Language and source identity
 
 The helper uses built-in text for the consent dialog and menu bar. It
@@ -269,8 +301,8 @@ fingerprint with the one on the remote host before approving. For `local`,
 any process running as the same user that can read the private key can
 control the Mac unattended until the grant is revoked.
 
-**Deny** is the default and shows the remaining seconds until the 60-second
-authorization deadline. The approval buttons unlock when the dialog stays
+**Deny** is the default and shows the remaining seconds until the
+consent deadline. The approval buttons unlock when the dialog stays
 focused and clear for 0.5 seconds. Approval requires a fresh gesture. A
 left mouse press or key press during the wait restarts it. Overlapping
 windows and system overlays such as screenshot selection pause confirmation.
@@ -469,7 +501,8 @@ batch that crossed the final check can still reach its destination.
 | `invalid_request`, `unsupported_version`, `method_unavailable` | Invalid request shape, version or method |
 | `authentication_failed`, `connection_closed` | Failed handshake or a connection that lost its authority |
 | `auth_required`, `auth_failed` | Controller authorization is pending, or proof failed and the connection closes |
-| `consent_denied` | The local user declined or the consent window expired or was interrupted |
+| `consent_denied`, `consent_expired`, `cancelled` | Local rejection, consent timeout, or interruption, respectively |
+| `needs_system_permission`, `permissions_expired` | System grants are missing, or the permission deadline expired |
 | `key_store_unavailable`, `trusted_key_limit` | Keychain access failed or the grant list is full |
 | `desktop_disabled` | Compile-only helper |
 | `console_unavailable`, `accessibility_permission_required` | Unavailable graphical session or missing Accessibility grant |

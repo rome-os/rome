@@ -5,6 +5,7 @@ final class Admission: @unchecked Sendable {
     private let lock = NSLock()
     private var active = false
     private var hasBinding = false
+    private var executionHelperRunning = false
     private var reason: String?
     private var exiting = false
     private var onStop: (@Sendable () -> Void)?
@@ -31,6 +32,10 @@ final class Admission: @unchecked Sendable {
     }
 
     var needsAccessCheck: Bool { lock.withLock { reason == nil && (active || hasBinding) } }
+
+    func setExecutionHelperRunning(_ running: Bool) {
+        lock.withLock { executionHelperRunning = running }
+    }
 
     func updateBindings(_ hasBinding: Bool) {
         lock.withLock { self.hasBinding = hasBinding }
@@ -64,14 +69,14 @@ final class Admission: @unchecked Sendable {
     }
 
     var terminating: Bool { lock.withLock { exiting } }
-    var locallyStopped: Bool { lock.withLock { reason == "local_stop" } }
+    var locallyStopped: Bool { lock.withLock { reason == "local_stop" || reason == "console_unavailable" } }
 
     func status() -> [String: Any] {
         lock.withLock { statusLocked() }
     }
 
     private func statusLocked() -> [String: Any] {
-        var status: [String: Any] = ["stop": reason == nil ? "running" : (active || hasBinding) ? "cancel_requested" : "stop_confirmed"]
+        var status: [String: Any] = ["stop": reason == nil ? "running" : (active || hasBinding || executionHelperRunning) ? "cancel_requested" : "stop_confirmed"]
         status["reason"] = reason
         return status
     }
@@ -178,23 +183,26 @@ final class Listener: Sendable {
 
 final class Connection: @unchecked Sendable {
     let fd: Int32
-    let listener: Listener
+    private let intact: @Sendable () -> Bool
     let peer: Peer
     let admission: Admission
     private let writer = DispatchQueue(label: "rome.computer-use.writer", qos: .userInitiated)
-    private let writes = DispatchGroup()
     private let output = NSLock()
     private var pendingBytes = 0
     private var pendingFrames = 0
 
-    init(fd: Int32, listener: Listener, peer: Peer, admission: Admission) throws {
+    convenience init(fd: Int32, listener: Listener, peer: Peer, admission: Admission) throws {
+        try self.init(fd: fd, peer: peer, admission: admission, intact: { listener.intact })
+    }
+
+    init(fd: Int32, peer: Peer, admission: Admission, intact: @escaping @Sendable () -> Bool) throws {
         var enabled: Int32 = 1
         guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout.size(ofValue: enabled))) == 0 else {
             close(fd)
             throw Failure("socket_unavailable")
         }
         self.fd = fd
-        self.listener = listener
+        self.intact = intact
         self.peer = peer
         self.admission = admission
     }
@@ -207,14 +215,14 @@ final class Connection: @unchecked Sendable {
         shutdown(fd, admission.locallyStopped ? SHUT_RD : SHUT_RDWR)
     }
 
-    func notifyLocalStop() {
+    func notifyLocalStop(_ code: String = "session_stopped") {
         guard admission.locallyStopped else { return }
-        defer { shutdown(fd, SHUT_RDWR) }
-        // A blocked writer must not delay local shutdown.
-        guard writes.wait(timeout: .now() + .milliseconds(100)) == .success,
-              (try? peer.identity.verifyPeer()) != nil,
-              let frame = try? Wire.failure(nil, "session_stopped") else { return }
-        _ = frame.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, MSG_DONTWAIT) }
+        writer.async { [self] in
+            do {
+                try peer.identity.verifyPeer()
+                try sendBytes(fd, Wire.failure(nil, code))
+            } catch { shutdown(fd, SHUT_RDWR) }
+        }
     }
 
     func verify() throws {
@@ -228,7 +236,7 @@ final class Connection: @unchecked Sendable {
     func checkLive(allowInput: Bool = true) throws {
         try peer.identity.verifyPeer()
         var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        guard !admission.terminating, listener.intact,
+        guard !admission.terminating, intact(),
               poll(&event, 1, 0) >= 0, Int32(event.revents) & (POLLHUP | POLLERR | POLLNVAL) == 0 else {
             throw Failure("connection_closed")
         }
@@ -248,8 +256,10 @@ final class Connection: @unchecked Sendable {
     func next() throws -> Request { try Wire.request(nextBody()) }
 
     func sendNow(_ frame: Data) throws {
-        try verify()
-        try sendBytes(fd, frame)
+        try writer.sync {
+            try verify()
+            try sendBytes(fd, frame)
+        }
     }
 
     func flush() { writer.sync {} }
@@ -265,15 +275,16 @@ final class Connection: @unchecked Sendable {
             end()
             throw Failure("connection_closed")
         }
-        writer.async(group: writes) {
+        writer.async {
             defer {
                 self.output.withLock {
                     self.pendingBytes -= frame.count
                     self.pendingFrames -= 1
                 }
             }
-            do { try self.sendNow(frame) }
-            catch { self.end() }
+            guard (try? self.verify()) != nil else { return }
+            do { try sendBytes(self.fd, frame) }
+            catch { self.end(); shutdown(self.fd, SHUT_RDWR) }
         }
     }
 }
@@ -285,6 +296,8 @@ struct ConsentPrompt: Sendable {
     let host: ProcessIdentity
     let signingSummary: Peer.SigningSummary?
     let deadline: DispatchTime
+
+    var interruption: Failure { Failure(DispatchTime.now() >= deadline ? "consent_expired" : "cancelled") }
 
     var claimedSource: String? { controller?.label }
 
@@ -319,19 +332,20 @@ struct SessionAuthorization: Sendable {
 }
 
 // A provider must stop waiting when canContinue returns false.
-typealias ConsentProvider = @Sendable (_ prompt: ConsentPrompt, _ canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision
+typealias ConsentProvider = @Sendable (_ prompt: ConsentPrompt, _ canContinue: @escaping @Sendable () -> Bool) throws -> ConsentDecision
 
 private func authorize(_ prompt: ConsentPrompt, store: any TrustedKeyStore, consent: ConsentProvider,
                        canContinue: @escaping @Sendable () -> Bool) throws -> SessionAuthorization {
     var authorization = SessionAuthorization(prompt: prompt)
-    guard canContinue() else { throw Failure("consent_denied") }
+    guard canContinue() else { throw prompt.interruption }
     if let controller = prompt.controller,
        let record = try store.lookup(publicKey: controller.key.base64), record.scope == controller.scope {
         authorization.persistent = record
         return authorization
     }
-    let decision = consent(prompt, canContinue)
-    guard decision != .deny, prompt.mode.choices.contains(decision), canContinue() else {
+    let decision = try consent(prompt, canContinue)
+    guard canContinue() else { throw prompt.interruption }
+    guard decision != .deny, prompt.mode.choices.contains(decision) else {
         throw Failure("consent_denied")
     }
     if decision == .allowPersistent, let controller = prompt.controller {
@@ -344,7 +358,9 @@ private func authorize(_ prompt: ConsentPrompt, store: any TrustedKeyStore, cons
 }
 
 func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
-           admission: Admission, desktop: DesktopSession?, store: any TrustedKeyStore, consent: ConsentProvider) throws {
+           admission: Admission, desktop: DesktopSession?, store: any TrustedKeyStore, consent: ConsentProvider,
+           permissionChecks: PermissionChecks? = nil,
+           worker: DispatchQueue = DispatchQueue(label: "rome.computer-use.window", qos: .userInitiated)) throws {
     defer { listener.removeSocket() }
     let (fd, peer) = try listener.acceptHost(host, admission: admission, signed: desktop != nil)
     let connection = try Connection(fd: fd, listener: listener, peer: peer, admission: admission)
@@ -447,7 +463,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         authorizedID = first.id
     }
 
-    let consentDeadline = DispatchTime.now() + .seconds(60)
+    let consentDeadline = DispatchTime.now() + .milliseconds(hello.consentTimeoutMs)
     let prompt = ConsentPrompt(locale: hello.locale, mode: hello.mode, controller: hello.controller,
                                host: peer.identity, signingSummary: peer.signingSummary,
                                deadline: consentDeadline)
@@ -465,13 +481,13 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     let authorization: SessionAuthorization
     do {
         authorization = try authorize(prompt, store: store, consent: consent, canContinue: canContinue)
-        guard canContinue() else { throw Failure("consent_denied") }
+        guard canContinue() else { throw prompt.interruption }
         if let desktop {
             guard DispatchQueue.main.sync(execute: { desktop.showStatus(authorization) }) else {
-                throw Failure("consent_denied")
+                throw Failure("cancelled")
             }
         }
-        guard canContinue() else { throw Failure("consent_denied") }
+        guard canContinue() else { throw prompt.interruption }
         try authorization.checkTrust(store)
     } catch {
         let reason = (error as? Failure)?.code ?? "key_store_unavailable"
@@ -479,8 +495,7 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         try? sendBytes(fd, Wire.failure(authorizedID, reason))
         return
     }
-    let result = hello.controller == nil ? identification.merging(authorization.result) { _, value in value } : authorization.result
-    try connection.sendNow(Wire.reply(authorizedID, result: result))
+    var result = hello.controller == nil ? identification.merging(authorization.result) { _, value in value } : authorization.result
     let watchdog = watch { try? connection.verify() }
     defer { watchdog.cancel() }
 
@@ -497,19 +512,37 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         : nil
     defer { trustWatchdog?.cancel() }
 
+    let permissions = hello.includeAccess ? SessionPermissions(checks: permissionChecks ?? (desktop == nil ? .headless : .system),
+        locale: hello.locale, mayOpenGuide: authorization.persistent == nil || authorization.enrolled, live: {
+            try connection.verify()
+            try admission.check()
+            try checkTrust()
+        }, handoff: { try ExecutionHandoff.start(admission: admission, connection: connection) },
+        end: { reason in
+            if reason == "permissions_expired" { try? connection.send(Wire.failure(nil, reason)); connection.flush() }
+            connection.end(reason)
+        }) : nil
+    if let permissions { result["access"] = try permissions.start() }
+    defer { permissions?.close() }
+
     let access = DesktopAccess()
     // A console scan can block without delaying the transport watchdog.
     let accessWatchdog = desktop != nil ? DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated)) : nil
     accessWatchdog?.setEventHandler {
-        guard admission.needsAccessCheck else { return }
-        do { try access.check() }
-        catch { _ = admission.stop((error as? Failure)?.code ?? "session_stopped") }
+        guard (try? admission.check()) != nil else { return }
+        do {
+            if let permissions {
+                guard try permissions.executor() == nil else { return }
+                guard PermissionChecks.system.missing().isEmpty else { connection.end(); return }
+            }
+            if admission.needsAccessCheck { try access.check() }
+        } catch let failure as Failure where failure.code == "needs_system_permission" { return }
+        catch { admission.terminate((error as? Failure)?.code ?? "session_stopped") }
     }
     accessWatchdog?.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(100))
     accessWatchdog?.resume()
     defer { accessWatchdog?.cancel() }
 
-    let worker = DispatchQueue(label: "rome.computer-use.window", qos: .userInitiated)
     let windows = Windows(worker: worker, access: access, live: {
         try connection.verify()
         try admission.check()
@@ -519,7 +552,12 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
         admission.updateBindings(count != 0)
         if let desktop { DispatchQueue.main.async { desktop.updateBinding(count) } }
     })
-    admission.whenStopped { [weak windows] in
+    admission.whenStopped { [weak windows, weak permissions, weak connection] in
+        if admission.locallyStopped {
+            if hello.includeAccess { connection?.notifyLocalStop("cancel_requested") }
+            connection?.end()
+        }
+        permissions?.stopExecution()
         worker.async { [weak windows] in
             windows?.stopAll()
             admission.updateBindings(false)
@@ -528,13 +566,23 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
     }
     defer {
         _ = admission.stop()
-        worker.sync { windows.stopAll() }
-        connection.notifyLocalStop()
+        worker.sync { windows.stopAll(); admission.updateBindings(false) }
+        if admission.locallyStopped {
+            permissions?.waitForExecutionExit()
+            if admission.status()["stop"] as? String == "stop_confirmed" {
+                connection.notifyLocalStop()
+            }
+            connection.flush()
+            shutdown(fd, SHUT_WR)
+        }
     }
+    try connection.sendNow(Wire.reply(authorizedID, result: result))
+    permissions?.monitor()
 
     while true {
         let request: Request
-        do { request = try connection.next() }
+        let body: Data
+        do { body = try connection.nextBody(); request = try Wire.request(body) }
         catch let failure as Failure {
             if failure.code == "invalid_request" {
                 try connection.send(Wire.failure(nil, failure.code))
@@ -557,6 +605,11 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
             }
             guard request.v == 1 else { throw Failure("unsupported_version") }
             switch request.method {
+            case "access_status", "open_permission_guide":
+                guard let permissions else { throw Failure("method_unavailable") }
+                try connection.verify()
+                try admission.check()
+                try permissions.respond(request, on: connection)
             case "status":
                 var status = admission.status()
                 status["instance"] = instance
@@ -565,45 +618,28 @@ func serve(listener: Listener, host: ProcessIdentity, handshake: Handshake,
                 let state = admission.stop()
                 try connection.send(Wire.reply(request.id, result: state))
             case "windows", "bind", "unbind", "observe", "act":
+                let executor = try permissions?.executor()
                 guard let desktop else { throw Failure("desktop_disabled") }
                 try connection.verify()
+                try checkTrust()
                 try admission.begin()
                 worker.async {
                     let previousCount = windows.bindingCount
                     let response: Data?
+                    var count = previousCount
                     do {
-                        let args = request.params
-                        let result: [String: Any]
-                        var image: Wire.Image?
-                        switch request.method {
-                        case "windows":
-                            result = try windows.list(application: args?.application)
-                        case "bind":
-                            guard let window = args?.window, window != 0 else { throw Failure("invalid_request") }
-                            result = try windows.bind(window)
-                        case "unbind":
-                            guard let id = args?.binding else { throw Failure("invalid_request") }
-                            result = try windows.unbind(id)
-                        case "observe":
-                            guard let id = args?.binding else { throw Failure("invalid_request") }
-                            (result, image) = try windows.observe(id, element: args?.element, screenshot: args?.screenshot ?? false)
-                        default:
-                            guard let args, let id = args.binding, let action = args.action else {
-                                throw Failure("invalid_request")
-                            }
-                            if let input = try WindowInput(action: action, args: args) {
-                                result = try windows.input(id, input)
-                            } else {
-                                guard let ref = args.element else { throw Failure("invalid_request") }
-                                result = try windows.act(id, element: ref, action: action, input: args.value)
-                            }
+                        if let executor { (response, count) = try executor.execute(body) }
+                        else {
+                            response = try windows.response(to: request)
+                            count = windows.bindingCount
                         }
-                        response = try Wire.reply(request.id, result: result, image: image)
                     } catch {
                         response = try? Wire.failure(request.id, (error as? Failure)?.code ?? "internal_error")
+                        if executor == nil { count = windows.bindingCount }
                     }
-                    let count = windows.bindingCount
-                    if count != previousCount { DispatchQueue.main.async { desktop.updateBinding(count) } }
+                    if executor != nil || count != previousCount {
+                        DispatchQueue.main.async { [count] in desktop.updateBinding(count) }
+                    }
                     admission.finish(hasBinding: count != 0)
                     if let response { try? connection.send(response) }
                 }

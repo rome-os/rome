@@ -376,7 +376,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         self.store = store
         super.init()
         let unavailable: @Sendable (Notification) -> Void = { _ in
-            _ = admission.stop("console_unavailable")
+            admission.terminate("console_unavailable")
         }
         let workspace = NSWorkspace.shared.notificationCenter
         workspaceObservers = [
@@ -387,13 +387,13 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: nil, using: unavailable)
     }
 
-    func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision {
+    func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) throws -> ConsentDecision {
         let eligible: @Sendable () -> Bool = {
             canContinue() && DesktopAccess.consoleSessionAvailable()
         }
-        guard eligible() else { return .deny }
+        guard eligible() else { throw prompt.interruption }
         var remaining = ConsentCountdown.seconds(until: prompt.deadline)
-        guard remaining > 0 else { return .deny }
+        guard remaining > 0 else { throw Failure("consent_expired") }
         let locale = prompt.locale
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -508,7 +508,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                 }
             }
             return event
-        }) else { return .deny }
+        }) else { throw Failure("cancelled") }
         defer { NSEvent.removeMonitor(inputMonitor) }
 
         let raise: @MainActor @Sendable () -> Void = {
@@ -593,18 +593,19 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         window.center()
         focus()
         // Keep the alert ordered on screen until the acceptance checks finish.
-        return withExtendedLifetime(alert) {
+        return try withExtendedLifetime(alert) {
             defer {
                 timer.invalidate()
                 window.orderOut(nil)
             }
             while true {
                 let response = app.runModal(for: window)
+                guard eligible() else { throw prompt.interruption }
                 guard let decision = ConsentDecision(rawValue: response.rawValue), decision != .deny,
                       let button = protected.first(where: { $0.tag == decision.rawValue }) else { return .deny }
                 if revalidate(), button.isEnabled { return decision }
                 reset()
-                if !eligible() { return .deny }
+                if !eligible() { throw prompt.interruption }
             }
         }
     }
