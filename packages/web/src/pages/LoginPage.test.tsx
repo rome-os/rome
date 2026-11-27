@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -249,5 +249,67 @@ describe("one sign-in method at a time", () => {
     expect(
       fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
     ).toBe(1);
+  });
+});
+
+describe.each([
+  {
+    name: "visitor",
+    method: "local",
+    buttonLabel: "Open shared dashboard",
+    endpoint: "/api/auth/visitor/start",
+    startError: "Could not start shared dashboard sign-in. Please try again.",
+  },
+  {
+    name: "cloud",
+    method: "cloud",
+    buttonLabel: "Continue with Rome Cloud",
+    endpoint: "/api/auth/cloud/start",
+    startError: "Could not start sign-in. Please try again.",
+  },
+] as const)("$name sign-in button", ({ method, buttonLabel, endpoint, startError }) => {
+  it("starts once on rapid clicks and stays locked on success", async () => {
+    const { promise, resolve } = Promise.withResolvers<Response>();
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockReturnValue(promise);
+    renderLogin("/login", method);
+    const button = screen.getByRole("button", { name: buttonLabel });
+
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => resolve(Response.json({ authorizeUrl: window.location.href })));
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      endpoint,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("unlocks and allows retry after a start failure", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }))
+      .mockImplementation(async () => Response.json({ authorizeUrl: window.location.href }));
+    renderLogin("/login", method);
+    const button = screen.getByRole("button", { name: buttonLabel });
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.getByRole("alert").textContent).toBe(startError);
+    expect(button.hasAttribute("aria-busy")).toBe(false);
+    expect(button.hasAttribute("aria-disabled")).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });
