@@ -360,16 +360,15 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // A chat the Concierge may read: a task chat or a Concierge chat, and on a
-  // connection any dashboard chat, since every member may read every chat
-  // (#2722 D12).
+  // A chat the Concierge may read: a task chat, a Concierge chat, or any
+  // other dashboard chat, since every member may read every chat (#2722 D12).
   const requireReadableChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
     const readable =
       chat !== null &&
       (chat.triggerKind === TASK_CHAT_TRIGGER_KIND ||
         isConciergeChat(chat) ||
-        (onConnection && isDashboardChat(chat)));
+        (chat.type === "webchat" && isDashboardChat(chat)));
     if (!chat || !readable) {
       throw new Error(`No task chat or Concierge chat ${chatId}. Use chat_list to find them.`);
     }
@@ -402,12 +401,19 @@ export async function buildConciergeTools(
     const chats = (await webchatRepo.listSessions("active")).filter(
       (chat) => chat.id !== here && isDashboardChat(chat),
     );
+    // One lookup per person, however many chats they have.
+    const names = new Map<string, Promise<string>>();
+    const nameOf = (owner: string) => {
+      const known = names.get(owner) ?? ownerName(owner);
+      names.set(owner, known);
+      return known;
+    };
     const conciergeChats = await Promise.all(
       chats.filter(isConciergeChat).map(async (chat) => ({
         chatId: chat.id,
         title: chat.name,
         kind: service.isMainChat(chat) ? "main chat" : "topic chat",
-        owner: await ownerName(ownerOf(chat)),
+        owner: await nameOf(ownerOf(chat)),
       })),
     );
     const others = chats
@@ -1308,7 +1314,7 @@ export async function buildConciergeTools(
       name: "chat_read",
       description:
         "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. `from` names the person who wrote a message. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan." +
-        (onConnection ? " Here it also reads any dashboard chat chat_list names." : ""),
+        " It also reads any other dashboard chat by its chatId.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
