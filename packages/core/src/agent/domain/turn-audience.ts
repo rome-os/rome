@@ -43,7 +43,7 @@ export function messagingAudience(context: ThreadContext, kind: string): Audienc
  * dashboard chat is shared. A turn that acts for someone other than the
  * guardian is shared. A turn started by another turn (a subagent's, a fork's)
  * is never more private than `parent`. A turn with no chat of its own, such
- * as a summoned agent's, takes `parent`'s audience, and is shared without one.
+ * as a subagent's, takes `parent`'s audience, and is shared without one.
  */
 export function turnAudience(
   context: ThreadContext | undefined,
