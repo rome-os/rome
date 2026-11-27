@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/rome-os/rome/compare/libs-v0.0.4...libs-v0.0.5) (2026-11-27)
+
+
+### Bug Fixes
+
+* **desktop:** sign in to a Rome shared with your account ([#2816](https://github.com/rome-os/rome/issues/2816)) ([13ebd17](https://github.com/rome-os/rome/commit/13ebd17e1f1ec4da1514a979dbd699fcc0880f5d))
+
 ## [0.0.4](https://github.com/rome-os/rome/compare/libs-v0.0.3...libs-v0.0.4) (2026-11-15)
 
 

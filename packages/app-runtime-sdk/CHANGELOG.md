@@ -1,5 +1,35 @@
 # @rome-os/app-runtime
 
+## [0.11.7](https://github.com/rome-os/rome/compare/app-runtime-v0.11.6...app-runtime-v0.11.7) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* delete People and its app SDK ports ([#2844](https://github.com/rome-os/rome/issues/2844))
+* **core:** stop a bot connect naming the installer guardian ([#2811](https://github.com/rome-os/rome/issues/2811))
+* **slack-app:** make the Slack app Rome's only Slack connection ([#2451](https://github.com/rome-os/rome/issues/2451))
+
+### Features
+
+* **agent:** open a session in a connection's chat with its latest messages ([#2445](https://github.com/rome-os/rome/issues/2445)) ([5798d32](https://github.com/rome-os/rome/commit/5798d329bb75b54369ed467b1d5bb9a7fb601868))
+* **app-runtime:** let an app list the chats and threads a connected account sees ([#2409](https://github.com/rome-os/rome/issues/2409)) ([7d709ee](https://github.com/rome-os/rome/commit/7d709ee7ac4f2c9e4ad453a4e2618e8196243a54))
+* **app-runtime:** let apps ask for the guardian's accounts ([#2794](https://github.com/rome-os/rome/issues/2794)) ([bad4e5a](https://github.com/rome-os/rome/commit/bad4e5aab16760b5d9e9673c46a13ce2c8031c98))
+* **app-runtime:** read a Discord chat's history from Discord itself ([#2407](https://github.com/rome-os/rome/issues/2407)) ([390f6f9](https://github.com/rome-os/rome/commit/390f6f96e393cdc84a0fdfecea474f01460d6829))
+* **app-runtime:** record a chat settings change as a member's ([#2736](https://github.com/rome-os/rome/issues/2736)) ([37debce](https://github.com/rome-os/rome/commit/37debce25001a76c3913b28ea31536576a6ddaa8))
+* **connections:** add Rome's official Discord bot, and let a connection chat start tasks ([#2545](https://github.com/rome-os/rome/issues/2545)) ([40ffd99](https://github.com/rome-os/rome/commit/40ffd998b3ac8ae1b4cb9dbf8cab8ed20524dbd7))
+* **connections:** add Rome's own Slack app connection ([#2507](https://github.com/rome-os/rome/issues/2507)) ([93954ec](https://github.com/rome-os/rome/commit/93954ecd641e54c89aae58fc9dc74d0148b3cbab))
+* **core:** stop a bot connect naming the installer guardian ([#2811](https://github.com/rome-os/rome/issues/2811)) ([82bb707](https://github.com/rome-os/rome/commit/82bb707cb510c9ee9a61d49d43ae2f67d012e51d))
+* delete People and its app SDK ports ([#2844](https://github.com/rome-os/rome/issues/2844)) ([a96c519](https://github.com/rome-os/rome/commit/a96c519f69ceba6fbdf2b26d28cb74057aaab567))
+* **participation:** record every Discord and Feishu message, and decide the reply, bot and mention rules in the wake gate ([#2481](https://github.com/rome-os/rome/issues/2481)) ([2be0695](https://github.com/rome-os/rome/commit/2be0695231cd667c1c9fc908cbf77e5b8beaf0fa))
+* **slack-app:** make the Slack app Rome's only Slack connection ([#2451](https://github.com/rome-os/rome/issues/2451)) ([015f9ea](https://github.com/rome-os/rome/commit/015f9ea8d87f11fc473b834c1951c32899d16ab9))
+
+
+### Bug Fixes
+
+* **app-runtime:** deprecate the sentinel log types ([#2788](https://github.com/rome-os/rome/issues/2788)) ([7341545](https://github.com/rome-os/rome/commit/7341545676775742fb86bc896bed898b6fa30c6c))
+* **core:** label a sender by their person and role ([#2795](https://github.com/rome-os/rome/issues/2795)) ([28aa8ec](https://github.com/rome-os/rome/commit/28aa8eca5beeb8fc35f0dabccc49c5c606a6a21d))
+* restore removed app SDK symbols as deprecated ([#2846](https://github.com/rome-os/rome/issues/2846)) ([8cbb311](https://github.com/rome-os/rome/commit/8cbb3110aadec58e36b4556b346752006718ad34))
+
 ## [0.11.6](https://github.com/rome-os/rome/compare/app-runtime-v0.11.5...app-runtime-v0.11.6) (2026-11-19)
 
 

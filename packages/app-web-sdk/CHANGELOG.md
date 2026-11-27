@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.2](https://github.com/rome-os/rome/compare/app-web-sdk-v0.4.1...app-web-sdk-v0.4.2) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* delete People and its app SDK ports ([#2844](https://github.com/rome-os/rome/issues/2844))
+
+### Features
+
+* **app-web-sdk:** build an app with no web bundle, and remove the Inbox page ([#2688](https://github.com/rome-os/rome/issues/2688)) ([cf89b1f](https://github.com/rome-os/rome/commit/cf89b1f725d6798efcb53b1cd35a4a3b7ed3c14b))
+* delete People and its app SDK ports ([#2844](https://github.com/rome-os/rome/issues/2844)) ([a96c519](https://github.com/rome-os/rome/commit/a96c519f69ceba6fbdf2b26d28cb74057aaab567))
+
+
+### Bug Fixes
+
+* restore removed app SDK symbols as deprecated ([#2846](https://github.com/rome-os/rome/issues/2846)) ([8cbb311](https://github.com/rome-os/rome/commit/8cbb3110aadec58e36b4556b346752006718ad34))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.3.0 to ^0.3.14
+
 ## [0.4.1](https://github.com/rome-os/rome/compare/app-web-sdk-v0.4.0...app-web-sdk-v0.4.1) (2026-11-15)
 
 
