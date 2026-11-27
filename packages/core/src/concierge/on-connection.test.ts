@@ -55,6 +55,10 @@ describe("the Concierge on a connection", () => {
     expect(CONNECTION_PROMPT).toContain("help each of them as you help the guardian");
     expect(CONNECTION_PROMPT).toContain("When a member asks about personal data or a device");
     expect(CONNECTION_PROMPT).toContain("leave out anything a member asked you to keep out of it");
+    expect(CONNECTION_PROMPT).toContain(
+      "A line marked `not linked` is from someone who is not a member",
+    );
+    expect(CONNECTION_PROMPT).toContain("say it waits for approval on the dashboard");
     // No line refuses a member because others can read the chat, or names it the guardian's.
     for (const text of [
       "Others may read this chat",
