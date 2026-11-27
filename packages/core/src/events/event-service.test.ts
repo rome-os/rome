@@ -25,21 +25,6 @@ function setup(run: RunEnsureAction = rs.fn<RunEnsureAction>()) {
   return { service, run };
 }
 
-it("refuses an app publication claiming the host's consent event", async () => {
-  const bus = new EventBus();
-  const received = rs.fn();
-  bus.subscribe(received);
-  const service = new EventService(bus, new EventCatalog());
-  await expect(
-    service.publish({
-      name: "computer.consent.changed",
-      source: "rome-node",
-      payload: { status: "authorized" },
-    }),
-  ).rejects.toThrow("reserved");
-  expect(received).not.toHaveBeenCalled();
-});
-
 describe("EventService.search", () => {
   it("lists Computer Use before the first poll and keeps its wait local when an app declares a wildcard", async () => {
     const catalog = new EventCatalog();

@@ -1,6 +1,11 @@
 // What `defer` takes: a name for what the agent watches and when it wakes.
 // Session model: docs/concepts/sessions.md.
 
+import {
+  COMPUTER_CONSENT_EVENT,
+  COMPUTER_CONSENT_SOURCE,
+  validateConsentWatch,
+} from "./consent-watch.js";
 import { z } from "zod";
 
 const MINUTE_MS = 60_000;
@@ -58,7 +63,7 @@ const deferEventSchema = z.strictObject({
     .transform((value) => value.trim())
     .optional(),
   deadline: z.string().optional(),
-  afterRevision: z.number().int().nonnegative().optional(),
+  afterRevision: z.number().optional(),
   expiresInMs: z.number().int().nonnegative().optional(),
 });
 
@@ -137,23 +142,9 @@ export function parseDeferInput(
 
   if (event) {
     const { deadline, waitingFor, expiresInMs, ...match } = event;
-    const consent = match.eventName === "computer.consent.changed";
+    const consent = match.eventName === COMPUTER_CONSENT_EVENT;
     if (consent) {
-      const ids = ["deviceId", "requestId"];
-      if (
-        match.filter?.length !== 2 ||
-        !ids.every((id) => match.filter?.some((c) => c.field === id && c.equals.trim()))
-      ) {
-        return {
-          ok: false,
-          error:
-            "computer.consent.changed needs exactly two equality filters: deviceId and requestId",
-        };
-      }
-      if (match.sourcePattern !== undefined && match.sourcePattern !== "rome-node") {
-        return { ok: false, error: "computer.consent.changed needs sourcePattern rome-node" };
-      }
-      match.sourcePattern = "rome-node";
+      match.sourcePattern ??= COMPUTER_CONSENT_SOURCE;
     } else if (match.afterRevision !== undefined || expiresInMs !== undefined) {
       return {
         ok: false,
@@ -174,22 +165,24 @@ export function parseDeferInput(
         };
       }
     } else {
-      if (options.taskChecks) return { ok: false, error: DEADLINE_REQUIRED };
-      if (expiresInMs === undefined)
+      if (!consent || expiresInMs === undefined) {
+        if (options.taskChecks) return { ok: false, error: DEADLINE_REQUIRED };
         return { ok: false, error: "copy expiresInMs from the Computer Use request" };
+      }
       // Give the last status read time to report the host's expiry.
       deadlineMs = new Date(now + expiresInMs + 5_000).getTime();
       if (Number.isNaN(deadlineMs))
         return { ok: false, error: "defer.event.expiresInMs exceeds the date range" };
     }
-    if (deadlineMs <= now) {
+    if (consent) {
+      const validated = validateConsentWatch(
+        { type: "event-bus", once: true, ...match },
+        { afterRevision: match.afterRevision, deadline: new Date(deadlineMs).toISOString() },
+        { now },
+      );
+      if ("error" in validated) return { ok: false, error: validated.error };
+    } else if (deadlineMs <= now) {
       return { ok: false, error: "defer.event.deadline is in the past — pick a later time" };
-    }
-    if (consent && deadlineMs > now + 10 * MINUTE_MS) {
-      return {
-        ok: false,
-        error: "computer.consent.changed requires a deadline within ten minutes",
-      };
     }
     return {
       ok: true,

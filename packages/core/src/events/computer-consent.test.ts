@@ -6,6 +6,9 @@ import { deferred } from "../test/kit/im/peer.js";
 import { ComputerConsentWatcher } from "./computer-consent.js";
 import { EventBus } from "./event-bus.js";
 
+const warn = rs.hoisted(() => rs.fn());
+rs.mock("../logger.js", () => ({ createLogger: () => ({ warn, info: rs.fn(), error: rs.fn() }) }));
+
 const deviceId = "mac";
 const requestId = "request-a";
 const pending = { status: "pending_consent", requestId, revision: 1, expiresInMs: 30_000 };
@@ -50,12 +53,13 @@ describe("Computer Use access waits", () => {
     read.mockReset().mockResolvedValue({ ok: true, result: pending });
     fire.mockClear();
     published.mockClear();
+    warn.mockClear();
     bus = new EventBus();
     bus.subscribe(published);
     provider = new EventBusTriggerProvider(
       bus,
       { update: async () => {} },
-      new ComputerConsentWatcher({ runAction: read }, bus),
+      new ComputerConsentWatcher({ runAction: read }),
     );
   });
 
@@ -81,12 +85,7 @@ describe("Computer Use access waits", () => {
     await provider.activate(routine("wait", 1), fire);
     expect(read).toHaveBeenCalledWith(deviceId, "computer.status", { requestId });
     await rs.advanceTimersByTimeAsync(0);
-    expect(published).toHaveBeenCalledExactlyOnceWith({
-      name: "computer.consent.changed",
-      source: "rome-node",
-      emittedAt: expect.any(String),
-      payload: { ...result, deviceId },
-    });
+    expect(published).not.toHaveBeenCalled();
     expect(fire).toHaveBeenCalledExactlyOnceWith({ ...result, deviceId });
     await rs.advanceTimersByTimeAsync(65_000);
     expect(read).toHaveBeenCalledTimes(1);
@@ -102,7 +101,7 @@ describe("Computer Use access waits", () => {
     expect(fire).toHaveBeenCalledExactlyOnceWith({ deviceId, ...permission });
   });
 
-  it("shares an outstanding read and applies each wait's revision to every publication", async () => {
+  it("shares an outstanding read and applies each wait's revision to the result", async () => {
     const slow = deferred<DeviceRunResult>();
     read.mockReturnValueOnce(slow.promise).mockResolvedValue({ ok: true, result: permission });
     const second = rs.fn(async () => {});
@@ -113,7 +112,7 @@ describe("Computer Use access waits", () => {
     slow.resolve({ ok: true, result: permission });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(fire).toHaveBeenCalledExactlyOnceWith({ deviceId, ...permission });
-    expect(published).toHaveBeenCalledTimes(1);
+    expect(published).not.toHaveBeenCalled();
     expect(second).not.toHaveBeenCalled();
     read.mockResolvedValue({ ok: true, result: authorized });
     await rs.advanceTimersByTimeAsync(2_000);
@@ -140,6 +139,19 @@ describe("Computer Use access waits", () => {
     expect(third).not.toHaveBeenCalled();
   });
 
+  it("skips a watch stopped by an earlier callback on the same read", async () => {
+    const watcher = new ComputerConsentWatcher({ runAction: read });
+    const params = { deviceId, requestId };
+    const second = rs.fn();
+    const firstWatch = watcher.watch(params, () => secondWatch.stop());
+    const secondWatch = watcher.watch(params, second);
+    await rs.advanceTimersByTimeAsync(1);
+    read.mockResolvedValue({ ok: true, result: authorized });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(second).not.toHaveBeenCalled();
+    firstWatch.stop();
+  });
+
   it("retries offline, rejected, and malformed RPC replies without waking another request", async () => {
     read
       .mockResolvedValueOnce({ ok: false, code: "target_unavailable", message: "offline" })
@@ -152,6 +164,21 @@ describe("Computer Use access waits", () => {
     expect(fire).not.toHaveBeenCalled();
     await rs.advanceTimersByTimeAsync(1);
     expect(fire).toHaveBeenCalledExactlyOnceWith({ deviceId, ...authorized });
+  });
+
+  it("warns once per consecutive poll error and warns again after recovery", async () => {
+    const offline = { ok: false as const, code: "target_unavailable", message: "offline" };
+    read.mockResolvedValue(offline);
+    await provider.activate(routine(), fire);
+    await rs.advanceTimersByTimeAsync(4_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    read.mockResolvedValue({ ...offline, message: "device disconnected" });
+    await rs.advanceTimersByTimeAsync(4_000);
+    expect(warn).toHaveBeenCalledTimes(2);
+    read.mockResolvedValueOnce({ ok: true, result: pending });
+    await rs.advanceTimersByTimeAsync(6_000);
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(fire).not.toHaveBeenCalled();
   });
 
   it("wakes at the deadline while offline and stops retrying", async () => {

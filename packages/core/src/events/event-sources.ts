@@ -1,6 +1,6 @@
 import type { EventCatalogEntry, EventFilterCondition } from "@rome-os/app-runtime";
 import { matchesSource } from "../routines/event-bus-trigger-provider.js";
-import { COMPUTER_CONSENT_EVENT } from "./computer-consent.js";
+import { COMPUTER_CONSENT_EVENT } from "../agent/index.js";
 import type { RomeAppEventSource } from "../apps/types.js";
 import { createLogger } from "../logger.js";
 

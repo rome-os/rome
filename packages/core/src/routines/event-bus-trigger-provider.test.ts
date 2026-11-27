@@ -6,7 +6,8 @@ import {
   matchesFilter,
 } from "./event-bus-trigger-provider.js";
 import { EventBus, type BusEvent } from "../events/event-bus.js";
-import { COMPUTER_CONSENT_EVENT, ComputerConsentWatcher } from "../events/computer-consent.js";
+import { COMPUTER_CONSENT_EVENT } from "../agent/index.js";
+import { ComputerConsentWatcher } from "../events/computer-consent.js";
 import type { Routine, Trigger } from "./types.js";
 
 function buildRoutine(overrides: Partial<Routine> & { trigger: Trigger }): Routine {
@@ -79,7 +80,7 @@ describe("EventBusTriggerProvider", () => {
     provider = new EventBusTriggerProvider(
       bus,
       repo,
-      new ComputerConsentWatcher({ runAction: read }, bus),
+      new ComputerConsentWatcher({ runAction: read }),
     );
     const trigger = {
       type: "event-bus" as const,
@@ -113,7 +114,27 @@ describe("EventBusTriggerProvider", () => {
     provider.stop();
   });
 
-  it("does not deliver a consent payload without an active watcher", async () => {
+  it.each([
+    false,
+    true,
+  ])("ignores a consent broadcast with watcher installed: %s", async (installed) => {
+    if (installed) {
+      provider = new EventBusTriggerProvider(
+        bus,
+        repo,
+        new ComputerConsentWatcher({
+          runAction: async () => ({
+            ok: true,
+            result: {
+              status: "pending_consent",
+              requestId: "a",
+              revision: 1,
+              expiresInMs: 30_000,
+            },
+          }),
+        }),
+      );
+    }
     const trigger = {
       type: "event-bus" as const,
       eventName: COMPUTER_CONSENT_EVENT,
@@ -136,6 +157,7 @@ describe("EventBusTriggerProvider", () => {
     });
     await flush();
     expect(fire).not.toHaveBeenCalled();
+    expect(provider.isActive("r-1")).toBe(true);
     provider.stop();
   });
 

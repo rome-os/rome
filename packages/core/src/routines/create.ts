@@ -9,7 +9,7 @@ import { z } from "zod";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { createLogger } from "../logger.js";
-import { validateConsentWatch } from "../events/computer-consent.js";
+import { validateConsentWatch } from "../agent/index.js";
 import type { RoutineEngine } from "./engine.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";

@@ -258,7 +258,7 @@ describe("defer session continuity", () => {
       const bus = new EventBus();
       engine.registerProvider(
         "event-bus",
-        new EventBusTriggerProvider(bus, routines, new ComputerConsentWatcher(devices, bus)),
+        new EventBusTriggerProvider(bus, routines, new ComputerConsentWatcher(devices)),
       );
       return engine;
     }

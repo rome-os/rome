@@ -17,7 +17,7 @@ import {
   type CreateRoutineInput,
 } from "./create.js";
 import type { RoutineEngine } from "./engine.js";
-import { validateConsentWatch } from "../events/computer-consent.js";
+import { validateConsentWatch } from "../agent/index.js";
 import { isSyncedRoutineKey } from "./synced-routine-key.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";

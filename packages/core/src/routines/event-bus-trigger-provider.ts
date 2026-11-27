@@ -4,12 +4,8 @@ import type { TriggerProvider } from "./trigger-provider.js";
 import type { EventBusTrigger, EventFilterCondition, Routine } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { BusEvent, EventBus } from "../events/event-bus.js";
-import {
-  COMPUTER_CONSENT_EVENT,
-  type ComputerConsentWatcher,
-  type ConsentWatch,
-  validateConsentWatch,
-} from "../events/computer-consent.js";
+import { COMPUTER_CONSENT_EVENT, validateConsentWatch } from "../agent/index.js";
+import type { ComputerConsentWatcher, ConsentWatch } from "../events/computer-consent.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("event-bus-trigger");
@@ -91,7 +87,11 @@ export class EventBusTriggerProvider implements TriggerProvider {
       );
     }
     const { watch } = validated;
-    if (watch) registration.consent = withoutSessionActor(() => this.consentWatcher?.watch(watch));
+    if (watch) {
+      registration.consent = withoutSessionActor(() =>
+        this.consentWatcher?.watch(watch, (payload) => this.fireOnce(routine.id, payload)),
+      );
+    }
     log.info("event-bus trigger activated", {
       routineId: routine.id,
       name: routine.name,
@@ -123,16 +123,16 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   private onEvent(event: BusEvent): void {
+    if (event.name === COMPUTER_CONSENT_EVENT) return;
     for (const { routine, fire, consent } of this.registrations.values()) {
       const trigger = routine.trigger as EventBusTrigger;
-      if (trigger.eventName !== event.name) continue;
+      if (consent || trigger.eventName !== event.name) continue;
       if (trigger.sourcePattern && !matchesSource(trigger.sourcePattern, event.source)) {
         continue;
       }
       if (trigger.filter && !matchesFilter(trigger.filter, event.payload)) {
         continue;
       }
-      if (event.name === COMPUTER_CONSENT_EVENT && !consent?.accepts(event)) continue;
       if (trigger.once) {
         this.fireOnce(routine.id, event.payload);
         continue;

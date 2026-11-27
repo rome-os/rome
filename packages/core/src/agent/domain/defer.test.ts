@@ -78,7 +78,7 @@ describe("parseDeferInput with an event", () => {
     { field: "deviceId", equals: "mac" },
     { field: "requestId", equals: "a" },
   ];
-  const consentWait = (overrides: Record<string, unknown> = {}) =>
+  const consentWait = (overrides: Record<string, unknown> = {}, taskChecks = false) =>
     parseDeferInput(
       {
         name: "Mac access",
@@ -92,7 +92,24 @@ describe("parseDeferInput with an event", () => {
         },
       },
       NOW,
+      { taskChecks },
     );
+
+  it("derives a task check consent deadline from the remaining time", () => {
+    const waitingFor = "Mac access";
+    expect(consentWait({ waitingFor }, true)).toMatchObject({
+      ok: true,
+      wakeUp: { waitingFor, deadlineMs: NOW + 35_000 },
+    });
+    expect(consentWait({}, true)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("waitingFor is required"),
+    });
+    expect(consentWait({ waitingFor, expiresInMs: undefined }, true)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("deadline is required"),
+    });
+  });
 
   it("bounds a computer consent wait for an ordinary chat and keeps the cursor outside its filter", () => {
     expect(consentWait()).toMatchObject({

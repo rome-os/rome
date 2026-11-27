@@ -120,6 +120,12 @@ export {
 export type { Skill, SkillCatalog } from "./domain/skill.js";
 export type { AgentAction, AgentActions } from "./domain/agent-action.js";
 export type { AgentLog } from "./domain/agent-log.js";
+export {
+  COMPUTER_CONSENT_EVENT,
+  COMPUTER_CONSENT_SOURCE,
+  type ConsentWatchParams,
+  validateConsentWatch,
+} from "./domain/consent-watch.js";
 export type { WakeUp } from "./domain/defer.js";
 export {
   projectSummary,

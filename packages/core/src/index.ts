@@ -1237,11 +1237,7 @@ async function main() {
   const eventBus = new EventBus();
   routineEngine.registerProvider(
     "event-bus",
-    new EventBusTriggerProvider(
-      eventBus,
-      routinesRepo,
-      new ComputerConsentWatcher(nodeDevices, eventBus),
-    ),
+    new EventBusTriggerProvider(eventBus, routinesRepo, new ComputerConsentWatcher(nodeDevices)),
   );
 
   // Manual triggers never fire on their own — they only run via runNow(). The
