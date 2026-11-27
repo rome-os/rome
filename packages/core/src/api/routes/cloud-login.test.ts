@@ -373,6 +373,36 @@ describe("/api/auth/cloud — start requests the right scope", () => {
   });
 });
 
+describe("/api/auth/cloud — start lets the person choose an account", () => {
+  async function authorizeUrl(body?: unknown): Promise<URL> {
+    setInstanceTokenInMemory("romeinst_existing");
+    const app = await buildRoute({ fetchImpl: fakeRomeCloud(() => ({})).fetch });
+    const res = await app.request("/api/auth/cloud/start", {
+      method: "POST",
+      ...(body !== undefined && {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    });
+    expect(res.status).toBe(200);
+    return new URL(((await res.json()) as { authorizeUrl: string }).authorizeUrl);
+  }
+
+  it('asks Rome Cloud for an account chooser for "Use another account"', async () => {
+    expect((await authorizeUrl({ chooseAccount: true })).searchParams.get("prompt")).toBe(
+      "select_account",
+    );
+  });
+
+  it.each([
+    ["no body", undefined],
+    ["a plain start", {}],
+    ["a non-boolean ask", { chooseAccount: "yes" }],
+  ])("signs in the current Rome Cloud account for %s", async (_label, body) => {
+    expect((await authorizeUrl(body)).searchParams.has("prompt")).toBe(false);
+  });
+});
+
 describe("/api/auth/cloud — vanilla instance", () => {
   it("enrolls, binds the guardian account from the id_token, and signs in", async () => {
     insertGuardian({ accountId: null });

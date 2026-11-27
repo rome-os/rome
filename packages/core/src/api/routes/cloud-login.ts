@@ -223,6 +223,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
     authorizeUrl.searchParams.set("nonce", attempt.nonce);
     authorizeUrl.searchParams.set("instance_name", hostname());
+    // "Use another account" on the login page: Rome Cloud lets the person
+    // choose an account instead of signing in the one it already has.
+    const body = (await c.req.json().catch(() => null)) as { chooseAccount?: unknown } | null;
+    if (body?.chooseAccount === true) authorizeUrl.searchParams.set("prompt", "select_account");
 
     return c.json({ authorizeUrl: authorizeUrl.toString() });
   });
