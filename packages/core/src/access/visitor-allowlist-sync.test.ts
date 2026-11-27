@@ -486,7 +486,9 @@ describe("DashboardAccessStore", () => {
     const listed = async () =>
       (await listMembers(ctx))
         .filter((member) => member.role === "member")
-        .flatMap((member) => member.accounts.map((account) => account.accountId));
+        .flatMap((member) => member.accounts)
+        .filter((account) => account.platform === "rome-cloud-email")
+        .map((account) => account.accountId);
 
     await Promise.all([
       store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] }),

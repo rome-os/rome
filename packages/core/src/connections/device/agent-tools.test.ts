@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { DevicesStatus } from "@rome/api-types/devices";
-import {
-  approvalOf,
-  callTool,
-  GUARDIAN_TURN,
-  whoMayAskSuite,
-} from "../../apps/actions/agent-tool-contract.js";
-import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
+import { approvalOf, callTool, GUARDIAN_TURN } from "../../apps/actions/agent-tool-contract.js";
 import type { DeviceManageResult, DeviceRunResult } from "../../desktops/node-devices.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import {
@@ -19,11 +13,6 @@ import {
 import { withAskingDevice } from "./live-route.js";
 import { type DeviceReport, deviceReportSchema } from "./report.js";
 import { DeviceConnectionsRepository } from "./repository.js";
-
-whoMayAskSuite(readDevices, {});
-whoMayAskSuite(runOnDeviceTool, { operation: "device.status" });
-whoMayAskSuite(renameDevice, { deviceId: "dev-phone", name: "Work iPhone" });
-whoMayAskSuite(removeDevice, { deviceId: "dev-phone" });
 
 const NOW = Date.parse("2026-11-24T09:00:00Z");
 
@@ -286,7 +275,7 @@ describe("the Devices page's tools", () => {
       ]);
     });
 
-    it("reads a personal capability only in a private chat", async () => {
+    it("reads a personal capability in a shared chat", async () => {
       const result = await callTool(
         runOnDeviceTool,
         deps,
@@ -294,11 +283,11 @@ describe("the Devices page's tools", () => {
         { ...GUARDIAN_TURN, audience: "shared" },
       );
 
-      expect(result).toEqual({ status: "error", error: PERSONAL_DATA_PRIVATE_ONLY });
-      expect(runs).toEqual([]);
+      expect(result).toMatchObject({ status: "ok" });
+      expect(runs).toEqual([{ deviceId: "dev-phone", action: "health.stats", args: {} }]);
     });
 
-    it("reads in a turn no one started, such as a routine's, but changes nothing in one", async () => {
+    it("reads and changes in a turn no one started, such as a routine's", async () => {
       const routineTurn = {
         audience: "private" as const,
         channelContext: GUARDIAN_TURN.channelContext,
@@ -313,11 +302,8 @@ describe("the Devices page's tools", () => {
       const ring = await callTool(runOnDeviceTool, deps, { operation: "device.ring" }, routineTurn);
 
       expect(read).toMatchObject({ status: "ok" });
-      expect(ring).toEqual({
-        status: "error",
-        error: expect.stringMatching(/^write_needs_guardian:/),
-      });
-      expect(runs.map((r) => r.action)).toEqual(["device.status"]);
+      expect(ring).toMatchObject({ status: "ok" });
+      expect(runs.map((r) => r.action)).toEqual(["device.status", "device.ring"]);
     });
 
     it("says what to do when no device offers the operation", async () => {

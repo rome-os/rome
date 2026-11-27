@@ -18,23 +18,24 @@ import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "./rules.js";
-import {
-  DISCORD_CHAT_RULES,
-  FEISHU_CHAT_RULES,
-  WECHAT_CHAT_RULES,
-} from "@rome/api-types/chat-rules";
+import { DISCORD_CHAT_RULES, FEISHU_CHAT_RULES } from "@rome/api-types/chat-rules";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 /** The rules each kind declares, as its descriptor does. */
 const CHAT_RULES = {
   discord: DISCORD_CHAT_RULES,
   feishu: FEISHU_CHAT_RULES,
-  wechat: WECHAT_CHAT_RULES,
+  // A kind whose chat can be switched off and given its own agent, and that
+  // wakes on every message it hears.
+  routed: {
+    offers: ["enabled", "routing.agentName", "session.reset"],
+    fixed: WAKES_ON_EVERY_MESSAGE,
+  },
   agents: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
 } satisfies Record<string, KindChatRules>;
 
 function directoryDescriptor(
-  service: "discord" | "feishu" | "wechat" | "agents",
+  service: "discord" | "feishu" | "routed" | "agents",
   conversations: (connectionId: string) => ChatDescriptor[],
 ): ConnectionDescriptor {
   return {
@@ -141,10 +142,10 @@ describe("ChatSettingsService", () => {
       ]),
     );
     registry.register(directoryDescriptor("feishu", () => []));
-    registry.register(directoryDescriptor("wechat", () => []));
+    registry.register(directoryDescriptor("routed", () => []));
     const discord = await connectLive(registry, "discord");
     const feishu = await connectLive(registry, "feishu");
-    const wechat = await connectLive(registry, "wechat");
+    const routed = await connectLive(registry, "routed");
     const repository = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
     const service = new ChatSettingsService({
       repository,
@@ -174,7 +175,7 @@ describe("ChatSettingsService", () => {
       changed: onChanged,
       discord,
       feishu,
-      wechat,
+      routed,
       parent,
       child: childDescriptor.ref,
       childDescriptor,
@@ -540,7 +541,7 @@ describe("ChatSettingsService", () => {
   });
 
   it("validates actors, supported fields, agents, list source, and offline edits", async () => {
-    const { registry, service, discord, feishu, wechat, parent } = await setup();
+    const { registry, service, discord, feishu, routed, parent } = await setup();
 
     await expect(
       service.update({
@@ -571,23 +572,23 @@ describe("ChatSettingsService", () => {
       }),
     ).rejects.toThrow('Unsupported conversation setting "activation.botMessages"');
 
-    const wechatRef: ChatRef = {
-      connectionId: wechat.id,
-      chatId: "wechat-contact" as ChatId,
+    const routedRef: ChatRef = {
+      connectionId: routed.id,
+      chatId: "routed-contact" as ChatId,
     };
     service.observe({
-      ref: wechatRef,
-      connectionKind: "wechat",
-      service: "wechat",
+      ref: routedRef,
+      connectionKind: "routed",
+      service: "routed",
       kind: "group",
-      displayName: "WeChat conversation",
+      displayName: "Routed conversation",
     });
-    await expect(service.get(wechatRef)).resolves.toMatchObject({
+    await expect(service.get(routedRef)).resolves.toMatchObject({
       supportedFields: ["enabled", "routing.agentName", "session.reset"],
     });
     await expect(
       service.update({
-        ref: wechatRef,
+        ref: routedRef,
         set: { enabled: false, routing: { agentName: "pm-assistant" } },
         clear: [],
         actor: { kind: "guardian", id: "guardian-1" },
@@ -597,7 +598,7 @@ describe("ChatSettingsService", () => {
     });
     await expect(
       service.update({
-        ref: wechatRef,
+        ref: routedRef,
         set: { activation: { mode: "all" } },
         clear: [],
         actor: { kind: "guardian", id: "guardian-1" },
@@ -668,7 +669,7 @@ describe("ChatSettingsService", () => {
   });
 
   it("hides persisted settings after their connection is removed", async () => {
-    const { registry, repository, service, discord, wechat, parent } = await setup();
+    const { registry, repository, service, discord, routed, parent } = await setup();
     await service.update({
       ref: parent,
       set: { enabled: false },
@@ -676,19 +677,19 @@ describe("ChatSettingsService", () => {
       actor: { kind: "guardian" },
     });
 
-    const wechatRef: ChatRef = {
-      connectionId: wechat.id,
-      chatId: "wechat-group" as ChatId,
+    const routedRef: ChatRef = {
+      connectionId: routed.id,
+      chatId: "routed-group" as ChatId,
     };
     service.observe({
-      ref: wechatRef,
-      connectionKind: "wechat",
-      service: "wechat",
+      ref: routedRef,
+      connectionKind: "routed",
+      service: "routed",
       kind: "group",
-      displayName: "WeChat group",
+      displayName: "Routed group",
     });
     await service.update({
-      ref: wechatRef,
+      ref: routedRef,
       set: { enabled: false },
       clear: [],
       actor: { kind: "guardian" },
@@ -697,7 +698,7 @@ describe("ChatSettingsService", () => {
     await registry.remove(discord.id);
 
     const page = await service.list();
-    expect(page.items.map((item) => item.snapshot.conversation.service)).toEqual(["wechat"]);
+    expect(page.items.map((item) => item.snapshot.conversation.service)).toEqual(["routed"]);
     expect(repository.find("discord", "parent" as ChatId)?.channelSettings).not.toBeNull();
   });
 
@@ -779,24 +780,24 @@ describe("ChatSettingsService", () => {
   });
 
   it("still reads a seen conversation and its settings once its connection is removed", async () => {
-    const { registry, service, wechat } = await setup();
+    const { registry, service, routed } = await setup();
     const ref: ChatRef = {
-      connectionId: wechat.id,
-      chatId: "wechat-group" as ChatId,
+      connectionId: routed.id,
+      chatId: "routed-group" as ChatId,
     };
     service.observe({
       ref,
-      connectionKind: "wechat",
-      service: "wechat",
+      connectionKind: "routed",
+      service: "routed",
       kind: "group",
-      displayName: "WeChat group",
+      displayName: "Routed group",
     });
     await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
 
-    await registry.remove(wechat.id);
+    await registry.remove(routed.id);
 
     const snapshot = await service.get(ref);
-    expect(snapshot.conversation.displayName).toBe("WeChat group");
+    expect(snapshot.conversation.displayName).toBe("Routed group");
     expect(snapshot.effective.enabled).toBe(false);
   });
 
@@ -844,9 +845,9 @@ describe("ChatSettingsService", () => {
       repository: new DrizzleConnectionsRepository(testDb.db),
     });
     registry.register(directoryDescriptor("feishu", () => []));
-    registry.register(directoryDescriptor("wechat", () => []));
+    registry.register(directoryDescriptor("routed", () => []));
     const sales = await connectLive(registry, "feishu");
-    const support = await connectLive(registry, "wechat");
+    const support = await connectLive(registry, "routed");
     // The account the sales channel is paired as, which a re-pairing
     // changes, and the channel it is, which a reconnect changes.
     const paired: { sales: string | null; salesChannel: string } = {

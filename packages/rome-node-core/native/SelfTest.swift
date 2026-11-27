@@ -24,6 +24,7 @@ final class SelfTest {
         try test.input()
         try test.consent()
         try test.activationPolicy()
+        try test.permissionSetup()
         try test.authorizationOptions()
         try test.trustedKeyStorage()
         try test.frames()
@@ -839,6 +840,71 @@ final class SelfTest {
         }
         try rejects("console_unavailable") {
             try requireAccessoryPolicy(current: { .regular }, set: { _ in false })
+        }
+    }
+
+    private func permissionSetup() throws {
+        let mode = "--setup-permissions"
+        let requests: [([String], PermissionStep?, HelperLocale)] = [
+            ([], nil, .ja),
+            (["all"], nil, .ja),
+            (["accessibility", "--locale", "en-US"], .accessibility, .en),
+            (["--locale", "zh-CN", "screen-recording"], .screenRecording, .zhHans),
+            (["--locale", "zh-TW"], nil, .zhHant),
+            (["--locale", "fr"], nil, .ja),
+        ]
+        for (args, step, locale) in requests {
+            let request = try PermissionSetupRequest([mode] + args, preferred: ["ja-JP"])
+            try expect(request.step == step && request.locale == locale, "parse permission setup arguments")
+        }
+        let defaultRequest = try PermissionSetupRequest([], preferred: ["ja-JP"])
+        try expect(defaultRequest.step == nil && defaultRequest.locale == .ja,
+                   "empty arguments open the default permission guide")
+        for args in [
+            ["unknown"], ["--bad"], [mode], ["--locale"], ["--locale", ""], ["--locale", "--bad"],
+            ["all", "accessibility"], ["screen-recording", "screen-recording"], ["--locale", "en", "--locale", "ja"],
+        ] {
+            try rejects("invalid_request") { _ = try PermissionSetupRequest([mode] + args, preferred: []) }
+        }
+
+        var setup = PermissionSetupState(step: nil, granted: [])
+        try expect(setup.step == .accessibility && setup.takePrompt() == .accessibility, "starts at Accessibility")
+        setup.enter(.accessibility)
+        try expect(setup.takePrompt() == nil, "clicking the current step does not repeat its prompt")
+        setup.update([.accessibility])
+        try expect(setup.step == .screenRecording && setup.takePrompt() == .screenRecording, "advances to Screen Recording")
+        setup.update([.accessibility])
+        try expect(setup.takePrompt() == nil, "polling does not repeat a prompt")
+        setup.enter(.accessibility)
+        try expect(setup.step == .accessibility && setup.takePrompt() == nil, "can show a granted pane without prompting")
+        setup.enter(.screenRecording)
+        try expect(setup.takePrompt() == .screenRecording && setup.takePrompt() == nil, "prompts once on reentry")
+        setup.update([.accessibility, .screenRecording])
+        try expect(setup.step == nil && setup.takePrompt() == nil, "completes once both permissions are granted")
+        setup.update([.accessibility])
+        try expect(setup.step == .screenRecording, "returns to a revoked permission")
+
+        var explicit = PermissionSetupState(step: .screenRecording, granted: [])
+        try expect(explicit.step == .screenRecording && explicit.takePrompt() == .screenRecording, "honors the requested pane")
+        explicit.update([.screenRecording])
+        try expect(explicit.step == .accessibility, "a recording grant advances to the remaining permission")
+        try expect(PermissionSetupState(step: nil, granted: [.accessibility]).step == .screenRecording,
+                   "starts at the first missing permission")
+        try expect(PermissionSetupState(step: nil, granted: [.accessibility, .screenRecording]).step == nil,
+                   "shows completion when setup starts with both grants")
+
+        let visible = CGRect(x: 100, y: 100, width: 1000, height: 800)
+        let panel = CGSize(width: 220, height: 150)
+        let anchors: [(CGRect?, CGPoint)] = [
+            (CGRect(x: 200, y: 300, width: 500, height: 500), CGPoint(x: 712, y: 650)),
+            (CGRect(x: 500, y: 300, width: 500, height: 500), CGPoint(x: 268, y: 650)),
+            (CGRect(x: 230, y: 390, width: 740, height: 480), CGPoint(x: 750, y: 228)),
+            (CGRect(x: 100, y: 100, width: 1000, height: 840), CGPoint(x: 880, y: 750)),
+            (nil, CGPoint(x: 868, y: 738)),
+        ]
+        for (rect, point) in anchors {
+            try expect(dockPermissionPanel(size: panel, settings: rect, visible: visible) == point,
+                       "docks or clamps within the visible screen")
         }
     }
 

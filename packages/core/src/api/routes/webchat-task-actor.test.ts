@@ -110,7 +110,7 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
     agentSessionManager: { open },
     skillCatalog: { find: () => undefined, list: () => [] },
     settingsRepo: { get: async () => undefined },
-    peopleRepo: { byBondLevel: async () => [] },
+    guardianPerson: async () => null,
     sessionOpeningFor: () => ({}),
     concierge: {
       deps: {

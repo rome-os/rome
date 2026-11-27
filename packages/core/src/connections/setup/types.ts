@@ -78,7 +78,7 @@ export interface SetupView {
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL. First-class
-   *  because QR grant recurs across connection kinds (WeChat, WhatsApp): the server
+   *  because QR grant recurs across connection kinds (WhatsApp, Feishu): the server
    *  renders the image once and every surface — dashboard `<img>`, a chat
    *  message — presents it without its own QR encoder. The raw content string
    *  rides along in `links` so a surface that prefers a tappable link has it. */

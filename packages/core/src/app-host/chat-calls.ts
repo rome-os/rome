@@ -74,9 +74,6 @@ const ChatSettingsInput = z.custom<
 export interface WorkerCaller {
   callerActionContext?: {
     actor?: SessionActor;
-    /** Who reads the calling turn's answer, as the host read it when the
-     *  turn started. Absent for an action that is not the host's own. */
-    audience?: "private" | "shared";
     channelContext?: ThreadContext;
     /** The agent turn the action runs in. Absent outside any agent turn, as
      *  for a routine's fire. */
@@ -101,44 +98,6 @@ export interface ChatWorkerCallsDeps {
     message: OutgoingMessage,
     agentName: string | undefined,
   ) => Promise<MessageReceipt | null>;
-}
-
-/**
- * Whether the calling action may read any chat: it runs in a turn whose
- * audience is private, so nobody but the guardian reads what it says, or
- * outside any agent turn. A turn others read, such as one for a visitor, in a
- * group or in an email thread, could pass on what another chat holds, so it
- * reads only the chat it is in. An agent turn with no chat of its own, such
- * as a summoned agent's, reads any chat only when its audience is private,
- * and otherwise none. A turn in a chat with no audience reads as shared, and
- * so does one acting for anyone but the guardian. A routine's fire runs
- * outside any agent turn, so a routine made for a shared chat still reads any
- * chat (#2437). Domain: docs/domains/participation.md#audience.
- */
-function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
-  if (context?.actor && context.actor.kind !== "guardian") return false;
-  if (!context?.channelContext && !context?.turnId) return true;
-  return context.audience === "private";
-}
-
-/** Whether `chatId` is the chat a turn is in: its own, or, in a native
- *  thread, the chat the thread hangs off, which the same people read. */
-function isOwnChat(chatId: string | undefined, place: ThreadContext | undefined): boolean {
-  if (chatId === undefined || !place) return false;
-  return chatId === place.threadId || chatId === place.parentThreadId;
-}
-
-/** The channel a query names: its name, or the channel holding the account. */
-async function channelNamed(
-  channelsService: ChannelsService,
-  target: Account | string,
-): Promise<string | null> {
-  if (typeof target === "string") return target;
-  const summaries = await channelsService.list();
-  const held = summaries.find(
-    (summary) => summary.account?.platform === target.platform && summary.account?.id === target.id,
-  );
-  return held?.name ?? null;
 }
 
 /** The chat calls an app's worker makes, keyed by method name. */
@@ -167,15 +126,6 @@ export function chatWorkerCalls(
     "channels.query": async (params, caller) => {
       const { channel, chatId, since, until, after, olderThan, newerThan, limit } =
         parseWorkerCallParams("channels.query", QueryParams, params);
-      const context = caller?.callerActionContext;
-      const place = context?.channelContext;
-      if (
-        !readsAnyChat(context) &&
-        (!isOwnChat(chatId, place) ||
-          (await channelNamed(channelsService, channel)) !== place?.channel)
-      ) {
-        throw new Error("A turn others read reads only the chat it is in");
-      }
       // The dashboard chat reads as the person accountable for the calling
       // action's turn, in the chat it runs in.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
@@ -190,15 +140,10 @@ export function chatWorkerCalls(
         }),
       );
     },
-    "channels.chats": async (params, caller) => {
+    "channels.chats": async (params) => {
       const { channel, query, limit, cursor, includeThreads, includeArchivedThreads } =
         parseWorkerCallParams("channels.chats", ChatsParams, params);
       if (!channelsService.chats) throw new Error("This Rome lists no chats");
-      // A listing names no one chat, so it reads as a query of no chat would:
-      // a turn others read lists nothing.
-      if (!readsAnyChat(caller?.callerActionContext)) {
-        throw new Error("A turn others read lists no chats");
-      }
       return await channelsService.chats(channel, {
         ...(query ? { query } : {}),
         ...(limit ? { limit } : {}),

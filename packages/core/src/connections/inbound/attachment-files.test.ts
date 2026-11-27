@@ -53,7 +53,6 @@ describe("attachment URL downloads", () => {
     expect(isAllowedAttachmentUrl("https://media.discordapp.net/attachments/1/2/file.png")).toBe(
       true,
     );
-    expect(isAllowedAttachmentUrl("https://novac2c.cdn.weixin.qq.com/c2c/file")).toBe(true);
     expect(isAllowedAttachmentUrl("https://mmg.whatsapp.net/file")).toBe(true);
     expect(isAllowedAttachmentUrl("https://api.telegram.org/file/bot123/file")).toBe(true);
 

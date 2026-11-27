@@ -1,15 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type * as connections from "../../../connections/message.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
 import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";
-import { WECHAT_USER, WechatPeer } from "./wechat.js";
 
-export type Platform = "telegram" | "wechat" | "discord";
+export type Platform = "telegram" | "discord";
 
 /**
  * A production adapter running against its platform's peer, with one
@@ -122,37 +118,6 @@ const telegram = () =>
     };
   });
 
-const wechat = () =>
-  assemble(async (undo) => {
-    // Made first so it is removed last, after the peer closes. The adapter's
-    // last long poll can still write its sync state here after that, which
-    // at worst leaves this temp dir behind.
-    const statePath = await mkdtemp(join(tmpdir(), "rome-wechat-peer-"));
-    undo(() => rm(statePath, { recursive: true, force: true }));
-    const peer = await WechatPeer.start();
-    undo(() => peer.close());
-    // Rome's iLink adapter calls the global fetch.
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = peer.fetch;
-    undo(() => {
-      globalThis.fetch = originalFetch;
-    });
-    const adapter = peer.createAdapter(statePath);
-    const heard = inbox(adapter, "wechat");
-    undo(() => heard.assertTaken());
-    // Registered first, so an adapter that fails to start is still stopped.
-    undo(() => adapter.stop());
-    await adapter.start();
-    const conversation = WECHAT_USER as ChatId;
-    return {
-      platform: "wechat",
-      peer,
-      conversation,
-      send: (message) => adapter.send(conversation, message),
-      receive: (text) => heard.receive(() => peer.emitMessage(text)),
-    };
-  });
-
 const discord = () =>
   assemble(async (undo) => {
     const peer = await DiscordPeer.start();
@@ -181,6 +146,5 @@ const discord = () =>
 /** Starts each platform's test channel, by platform name. */
 export const TEST_CHANNELS: Record<Platform, () => Promise<TestChannel>> = {
   telegram,
-  wechat,
   discord,
 };

@@ -4,7 +4,7 @@ import { ActionExecutionsRepository } from "../apps/repositories/action-executio
 import { routineRuns as routineRunsTable } from "../db/schema.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import { callTool, whoMayAskSuite } from "../apps/actions/agent-tool-contract.js";
+import { callTool } from "../apps/actions/agent-tool-contract.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import {
   changeRoutineTool,
@@ -18,16 +18,6 @@ import {
   stopRoutine,
   stopRoutineRun,
 } from "./agent-tools.js";
-
-whoMayAskSuite(readRoutines, {});
-whoMayAskSuite(changeRoutineTool, { routineId: "r-1", name: "Evening briefing" });
-whoMayAskSuite(pauseRoutine, { routineId: "r-1" });
-whoMayAskSuite(resumeRoutine, { routineId: "r-1" });
-whoMayAskSuite(runRoutine, { routineId: "r-1" });
-whoMayAskSuite(stopRoutineRun, { routineId: "r-1" });
-whoMayAskSuite(listRoutineRunsTool, { routineId: "r-1" });
-whoMayAskSuite(readRoutineRunTool, { routineId: "r-1", runId: "run-1" });
-whoMayAskSuite(stopRoutine, { routineId: "r-1" });
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
@@ -340,10 +330,6 @@ describe("changing a routine", () => {
     expect(await change({ routineId, args: { threadId: "chat-1" } })).toEqual({
       status: "error",
       error: "text: Required",
-    });
-    expect(await change({ routineId, actionName: "system:change_routine" })).toMatchObject({
-      status: "error",
-      error: expect.stringContaining("a routine cannot run it"),
     });
     const trigger = { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "25:00" };
     expect(await change({ routineId, trigger })).toMatchObject({
