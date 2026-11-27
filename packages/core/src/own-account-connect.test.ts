@@ -122,36 +122,75 @@ describe("a LinkedIn connect", () => {
     testDb = undefined;
   });
 
-  it("makes the account the guardian's when LinkedIn names only its public id", async () => {
+  const withMemberId = {
+    logged_in: true,
+    plain_id: "12345",
+    public_id: "ada-lovelace",
+    name: "Ada",
+  };
+  const publicIdOnly = { logged_in: true, public_id: "ada-lovelace", name: "Ada" };
+
+  /** A Rome with a guardian and LinkedIn registered, whose `whoami` answers
+   *  `whoami.current`. */
+  async function linkedIn() {
     testDb = createTestDb();
     const members = memberContext(testDb.db);
-    await guardianSeatCreated(members, { accounts: [] });
+    const guardian = await guardianSeatCreated(members, { accounts: [] });
     const store = new DrizzleConnectionsRepository(testDb.db);
     const registry = new ConnectionRegistry({ repository: store });
+    const whoami: { current: object } = { current: withMemberId };
     registry.register(
       createLinkedInDescriptor({
         syncSink: {} as LinkedInSyncSink,
         minIntervalMs: 60_000,
         maxIntervalMs: 60_000,
-        run: async () => ({
-          code: 0,
-          stdout: JSON.stringify({ logged_in: true, public_id: "ada-lovelace", name: "Ada" }),
-          stderr: "",
-        }),
+        run: async () => ({ code: 0, stdout: JSON.stringify(whoami.current), stderr: "" }),
         openLoginTab: async () => true,
       }),
     );
     const manager = new SetupManager({ registry, participant: ownAccountConnected() });
-
-    const started = await manager.start({ connectionKind: "linkedin" }, "session");
-    await rs.waitFor(() => expect(manager.state(started.cid)?.status).toBe("done"));
-
-    const account = {
-      platform: "linkedin",
-      accountId: "https://www.linkedin.com/in/ada-lovelace/",
+    const run = async (connectionId?: string) => {
+      const started = await manager.start({ connectionKind: "linkedin", connectionId }, "session");
+      await rs.waitFor(() => expect(manager.state(started.cid)?.status).toBe("done"));
     };
+    return { members, guardian, store, registry, whoami, run };
+  }
+
+  it("makes the account the guardian's when LinkedIn names its member id", async () => {
+    const { members, store, registry, run } = await linkedIn();
+    await run();
+
+    const account = { platform: "linkedin", accountId: "12345" };
     expect(await roleOfAccount(members, account)).toBe("guardian");
     const [connection] = registry.find("linkedin");
+    expect(connection && store.accountOf(connection.id)).toEqual(account);
+  });
+
+  it("gives the guardian nothing when LinkedIn names only the public id", async () => {
+    const { members, guardian, store, registry, whoami, run } = await linkedIn();
+    whoami.current = publicIdOnly;
+    await run();
+
+    expect(await members.identity.accountsOf(guardian.id)).toEqual([]);
+    const [connection] = registry.find("linkedin");
+    expect(connection && store.accountOf(connection.id)).toBeNull();
+  });
+
+  it("keeps the connection when a fix names no member id", async () => {
+    const { members, guardian, store, registry, whoami, run } = await linkedIn();
+    await run();
+    const [connection] = registry.find("linkedin");
+    whoami.current = publicIdOnly;
+    await run(connection?.id);
+    const account = { platform: "linkedin", accountId: "12345" };
+    expect(registry.find("linkedin").map((found) => found.id)).toEqual([connection?.id]);
+    expect(
+      (await members.identity.accountsOf(guardian.id)).map((owned) => owned.accountId),
+    ).toEqual(["12345"]);
+    whoami.current = withMemberId;
+    await run(connection?.id);
+
+    expect(registry.find("linkedin").map((found) => found.id)).toEqual([connection?.id]);
     expect(connection && store.accountOf(connection.id)).toEqual(account);
   });
 });
