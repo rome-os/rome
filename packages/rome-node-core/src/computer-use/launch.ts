@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -46,6 +47,18 @@ export interface LaunchOptions {
   startupTimeoutMs?: number;
   verifyBundle?: (appPath: string, signal: AbortSignal) => void | Promise<void>;
   launcher?: (context: LaunchContext) => void | Promise<void>;
+}
+
+export type PermissionSetupPane = "accessibility" | "screen-recording" | "all";
+
+export interface PermissionSetupOptions {
+  appPath: string;
+  pane?: PermissionSetupPane;
+  locale?: string;
+  signal?: AbortSignal;
+  startupTimeoutMs?: number;
+  verifyBundle?: LaunchOptions["verifyBundle"];
+  launcher?: (args: string[], signal: AbortSignal) => void | Promise<void>;
 }
 
 const exitCleanups = new Set<() => void>();
@@ -185,6 +198,94 @@ async function verifyHelperBundle(
     return appPath;
   } catch (cause) {
     throw new ComputerUseError("invalid_helper_bundle", { cause });
+  }
+}
+
+async function readOptionalFile(path: string, signal: AbortSignal): Promise<string> {
+  try {
+    return await readFile(path, { encoding: "utf8", signal });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+const SETUP_FAILURE_CODES = new Set([
+  "invalid_request",
+  "desktop_disabled",
+  "console_unavailable",
+  "permission_setup_unavailable",
+]);
+
+function helperSetupFailure(output: string): ComputerUseError | undefined {
+  for (const line of output.split(/\r?\n/)) {
+    const code = line.trim();
+    if (!SETUP_FAILURE_CODES.has(code)) continue;
+    if (
+      code === "invalid_request" ||
+      code === "desktop_disabled" ||
+      code === "console_unavailable"
+    ) {
+      return new ComputerUseError(code);
+    }
+    return new ComputerUseError("internal_error", { cause: new Error(code) });
+  }
+  return undefined;
+}
+
+export async function launchPermissionSetup(options: PermissionSetupOptions): Promise<void> {
+  if (!options.launcher && process.platform !== "darwin") {
+    throw new ComputerUseError("computer_use_unsupported_platform");
+  }
+  const waitMs = options.startupTimeoutMs ?? 2500;
+  const timeout = AbortSignal.timeout(Math.max(5000, waitMs + 2500));
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const app = await untilAbort(
+    () => verifyHelperBundle(options.appPath, signal, options.verifyBundle),
+    signal,
+  );
+  const directory = await mkdtemp(join(tmpdir(), "rome-cu-setup-"));
+  const stdoutPath = join(directory, "stdout.txt");
+  const stderrPath = join(directory, "stderr.txt");
+  const args = [
+    "-n",
+    "--stdout",
+    stdoutPath,
+    "--stderr",
+    stderrPath,
+    "-a",
+    app,
+    "--args",
+    "--setup-permissions",
+  ];
+  if (options.pane !== undefined) args.push(options.pane);
+  if (options.locale !== undefined) args.push("--locale", options.locale);
+  const launch =
+    options.launcher ??
+    (async (launchArgs, launchSignal) => {
+      await run("/usr/bin/open", launchArgs, { signal: launchSignal });
+    });
+  try {
+    await untilAbort(() => launch(args, signal), signal);
+    const deadline = Date.now() + waitMs;
+    while (true) {
+      signal.throwIfAborted();
+      const stdout = await readOptionalFile(stdoutPath, signal);
+      if (stdout.split(/\r?\n/).includes("ready")) return;
+      const stderr = await readOptionalFile(stderrPath, signal);
+      const failure = helperSetupFailure(stderr);
+      if (failure) throw failure;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        if (stderr.trim()) {
+          throw new ComputerUseError("internal_error", { cause: new Error(stderr.trim()) });
+        }
+        throw new ComputerUseError("startup_timeout");
+      }
+      await delay(Math.min(POLL_INTERVAL_MS, remaining), undefined, { signal });
+    }
+  } finally {
+    await rm(directory, { force: true, recursive: true });
   }
 }
 

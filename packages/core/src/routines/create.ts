@@ -515,7 +515,15 @@ export async function checkRoutineAction(
   if (!(await deps.actionRegistry.has(actionName))) {
     return { ok: false, error: unknownActionError(actionName) };
   }
-  // A routine fires its action outside the agent tool gate, so an explicit
+  // A routine's run starts no routine run (run-now.ts), so this would fail every fire.
+  if (actionName === "system:run_routine") {
+    return {
+      ok: false,
+      error:
+        "A routine's run cannot start a routine run; put the other routine's action in this one instead.",
+    };
+  }
+  // A routine fires its action outside the agent's allow-list, so an explicit
   // target needs a principal that may call it: the app code that owns the call
   // (callerAppId), or an agent that holds the action. Unattributed calls, such
   // as one fired by another routine, a webhook or a favor, fail closed.

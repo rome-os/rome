@@ -4,6 +4,7 @@ import type {
   CloudInstanceAuthorization,
   InstanceAuthorizationRequest,
   InstanceSession,
+  VisitorAuthorizationRequest,
 } from "./types.js";
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -51,7 +52,9 @@ export function parseCloudInstance(value: unknown): CloudInstance | null {
   const origin = exactHttpsOrigin(input?.origin);
   const status = nonEmptyString(input?.status);
   if (!id || !name || !slug || !origin || !status) return null;
-  return { id, name, slug, origin, status };
+  if (input?.role !== "visitor") return { id, name, slug, origin, status, role: "owner" };
+  const ownerName = nonEmptyString(input.ownerName);
+  return { id, name, slug, origin, status, role: "visitor", ...(ownerName ? { ownerName } : {}) };
 }
 
 export function parseInstanceAuthorizationRequest(
@@ -83,6 +86,26 @@ export function parseInstanceAuthorizationRequest(
   };
 }
 
+export function parseVisitorAuthorizationRequest(
+  value: unknown,
+): VisitorAuthorizationRequest | null {
+  const input = record(value);
+  if (input?.intent !== "signin" || input.code_challenge_method !== "S256") return null;
+  const redirectUri = nonEmptyString(input.redirect_uri);
+  const challenge = nonEmptyString(input.code_challenge);
+  const state = nonEmptyString(input.state);
+  const instanceName = nonEmptyString(input.instance_name);
+  if (!redirectUri || !challenge || !state || !instanceName) return null;
+  return {
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state,
+    instance_name: instanceName,
+    intent: "signin",
+  };
+}
+
 export function parseCloudInstanceAuthorization(value: unknown): CloudInstanceAuthorization | null {
   const input = record(value);
   const code = nonEmptyString(input?.code);
@@ -98,7 +121,14 @@ export function parseInstanceSession(value: unknown): InstanceSession | null {
   const token = nonEmptyString(input?.session_token);
   const expiresAt = nonEmptyString(input?.expires_at);
   const origin = exactHttpsOrigin(input?.origin);
-  if (input?.cookie_name !== "rome_session" || !token || !expiresAt || !origin) return null;
+  if (!token || !expiresAt || !origin) return null;
   if (!Number.isFinite(Date.parse(expiresAt))) return null;
-  return { cookieName: "rome_session", token, expiresAt, origin };
+  if (input?.cookie_name === "rome_session") {
+    return { cookieName: "rome_session", token, expiresAt, origin };
+  }
+  // A visitor session names its role too, so neither credential passes for the other.
+  if (input?.cookie_name === "rome_visitor" && input.role === "visitor") {
+    return { cookieName: "rome_visitor", token, expiresAt, origin };
+  }
+  return null;
 }

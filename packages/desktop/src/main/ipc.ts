@@ -8,6 +8,8 @@ import { getDb } from "./db/database";
 import { settings } from "./db/schema";
 import { handleFromAppOrInstance, handleTrusted, isInstanceSender } from "./ipc-trust";
 import type { AppShims } from "./app-shims";
+import type { ShareShortcut } from "./share-shortcut";
+import { SHARE_SHORTCUT_LABEL } from "./share-shortcut/state";
 import { requireAppId } from "./app-shims/identity";
 import type { SettingsAccess } from "./app-shims/store";
 import type { RuntimeController } from "./runtime/controller";
@@ -33,6 +35,8 @@ interface IpcHandlerOptions {
   };
   /** Rome apps on this Mac's Desktop; absent where the app can't make them. */
   apps?: AppShims;
+  /** The key that sends the selection to an app; absent off macOS. */
+  shareShortcut?: ShareShortcut;
 }
 
 interface CloudState {
@@ -173,22 +177,35 @@ export function registerIpcHandlers(
 
   // The open Rome's dashboard puts one of its apps on the Desktop. The app is
   // read from that Rome, so the page names only which one.
+  const dashboardOrigin = (): string | null => {
+    if (!runtime.isReady()) return null;
+    try {
+      return new URL(runtime.getDashboardUrl()).origin;
+    } catch {
+      return null;
+    }
+  };
   const { apps } = options;
   if (apps) {
-    const dashboardOrigin = (): string | null => {
-      if (!runtime.isReady()) return null;
-      try {
-        return new URL(runtime.getDashboardUrl()).origin;
-      } catch {
-        return null;
-      }
-    };
     ipcMain.handle("apps:addToDesktop", (event, appId) => {
       const origin = dashboardOrigin();
       if (!origin || !isInstanceSender(event, origin)) {
         throw new Error("apps:addToDesktop is not available to this page");
       }
       return apps.addToDesktop(origin, requireAppId(appId));
+    });
+  }
+
+  // The same page makes one of its apps the one the share shortcut opens.
+  const shareShortcut = options.shareShortcut;
+  if (shareShortcut) {
+    ipcMain.handle("apps:useWithShareShortcut", async (event, appId) => {
+      const origin = dashboardOrigin();
+      if (!origin || !isInstanceSender(event, origin)) {
+        throw new Error("apps:useWithShareShortcut is not available to this page");
+      }
+      await shareShortcut.use(origin, requireAppId(appId));
+      return { shortcut: SHARE_SHORTCUT_LABEL };
     });
   }
 

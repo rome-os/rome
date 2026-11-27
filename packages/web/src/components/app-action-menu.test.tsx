@@ -267,4 +267,27 @@ describe("Add to Desktop", () => {
     Object.assign(globalThis, { window: { rome: {} } });
     expect(keysOf(menu())).not.toContain("add-to-desktop");
   });
+
+  it("offers the share shortcut for an app that takes shared text, and assigns it", () => {
+    const useWithShareShortcut = rs.fn(async () => ({ shortcut: "⌥D" }));
+    Object.assign(globalThis, {
+      window: { rome: { apps: { addToDesktop: rs.fn(), useWithShareShortcut } } },
+    });
+    const entry = menu(makeApp({ acceptsSharedText: true })).find(
+      (e) => e.key === "share-shortcut",
+    );
+    if (entry?.type !== "action") throw new Error("missing the share shortcut");
+    expect(entry.label).toBe("installed.useWithShareShortcut");
+    entry.onSelect();
+    expect(useWithShareShortcut).toHaveBeenCalledWith("@ray/demo");
+  });
+
+  it("does not offer the share shortcut for an app that takes no shared text", () => {
+    Object.assign(globalThis, {
+      window: { rome: { apps: { addToDesktop: rs.fn(), useWithShareShortcut: rs.fn() } } },
+    });
+    expect(keysOf(menu())).not.toContain("share-shortcut");
+    Object.assign(globalThis, { window: { rome: { apps: { addToDesktop: rs.fn() } } } });
+    expect(keysOf(menu(makeApp({ acceptsSharedText: true })))).not.toContain("share-shortcut");
+  });
 });

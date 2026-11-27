@@ -360,6 +360,57 @@ An app sets up the state it depends on, such as a routine it must always have, w
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
 
+## Share targets
+
+A share target is an app's declaration, under `web.shareTarget` in its manifest, that its web page takes text the user sends to it from elsewhere. It is the [Web Share Target](https://developer.mozilla.org/en-US/docs/Web/Manifest/share_target) member of the app's web manifest, declared once in `app.yaml`.
+
+```yaml
+web:
+  manifest: web/manifest.json
+  shareTarget:
+    path: /quick   # app route; optional, defaults to the app's own page
+    width: 380     # optional: window size the page is designed for, in points
+    height: 460
+```
+
+Rome opens `/full/apps/<appId><path>?text=<the text>`. The page reads `text` from the query, starts its work with it, and treats a missing `text` as an ordinary open.
+
+A surface that shows the page in a window of its own owns that window, and the app owns what is inside it. The app shapes the window two ways:
+
+- **`path`** points the window at a page built for it, such as a compact view of the answer, separate from the app's full page.
+- **`width` and `height`** give the size that page is designed for, between 280 and 720 points wide and 200 and 900 points tall. Rome publishes them as `rome_share_panel` in the app's web manifest. They are a starting size: the surface keeps the window on screen, and the user can resize it.
+
+Surfaces that send text:
+
+- **The Mac app's share shortcut.** The guardian picks the app with **Open with ⌥D** in its app menu. Pressing ⌥D anywhere reads the selection in the frontmost app and shows the page in a floating panel. See [The Mac app's floating panel](#the-mac-apps-floating-panel).
+- **A phone's share sheet**, for an app installed to the home screen from a browser that honors `share_target`.
+
+**Contracts:**
+
+- `path` is plain `/segments` of letters, digits, `-` and `_`, with no dot segments, query or fragment, so the target stays inside the app's route. Rome adds `text` itself.
+- The target is always the app's full-screen route, on the same Rome.
+- The app does not set the window's frame, position, transparency or stacking. A borderless page from an untrusted app could pass for another app or a system dialog.
+- The installed-apps list marks such an app with `acceptsSharedText`, so surfaces offer only apps that take text.
+
+### The Mac app's floating panel
+
+The panel is a macOS panel window the Mac app owns. It shows the app's share page and nothing of the app runs outside that page.
+
+| Behavior | What happens |
+|---|---|
+| Opening | ⌥D reads the selection: Accessibility first, then a ⌘C with every clipboard item and type put back. A copied password (`org.nspasteboard.ConcealedType`) is left alone and the panel opens without text. |
+| Text | Cut to 2,000 characters and 6,000 percent-encoded bytes, never inside a character, because it travels in the URL. |
+| Size | The app's `width` and `height`, within the limits above, else 420 × 560; never larger than the display. The user can resize it down to 280 × 200. |
+| Position | Beside the pointer, kept inside the display's work area. |
+| Frame | A standard macOS title bar with the app's name and a close button. |
+| Focus | Shown without taking focus, so the app being read stays in front. Clicking into the page focuses it for typing. |
+| Stacking | Floats above other windows and follows the user across Spaces and full-screen apps. |
+| Again | ⌥D with new text loads it into the open panel. ⌥D with nothing new selected, Esc, or the close button hides it and returns focus. |
+| Loading | Waits until the Rome is reachable; a failed load loads again on the next press. |
+| Off | The tray names the chosen app and turns the key off. One app holds the key at a time. |
+
+The page runs sandboxed with no preload, the same as an app on the Desktop, and links that open a new window go to the system browser.
+
 ## Event sources
 
 An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.

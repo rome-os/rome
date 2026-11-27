@@ -4,7 +4,8 @@
  *
  * The flow: an OAuth code with PKCE gets a Cloud credential, the credential
  * lists the hosted instances, and the instance, Cloud, and app then trade a
- * one-time code for a `rome_session` the app installs in its web view.
+ * one-time code for a `rome_session` the app installs in its web view. On a
+ * Rome shared with the account, the visitor grant yields a `rome_visitor`.
  *
  * Runtime-neutral: global `fetch` and `URL` only, so it runs in Electron's
  * main process and in tests. Each host injects its own fetch, secure storage,
@@ -26,8 +27,10 @@ export {
   type CloudInstanceAuthorization,
   type InstanceAuthorizationRequest,
   type InstanceSession,
+  type InstanceSessionCookie,
   NativeAuthError,
   type NativeAuthErrorCode,
+  type VisitorAuthorizationRequest,
 } from "./types.js";
 export {
   exactHttpsOrigin,
@@ -36,4 +39,5 @@ export {
   parseCloudInstanceAuthorization,
   parseInstanceAuthorizationRequest,
   parseInstanceSession,
+  parseVisitorAuthorizationRequest,
 } from "./validation.js";

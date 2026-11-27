@@ -880,6 +880,7 @@ describe("WorkerRpcServer events.publish", () => {
 
     const staleStore: ReplayStore = {
       rootExecutionId: "stale-root",
+      journalId: "stale-root",
       rootActionName: "unrelated_action",
       rootArgs: {},
       journal: [],

@@ -25,8 +25,8 @@ describe("the Concierge on a connection", () => {
       withoutDefer: true,
     });
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:concierge_follow");
-    // Renaming checks a dashboard chat's owner, so a bot turn is refused even for the guardian.
-    expect(CONCIERGE_CHAT_ACTIONS).toContain("core:set_agent_name");
+    expect(CONCIERGE_CHAT_ACTIONS).not.toContain("core:set_agent_name");
+    expect(CONNECTION_PROMPT).toContain("To change your own name, call `core:set_agent_name`.");
     // A shown file links to the dashboard's assets, which a bot chat cannot open.
     expect(CONCIERGE_CHAT_ACTIONS).toContain("core:show_file");
     // Listing routines shows every routine and its arguments, for the guardian alone.
@@ -50,9 +50,9 @@ describe("the Concierge on a connection", () => {
     }
   });
 
-  it("runs tasks with the tools it keeps, and approves nothing itself", () => {
+  it("runs tasks for whoever asks with the tools it keeps, and approves nothing itself", () => {
     for (const name of CONNECTION_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
-    expect(CONNECTION_PROMPT).toContain("Only the guardian may ask for one");
+    expect(CONNECTION_PROMPT).not.toContain("Only the guardian may ask for one");
     expect(CONNECTION_PROMPT).toContain("Never approve anything yourself.");
   });
 

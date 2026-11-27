@@ -667,15 +667,6 @@ export async function buildConciergeTools(
     return guardian.length === 1 ? guardian[0] : undefined;
   };
 
-  // The bond level of the turn's sender on a connection. A turn Rome runs
-  // there, such as a task's report or a reminder, has none and acts for the
-  // guardian, who started the task. Any other turn without one is anyone's.
-  const bondHere = (chatId: string): string => {
-    const bond = context.getThreadContext()?.senderBondLevel;
-    if (bond !== undefined) return bond;
-    return service.runsSystemTurnIn(chatId) ? "guardian" : "other";
-  };
-
   // Says `text` in this chat on a connection. Answers the platform's key.
   // The turn's first message quotes the message it answers, as the inbox
   // quoted every reply.
@@ -1710,30 +1701,5 @@ export async function buildConciergeTools(
     },
   ];
   if (!onConnection) return tools;
-  // On a connection, the task tools act for the guardian. A message from
-  // anyone else may not use them; a turn Rome runs there, such as a task's
-  // report, may. Anyone's turn may say something and react.
-  const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
-  return tools
-    .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
-    .map(
-      (tool): RomeTool =>
-        tool.name === "say" || tool.name === "react"
-          ? tool
-          : {
-              ...tool,
-              handler: async (input, call) =>
-                othersRefused()
-                  ? {
-                      content: [
-                        {
-                          type: "text",
-                          text: "Only the guardian can start or change tasks here. Answer with say.",
-                        },
-                      ],
-                      isError: true,
-                    }
-                  : tool.handler(input, call),
-            },
-    );
+  return tools.filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name));
 }

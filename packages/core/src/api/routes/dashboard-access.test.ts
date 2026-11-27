@@ -135,7 +135,7 @@ describe("Dashboard-access API", () => {
     expect(
       (await listMembers(ctx)).map((m) => ({
         role: m.role,
-        emails: m.accounts.map((a) => a.accountId),
+        emails: m.accounts.filter((a) => a.platform === "rome-cloud-email").map((a) => a.accountId),
       })),
     ).toEqual([
       { role: "guardian", emails: ["owner@example.com"] },
@@ -192,7 +192,7 @@ describe("Dashboard-access API", () => {
     expect(res.status).toBe(500);
     expect(
       (await listMembers(memberContext(testDb.db))).flatMap((m) =>
-        m.accounts.map((a) => a.accountId),
+        m.accounts.filter((a) => a.platform === "rome-cloud-email").map((a) => a.accountId),
       ),
     ).toEqual(["ada@example.com"]);
     expect([...dashboardAccessState.cloudEmails()]).toEqual(["ada@example.com"]);

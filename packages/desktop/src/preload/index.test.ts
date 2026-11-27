@@ -43,10 +43,10 @@ describe("preload bridge", () => {
     );
   });
 
-  it("adds the Desktop apps bridge on macOS, which carries only adding an app", async () => {
+  it("adds the Desktop apps bridge on macOS, which carries only adding an app and the share shortcut", async () => {
     const remote = await load("https:", "darwin");
     expect(Object.keys(remote)).toEqual(["device", "microphone", "apps"]);
-    expect(Object.keys(remote.apps as object)).toEqual(["addToDesktop"]);
+    expect(Object.keys(remote.apps as object)).toEqual(["addToDesktop", "useWithShareShortcut"]);
   });
 
   it("gives the app's own pages the audit log", async () => {

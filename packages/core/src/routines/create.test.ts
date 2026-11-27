@@ -1659,7 +1659,6 @@ describe("create_routine — naming the action", () => {
   it.each([
     "system:pause_routine",
     "system:resume_routine",
-    "system:run_routine",
     "system:stop_routine",
   ])("saves a routine that runs %s", async (actionName) => {
     const result = await createRoutine(nightly(actionName), {
@@ -1671,6 +1670,18 @@ describe("create_routine — naming the action", () => {
 
     expect(result.status).toBe("ok");
     expect(await repo.findAll()).toHaveLength(1);
+  });
+
+  it("saves no routine that runs system:run_routine, since its every fire would fail", async () => {
+    const result = await createRoutine(nightly("system:run_routine"), {
+      routinesRepo: repo,
+      actionRegistry: allActions,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
+
+    expect(result.status).not.toBe("ok");
+    expect(await repo.findAll()).toHaveLength(0);
   });
 
   it("stores the full ID it was given", async () => {

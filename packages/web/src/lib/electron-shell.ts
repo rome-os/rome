@@ -82,6 +82,20 @@ export function desktopApps(): DesktopAppsBridge | null {
   return typeof apps?.addToDesktop === "function" ? (apps as DesktopAppsBridge) : null;
 }
 
+/**
+ * The Mac app's share shortcut: makes its key open this app, beside the
+ * pointer, with the text selected in any app. Null in a browser or an app
+ * without it. Resolves with the key as macOS prints it.
+ */
+export function desktopShareShortcut(): ((appId: string) => Promise<{ shortcut: string }>) | null {
+  if (!isElectronShell()) return null;
+  const apps = (window.rome as { apps?: { useWithShareShortcut?: unknown } }).apps;
+  const use = apps?.useWithShareShortcut;
+  return typeof use === "function"
+    ? (use as (appId: string) => Promise<{ shortcut: string }>)
+    : null;
+}
+
 /** A folder on this computer that the user picked in the system dialog. */
 export interface DesktopPickedFolder {
   path: string;

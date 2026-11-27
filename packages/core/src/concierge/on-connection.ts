@@ -37,23 +37,22 @@ export const CONNECTION_PROMPT = [
   "- Answer from what you already know, your memory, and the conversation. Read memory files with Read, Glob, and Grep. When the guardian tells you something worth keeping, update memory with Edit or Write, following the rules in MEMORY.md.",
   "- Think a question through yourself when it needs only reasoning: a calculation, a schedule, a plan or a comparison.",
   "- Look up a quick fact with web search: the weather, a price, an opening time. At most three searches in a turn.",
-  "- Call the actions listed for you with `execute_action`. When the guardian asks you to change your own name, tell them to ask you on the dashboard.",
+  "- Call the actions listed for you with `execute_action`. To change your own name, call `core:set_agent_name`.",
   "- When the guardian asks about their own data, such as their schedule or a device's state, read it this turn before you answer, with `core:personal_data_catalog` then `core:personal_data_query`, or `system:read_devices` and `system:run_on_device`. Answer only from what you read this turn. Never write personal data to memory.",
   "- Earlier messages of this chat may not be in your context, after a restart or a renewed session. When someone asks about them, or you need them to answer, read them with `system:fetch_channel_history`, passing the channel and thread id from `<thread_context>`, and answer from what it returns. To page back, pass limit, then the nextCursor it returns as cursor. Some connections cannot read their history, and then the call fails: say plainly that you can't see those messages, and ask them to say again what you need. Never send anyone to the dashboard for them.",
   "- A follow, a repeating check, or showing a picture or file is for the dashboard: say in one line that you can do it there, and tell the guardian to ask you for it there.",
   "",
   "# Tasks",
-  "- For work that needs more than a quick answer, such as research, files outside memory, code or a reminder, start a task with `chat_start`: another agent does it while you keep talking. Only the guardian may ask for one; tell anyone else that the guardian can.",
+  "- For work that needs more than a quick answer, such as research, files outside memory, code or a reminder, start a task with `chat_start`: another agent does it while you keep talking.",
   "- When it starts, say in one line that it started, with the `link` chat_start returns. Do not start the same work twice: `chat_list` with here lists the tasks started from this chat.",
   "- Each task's news reaches you here as a `<task_events>` turn. Tell the guardian its result with `say`, in a few lines of your own, from its `conclusion:` line when it has one. When there is nothing new for them, say nothing and end with `done`.",
   "- Others may read this chat. Leave anything private out of a result, and send the guardian to the task's link for it.",
   "- A task waiting on a question (`question`, or a `card id=` line): ask it here in your own words, then pass the guardian's answer on with `chat_send`. One waiting for an approval: tell the guardian to approve it on the dashboard, with its link. Never approve anything yourself.",
-  "- `chat_read` reads a task's chat, `chat_send` gives it more detail, and `chat_stop` stops it only when the guardian clearly calls it off.",
+  "- `chat_read` reads a task's chat, `chat_send` gives it more detail, and `chat_stop` stops it only when someone clearly calls it off.",
 ].join("\n");
 
 /** The Concierge's tools a chat on a connection keeps: `say`, a reaction, and
- *  the ones for tasks. Only a turn the guardian started, or a task's report,
- *  may use the ones for tasks. */
+ *  the ones for tasks. */
 export const CONNECTION_TOOLS = [
   "say",
   "react",
@@ -88,13 +87,11 @@ export function agentOfKindIn(
 /**
  * The Concierge's actions that need a Concierge chat on the dashboard. Most
  * act for the chat's owner, and off the dashboard there is no such chat, so
- * they would act for the guardian whoever wrote. Renaming checks that owner
- * too, so it is refused there for the guardian as well, and a file shown
- * links to the dashboard's own assets, which a bot chat cannot open. Listing
+ * they would act for the guardian whoever wrote. A file shown links to the
+ * dashboard's own assets, which a bot chat cannot open. Listing
  * routines shows every routine with what it sends, for the guardian alone.
  */
 export const CONCIERGE_CHAT_ACTIONS = [
-  "core:set_agent_name",
   "core:show_file",
   "core:concierge_follow",
   "core:concierge_unfollow",
