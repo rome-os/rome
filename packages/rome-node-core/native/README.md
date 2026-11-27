@@ -500,8 +500,9 @@ app with no arguments (such as from Finder or macOS "Quit & Reopen") also opens
 the default guide. Add `--locale <tag>` to select the guide language. The guide
 writes `ready` to stdout once it is running or has focused an existing panel,
 follows the System Settings window, and keeps checking both permissions while
-the guide is open (with a slower Screen Recording check once granted so
-revocations still update live).
+the guide is open (with a slower Screen Recording check while System Settings
+is visible so revocations still update live without background launches once
+Settings is closed).
 
 For device status, the host verifies the release signature and uses
 LaunchServices to run `--check-permissions` in a hidden, short-lived instance.

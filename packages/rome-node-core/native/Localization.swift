@@ -8,7 +8,8 @@ enum HelperLocale: String, CaseIterable, Sendable {
         case deny, allowSession, allowPersistent
         case menuTitle, noWindows, oneWindow, multipleWindows, stop, revokeCurrent, revokeAll, keyStoreError
         case claimedSource, process, executable, signingIdentifier, teamID, signingUnavailable, noTeamID, adHoc
-        case setupTitle, setupAccessibility, setupDeviceControl, setupScreenRecording, setupScreenAndAudioRecording
+        case setupTitle, setupAccessibility, setupDeviceControl, setupSystemProtectionOverride
+        case setupScreenRecording, setupScreenAndAudioRecording
         case setupGranted, setupPending
         case setupInstructions, setupScreenInstructions, setupDragHint, setupGrantedDetail
         case setupComplete, setupCompleteDetail, setupCompleteReopenDetail
@@ -33,7 +34,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "Rome Computer Use", "No window bound", "1 active window", "%d active windows", "Stop Computer Use",
             "Revoke “%@” (%@) & Stop", "Revoke All Authorized Keys", "Could not revoke authorized keys",
             "Claimed by requester", "Process", "Executable", "Signing ID", "Team ID", "Unverified", "None", "Ad hoc signed",
-            "Set Up Computer Use", "Accessibility", "Device Control and Data Access",
+            "Set Up Computer Use", "Accessibility", "Device Control and Data Access", "System & App Protection Override",
             "Screen Recording", "Screen & System Audio Recording", "Allowed", "Needs permission",
             "Turn on Rome Computer Use in System Settings. If it is missing, drag the app below into the list.",
             "Turn on Rome Computer Use in System Settings (drag the app below into the list if missing). If macOS asks, click “Quit & Reopen”.",
@@ -53,7 +54,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "Rome 电脑控制", "未绑定窗口", "1 个活动窗口", "%d 个活动窗口", "停止电脑控制",
             "撤销「%@」（%@）并停止", "撤销全部已授权来源", "无法撤销已授权公钥",
             "请求方声称", "进程", "可执行文件", "签名标识", "团队 ID", "未验证", "无", "临时签名",
-            "设置电脑控制权限", "辅助功能", "设备控制和数据访问",
+            "设置电脑控制权限", "辅助功能", "设备控制和数据访问", "系统与 App 保护覆盖",
             "屏幕录制", "录屏与系统录音", "已允许", "待授权",
             "在「系统设置」中打开 Rome Computer Use 的开关。如果列表中没有此项，请将下方的应用拖入列表。",
             "在「系统设置」中打开 Rome Computer Use 的开关（如果列表中没有，请将下方应用拖入列表）。若系统提示，请点击「退出并重新打开」。",
@@ -73,7 +74,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "Rome 電腦控制", "未綁定視窗", "1 個使用中的視窗", "%d 個使用中的視窗", "停止電腦控制",
             "撤銷「%@」（%@）並停止", "撤銷所有已授權來源", "無法撤銷已授權的公開金鑰",
             "請求方聲稱", "程序", "可執行檔", "簽章識別碼", "團隊 ID", "未驗證", "無", "臨時簽章",
-            "設定電腦控制權限", "輔助使用", "裝置控制和資料取用",
+            "設定電腦控制權限", "輔助使用", "裝置控制和資料取用", "系統與 App 保護覆寫",
             "螢幕錄製", "螢幕與系統錄音", "已允許", "待授權",
             "在「系統設定」中開啟 Rome Computer Use 的開關。如果列表中沒有這個項目，請將下方的 App 拖入列表。",
             "在「系統設定」中開啟 Rome Computer Use 的開關（如果列表中沒有，請將下方 App 拖入列表）。若系統提示，請點擊「結束並重新打開」。",
@@ -94,7 +95,7 @@ enum HelperLocale: String, CaseIterable, Sendable {
             "コンピュータの操作を停止", "「%@」（%@）の許可を取り消して停止", "すべての接続元の許可を取り消す",
             "許可済みの鍵を取り消せませんでした",
             "要求元の申告", "プロセス", "実行ファイル", "署名識別子", "チーム ID", "未検証", "なし", "アドホック署名",
-            "コンピュータ操作の権限設定", "アクセシビリティ", "デバイスの制御とデータへのアクセス",
+            "コンピュータ操作の権限設定", "アクセシビリティ", "デバイスの制御とデータへのアクセス", "システムとアプリ保護の上書き",
             "画面収録", "画面収録とシステムオーディオ録音", "許可済み", "許可が必要",
             "「システム設定」で Rome Computer Use をオンにしてください。一覧にない場合は、下のアプリを一覧へドラッグしてください。",
             "「システム設定」で Rome Computer Use をオンにしてください（一覧にない場合は下のアプリをドラッグ）。確認が出たら「終了して再度開く」をクリックしてください。",

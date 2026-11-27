@@ -432,7 +432,8 @@ private final class PermissionFlow: NSObject {
         }
         let now = ProcessInfo.processInfo.systemUptime
         let screenGranted = grants.contains(.screenRecording)
-        let shouldProbe = screenGranted || state.step == .screenRecording || grants.contains(.accessibility)
+        let shouldProbe = (screenGranted && lastSettingsFrame != nil)
+            || (!screenGranted && (state.step == .screenRecording || grants.contains(.accessibility)))
         guard shouldProbe, !probing, now >= nextProbe else { return }
         probing = true
         nextProbe = now + (screenGranted ? Self.grantedScreenProbeInterval : Self.pendingScreenProbeInterval)
