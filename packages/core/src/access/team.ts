@@ -1,5 +1,5 @@
 // The team: the people who use this Rome as the guardian does. Contract:
-// docs/concepts/people.md#team.
+// docs/concepts/access.md#team.
 
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import type { SessionActor } from "./session-actor.js";

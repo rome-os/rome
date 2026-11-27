@@ -28,7 +28,7 @@ Policy actions:
 
 ## Approvals
 
-The approval system gates sensitive [actions](actions.md) behind [guardian](people.md#guardian) sign-off. When a gated action is triggered, execution pauses and Rome records an approval. The guardian approves or rejects it from the web dashboard.
+The approval system gates sensitive [actions](actions.md) behind [guardian](access.md#guardian) sign-off. When a gated action is triggered, execution pauses and Rome records an approval. The guardian approves or rejects it from the web dashboard.
 
 **Contracts:**
 
