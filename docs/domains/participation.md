@@ -84,7 +84,7 @@ What the agent says back after a wake, through the account it was woken on.
 Who can read what a turn says: *private* (only the guardian) or *shared* (anyone else may). It is read off the turn's place and the sender when the turn starts, and it does not change during the turn.
 
 - A turn is private in a dashboard chat only the guardian can open, and in a direct message with Rome's account that the guardian sent while nobody but the guardian may open the dashboard, where Rome records that chat. The guardian's Concierge chats and its task chats open only for the guardian. Any other dashboard chat opens for every dashboard user, so it is private only while nobody but the guardian may open the dashboard. A group, a channel, an email thread, a direct message from anyone else and a visitor's chat are shared.
-- A turn whose place is unknown is shared. A turn with no place of its own, such as a summoned agent's, takes the audience of the turn that started it, and is shared when no turn did.
+- A turn whose place is unknown is shared. A turn with no place of its own, such as a subagent's, takes the audience of the turn that started it, and is shared when no turn did.
 - A subagent, fork or task takes its starter's audience, never a more private one.
 
 ## Decided against
