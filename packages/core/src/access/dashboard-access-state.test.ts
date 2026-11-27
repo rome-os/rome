@@ -9,7 +9,6 @@ import {
   memberContext,
   seatAccounts,
 } from "./application/members.js";
-import { placeAudience } from "../core/place-audience.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import type { DrizzleDb } from "../db/index.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "./dashboard-access-config.js";
@@ -66,7 +65,7 @@ describe("DashboardAccessState", () => {
     }
   });
 
-  it("reads a Rome with a Rome Cloud guardian and no members as having no one invited, so the guardian's chats stay private", async () => {
+  it("reads a Rome with a Rome Cloud guardian and no members as having no one invited", async () => {
     const testDb = createTestDb();
     try {
       await createCloudGuardian(testDb.db, "acct-owner", "owner@example.com");
@@ -75,25 +74,10 @@ describe("DashboardAccessState", () => {
       });
       const state = new DashboardAccessState();
       await state.load(testDb.db);
-      // Wired as index.ts wires it.
-      const audience = placeAudience({
-        dashboardChat: async (id) => ({ id, agentName: "main", ownerKey: null }),
-        visitorsAllowed: () => state.hasCloudEmailAccess(),
-      });
-
       expect(state.hasCloudEmailAccess()).toBe(false);
       expect(state.hasSignInEmails()).toBe(true);
       expect(state.cloudEmails().size).toBe(0);
       expect(state.isCloudEmailAllowed("owner@example.com")).toBe(true);
-      expect(
-        await audience({
-          channel: "telegram",
-          threadId: "1",
-          threadType: "private",
-          senderBondLevel: "guardian",
-        }),
-      ).toBe("private");
-      expect(await audience({ channel: "webchat", threadId: "chat-1" })).toBe("private");
     } finally {
       testDb.close();
     }

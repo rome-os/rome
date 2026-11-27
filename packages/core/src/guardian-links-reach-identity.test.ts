@@ -18,7 +18,6 @@ import {
 } from "./identity/application/account-codes.js";
 import { createIdentity } from "./identity/identity.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
-import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { createTestDb, type TestDb } from "./test/db.js";
 
@@ -73,29 +72,20 @@ describe("the guardian's links in People reaching Identity", () => {
       .map((a) => `${a.platform}:${a.accountId}`);
   }
 
-  async function connect(platform: string, id: string, stableId = false): Promise<void> {
-    const apply = await linkGuardianOnConnect(people).prepare({
-      platform,
-      connectedBy: { id, stableId },
-    });
-    testDb.db.transaction((tx) => apply?.(tx, { reachesAnotherAccount: false }));
-  }
-
-  it("follows a connect, a re-point, a WhatsApp self link and an unlink, and leaves a code's account", async () => {
+  it("follows a link, a re-point and an unlink, and leaves a code's account", async () => {
     const { code } = await accountCodeIssued(accountCodeContext(testDb.db), guardianId);
     await accountCodeRedeemed(accountCodeContext(testDb.db), code, {
       platform: "telegram",
       accountId: "99",
     });
 
-    await connect("wechat", "wx-old");
+    people.linkStated({ platform: "wechat", id: "wx-old" }, "owner");
     expect(await inIdentity()).toEqual(["telegram:99", "wechat:wx-old"]);
 
-    // A kind whose ids are not stable re-points the guardian's one link there.
-    await connect("wechat", "wx-new");
+    people.readdress("owner", { platform: "wechat", id: "wx-old" }, "wx-new");
     expect(await inIdentity()).toEqual(["telegram:99", "wechat:wx-new"]);
 
-    await linkGuardianToAccount(people, "whatsapp", "15550001@s.whatsapp.net");
+    people.linkStated({ platform: "whatsapp", id: "15550001@s.whatsapp.net" }, "owner");
     expect(await inIdentity()).toEqual([
       "telegram:99",
       "wechat:wx-new",
@@ -143,19 +133,15 @@ describe("the guardian's links in People reaching Identity", () => {
     expect(await identity.personOf({ platform: "agents", accountId: "ep-fred" })).toBeNull();
   });
 
-  it("rolls the connect back, credential and link, when Identity cannot be written", async () => {
+  it("rolls People's write back with the transaction it joined when Identity cannot be written", async () => {
     const failing = new DrizzlePeopleRepository(testDb.db, () => {
       throw new Error("identity write failed");
     });
-    const apply = await linkGuardianOnConnect(failing).prepare({
-      platform: "wechat",
-      connectedBy: { id: "wx-1" },
-    });
     expect(() =>
       testDb.db.transaction((tx) => {
-        // Stands in for the credential the grant writes in this transaction.
+        // Stands in for another write in the same transaction.
         tx.insert(settings).values({ key: "credential", value: 1, updatedAt: new Date() }).run();
-        apply?.(tx, { reachesAnotherAccount: false });
+        failing.linkStated({ platform: "wechat", id: "wx-1" }, "owner", tx);
       }),
     ).toThrow("identity write failed");
     expect(testDb.db.select().from(settings).all()).toEqual([]);

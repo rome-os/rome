@@ -47,7 +47,7 @@ import { send } from "../chats/send.js";
 import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
-import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
+import { chatTaskEvents, chatTaskListRoutes } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { vaultRoutes } from "./routes/vault.js";
@@ -404,10 +404,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
           subscribeConciergeActivity: (owner, emit) =>
             deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
-          hasChatTasks: async (chatId, owner) =>
-            deps.concierge ? ownsConciergeChat(deps.concierge, chatId, owner) : false,
-          subscribeChatTasks: (chatId, owner, emit) =>
-            subscribeChatTasks(deps, chatId, owner, emit),
+          chatTasks: (chatId) => chatTaskEvents(deps, chatId),
         },
         deps.phoneWatching,
         deps.dashboardActivity,

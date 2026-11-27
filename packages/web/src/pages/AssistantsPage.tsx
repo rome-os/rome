@@ -5,7 +5,7 @@ import { Bot, Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Assistant } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { TimelinePage } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/message";
 import { AssistantKindMark, useAssistantKindLabel } from "@/components/assistant-kind-icon";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatBubble } from "@/components/chat/ChatBubble";

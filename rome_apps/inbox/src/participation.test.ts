@@ -17,9 +17,9 @@ import type {
   ChatSettingsControl,
   InboundEvent,
   MessagesSaid,
-  PersonRecord,
   RunParams,
   SaidInboundEvent,
+  SaidSender,
 } from "@rome-os/app-runtime";
 import type { WakeGate } from "./actions/message-handler/index.js";
 import { createAction } from "./actions/message-handler/index.js";
@@ -37,11 +37,10 @@ const actionConfig: ActionConfig = {
   sideEffects: "write",
 };
 
-type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
-
 interface Setup {
-  /** The sender's bond level, or `stranger` for an account linked to no person. */
-  sender: BondLevel | "stranger";
+  /** Who the host says sent the message: the guardian, a member, or
+   *  `stranger` for an account nobody holds. */
+  sender: "guardian" | "member" | "stranger";
   /** What Core's wake gate answers, `wake` when absent. */
   wake?: ReturnType<WakeGate>;
   /** The hook's decision passed on with the message, so Inbox asks no gate. */
@@ -57,16 +56,6 @@ interface Setup {
 
 function result(content: string): AgentMessage {
   return { type: "result", content };
-}
-
-function person(bondLevel: BondLevel): PersonRecord {
-  return {
-    id: `person-${bondLevel}`,
-    displayName: `Person ${bondLevel}`,
-    bondLevel,
-    channelMappings: [],
-    createdAt: new Date("2026-01-01T00:00:00Z"),
-  } as PersonRecord;
 }
 
 /** Runs one message through `inbox:message_handler` and reports what it did. */
@@ -89,9 +78,6 @@ async function handle(setup: Setup) {
 
   const action = createAction(actionConfig, {
     agentRunner,
-    personMappingRepo: {
-      findByChannelUser: async () => (setup.sender === "stranger" ? null : person(setup.sender)),
-    },
     wakeGateFor:
       async () =>
       (...request: Parameters<WakeGate>) => {
@@ -130,6 +116,10 @@ async function handle(setup: Setup) {
     displayName: "Alice",
     text: "Can you help?",
     messageId: "message-1",
+    sender:
+      setup.sender === "stranger"
+        ? { person: null, guardian: false }
+        : { person: { id: `person-${setup.sender}` }, guardian: setup.sender === "guardian" },
     ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
     ...(setup.decidedByHook ? { wake: setup.decidedByHook } : {}),
   });
@@ -154,7 +144,7 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     { wake: "quiet", outcome: "quiet" },
     { wake: "block", outcome: "blocked" },
   ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
-    const handled = await handle({ sender: "inner-circle", wake });
+    const handled = await handle({ sender: "member", wake });
     expect(wakeOf(handled)).toBe(outcome);
   });
 
@@ -182,7 +172,7 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
   });
 
   it("asks the gate about the chat and the linked person, or no one for a stranger", async () => {
-    const linked = await handle({ sender: "inner-circle" });
+    const linked = await handle({ sender: "member" });
     const stranger = await handle({ sender: "stranger" });
 
     expect(linked.wakeRequests).toEqual([
@@ -194,7 +184,7 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
           place: "group",
           threadName: "Dev Chat",
         },
-        { person: { id: "person-inner-circle" } },
+        { person: { id: "person-member" } },
       ],
     ]);
     expect(stranger.wakeRequests).toEqual([[expect.anything(), { person: null }]]);
@@ -221,7 +211,7 @@ describe("send: the agent's reply", () => {
   });
 
   it("sends nothing when the agent says nothing", async () => {
-    const handled = await handle({ sender: "inner-circle" });
+    const handled = await handle({ sender: "member" });
 
     expect(handled.outcome.data).toMatchObject({ action: "no_response" });
     expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
@@ -236,6 +226,8 @@ describe("wake: in the hook", () => {
     recorded: boolean;
     /** The wake gate's answer, for a recorded message that names its sender. */
     gate?: ReturnType<WakeGate>;
+    /** Who the host says sent it, where it names a sender. */
+    person?: SaidSender["person"];
   }) {
     const run = rs.fn(async () => ({ status: "ok" as const }));
     const typing = rs.fn(async () => null);
@@ -298,16 +290,19 @@ describe("wake: in the hook", () => {
       await recordedHandler?.({
         ...event,
         recorded: { chatRecordId: "chat-1", messageId: "recorded-1" },
-        ...(options.gate ? { sender: { person: null, delegate: false, label: "not linked" } } : {}),
+        ...(options.gate
+          ? { sender: { person: options.person ?? null, delegate: false, label: "not linked" } }
+          : {}),
       });
     } else {
       await handler?.(event);
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const args = run.mock.calls[0]?.[1] as { wake?: string } | undefined;
+    const args = run.mock.calls[0]?.[1] as { wake?: string; sender?: unknown } | undefined;
     return {
       heard: run.mock.calls.length > 0 ? "handled" : "quiet",
       wake: args?.wake,
+      sender: args?.sender,
       typing: typing.mock.calls.length > 0,
     };
   }
@@ -329,7 +324,9 @@ describe("wake: in the hook", () => {
     agent: _label,
     ...options
   }) => {
-    expect((await hear(options)).heard).toBe(heard);
+    const result = await hear(options);
+    expect(result.heard).toBe(heard);
+    expect(result.sender).toBeUndefined();
   });
 
   // The hook asks the gate once People's answer comes with the message, so a
@@ -346,6 +343,23 @@ describe("wake: in the hook", () => {
     typing,
   }) => {
     const result = await hear({ enabled: true, accountAgent: "main", recorded: true, gate });
-    expect(result).toEqual({ heard, wake, typing });
+    expect(result).toMatchObject({ heard, wake, typing });
+  });
+
+  it.each([
+    { bondLevel: "guardian", guardian: true },
+    { bondLevel: "other", guardian: false },
+  ] as const)("passes the sender the host names on to the handler, guardian $guardian", async ({
+    bondLevel,
+    guardian,
+  }) => {
+    const result = await hear({
+      enabled: true,
+      accountAgent: "main",
+      recorded: true,
+      gate: "wake",
+      person: { id: "person-1", name: "Ana", bondLevel },
+    });
+    expect(result.sender).toEqual({ person: { id: "person-1" }, guardian });
   });
 });

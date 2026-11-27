@@ -17,7 +17,6 @@ const source = (overrides: Partial<TaskInputSource> = {}): TaskInputSource => ({
   chatId: "source",
   turnId: "turn",
   actor: guardian,
-  audience: "private",
   isCurrent: () => true,
   ...overrides,
 });
@@ -45,17 +44,11 @@ async function admitted(actor: SessionActor, owner: string) {
 }
 
 describe("task input attribution", () => {
-  it("hands the exact verified actor to a private task and keeps the source separate", async () => {
+  it("hands the exact verified actor to a task and keeps the source separate", async () => {
     const actor = await admitted(guardian, "guardian");
     expect(actor).toEqual(guardian);
     expect(actor).not.toBe(guardian);
     expect(Object.isFrozen(actor)).toBe(true);
-  });
-
-  it("refuses an unknown source audience", async () => {
-    await withTaskInputActor(source({ audience: undefined as never }), "target", body, async () => {
-      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
-    });
   });
 
   it("preserves a visitor, never promotes them to guardian", async () => {

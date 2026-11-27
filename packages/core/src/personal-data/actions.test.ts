@@ -209,12 +209,9 @@ describe("personal-data actions", () => {
     expect(result).toMatchObject({ status: "error" });
   });
 
-  it.each([
-    { audience: "shared" as const },
-    {},
-  ])("runs both actions in any turn (%o)", async (context) => {
+  it("runs both actions in any turn", async () => {
     for (const name of ["core:personal_data_catalog", "core:personal_data_query"]) {
-      const result = await engine.run(name, { source: "apple_health", type: "stepCount" }, context);
+      const result = await engine.run(name, { source: "apple_health", type: "stepCount" });
       expect(result).toMatchObject({ status: "ok" });
     }
   });

@@ -47,16 +47,13 @@ import { addressIsConversationFeature } from "./talk-features.js";
 import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 /** Runtime deps the WhatsApp adapter needs that `kit` cannot supply: the
- *  address-book store mirror and the guardian auto-map callback. Threaded in at
+ *  address-book store mirror. Threaded in at
  *  registration time from index.ts, where the repos exist — the descriptor is
  *  otherwise pure. */
 export interface WhatsAppDescriptorDeps {
   /** The address-book store mirror (waContacts/waChats/history), fed every
    *  Baileys sync event. `WhatsAppStoreRepository` is the production sink. */
   syncSink: WhatsAppSyncSink;
-  /** Called with the canonical self JID the adapter derives on
-   *  `connection: "open"`, each time the account connects. */
-  onAccountConnected: (selfJid: string) => void;
   /** Injectable socket factory (tests). Defaults to the real WhatsAppAdapter. */
   createAdapter?: (authProvider: WhatsAppAuthProvider) => WhatsAppAdapter;
   /** Injectable transient pairing-socket factory for the setup (tests).
@@ -216,7 +213,7 @@ async function defaultQrDataUrl(content: string): Promise<string> {
  *      `data:` image,
  *   3. `ctx.step("paired")` — wait for the Baileys handshake to reach `open`,
  *   4. stop the transient socket, then return the terminal grant: the
- *      in-memory session material + whatsapp profile + guardian mapping.
+ *      in-memory session material + whatsapp profile, naming the paired account.
  * The runtime performs the single durable write from the returned grant;
  * cancel/abandon tears the socket down and writes nothing.
  */
@@ -297,7 +294,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
   const sessionScheme = whatsappSessionScheme();
   // The WhatsApp setup: show the linking QR, drive the Baileys
   // handshake over a transient in-memory socket, then land the session
-  // material + profile + guardian mapping in one terminal write.
+  // material + profile in one terminal write.
   sessionScheme.setup = makeWhatsAppSetup({ openPairing, makeQrDataUrl: deps.makeQrDataUrl });
 
   return {
@@ -324,7 +321,6 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             saveCreds: auth.saveCreds,
           }));
           adapter.onSync(deps.syncSink);
-          adapter.onConnected(deps.onAccountConnected);
 
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           adapter.onFault((fault) => {

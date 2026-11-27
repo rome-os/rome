@@ -3,12 +3,8 @@
 // workers over IpcRpc. Workers call `agent.session.runTurn` and consume the
 // returned `agent.turn:<turnId>` stream.
 
-import { canOpen } from "../webchat/privacy.js";
-import { readerOwner } from "../webchat/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
-import type { IpcCallContext, IpcRpc } from "../apps/actions/ipc.js";
-import { walkToRoot } from "../agent/index.js";
-import { parseSessionKey } from "./agent-session-key.js";
+import type { IpcRpc } from "../apps/actions/ipc.js";
 import type {
   ChatId,
   ChatRef,
@@ -28,7 +24,6 @@ import type {
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
-import { narrowerAudience } from "../agent/index.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import {
@@ -138,43 +133,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private isTextPrivate?: (agentName: string, channel: string) => boolean,
   ) {}
 
-  /**
-   * Whether the action that asked to resume `session` may: every dashboard
-   * chat the session runs in (its own, its parent's, a fork's or subagent's
-   * row) must exist and be one its caller may open.
-   */
-  private async callerMayResume(session: AgentSession, ctx: IpcCallContext): Promise<boolean> {
-    if (!this.webchatRepo) return true;
-    const repo = this.webchatRepo;
-    const caller = ctx.callerActionContext;
-    const thread = caller?.channelContext;
-    const owner = await readerOwner(repo, {
-      actor: caller?.actor,
-      chatId: thread?.channel === "webchat" && thread.threadId ? thread.threadId : null,
-    });
-    const required: string[] = [];
-    const known = new Set<string>([session.sessionId]);
-    // Checked only when the session's opener named no chat, as when the
-    // session held its chat itself (temporary, ZHA-157).
-    if (!openerChat(session)) {
-      const chat = await findSessionChat(repo, session.sessionId);
-      if (chat) known.add(chat.id);
-    }
-    const root = walkToRoot(session.key.channelThreadKey);
-    for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
-    const rootKey = parseSessionKey(root);
-    if (rootKey.kind === "webchat") required.push(rootKey.chatId);
-    for (const chatId of required) {
-      const chat = await repo.getSession(chatId);
-      if (!chat || !canOpen(chat, owner)) return false;
-    }
-    for (const chatId of known) {
-      const chat = await repo.getSession(chatId);
-      if (chat && !canOpen(chat, owner)) return false;
-    }
-    return true;
-  }
-
   attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
       registerActionSubprocessHost(rpc, this.actionWorkerCoordinator, child);
@@ -222,20 +180,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
             : req.key.channelThreadKey;
           const stated = await this.openingFor(openedKey ?? "", sessionInit.threadContext);
-          // The session reads no more privately than the caller main read.
-          // A session with no chat opens shared, so its shell stays shared
-          // even when its turns take a private caller's audience. A session
-          // already live keeps the reading it opened with.
-          const audience = narrowerAudience(
-            stated.audience,
-            ctx.callerActionContext?.audience ?? "shared",
-          );
           const opening = {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
             ...stated,
-            audience,
-            toolEnv: { ...stated.toolEnv, ROME_TURN_AUDIENCE: audience },
             kind: sessionInit.threadContext ? ("conversation" as const) : ("action" as const),
             workingDir,
             isSubagent: true,
@@ -256,13 +204,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               );
           acquired = session;
           noteOpenerChat(session, namedChat);
-          // A session resumed by its id runs in its own chats, so the caller
-          // must be one who may open them, as on the dashboard's routes.
-          if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
-            throw new Error(`Agent session "${req.sessionId}" was not found`);
-          }
           // An action's worker may only fill a link the session lacks, never
-          // move one, and only once the check above has passed.
+          // move one.
           await openedInChat(this.webchatRepo, session, namedChat, { replace: false });
         } catch (err) {
           acquired?.release();
@@ -320,10 +263,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const handle = await session.submit(req.input, {
           priority: "after",
           ...(actor ? { actor } : {}),
-          // The turn is never more private than the turn or chat that ran
-          // the action asking for it, as main read it. Without that reading,
-          // such as for an action a third-party app runs, the turn is shared.
-          parentAudience: ctx.callerActionContext?.audience ?? "shared",
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,

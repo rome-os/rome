@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/db.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
-import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -604,30 +602,18 @@ describe("LinkedInStoreRepository", () => {
       });
     });
 
-    // A mirrored participant becomes a Rome person through the existing person
-    // create/link flow — there is no second write path here. The bare member id
-    // is the account's address on both sides, so promotion needs no translation
-    // step and nothing in this repository ever writes `persons`.
-    describe("promotion to a person", () => {
-      let people: PeopleRepository;
-
-      const personCount = () =>
-        Number(
-          (testDb.db.all(sql`SELECT COUNT(*) AS n FROM persons`) as Array<{ n: number }>)[0].n,
-        );
-
+    describe("participant read", () => {
       beforeEach(async () => {
-        people = new DrizzlePeopleRepository(testDb.db);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });
 
-      it("lists a mirrored account as unpromoted until a person claims it", async () => {
+      it("lists every mirrored account with its thread count", async () => {
         const rows = await repo.listParticipants();
 
         expect(rows.map((r) => r.participantId)).toEqual([ada.participantId, self.participantId]);
-        expect(rows.map((r) => r.linkedPersonId)).toEqual([null, null]);
         expect(rows[0].threadCount).toBe(1);
+        expect(rows[0].headline).toBe("Engineer");
       });
 
       it("bounds the participant read by default and reads it whole on limit: null", async () => {
@@ -635,78 +621,6 @@ describe("LinkedInStoreRepository", () => {
         expect(await repo.listParticipants({ limit: null })).toHaveLength(2);
         // The no-argument call is the one the address book's fold makes.
         expect(await repo.listParticipants()).toHaveLength(2);
-      });
-
-      it("promoting writes a person and a linkedin mapping carrying the member id", async () => {
-        await people.create({
-          displayName: "Ada Lovelace",
-          bondLevel: "acquaintance",
-          links: [{ platform: "linkedin", id: ada.participantId }],
-        });
-
-        const mapping = (
-          testDb.db.all(
-            sql`SELECT platform, account_id AS accountId, person_id AS personId
-                FROM links`,
-          ) as Array<Record<string, string>>
-        )[0];
-        expect(mapping).toEqual({
-          platform: "linkedin",
-          accountId: ada.participantId,
-          personId: "ada-lovelace",
-        });
-
-        const rows = await repo.listParticipants();
-        const promoted = rows.find((r) => r.participantId === ada.participantId);
-        expect(promoted?.linkedPersonId).toBe("ada-lovelace");
-        expect(promoted?.linkedPersonName).toBe("Ada Lovelace");
-        // The headline stays on the mirror row: `links` has nowhere
-        // to put it, and it belongs in the person's memory profile.
-        expect(promoted?.headline).toBe("Engineer");
-        // Promoting one account says nothing about the rest of the inbox.
-        expect(rows.find((r) => r.participantId === self.participantId)?.linkedPersonId).toBeNull();
-      });
-
-      it("refuses to promote a participant a person already holds", async () => {
-        await people.create({
-          displayName: "Ada Lovelace",
-          bondLevel: "acquaintance",
-          links: [{ platform: "linkedin", id: ada.participantId }],
-        });
-
-        // The second promotion slugs to a free id (`ada-lovelace-2`), so the
-        // refusal is the held account's rather than a colliding person id's.
-        await expect(
-          people.create({
-            displayName: "Ada Lovelace",
-            bondLevel: "acquaintance",
-            links: [{ platform: "linkedin", id: ada.participantId }],
-          }),
-        ).rejects.toThrow(/already belongs to person/);
-
-        expect(personCount()).toBe(1);
-        expect((await repo.listParticipants())[0].linkedPersonId).toBe("ada-lovelace");
-      });
-
-      it("linking an already-promoted participant re-points the one mapping", async () => {
-        await people.create({
-          displayName: "Ada Lovelace",
-          bondLevel: "acquaintance",
-          links: [{ platform: "linkedin", id: ada.participantId }],
-        });
-        await people.createWithId("ada-byron", {
-          displayName: "Ada Byron",
-          bondLevel: "inner-circle",
-        });
-
-        await people.linkStated({ platform: "linkedin", id: ada.participantId }, "ada-byron");
-
-        expect(personCount()).toBe(2);
-        const rows = await repo.listParticipants();
-        expect(rows.find((r) => r.participantId === ada.participantId)).toMatchObject({
-          linkedPersonId: "ada-byron",
-          linkedPersonName: "Ada Byron",
-        });
       });
     });
 

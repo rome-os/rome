@@ -605,16 +605,6 @@
     "skillCount_one": "{{count}} 个技能",
     "skillCount_other": "{{count}} 个技能"
   },
-  "impersonation": {
-    "buttonLabel": "身份扮演",
-    "menuTitle": "身份扮演",
-    "currentlySpeakingAs": "当前以 {{name}} 的身份发言。",
-    "guardianFallback": "守护者",
-    "guardianWithName": "{{name}}(守护者)",
-    "personLabel": "{{name}}({{bondLevel}})",
-    "default": "默认",
-    "noOtherUsers": "暂无其他用户。"
-  },
   "project": {
     "buttonLabel": "项目",
     "changeProject": "切换项目",

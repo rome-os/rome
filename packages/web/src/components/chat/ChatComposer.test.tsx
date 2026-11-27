@@ -5,7 +5,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import {
   loadNewChatDraft,
   saveNewChatDraft,
@@ -56,26 +55,10 @@ function stubCoarsePointer(matches: boolean) {
   );
 }
 
-function person(id: string, displayName: string, bondLevel: string): PersonResource {
-  return { id, displayName, bondLevel, accounts: [], messageCount: 0, latest: null };
-}
-
-/** A `GET /api/people` body, with the counts the route derives from the rows. */
-function peopleList(people: PersonResource[]): PeopleList {
-  const counts = { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 };
-  for (const row of people) {
-    counts[normalizeBondLevel(row.bondLevel)] += 1;
-    counts.all += 1;
-  }
-  return { people, counts };
-}
-
 interface RenderComposerOptions {
   composerRef?: Ref<ChatComposerHandle>;
   settings?: Record<string, unknown>;
   settingsPromise?: Promise<Record<string, unknown>>;
-  /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
-  people?: PersonResource[];
 }
 
 /** Answers the requests a mounted composer makes. */
@@ -86,7 +69,6 @@ function mockComposerFetch(options: RenderComposerOptions = {}) {
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
       return Response.json({ guardianName: "Ada", ...settings });
     }
-    if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
     if (url === "/api/chat/locations") {
       return Response.json({
         projects: {
@@ -138,9 +120,6 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
   };
 }
 
-// The people the composer offers to speak as. The listing is the curated
-// people read (`GET /api/people`); the guardian is dropped because speaking as
-// the guardian is what the composer already does by default.
 describe("text-only composer", () => {
   afterEach(() => {
     cleanup();
@@ -198,44 +177,6 @@ describe("placeholder hints", () => {
     expect(
       await screen.findByPlaceholderText("Send anytime, even while the agent is working"),
     ).toBeTruthy();
-  });
-});
-
-describe("composer mention list", () => {
-  const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
-  const RAY = person("ray-oster", "Ray Oster", "inner-circle");
-  const SAM = person("sam-okafor", "Sam Okafor", "colleague");
-
-  it("renders its people from GET /api/people", async () => {
-    const { fetchSpy } = renderComposer(
-      {},
-      { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY, SAM] },
-    );
-
-    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
-
-    expect(await screen.findByText("Ray Oster")).toBeTruthy();
-    expect(screen.getByText("Sam Okafor")).toBeTruthy();
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.map(([input]) => String(input))).toContain("/api/people"),
-    );
-  });
-
-  it("excludes the guardian", async () => {
-    renderComposer({}, { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY] });
-
-    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
-
-    await screen.findByText("Ray Oster");
-    expect(screen.queryByText("Mock Guardian")).toBeNull();
-  });
-
-  it("offers nobody when the listing holds only the guardian", async () => {
-    renderComposer({}, { settings: { enableImpersonation: true }, people: [GUARDIAN] });
-
-    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
-
-    expect(await screen.findByText("No other users available.")).toBeTruthy();
   });
 });
 
@@ -400,11 +341,8 @@ describe("composer attachment uploads", () => {
       return sendPending;
     });
     const composerRef = createRef<ChatComposerHandle>();
-    const { container } = renderComposer(
-      { onSend, showProjectSelector: true },
-      { composerRef, settings: { enableImpersonation: true } },
-    );
-    await screen.findByRole("button", { name: "Impersonation" });
+    const { container } = renderComposer({ onSend, showProjectSelector: true }, { composerRef });
+    await screen.findByRole("button", { name: "Project" });
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     if (!fileInput) throw new Error("file input not found");
     const first = new File([new Uint8Array(25)], "first.txt", { type: "text/plain" });
@@ -422,9 +360,6 @@ describe("composer attachment uploads", () => {
     expect((screen.getByRole("button", { name: "Project" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
-    expect(
-      (screen.getByRole("button", { name: "Impersonation" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
     // The lock is immediate; the progress bar is not — it waits out the delay
     // so short uploads stay silent.
     if (!controls) throw new Error("send controls not captured");
@@ -923,7 +858,6 @@ describe("New chat draft", () => {
     projectPath: "default",
     agentMention: null,
     skill: null,
-    personaId: "",
   };
   const draft: NewChatDraft = {
     ...empty,
@@ -931,7 +865,6 @@ describe("New chat draft", () => {
     projectPath: "research",
     agentMention: { appId: "app", agentName: "app/agent", appLabel: "App" },
     skill: { name: "skill" },
-    personaId: "person",
   };
   const input = () => screen.getByRole("textbox") as HTMLTextAreaElement;
 
@@ -948,33 +881,12 @@ describe("New chat draft", () => {
     expect(input().value).toBe(draft.text);
     expect(input().selectionStart).toBe(draft.text.length);
     fireEvent.input(input(), { target: { value: "edited before settings" } });
-    await act(async () => resolveSettings({ enableImpersonation: true }));
+    await act(async () => resolveSettings({}));
     expect(loadNewChatDraft()).toEqual({ ...draft, text: "edited before settings" });
     first.unmount();
-    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: true } });
+    renderComposer({ persistNewChatDraft: true });
     expect(input().value).toBe("edited before settings");
     expect(loadNewChatDraft()).toEqual({ ...draft, text: "edited before settings" });
-  });
-
-  it.each([
-    "send",
-    "submit",
-  ])("includes the restored persona before settings resolve (%s)", async (method) => {
-    saveNewChatDraft(draft);
-    const composerRef = createRef<ChatComposerHandle>();
-    const onSend = rs.fn().mockResolvedValue(undefined);
-    renderComposer(
-      { persistNewChatDraft: true, onSend },
-      {
-        composerRef,
-        settingsPromise: new Promise<Record<string, unknown>>(() => {}),
-      },
-    );
-    expect(composerRef.current?.getMetadataSnapshot().personaId).toBe(draft.personaId);
-    if (method === "send") fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    else act(() => composerRef.current?.submit("Quick entry"));
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
   });
 
   it("restores a draft device folder and sends it with the first turn", async () => {
@@ -1063,10 +975,7 @@ describe("New chat draft", () => {
 
   it("does not save an old composer's edits after another tab changes auth", () => {
     saveNewChatDraft(draft);
-    const first = renderComposer(
-      { persistNewChatDraft: true },
-      { settings: { enableImpersonation: true } },
-    );
+    const first = renderComposer({ persistNewChatDraft: true });
     expect(input().value).toBe(draft.text);
     localStorage.setItem("rome:auth-epoch", "other-tab-logout");
     fireEvent.input(input(), { target: { value: "edited old user's text" } });
@@ -1109,10 +1018,7 @@ describe("New chat draft", () => {
 
   it("clears text and context storage at send start", () => {
     saveNewChatDraft(draft);
-    renderComposer(
-      { persistNewChatDraft: true, onSend: () => new Promise<void>(() => {}) },
-      { settings: { enableImpersonation: true } },
-    );
+    renderComposer({ persistNewChatDraft: true, onSend: () => new Promise<void>(() => {}) });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(input().value).toBe("");
     expect(loadNewChatDraft()).toBeNull();
@@ -1127,10 +1033,7 @@ describe("New chat draft", () => {
       if (created) controls.onSessionCreated?.();
       return Promise.reject(new Error(created ? "postTurn failed" : "createSession failed"));
     });
-    renderComposer(
-      { persistNewChatDraft: true, onSend },
-      { settings: { enableImpersonation: true } },
-    );
+    renderComposer({ persistNewChatDraft: true, onSend });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(input().value).toBe(draft.text));
     expect(loadNewChatDraft()).toEqual(created ? null : draft);
@@ -1148,7 +1051,7 @@ describe("New chat draft", () => {
             rejectSend = reject;
           }),
       },
-      { composerRef, settings: { enableImpersonation: true } },
+      { composerRef },
     );
     act(() => composerRef.current?.addFiles([new File(["fixture"], "notes.txt")]));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -1160,7 +1063,7 @@ describe("New chat draft", () => {
     expect(input().value).toBe(draft.text);
     expect(input().disabled).toBe(false);
     first.unmount();
-    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: true } });
+    renderComposer({ persistNewChatDraft: true });
     expect(input().value).toBe(draft.text);
     expect(screen.queryByText("notes.txt")).toBeNull();
   });
@@ -1191,33 +1094,6 @@ describe("New chat draft", () => {
     await act(async () => adopt());
     expect(input().value).toBe("newer draft");
     expect(loadNewChatDraft()?.text ?? null).toBe(unmounted ? "newer draft" : null);
-  });
-
-  it("restores a failed create despite a context-only record from late settings", async () => {
-    saveNewChatDraft(draft);
-    let resolveSettings!: (settings: Record<string, unknown>) => void;
-    const settingsPromise = new Promise<Record<string, unknown>>((resolve) => {
-      resolveSettings = resolve;
-    });
-    let rejectCreate!: (error: Error) => void;
-    renderComposer(
-      {
-        persistNewChatDraft: true,
-        onSend: () =>
-          new Promise<void>((_resolve, reject) => {
-            rejectCreate = reject;
-          }),
-      },
-      { settingsPromise },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(input().value).toBe("");
-    expect(loadNewChatDraft()).toBeNull();
-    await act(async () => resolveSettings({ enableImpersonation: false }));
-    await waitFor(() => expect(loadNewChatDraft()).toMatchObject({ text: "", personaId: "" }));
-    await act(async () => rejectCreate(new Error("create failed")));
-    expect(input().value).toBe(draft.text);
-    expect(loadNewChatDraft()).toMatchObject({ text: draft.text, personaId: "" });
   });
 
   it("does not replace a newer draft on failure", async () => {
@@ -1276,13 +1152,6 @@ describe("New chat draft", () => {
     expect(loadNewChatDraft()).toEqual(draft);
   });
 
-  it("drops a restored persona only when settings confirm impersonation is disabled", async () => {
-    saveNewChatDraft(draft);
-    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: false } });
-    await waitFor(() => expect(loadNewChatDraft()?.personaId).toBe(""));
-    expect(loadNewChatDraft()?.text).toBe(draft.text);
-  });
-
   it("keeps an unrelated draft and selected skill/uploads when Rome News submits its own prompt", async () => {
     saveNewChatDraft(draft);
     const composerRef = createRef<ChatComposerHandle>();
@@ -1290,10 +1159,7 @@ describe("New chat draft", () => {
       controls.onSessionCreated?.();
       return Promise.resolve();
     });
-    renderComposer(
-      { persistNewChatDraft: true, onSend },
-      { composerRef, settings: { enableImpersonation: true } },
-    );
+    renderComposer({ persistNewChatDraft: true, onSend }, { composerRef });
     const file = new File(["fixture"], "notes.txt");
     act(() => composerRef.current?.addFiles([file]));
     await act(async () => composerRef.current?.submit("News prompt"));

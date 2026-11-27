@@ -1,19 +1,17 @@
-// A person's history: their messages across every account, and sending to
-// them. The rules are in application/; the chat composer's people listing and
-// the assistants' routes read them. Vocabulary: docs/domains/people.md.
+// A person's history: their messages across every account, and whether each
+// account can be sent to. The rules are in application/ and
+// chats/direct-place.ts; the chat composer's people listing reads them.
+// Vocabulary: docs/domains/people.md.
 
 export {
   asGuardian,
-  directPlace,
   readSendStates,
   type SendDeps,
   sendersOf,
-} from "./application/send.js";
+} from "../../chats/direct-place.js";
 export { assignAccountHeads, readAccountTimeline } from "./application/timeline.js";
 export {
   guardianChannels,
   personMessageStores,
   timelineAccounts,
 } from "./application/timeline-sources.js";
-
-export { respondToSend } from "./http/send-response.js";

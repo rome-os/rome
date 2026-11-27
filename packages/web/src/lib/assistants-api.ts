@@ -1,5 +1,5 @@
 import type { Assistant, AssistantList } from "@rome/api-types/assistants";
-import type { SentMessage, TimelinePage } from "@rome/api-types/people";
+import type { SentMessage, TimelinePage } from "@rome/api-types/message";
 import { fetchJson } from "@/lib/fetch-json";
 
 // Assistants: a Dot, Muse or another Rome talking to Rome through Rome Cloud,

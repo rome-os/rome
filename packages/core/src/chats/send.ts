@@ -1,10 +1,10 @@
 // Saying a message in a chat from outside an agent turn, wherever the chat
 // lives. Vocabulary: docs/domains/chats.md#place and
-// docs/domains/chats.md#delivery. The wire answers are the People contract's
-// (`@rome/api-types/people`).
+// docs/domains/chats.md#delivery. The wire answers are the message contract's
+// (`@rome/api-types/message`).
 //
 // A send names a place, never an account. Reaching an account directly is
-// finding the place first, which `people/person-history/application/send.ts` does for the People and
+// finding the place first, which `chats/direct-place.ts` does for the People and
 // assistants surfaces.
 //
 // Chats owns the answer and which side says the message; it says nothing
@@ -13,7 +13,7 @@
 // (`connections/send.ts`).
 
 import type { Account } from "@rome-os/app-runtime";
-import type { AccountSendState, SentMessage } from "@rome/api-types/people";
+import type { AccountSendState, SentMessage } from "@rome/api-types/message";
 import { sendOnConnection, type SendIntoPlaceDeps } from "../connections/send.js";
 import type { Delivery } from "./delivery.js";
 import type { Place } from "./place.js";

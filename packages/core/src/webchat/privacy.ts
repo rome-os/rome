@@ -72,8 +72,7 @@ export interface ChatPrivacyRow {
 }
 
 /** Whether a chat is in what Rome shows `owner`: any chat but another person's
- * Concierge or task chat. Resuming a session by its id asks this until the
- * audience of a session goes (rome-os/rome#2722). */
+ * Concierge or task chat. */
 export function canOpen(chat: ChatPrivacyRow | null | undefined, owner: string | null): boolean {
   const privateTo = privateOwnerOf(chat);
   return privateTo === null || privateTo === owner;

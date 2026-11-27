@@ -28,8 +28,7 @@ const routineEngine = {
 
 beforeEach(() => {
   testDb = createTestDb();
-  // Every routine's chat is the guardian's private chat.
-  routines = new RoutinesRepository(testDb.db, async () => "private");
+  routines = new RoutinesRepository(testDb.db);
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
   deps = {
@@ -106,7 +105,7 @@ describe("running a routine now", () => {
 
   it("runs for a turn no one started", async () => {
     const id = await createRoutine();
-    const result = await callTool(runRoutine, deps, { routineId: id }, { audience: "private" });
+    const result = await callTool(runRoutine, deps, { routineId: id }, {});
     expect(result).toMatchObject({ status: "ok" });
     expect(routineEngine.runNow).toHaveBeenCalledTimes(1);
   });
@@ -147,17 +146,5 @@ describe("stopping a routine's run", () => {
       status: "ok",
       data: { routineId: id, name: "Weekly report", stopped: true },
     });
-  });
-
-  it("stops it from a shared chat", async () => {
-    const id = await createRoutine();
-    const result = await callTool(
-      stopRoutineRun,
-      deps,
-      { routineId: id },
-      { ...guardianAsked, audience: "shared" },
-    );
-    expect(result).toMatchObject({ status: "ok" });
-    expect(routineEngine.cancelRun).toHaveBeenCalledWith(id);
   });
 });

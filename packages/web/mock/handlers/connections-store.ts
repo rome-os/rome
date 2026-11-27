@@ -43,10 +43,7 @@ function chatRuleFields(
   };
 }
 
-// The connection ledger. In its own module because two surfaces read it and one
-// of them writes it: the Connections page revokes a grant, and the send routes
-// behind that channel have to notice. Keeping it in `index.ts` would have meant
-// `people.ts` importing the module that imports it.
+// The connection ledger, which the Connections page reads and revokes grants in.
 //
 // Every card reads its state from `state`, never from `capabilities`: a
 // connection with no state renders "Not connected" however unlocked its

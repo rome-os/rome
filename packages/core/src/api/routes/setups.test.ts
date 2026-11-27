@@ -6,7 +6,7 @@
 // terminal grant (a connection is minted and its credential imported),
 // cancel, idempotent late delivery, and the same-origin guard.
 
-import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
+import { ownAccountConnected } from "../../access/application/own-account-connect.js";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
@@ -36,7 +36,6 @@ import {
 } from "../../connections/kinds/feishu/descriptor.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { createTestDb } from "../../test/db.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
@@ -73,18 +72,6 @@ const setupFn: SetupFn = async (interact) => {
   };
 };
 
-function fakePersonRepo(): PeopleRepository {
-  return {
-    byAccount: async () => null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [{ id: "guardian", links: [] }],
-    // The terminal grant applies the guardian mapping through the synchronous
-    // write helpers enlisted in its transaction — not the async setters.
-    readdress: rs.fn(),
-    linkStated: rs.fn(() => "id"),
-  } as unknown as PeopleRepository;
-}
-
 function harness() {
   const { db, close } = createTestDb();
   openDbs.push(close);
@@ -93,14 +80,12 @@ function harness() {
   fixture.descriptor.connectionKind = "fake-telegram";
   fixture.descriptor.auth.setup = setupFn;
   registry.register(fixture.descriptor);
-  const peopleRepo = fakePersonRepo();
-  const manager = new SetupManager({ registry, participant: linkGuardianOnConnect(peopleRepo) });
+  const manager = new SetupManager({ registry, participant: ownAccountConnected() });
   const deps = {
     db,
     approvalsRepo: new ApprovalsRepository(db),
     connectionRegistry: registry,
     setupManager: manager,
-    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return { app, registry };
@@ -263,23 +248,13 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
-    const personRepo = {
-      byAccount: async () => null,
-      isDismissed: async () => false,
-      byBondLevel: async () => [{ id: "guardian", links: [] }],
-      // The terminal grant applies the guardian mapping through the synchronous
-      // write helpers enlisted in its transaction — not the async setters.
-      readdress: rs.fn(),
-      linkStated: rs.fn(() => "id"),
-    };
+    // A Feishu app is no one's own account, so no connect joins it.
+    const joined = rs.fn(async () => undefined);
     registry.register(feishuDeps(overrides));
-    const manager = new SetupManager({
-      registry,
-      participant: linkGuardianOnConnect(personRepo as unknown as PeopleRepository),
-    });
+    const manager = new SetupManager({ registry, participant: { prepare: joined } });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
-    return { app, registry, personRepo };
+    return { app, registry, joined };
   }
 
   interface FeishuFakes {
@@ -323,8 +298,8 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
   }
 
-  it("manual mode: validates and grants credentials without a guardian mapping", async () => {
-    const { app, registry, personRepo } = feishuHarness({});
+  it("manual mode: validates and grants credentials and joins no write about whose account it is", async () => {
+    const { app, registry, joined } = feishuHarness({});
 
     const startRes = await app.request("/connections/feishu/grants/app/setup", {
       method: "POST",
@@ -349,7 +324,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_abc", domain: "lark", appType: "manual" });
-    expect(personRepo.linkStated).not.toHaveBeenCalled();
+    expect(joined).not.toHaveBeenCalled();
   });
 
   it("agent-ready mode: presents the QR mid-step and grants the minted credential", async () => {
@@ -399,7 +374,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 
   it("cancel mid-agent-ready interrupts the wait and leaves zero durable state", async () => {
     let stepSignal: AbortSignal | undefined;
-    const { app, registry, personRepo } = feishuHarness({
+    const { app, registry, joined } = feishuHarness({
       registerAgentApp: (opts) =>
         new Promise<FeishuPendingMaterial>((_res, rej) => {
           stepSignal = opts.signal;
@@ -425,9 +400,9 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       "cancelled",
     );
     expect(stepSignal?.aborted).toBe(true);
-    // Zero durable state: no connection minted, no guardian mapping.
+    // Zero durable state: no connection minted, no joined write.
     expect(registry.find("feishu")).toHaveLength(0);
-    expect(personRepo.linkStated).not.toHaveBeenCalled();
+    expect(joined).not.toHaveBeenCalled();
   });
 });
 
@@ -628,7 +603,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     );
     const manager = new SetupManager({
       registry,
-      participant: linkGuardianOnConnect(fakePersonRepo()),
+      participant: ownAccountConnected(),
     });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));

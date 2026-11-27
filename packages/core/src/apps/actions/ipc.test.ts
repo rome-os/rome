@@ -140,9 +140,7 @@ describe("IpcRpc errors", () => {
 });
 
 describe("IpcRpc caller context", () => {
-  // Main reads a chat call that arrives without its caller as one made outside
-  // any agent turn, which reads every chat. Each gated call must carry it.
-  it("carries the calling action's turn on every chat call main gates by it", async () => {
+  it("carries the calling action's turn on every chat call", async () => {
     const { main, worker } = linkedPeers(ROOT_CONTEXT);
     const seen = new Map<string, unknown>();
     for (const method of ["channels.query", "channels.chats", "channels.send"]) {
@@ -156,7 +154,6 @@ describe("IpcRpc caller context", () => {
       executionId: "e1",
       rootExecutionId: "e1",
       initiator: "agent",
-      audience: "shared" as const,
       turnId: "t1",
       agentName: "concierge",
     };
@@ -168,7 +165,7 @@ describe("IpcRpc caller context", () => {
     });
 
     for (const method of ["channels.query", "channels.chats", "channels.send"]) {
-      expect(seen.get(method)).toMatchObject({ audience: "shared", turnId: "t1" });
+      expect(seen.get(method)).toMatchObject({ turnId: "t1" });
     }
   });
 });

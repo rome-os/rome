@@ -30,14 +30,12 @@ const HISTORY_READ_LIMIT = 1000;
 const PARTICIPANTS_READ_LIMIT = 10000;
 
 /**
- * One mirrored LinkedIn account, annotated with whether it has been promoted
- * to a curated `persons` entry. `isSelf` rides along rather than being filtered
- * out here: which accounts a caller offers for promotion is its own policy,
- * and the guardian's own row is still a real member of the threads it appears
- * in.
+ * One mirrored LinkedIn account. `isSelf` rides along rather than being
+ * filtered out here: which accounts a caller offers is its own policy, and the
+ * guardian's own row is still a real member of the threads it appears in.
  */
 export interface LinkedInParticipantContactRow {
-  /** Bare LinkedIn member id — the `channelUserId` promotion writes. */
+  /** Bare LinkedIn member id. */
   participantId: string;
   name: string | null;
   headline: string | null;
@@ -45,9 +43,6 @@ export interface LinkedInParticipantContactRow {
   isSelf: boolean;
   /** How many mirrored threads this account belongs to. */
   threadCount: number;
-  /** The person this account was promoted into, or null when unpromoted. */
-  linkedPersonId: string | null;
-  linkedPersonName: string | null;
   /**
    * Unix seconds of the newest message on this account's direct threads, or
    * null when the mirror holds none. See {@link DIRECT_THREADS} for why a group
@@ -588,15 +583,8 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
   }
 
   /**
-   * Every stored LinkedIn account, each row saying whether it has already been
-   * promoted to a person and what its direct threads last carried. The join is
-   * on the member id itself — no translation step — because
-   * `linkedin_participants.participant_id` and a `linkedin`
-   * `links.account_id` are the same identifier by construction.
-   *
-   * Promotion is a guardian action against these rows, not something this
-   * repository performs: a LinkedIn inbox holds many accounts that should
-   * never enter the curated person graph, so nothing here writes `persons`.
+   * Every stored LinkedIn account, each row saying what its direct threads
+   * last carried.
    *
    * `limit` defaults to a generous cap that suits a single-payload endpoint.
    * Pass `null` to read the table whole, which is what a caller that paginates
@@ -617,8 +605,6 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         p.is_self AS isSelf,
         (SELECT COUNT(*) FROM linkedin_thread_participants tp
            WHERE tp.participant_id = p.participant_id) AS threadCount,
-        cm.person_id AS linkedPersonId,
-        person.display_name AS linkedPersonName,
         (SELECT MAX(coalesce(m.sent_at, m.created_at))
            FROM linkedin_messages m
            JOIN direct_threads d ON d.threadId = m.thread_id
@@ -634,9 +620,6 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
            JOIN direct_threads d ON d.threadId = m.thread_id
            WHERE d.participantId = p.participant_id) AS messageCount
       FROM linkedin_participants p
-      LEFT JOIN links cm
-        ON cm.platform = 'linkedin' AND cm.account_id = p.participant_id
-      LEFT JOIN persons person ON person.id = cm.person_id
       ORDER BY lower(coalesce(p.name, p.participant_id)) ASC, p.participant_id ASC
       ${limitClause}
     `)) as Array<Record<string, unknown>>;
@@ -648,8 +631,6 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
       type: (r.type as string | null) ?? null,
       isSelf: Boolean(r.isSelf),
       threadCount: Number(r.threadCount ?? 0),
-      linkedPersonId: (r.linkedPersonId as string | null) ?? null,
-      linkedPersonName: (r.linkedPersonName as string | null) ?? null,
       lastMessageAt: r.lastMessageAt == null ? null : Number(r.lastMessageAt),
       lastMessagePreview: (r.lastMessagePreview as string | null) ?? null,
       messageCount: Number(r.messageCount ?? 0),

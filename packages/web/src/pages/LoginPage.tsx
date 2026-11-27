@@ -232,6 +232,8 @@ export default function LoginPage() {
     body = (
       <>
         <div hidden={showLocalForm} className="w-full">
+          {/* Signing out of this Rome keeps the Rome Cloud session, so the
+              button alone would sign the same account in again. */}
           <CloudLoginButton
             onStartError={(message) => {
               setCloudError(message);
@@ -239,6 +241,7 @@ export default function LoginPage() {
             }}
             autoStart={autoStartCloud}
             busy={visitorStarting}
+            chooseAccount
           />
           {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
           {localPasswordAvailable &&

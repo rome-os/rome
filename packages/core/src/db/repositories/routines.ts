@@ -106,15 +106,8 @@ export function chatNamedByArgs(actionName: string, args: Record<string, unknown
   return typeof value === "string" && value ? value : null;
 }
 
-/** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
-export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "shared">;
-
 export class RoutinesRepository {
-  /** @param placeAudience Who can read a routine's chat. Absent, every chat is shared. */
-  constructor(
-    private db: DrizzleDb,
-    private placeAudience?: RoutinePlaceAudience,
-  ) {}
+  constructor(private db: DrizzleDb) {}
 
   /**
    * @deprecated Renames the action of every routine saved under an action's
@@ -133,23 +126,6 @@ export class RoutinesRepository {
       renamed += updated.length;
     }
     return renamed;
-  }
-
-  /**
-   * Who can read what a routine's fires say: its chat's audience, and shared
-   * for a routine of no chat or one that no longer exists.
-   */
-  async audienceOf(id: string): Promise<"private" | "shared"> {
-    const [row] = await this.db
-      .select({ chatId: routines.chatId })
-      .from(routines)
-      .where(eq(routines.id, id));
-    return this.chatAudience(row?.chatId ?? null);
-  }
-
-  private async chatAudience(chatId: string | null): Promise<"private" | "shared"> {
-    if (!chatId || !this.placeAudience) return "shared";
-    return this.placeAudience(chatId);
   }
 
   async findAll() {

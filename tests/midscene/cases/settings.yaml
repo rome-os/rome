@@ -44,8 +44,8 @@ cases:
           Scroll through Advanced settings until the "Developer settings" heading is near the top
           of the screen, and stop. Do not click anything.
       - aiAssert: >-
-          The "Developer settings" section shows the "Model selector", "Impersonation", and "AI
-          tool usage" switches below its heading, with no control to expand it.
+          The "Developer settings" section shows the "Model selector" and "AI tool usage"
+          switches below its heading, with no control to expand it.
       # Model ID mappings sits below the switches and the page is taller than one
       # screen, so it is checked in a separate screenshot.
       - aiAct: >-

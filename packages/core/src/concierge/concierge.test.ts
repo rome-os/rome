@@ -2222,7 +2222,7 @@ describe("Concierge tools", () => {
     expect(await titles({ includeEnded: true })).toEqual(["Calendar", "Flights", "Hotels"]);
   });
 
-  it("chat_read reads another Concierge chat, and refuses a chat that is neither kind", async () => {
+  it("chat_read reads another Concierge chat, whoever its owner is, and refuses a chat that is neither kind", async () => {
     const s = setup();
     s.messages.set(TOPIC_CHAT, [
       {
@@ -2243,6 +2243,8 @@ describe("Concierge tools", () => {
         { role: "user", from: "guardian", text: "and calls" },
       ],
     });
+    s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), ownerKey: "visitor:acct-ann" });
+    expect((await s.tool("chat_read", { chatId: TOPIC_CHAT })).isError).toBeFalsy();
     s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });
     const refused = await s.tool("chat_read", { chatId: "plain" });
     expect(refused.isError).toBe(true);
@@ -5223,16 +5225,15 @@ describe("Concierge chats", () => {
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
   });
 
-  it("knows a topic chat of its owner whether it is archived or not, and never the main chat or another person's", async () => {
+  it("knows whose a topic chat is whether it is archived or not, and never the main chat", async () => {
     const s = setup({ startEvents: false });
-    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
+    expect(await s.service.ownerOfTopicChat(TOPIC_CHAT)).toBe("guardian");
     // An archived topic chat is in no list, but its unarchive asks about it.
     s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
     expect(await s.service.conciergeChat(TOPIC_CHAT)).toBeNull();
-    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "guardian")).toBe(true);
-    expect(await s.service.isTopicChatOf(TOPIC_CHAT, "visitor:acct-ann")).toBe(false);
-    expect(await s.service.isTopicChatOf(CONCIERGE_CHAT, "guardian")).toBe(false);
-    expect(await s.service.isTopicChatOf("gone", "guardian")).toBe(false);
+    expect(await s.service.ownerOfTopicChat(TOPIC_CHAT)).toBe("guardian");
+    expect(await s.service.ownerOfTopicChat(CONCIERGE_CHAT)).toBeNull();
+    expect(await s.service.ownerOfTopicChat("gone")).toBeNull();
   });
 
   it("restoring an archived topic chat reads its rows as its own again, and moves its follows back only when asked", async () => {

@@ -2,16 +2,16 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-24
-- **Concept**: [People — Team](../concepts/people.md#team), [Access control](../architecture/access-control.md)
+- **Concept**: [Access — Team](../concepts/access.md#team), [Access control](../architecture/access-control.md)
 - **Supersedes**: the sentence "Approvals stay with the guardian" in [A Concierge for each person](a-concierge-for-each-person.md)
 
 ## Context
 
-A guardian who invites people to the dashboard wants them to use Rome as the guardian does. A [dashboard admin](../concepts/people.md#dashboard-admin) reached most of the dashboard, but every check that asked for the guardian refused them: approvals, the vault, app-connection access, personal data, device connections, the app catalog stream, and the node console. Each of those checks was written on its own, so the guardian could not tell from Settings what a person they invited could do.
+A guardian who invites people to the dashboard wants them to use Rome as the guardian does. A [dashboard admin](../concepts/access.md#dashboard-admin) reached most of the dashboard, but every check that asked for the guardian refused them: approvals, the vault, app-connection access, personal data, device connections, the app catalog stream, and the node console. Each of those checks was written on its own, so the guardian could not tell from Settings what a person they invited could do.
 
 ## Decision
 
-The guardian and every dashboard admin are the [team](../concepts/people.md#team). Every dashboard check that admitted only the guardian admits the team instead, and asks Access one question: whether the session actor is on the team, read from the dashboard allow-list as it stands at the request.
+The guardian and every dashboard admin are the [team](../concepts/access.md#team). Every dashboard check that admitted only the guardian admits the team instead, and asks Access one question: whether the session actor is on the team, read from the dashboard allow-list as it stands at the request.
 
 Four things stay the guardian's alone:
 

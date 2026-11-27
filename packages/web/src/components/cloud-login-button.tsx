@@ -8,31 +8,44 @@ import { beginCloudLogin } from "@/lib/cloud-login";
 // browser navigates to Rome Cloud, so this only re-enables itself on a start
 // failure. Callback failures come back as ?cloud=error&reason=… and are surfaced
 // by the host page, not here. `autoStart` runs the same start once on mount, in
-// place of the click.
+// place of the click. `chooseAccount` adds a quiet "Use another account" link
+// that starts the same sign-in but asks Rome Cloud to let the person pick an
+// account first. Both share one busy state, so only one attempt (and one state
+// cookie) is ever in flight.
 export function CloudLoginButton({
   onStartError,
   autoStart = false,
   busy = false,
+  chooseAccount = false,
 }: {
   onStartError: (message: string) => void;
   autoStart?: boolean;
   /** Another sign-in the page started is under way, so this one must not start too. */
   busy?: boolean;
+  chooseAccount?: boolean;
 }) {
   const { t } = useTranslation("auth");
   const [starting, setStarting] = useState(false);
   // Survives StrictMode's double effect run, so one mount starts one attempt.
   const autoStarted = useRef(false);
+  // Blocks a second start before the busy state has re-rendered.
+  const inFlight = useRef(false);
 
-  const start = useCallback(async () => {
-    setStarting(true);
-    onStartError("");
-    const result = await beginCloudLogin();
-    if (!result.ok) {
-      onStartError(result.reason === "network" ? t("networkError") : t("cloud.errorStart"));
-      setStarting(false);
-    }
-  }, [onStartError, t]);
+  const start = useCallback(
+    async (options: { chooseAccount?: boolean } = {}) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setStarting(true);
+      onStartError("");
+      const result = await beginCloudLogin(options);
+      if (!result.ok) {
+        onStartError(result.reason === "network" ? t("networkError") : t("cloud.errorStart"));
+        inFlight.current = false;
+        setStarting(false);
+      }
+    },
+    [onStartError, t],
+  );
 
   useEffect(() => {
     if (!autoStart || autoStarted.current) return;
@@ -41,13 +54,25 @@ export function CloudLoginButton({
   }, [autoStart, start]);
 
   return (
-    <AuthActionButton
-      busy={starting || busy}
-      busyLabel={t("cloud.connecting")}
-      onClick={() => void start()}
-    >
-      {t("cloud.signIn")}
-    </AuthActionButton>
+    <>
+      <AuthActionButton
+        busy={starting || busy}
+        busyLabel={t("cloud.connecting")}
+        onClick={() => void start()}
+      >
+        {t("cloud.signIn")}
+      </AuthActionButton>
+      {chooseAccount && (
+        <button
+          type="button"
+          disabled={starting || busy}
+          onClick={() => void start({ chooseAccount: true })}
+          className="mx-auto mt-4 block text-ui text-muted-foreground hover:text-foreground focus:outline-none focus-visible:underline disabled:opacity-50"
+        >
+          {t("login.useAnotherAccount")}
+        </button>
+      )}
+    </>
   );
 }
 

@@ -222,12 +222,6 @@ function renderChatComponent(
       conciergeExists = true;
       return Response.json({ id: "concierge", unread: 0 });
     }
-    if (url === "/api/people") {
-      return Response.json({
-        people: [],
-        counts: { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 },
-      });
-    }
     if (url === "/api/chat/sessions" && init?.method === "POST") {
       return homeData?.createSession?.() ?? Response.json({ id: "new-session" });
     }
@@ -529,7 +523,6 @@ describe("ChatComponent empty home", () => {
   const pinnedSession = {
     id: "session-pinned",
     name: "Pinned planning chat",
-    personaId: null,
     projectName: "",
     projectPath: "",
     agentName: null,
@@ -800,7 +793,6 @@ describe("New chat draft boundaries", () => {
       projectPath: "old-project",
       agentMention: null,
       skill: { name: "old-skill" },
-      personaId: "",
     });
     const agentMention = { appId: "app", agentName: "agent", appLabel: "App" };
     renderChatComponent({}, undefined, {
@@ -849,7 +841,6 @@ describe("New chat draft boundaries", () => {
       projectPath: "default",
       agentMention: null,
       skill: { name: "old-skill" },
-      personaId: "",
     });
     renderChatComponent({}, undefined, { pathname: "/chat", state: { draft: "explicit" } });
     await waitFor(() =>
@@ -865,7 +856,6 @@ describe("New chat draft boundaries", () => {
       projectPath: "default",
       agentMention: null,
       skill: null,
-      personaId: "",
     });
     renderChatComponent({}, undefined, { pathname: "/chat", state: { skill: "new-skill" } });
     await waitFor(() =>

@@ -133,8 +133,7 @@ export function resolveProfileMemoryPath(filePath: string): string {
 /**
  * Where every memory profile lives, as the memory file browser addresses it:
  * one folder under the memory root holding one file per person. The template's
- * `relationship/BONDS.md` states the same convention to the agent that writes
- * the profiles.
+ * `README.md` states the same convention to the agent that writes the profiles.
  *
  * Read it from here rather than spelling it again — a second literal keeps
  * working after this folder moves, and answers about a file nobody writes any

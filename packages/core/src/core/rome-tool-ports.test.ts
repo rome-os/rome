@@ -45,7 +45,6 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
-    audience: () => "shared",
     reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
@@ -64,7 +63,6 @@ function ports(
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
-    placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
     ...(deviceKinds ? { deviceKinds } : {}),
@@ -313,53 +311,6 @@ describe("romeToolPorts sessionTools", () => {
   });
 });
 
-describe("romeToolPorts actions carry the turn's audience", () => {
-  const audienceOfRun = (run: ReturnType<typeof ports>["run"]) =>
-    (run.mock.calls.at(-1) as unknown as [string, unknown, { audience?: string }])[2].audience;
-
-  it("hands a private turn in a private chat on as private", async () => {
-    const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "private" }), "system:send_message", {});
-    expect(audienceOfRun(run)).toBe("private");
-  });
-
-  it("reads the chat again on each call, so a chat that became shared narrows the turn", async () => {
-    const { actions, run } = ports();
-    await actions.run(
-      turn({
-        audience: () => "private",
-        threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
-      }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-
-  it("hands a turn with no chat of its own on with the audience it took from its starter", async () => {
-    const { actions, run } = ports();
-    // A summoned agent: its turn's audience is the summoning turn's.
-    await actions.run(
-      turn({ audience: () => "private", threadContext: () => undefined }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("private");
-    await actions.run(
-      turn({ audience: () => "shared", threadContext: () => undefined }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-
-  it("never widens a shared turn", async () => {
-    const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "shared" }), "system:send_message", {});
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-});
-
 describe("scoped task input from a session tool", () => {
   it("provides a turn-bound task input path rather than borrowing the callback's HTTP actor", async () => {
     let supplied: import("./session-tools.js").SessionToolContext | undefined;
@@ -396,35 +347,12 @@ describe("task input actor through the session tool port", () => {
         agentName: "core:concierge",
         actor: () => guardian,
         threadContext: () => thread,
-        audience: () => "private",
         ...overrides,
       }),
       true,
     );
     return { ...built, context };
   }
-
-  for (const [audience, actor] of [
-    ["private", guardian],
-    ["shared", guardian],
-    ["shared", visitor],
-  ] as const) {
-    it(`captures a ${actor.kind}'s ${audience} source audience in the host handoff`, async () => {
-      const { context } = await provided({ audience: () => audience, actor: () => actor });
-      await context.captureTaskInput!()("target", body, async () => {
-        expect(claimTaskInputActor("target", body, speaker)?.source.audience).toBe(audience);
-      });
-    });
-  }
-
-  it("revokes a handoff when the live audience changes", async () => {
-    let audience: "private" | "shared" = "private";
-    const { context } = await provided({ audience: () => audience });
-    await context.captureTaskInput!()("target", body, async () => {
-      audience = "shared";
-      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
-    });
-  });
 
   it("carries the visitor turn, not the unrelated ambient guardian, into the task action", async () => {
     const built = await provided({ actor: () => visitor });
@@ -513,7 +441,6 @@ it("snapshots the source identity rather than following mutation of its objects"
       agentName: "core:concierge",
       actor: () => actor,
       threadContext: () => thread,
-      audience: () => "private",
     }),
     true,
   );
@@ -554,7 +481,6 @@ describe("task input source capture precedes asynchronous setup", () => {
           agentName: "core:concierge",
           actor: () => actor,
           turnId: () => turnId,
-          audience: () => "private",
           threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
         }),
         true,
@@ -625,7 +551,6 @@ describe("task input source capture precedes asynchronous setup", () => {
         agentName: "core:concierge",
         actor: () => ({ kind: "guardian", userId: "synthetic-seat" }),
         live: undefined,
-        audience: () => "private",
         threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
       }),
       true,

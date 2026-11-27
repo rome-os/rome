@@ -89,9 +89,7 @@ describe("/chats/:chatId/tasks", () => {
         calls.push(`cancel ${chatId} ${checkId}`);
         return true;
       },
-      conciergeChat: async (chatId: string) =>
-        OWNERS[chatId] ? { id: chatId, name: chatId, main: true } : null,
-      ownerOfChat: async (chatId: string) => OWNERS[chatId] ?? null,
+      ownerOfLiveChat: async (chatId: string) => OWNERS[chatId] ?? null,
       stopTask: async (taskId: string, by: string) => {
         calls.push(`stop ${taskId} ${by}`);
         return 0;
@@ -307,7 +305,7 @@ describe("/chats/:chatId/tasks", () => {
     expect(new Set(ids).size).toBe(TASK_LIST_ENDED_PAGE + 3);
   });
 
-  it("shows a guardian and a visitor each only their own chat's work", async () => {
+  it("shows a Concierge chat's own work, whoever reads it", async () => {
     const theirs = await task({ title: "The guardian's" });
     const hers = await task({ title: "Ann's", chatId: "ann-main", ownerKey: "visitor:acct-ann" });
     for (const row of [theirs, hers]) await tasks.keepEnded([], [row.id]);
@@ -322,9 +320,9 @@ describe("/chats/:chatId/tasks", () => {
       ended: ["task Ann's"],
       on_its_own: ["routine Ann summary"],
     });
-    // Another person's chat does not exist to the caller.
-    expect((await app().request("/chats/ann-main/tasks", guardian)).status).toBe(404);
-    expect((await app().request("/chats/concierge/tasks", ann)).status).toBe(404);
+    expect(await read("ann-main")).toEqual(await read("ann-main", ann));
+    expect(await read("concierge", ann)).toEqual(await read("concierge"));
+    expect((await app().request("/chats/gone/tasks", guardian)).status).toBe(404);
   });
 
   it("shows a routine made in one of the chat's task chats, naming its task, and none of another owner's", async () => {
@@ -355,7 +353,7 @@ describe("/chats/:chatId/tasks", () => {
     expect(
       items.find((item) => item.kind === "routine" && item.name === "Daily summary"),
     ).not.toHaveProperty("fromTask");
-    // Ann sees her own task chat's routine, and never the guardian's.
+    // Ann's chat lists her own task chat's routine, and never the guardian's.
     expect(kindsIn(await read("ann-main", ann)).on_its_own).toEqual(["routine Ann's routine"]);
   });
 
@@ -363,16 +361,16 @@ describe("/chats/:chatId/tasks", () => {
     expect(await read("concierge")).toEqual({ chatId: "concierge", groups: [] });
   });
 
-  it("stops a task of the chat for its owner only", async () => {
+  it("stops a task of the chat for any member, and none of another chat", async () => {
     const flights = await task({ title: "Flights" });
     const stop = (chatId: string, as = guardian) =>
       app().request(`/chats/${chatId}/tasks/${flights.id}/stop`, { ...as, method: "POST" });
 
-    expect((await stop("concierge", ann)).status).toBe(404);
     expect((await stop("ann-main", ann)).status).toBe(404);
     expect(calls).toEqual([]);
     expect((await stop("concierge")).status).toBe(200);
-    expect(calls).toEqual([`stop ${flights.id} guardian`]);
+    expect((await stop("concierge", ann)).status).toBe(200);
+    expect(calls).toEqual([`stop ${flights.id} guardian`, `stop ${flights.id} guardian`]);
   });
 
   it("stops a task started from a chat on a connection from the main chat's list", async () => {
@@ -392,7 +390,7 @@ describe("/chats/:chatId/tasks", () => {
     expect(calls).toEqual([`stop ${flights.id} guardian`]);
   });
 
-  it("answers a task link for a task chat of any of the caller's own Concierge chats", async () => {
+  it("answers a task link for a task chat of any of the chat owner's Concierge chats", async () => {
     const flights = await task({ title: "Flights" });
     await chats.createSession(
       "calendar",
@@ -436,8 +434,10 @@ describe("/chats/:chatId/tasks", () => {
     expect(
       (await links("ann-main", [annsTask.id, flights.id, agenda.id], ann)).tasks.map((t) => t.id),
     ).toEqual([annsTask.id]);
-    // Another person's chat does not exist to the caller.
-    expect((await app().request("/chats/ann-main/task-links?ids=x", guardian)).status).toBe(404);
+    expect(await links("ann-main", [annsTask.id])).toEqual(
+      await links("ann-main", [annsTask.id], ann),
+    );
+    expect((await app().request("/chats/gone/task-links?ids=x", guardian)).status).toBe(404);
   });
 
   it("lists a routine a draft card in the chat turned on", async () => {
@@ -471,7 +471,7 @@ describe("/chats/:chatId/tasks", () => {
         }),
       );
     // The card's "Turn it on" in chat ann-main: a routine whose args name no chat.
-    const turnOn = (as: typeof guardian) =>
+    const turnOn = (as: typeof guardian, chatId = "ann-main") =>
       card.request("/routines", {
         ...as,
         method: "POST",
@@ -481,12 +481,12 @@ describe("/chats/:chatId/tasks", () => {
           trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "08:00" },
           actionName: "wake",
           args: {},
-          chatId: "ann-main",
+          chatId,
         }),
       });
-    // Only the chat's owner turns it on there.
-    expect((await turnOn(guardian)).status).toBe(404);
-    expect((await turnOn(ann)).status).toBe(201);
+    expect((await turnOn(guardian, "gone")).status).toBe(404);
+    // Any member turns it on there.
+    expect((await turnOn(guardian)).status).toBe(201);
     expect(kindsIn(await read("ann-main", ann))).toEqual({
       on_its_own: ["routine Morning nudge"],
     });
@@ -507,12 +507,14 @@ describe("/chats/:chatId/tasks", () => {
     await reader.cancel();
   });
 
-  it("opens the change stream for the chat's owner only", async () => {
-    expect((await app().request("/chats/concierge/tasks/events", ann)).status).toBe(404);
-    const stream = await app().request("/chats/concierge/tasks/events", guardian);
-    expect(stream.status).toBe(200);
-    expect(stream.headers.get("content-type")).toContain("text/event-stream");
-    await stream.body?.cancel();
+  it("opens the change stream for every member", async () => {
+    expect((await app().request("/chats/gone/tasks/events", ann)).status).toBe(404);
+    for (const member of [guardian, ann]) {
+      const stream = await app().request("/chats/concierge/tasks/events", member);
+      expect(stream.status).toBe(200);
+      expect(stream.headers.get("content-type")).toContain("text/event-stream");
+      await stream.body?.cancel();
+    }
   });
 
   describe("in the one panel's groups", () => {
@@ -706,7 +708,7 @@ describe("/chats/:chatId/tasks", () => {
   });
 
   describe("row actions", () => {
-    it("marks a one-off task of the chat done for its owner only, and no scheduled or ended one", async () => {
+    it("marks a one-off task of the chat done for any member, and no scheduled or ended one", async () => {
       const flights = await task({ title: "Flights" });
       const brief = await task({ title: "Morning brief" });
       const ended = await task({ title: "Hotel" });
@@ -733,16 +735,15 @@ describe("/chats/:chatId/tasks", () => {
       const done = (chatId: string, id: string, as = guardian) =>
         app().request(`/chats/${chatId}/tasks/${id}/done`, { ...as, method: "POST" });
 
-      expect((await done("concierge", flights.id, ann)).status).toBe(404);
       expect((await done("ann-main", flights.id, ann)).status).toBe(404);
       expect((await done("concierge", brief.id)).status).toBe(409);
       expect((await done("concierge", ended.id)).status).toBe(409);
       expect(calls).toEqual([]);
-      expect((await done("concierge", flights.id)).status).toBe(200);
+      expect((await done("concierge", flights.id, ann)).status).toBe(200);
       expect(calls).toEqual([`done ${flights.id}`]);
     });
 
-    it("cancels a reminder no task has, for the chat's owner only", async () => {
+    it("cancels a reminder no task has, for any member", async () => {
       const visa = await task({ title: "Visa" });
       checks.concierge = [
         { id: "lone", at: IN_AN_HOUR, taskId: null },
@@ -751,16 +752,15 @@ describe("/chats/:chatId/tasks", () => {
       const cancel = (chatId: string, id: string, as = guardian) =>
         app().request(`/chats/${chatId}/tasks/checks/${id}/cancel`, { ...as, method: "POST" });
 
-      expect((await cancel("concierge", "lone", ann)).status).toBe(404);
       expect((await cancel("ann-main", "lone", ann)).status).toBe(404);
       // A task's check is on the task's row, which has no Cancel.
       expect((await cancel("concierge", "on-visa")).status).toBe(404);
       expect(calls).toEqual([]);
-      expect((await cancel("concierge", "lone")).status).toBe(200);
+      expect((await cancel("concierge", "lone", ann)).status).toBe(200);
       expect(calls).toEqual(["cancel concierge lone"]);
     });
 
-    it("unfollows a follow of the chat, for the chat's owner only", async () => {
+    it("unfollows a follow of the chat, for any member", async () => {
       follows.concierge = [
         {
           kind: "follow",
@@ -779,16 +779,15 @@ describe("/chats/:chatId/tasks", () => {
         });
 
       const rome = { source: "github", target: "rome-os/rome" };
-      expect((await unfollow("concierge", rome, ann)).status).toBe(404);
       expect((await unfollow("ann-main", rome, ann)).status).toBe(404);
       expect((await unfollow("concierge", { source: "github", target: "other" })).status).toBe(404);
       expect((await unfollow("concierge", { source: "github" })).status).toBe(400);
       expect(calls).toEqual([]);
-      expect((await unfollow("concierge", rome)).status).toBe(200);
+      expect((await unfollow("concierge", rome, ann)).status).toBe(200);
       expect(calls).toEqual(["unfollow github rome-os/rome guardian"]);
     });
 
-    it("pauses, resumes and deletes a routine of the chat, for the chat's owner only", async () => {
+    it("pauses, resumes and deletes a routine of the chat, for any member", async () => {
       const mine = await summary("concierge", "Daily summary");
       const hers = await summary("ann-main", "Ann summary");
       const act = (chatId: string, id: string, what: string, as = guardian) =>
@@ -799,12 +798,11 @@ describe("/chats/:chatId/tasks", () => {
           { ...as, method: what === "delete" ? "DELETE" : "POST" },
         );
 
-      expect((await act("concierge", mine, "pause", ann)).status).toBe(404);
       expect((await act("concierge", hers, "pause")).status).toBe(404);
       expect((await act("ann-main", mine, "delete", ann)).status).toBe(404);
       expect(calls).toEqual([]);
 
-      expect((await act("concierge", mine, "pause")).status).toBe(200);
+      expect((await act("concierge", mine, "pause", ann)).status).toBe(200);
       expect((await routines.findById(mine))?.enabled).toBe(false);
       expect((await act("concierge", mine, "resume")).status).toBe(200);
       expect((await routines.findById(mine))?.enabled).toBe(true);

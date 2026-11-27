@@ -87,6 +87,13 @@ export function linkedinProfileFromIdentity(
   return linkedinGrantProfileSchema.parse(raw);
 }
 
+/** The account a LinkedIn grant is signed in as: the member id. A grant
+ *  whose `whoami` names no member id reaches no account. Both the
+ *  connection's account and the account that connected it read this value. */
+function linkedinAccountIdOf(profile: ProfileRecord): string | null {
+  return (typeof profile.plainId === "string" && profile.plainId) || null;
+}
+
 function toLinkedInDisplay(profile: LinkedInGrantProfile): ProfileDisplay {
   return Object.freeze({
     displayName: profile.displayName,
@@ -224,16 +231,11 @@ export function makeLinkedInSetup(deps: {
     }
 
     const profile = linkedinProfileFromIdentity(identity, new Date()) ?? undefined;
+    const signedInAs = profile ? linkedinAccountIdOf(profile) : null;
     return {
       credential: browserSessionCredential(),
       profile,
-      // The signed-in account, under the id `accountIdOf` records on the
-      // channel, so the two name one account.
-      ...(identity.plainId
-        ? { connectedBy: { id: identity.plainId } }
-        : identity.publicId
-          ? { connectedBy: { id: `https://www.linkedin.com/in/${identity.publicId}/` } }
-          : {}),
+      ...(signedInAs ? { connectedBy: { id: signedInAs } } : {}),
       summary: {
         title: "LinkedIn connected",
         body: [
@@ -275,7 +277,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     connectionKind: "linkedin",
     label: "LinkedIn",
     reviveProfile: (record) => reviveLinkedInProfile(record),
-    accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
+    accountIdOf: linkedinAccountIdOf,
     grant: "session",
     // Today's behaviour, stated: chats wake on every message the platform
     // delivers, and only the session reset is the guardian's to set.
