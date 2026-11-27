@@ -50,7 +50,7 @@ describe("personal-data actions", () => {
   afterEach(() => testDb.close());
 
   it("lists the catalog in a private turn", async () => {
-    const result = await engine.run("core:personal_data_catalog", {}, { audience: "private" });
+    const result = await engine.run("core:personal_data_catalog", {});
     expect(result).toMatchObject({
       status: "ok",
       data: { sources: [{ source: "apple_health", origin: { name: "iPhone" } }] },
@@ -58,11 +58,12 @@ describe("personal-data actions", () => {
   });
 
   it("answers a query in a private turn, in the guardian's zone by default", async () => {
-    const result = await engine.run(
-      "core:personal_data_query",
-      { source: "apple_health", type: "stepCount", start: "2026-11-10", end: "2026-11-11" },
-      { audience: "private" },
-    );
+    const result = await engine.run("core:personal_data_query", {
+      source: "apple_health",
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-11",
+    });
     expect(result).toMatchObject({
       status: "ok",
       data: { timeZoneIdentifier: TZ, results: [{ type: "stepCount", value: 14000 }] },
@@ -70,23 +71,19 @@ describe("personal-data actions", () => {
   });
 
   it("answers a routine's fire, which adds the payload that fired it", async () => {
-    const result = await engine.run(
-      "core:personal_data_query",
-      {
-        source: "apple_health",
-        type: "stepCount",
-        start: "2026-11-10",
-        end: "2026-11-11",
-        __triggerPayload: { firedAt: "2026-11-12T09:00:00Z" },
-      },
-      { audience: "private" },
-    );
+    const result = await engine.run("core:personal_data_query", {
+      source: "apple_health",
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-11",
+      __triggerPayload: { firedAt: "2026-11-12T09:00:00Z" },
+    });
     expect(result).toMatchObject({ status: "ok", data: { results: [{ value: 14000 }] } });
   });
 
   it("points at the install whose origin holds the data, where the store does not cover the window", async () => {
     const today = { source: "apple_health", type: "stepCount", start: "2026-11-12" };
-    const before = await engine.run("core:personal_data_query", today, { audience: "private" });
+    const before = await engine.run("core:personal_data_query", today);
     expect(before).toMatchObject({
       status: "ok",
       data: { connection: { state: "not_connected", next: expect.stringContaining("Rome app") } },
@@ -110,7 +107,7 @@ describe("personal-data actions", () => {
       },
       NOV_10 + 2 * DAY + 8 * HOUR,
     );
-    const after = await engine.run("core:personal_data_query", today, { audience: "private" });
+    const after = await engine.run("core:personal_data_query", today);
     expect(after).toMatchObject({
       status: "ok",
       data: {
@@ -125,13 +122,14 @@ describe("personal-data actions", () => {
       },
     });
     // A window the store covers needs no pointer.
-    const covered = await engine.run(
-      "core:personal_data_query",
-      { source: "apple_health", type: "stepCount", start: "2026-11-10", end: "2026-11-11" },
-      { audience: "private" },
-    );
+    const covered = await engine.run("core:personal_data_query", {
+      source: "apple_health",
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-11",
+    });
     expect((covered as { data: Record<string, unknown> }).data.connection).toBeUndefined();
-    const catalog = await engine.run("core:personal_data_catalog", {}, { audience: "private" });
+    const catalog = await engine.run("core:personal_data_catalog", {});
     expect(catalog).toMatchObject({
       data: { sources: [{ connection: { id: "dev-1:apple_health", state: "working" } }] },
     });
@@ -174,18 +172,12 @@ describe("personal-data actions", () => {
         NOV_10 + 8 * HOUR,
       );
     const query = () =>
-      engine.run(
-        "core:personal_data_query",
-        { source: "apple_health", type: "stepCount" },
-        { audience: "private" },
-      );
+      engine.run("core:personal_data_query", { source: "apple_health", type: "stepCount" });
     reportHealth("unknown", true);
     expect(await query()).toMatchObject({
       data: { connection: { id: "dev-1:apple_health", state: "working" } },
     });
-    expect(
-      await engine.run("core:personal_data_catalog", {}, { audience: "private" }),
-    ).toMatchObject({
+    expect(await engine.run("core:personal_data_catalog", {})).toMatchObject({
       data: {
         sources: [{ source: "apple_health", types: [], connection: { id: "dev-1:apple_health" } }],
       },
@@ -203,35 +195,24 @@ describe("personal-data actions", () => {
     expect(broken).toMatchObject({ data: { connection: { state: "broken" } } });
     expect(broken.data.connection.next).toContain("device's settings");
     // The catalog lists the pointer, and leaves the step to the query that found the gap.
-    const catalog = (await engine.run(
-      "core:personal_data_catalog",
-      {},
-      { audience: "private" },
-    )) as {
+    const catalog = (await engine.run("core:personal_data_catalog", {})) as {
       data: { sources: { connection: Record<string, unknown> }[] };
     };
     expect(catalog.data.sources[0].connection.next).toBeUndefined();
   });
 
   it("returns a query it cannot answer as an error the Agent reads", async () => {
-    const result = await engine.run(
-      "core:personal_data_query",
-      { source: "apple_health", type: "mood" },
-      { audience: "private" },
-    );
+    const result = await engine.run("core:personal_data_query", {
+      source: "apple_health",
+      type: "mood",
+    });
     expect(result).toMatchObject({ status: "error" });
   });
 
-  it.each([
-    { audience: "shared" as const },
-    {},
-  ])("refuses both actions outside a private turn (%o), before they run", async (context) => {
+  it("runs both actions in any turn", async () => {
     for (const name of ["core:personal_data_catalog", "core:personal_data_query"]) {
-      const result = await engine.run(name, { source: "apple_health", type: "stepCount" }, context);
-      expect(result).toEqual({
-        status: "error",
-        error: expect.stringMatching(/^personal_data_private_only: /),
-      });
+      const result = await engine.run(name, { source: "apple_health", type: "stepCount" });
+      expect(result).toMatchObject({ status: "ok" });
     }
   });
 
@@ -261,7 +242,6 @@ describe("personal-data actions", () => {
     healthOn("dev-asking", false, "origin-dev");
     healthOn("dev-other", true, ORIGIN);
     const result = await engine.run("core:personal_data_query", today, {
-      audience: "private",
       channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
     });
     expect(result).toMatchObject({
@@ -296,7 +276,6 @@ describe("personal-data actions", () => {
       "core:personal_data_catalog",
       {},
       {
-        audience: "private",
         channelContext: withAskingDevice({ channel: "webchat", threadId: "chat-1" }, "dev-asking"),
       },
     );
@@ -332,11 +311,12 @@ describe("personal-data actions", () => {
     );
     await lifecycle.removeDevice("dev-1");
     expect(devices.list()).toEqual([]);
-    const result = await engine.run(
-      "core:personal_data_query",
-      { source: "apple_health", type: "stepCount", start: "2026-11-10", end: "2026-11-11" },
-      { audience: "private" },
-    );
+    const result = await engine.run("core:personal_data_query", {
+      source: "apple_health",
+      type: "stepCount",
+      start: "2026-11-10",
+      end: "2026-11-11",
+    });
     expect(result).toMatchObject({
       status: "ok",
       data: { connection: { state: "not_connected" } },

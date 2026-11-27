@@ -1,6 +1,5 @@
 // Who the Slack app connection answers as the guardian: only the member who
-// signed in. Built in test/ because it crosses the connection, People and the
-// turn's audience. The setup names that member as the guardian's account
+// signed in. Built in test/ because it crosses the connection and People. The setup names that member as the guardian's account
 // (`T_A/U_GUARDIAN`, pinned in integrations/slack-app.test.ts); here the
 // registry's mapping of it is applied as the setup manager applies it, and
 // direct messages from that member and from another are heard through the
@@ -9,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
-import { messagingAudience } from "../agent/index.js";
 import { SLACK_APP_KIND } from "../connections/integrations/slack-app.js";
 import {
   depositSignature,
@@ -105,20 +103,5 @@ describe("Slack app members who did not sign in (R12)", () => {
     const [guardian, member] = heard;
     expect(await bondOf(guardian)).toBe("guardian");
     expect(await bondOf(member)).toBe("other");
-
-    // So only the guardian's direct message runs as the guardian's own turn.
-    const audienceOf = async (message: ChannelMessage) =>
-      messagingAudience(
-        {
-          channel: message.channel,
-          threadId: message.chatId,
-          threadType: "private",
-          channelUserId: message.senderId,
-          senderBondLevel: await bondOf(message),
-        },
-        SLACK_APP_KIND,
-      );
-    expect(await audienceOf(guardian)).toBe("private");
-    expect(await audienceOf(member)).toBe("shared");
   });
 });

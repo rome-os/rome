@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import type { Assistant } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { TimelinePage } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/message";
 import "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AssistantsPage } from "./AssistantsPage";

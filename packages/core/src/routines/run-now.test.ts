@@ -1,15 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
-import { actionExecutionContext } from "../apps/actions/context.js";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { actionOf, callTool, GUARDIAN_TURN } from "../apps/actions/agent-tool-contract.js";
-import type { ToolTurn } from "../apps/actions/agent-tool.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { type RoutineToolDeps, runRoutine, stopRoutine, stopRoutineRun } from "./agent-tools.js";
-import { RoutineEngine } from "./engine.js";
 
 const guardianAsked = GUARDIAN_TURN;
 
@@ -32,8 +28,7 @@ const routineEngine = {
 
 beforeEach(() => {
   testDb = createTestDb();
-  // Every routine's chat is the guardian's private chat.
-  routines = new RoutinesRepository(testDb.db, async () => "private");
+  routines = new RoutinesRepository(testDb.db);
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
   deps = {
@@ -108,53 +103,23 @@ describe("running a routine now", () => {
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 
-  it("refuses a turn the guardian's own message did not start, and runs nothing", async () => {
+  it("runs for a turn no one started", async () => {
     const id = await createRoutine();
-    const result = await callTool(runRoutine, deps, { routineId: id }, { audience: "private" });
-    expect((result as { error: string }).error).toMatch(/^needs_guardian:/);
-    expect(routineEngine.runNow).not.toHaveBeenCalled();
+    const result = await callTool(runRoutine, deps, { routineId: id }, {});
+    expect(result).toMatchObject({ status: "ok" });
+    expect(routineEngine.runNow).toHaveBeenCalledTimes(1);
   });
-});
-
-describe("a routine's fire", () => {
-  it("cannot run a routine, though the guardian made it in their private chat", async () => {
-    // The system action as it runs in the main process: the engine puts the
-    // fire's context in the action's store, and the action asks for its turn.
-    const engine = {
-      run: (_name: string, args: Record<string, unknown>, context: ActionRunContext) =>
-        actionExecutionContext.run(
-          { ...context, executionId: "fire", rootExecutionId: "fire", initiator: "routine" },
-          () => actionOf(runRoutine, deps).execute(args),
-        ),
-    } as unknown as ActionEngine;
-    const id = await actionExecutionContext.run(
-      {
-        executionId: "e",
-        rootExecutionId: "e",
-        initiator: "agent:core:main",
-        actor: { kind: "guardian", userId: "guardian", via: "cookie" },
-      },
-      () =>
-        routines.create({
-          name: "Run myself again",
-          trigger: { type: "manual" },
-          actionName: "system:run_routine",
-          args: {},
-          chatId: "guardian-chat",
-        }),
+  it("starts no run from inside a routine's run, so one routine cannot run another without end", async () => {
+    const id = await createRoutine();
+    // A routine whose action is system:run_routine, or an action its fire calls.
+    const result = await actionExecutionContext.run(
+      { executionId: "fire", rootExecutionId: "fire", initiator: "routine:Weekly report" },
+      () => actionOf(runRoutine, deps).execute({ routineId: id }),
     );
-    await routines.update(id, { args: { routineId: id } });
-    const fires = new RoutineEngine(
-      routines,
-      new RoutineRunsRepository(testDb.db),
-      engine,
-      0,
-      systemClock,
-    );
-
-    const run = await fires.runNow(id);
-
-    expect(run.error).toMatch(/needs_guardian:/);
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("cannot start"),
+    });
     expect(routineEngine.runNow).not.toHaveBeenCalled();
   });
 });
@@ -181,17 +146,5 @@ describe("stopping a routine's run", () => {
       status: "ok",
       data: { routineId: id, name: "Weekly report", stopped: true },
     });
-  });
-
-  it("refuses a chat that is not private with the guardian, and stops nothing", async () => {
-    const id = await createRoutine();
-    const result = await callTool(
-      stopRoutineRun,
-      deps,
-      { routineId: id },
-      { ...guardianAsked, audience: "shared" },
-    );
-    expect((result as { error: string }).error).toMatch(/^private_only:/);
-    expect(routineEngine.cancelRun).not.toHaveBeenCalled();
   });
 });

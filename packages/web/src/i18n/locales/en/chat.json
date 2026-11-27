@@ -605,16 +605,6 @@
     "skillCount_one": "{{count}} skill",
     "skillCount_other": "{{count}} skills"
   },
-  "impersonation": {
-    "buttonLabel": "Impersonation",
-    "menuTitle": "Impersonation",
-    "currentlySpeakingAs": "Currently speaking as {{name}}.",
-    "guardianFallback": "Guardian",
-    "guardianWithName": "{{name}} (guardian)",
-    "personLabel": "{{name}} ({{bondLevel}})",
-    "default": "Default",
-    "noOtherUsers": "No other users available."
-  },
   "project": {
     "buttonLabel": "Project",
     "changeProject": "Change project",

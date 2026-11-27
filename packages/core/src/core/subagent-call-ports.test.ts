@@ -93,7 +93,6 @@ describe("subagent calls through the run's ports", () => {
         childManager: Sessions;
         workingDir: string;
         actor?: { kind: string };
-        audience?: "private" | "shared";
       },
     ) {
       return calls.call(name, subagentRequest(input), {
@@ -105,12 +104,9 @@ describe("subagent calls through the run's ports", () => {
         chat: context.parentSessionId,
         agentName: context.parentAgentName,
         agentSessionId: context.parentAgentSessionId,
-        sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo, {
-          audience: "private",
-        }),
+        sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo, {}),
         at: { workingDir: context.workingDir },
         ...(context.actor ? { actor: context.actor } : {}),
-        ...(context.audience ? { audience: context.audience } : {}),
       });
     },
   });
@@ -167,29 +163,6 @@ describe("subagent calls through the run's ports", () => {
       },
     );
     expect(child.calls[0].options?.actor).toBe(guardian);
-  });
-
-  it("opens a subagent of a private chat with its starter's place and turn audience", async () => {
-    const child = fakeChildSession("child-1", ["child-turn-1"]);
-    const open = rs.fn(async () => child.session);
-    const childManager = { open, find: rs.fn(), shutdown: rs.fn(async () => undefined) };
-    await createService().startSubagent(
-      "researcher",
-      { prompt: "steps today?" },
-      {
-        parentSessionId: "parent-1",
-        parentAgentSessionId: "parent-runtime-1",
-        parentTurnId: "parent-turn-1",
-        parentToolUseId: "tool-1",
-        parentAgentName: "main",
-        parentChannelThreadKey: "webchat:parent-1",
-        childManager: childManager as unknown as Sessions,
-        workingDir: "/tmp/project-a",
-        audience: "private",
-      },
-    );
-    expect((open.mock.calls[0] as unknown[])[1]).toMatchObject({ audience: "private" });
-    expect(child.calls[0].options?.parentAudience).toBe("private");
   });
 
   it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {

@@ -61,7 +61,7 @@ describe("profile-memory", () => {
     expect(readFileSync(join(profileMemoryDir, "MEMORY.md"), "utf-8")).toContain("Privacy Config");
     // The wider template tree should land too.
     expect(existsSync(join(profileMemoryDir, "IDENTITY.md"))).toBe(true);
-    expect(existsSync(join(profileMemoryDir, "relationship", "BONDS.md"))).toBe(true);
+    expect(existsSync(join(profileMemoryDir, "relationship", "GUARDIAN.md"))).toBe(true);
   });
 
   it("copies missing memory files from memory.example into the profile directory", () => {

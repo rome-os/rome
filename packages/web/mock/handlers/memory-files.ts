@@ -3,17 +3,12 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 /**
  * The memory dir the Memory page browses — the fixture counterpart of the tree
  * core seeds from `packages/core/memory.example`, filled in as if Rome had been
- * running for a while against the People fixtures.
- *
- * A person's `memoryPath` points at `memory/relationship/<person-id>.md`, and
- * `memoryProfilePath` below reads it off this tree, so the people listing and
- * the Memory page agree about who has a profile.
+ * running for a while.
  */
 
 /**
- * Today's journal entry, dated off the browser's clock like the People
- * fixtures' relative timestamps — a literal date would read as months stale
- * within a release.
+ * Today's journal entry, dated off the browser's clock — a literal date would
+ * read as months stale within a release.
  */
 const now = new Date();
 const year = String(now.getFullYear());
@@ -166,18 +161,6 @@ export const memoryTree: MockFsNode[] = [
       "- Whether Saturday's hike is on. The call comes Friday evening.\n",
   ),
 ];
-
-/**
- * Where a person's profile lives, or null when nothing has been written about
- * them — the fixture stand-in for the relationship-dir read core answers
- * `memoryPath` from. Reading it off the tree keeps `memoryPath` from naming a
- * file the Memory page cannot open.
- */
-export function memoryProfilePath(personId: string): string | null {
-  const path = `memory/relationship/${personId}.md`;
-  const relationships = memoryTree.find((node) => node.path === "memory/relationship");
-  return relationships?.children?.some((node) => node.path === path) ? path : null;
-}
 
 export const memoryFileHandlers = fileBrowserHandlers({
   apiBasePath: "/api/memory",

@@ -4,7 +4,8 @@ This is the concepts index — the single source of truth for entity definitions
 
 Browse by domain:
 
-- [`people.md`](people.md) — Guardian, Visitor, Persons, Accounts, Addresses, Links, Bond levels. *Who Rome serves and who it interacts with.*
+- [`access.md`](access.md) — Guardian, Visitor, Dashboard admin, Team. *Who Rome serves.*
+- [`people.md`](people.md) — Persons, Accounts, Addresses, Links, Sending, Bond levels. *Who Rome interacts with.*
 - [`deployment.md`](deployment.md) — Profiles, Instances. *How a deployment names itself for data isolation and for telemetry.*
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*
@@ -22,7 +23,7 @@ Terms used on multiple surfaces with no entry yet. Chats, accounts, agents in ch
 
 - **Setup** — connection setup runtime, dashboard setup renderer, [`architecture/channels.md`](../architecture/channels.md) — a server-owned resumable connect protocol with a closed verb set. Any surface can render any setup.
 - **Trace** — per-turn evidence storage, dashboard trace drawer, replay app agent prompt — append-only per-turn evidence stream, distinct from OTEL spans, which docs never disambiguate.
-- **Seat (guardian seat)** — guardian auth state, [`actions.md#actor`](actions.md#actor), [`architecture/access-control.md`](../architecture/access-control.md) — the single per-instance guardian record, stable across login methods. [`people.md#guardian`](people.md#guardian) covers the role, not the record.
+- **Seat (guardian seat)** — guardian auth state, [`actions.md#actor`](actions.md#actor), [`architecture/access-control.md`](../architecture/access-control.md) — the single per-instance guardian record, stable across login methods. [`access.md#guardian`](access.md#guardian) covers the role, not the record.
 - **Webchat** — webchat runtime, dashboard chat, agent prompts, several concepts entries use it undefined — the dashboard-native channel and the only interactive surface.
 - **Webhook** — webhook API surface, [`architecture/api.md`](../architecture/api.md) — machine-credential, actor-less async action entry point.
 - **Settings (instance KV vs conversation settings)** — settings APIs and UI, [`architecture/notification-delivery.md`](../architecture/notification-delivery.md) — two distinct things sharing one word. The ambiguity is the reason to document.

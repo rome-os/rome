@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, identityConnectionKindOf } from "../../test/db.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";
-import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 
 describe("WhatsAppStoreRepository", () => {
   let db: DrizzleDb;
@@ -28,7 +27,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(rows).toHaveLength(2);
     const alice = rows.find((r) => r.jid === "111@s.whatsapp.net");
     expect(alice?.name).toBe("Alice");
-    expect(alice?.linkedPersonId).toBeNull();
     expect(alice?.messageCount).toBe(0);
   });
 
@@ -74,25 +72,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(may[0].jid).toBe("lid-may@lid"); // conversation-bearing jid, so the chat opens
     expect(may[0].lastMessagePreview).toBe("哪两个？");
     expect(may[0].messageCount).toBe(1);
-  });
-
-  it("carries a person link across the merged account", async () => {
-    const persons = new DrizzlePeopleRepository(db);
-    await persons.create({
-      displayName: "May",
-      bondLevel: "acquaintance",
-      links: [{ platform: "whatsapp", id: "15555550148@s.whatsapp.net" }],
-    });
-    await repo.upsertContacts([
-      { jid: "lid-may@lid", phoneNumber: "15555550148" },
-      { jid: "15555550148@s.whatsapp.net", phoneNumber: "15555550148", name: "may" },
-    ]);
-
-    const rows = await repo.listContacts();
-    const may = rows.filter((r) => (r.phoneNumber ?? "").includes("15555550148"));
-    expect(may).toHaveLength(1);
-    expect(may[0].linkedPersonId).toBeTruthy();
-    expect(may[0].linkedPersonName).toBe("May");
   });
 
   it("keeps distinct phone numbers and nameless phone-less LIDs as separate cards", async () => {
@@ -159,21 +138,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.name).toBe("Alice"); // preserved
     expect(alice?.notify).toBe("Alice 🌸"); // updated
     expect(alice?.phoneNumber).toBe("111"); // preserved
-  });
-
-  it("annotates contacts linked to a person", async () => {
-    const persons = new DrizzlePeopleRepository(db);
-    await persons.create({
-      displayName: "Alice Smith",
-      bondLevel: "inner-circle",
-      links: [{ platform: "whatsapp", id: "111@s.whatsapp.net" }],
-    });
-    await repo.upsertContacts([{ jid: "111@s.whatsapp.net", name: "Alice" }]);
-
-    const rows = await repo.listContacts();
-    const alice = rows.find((r) => r.jid === "111@s.whatsapp.net");
-    expect(alice?.linkedPersonId).toBeTruthy();
-    expect(alice?.linkedPersonName).toBe("Alice Smith");
   });
 
   it("stores messages and surfaces the latest preview + count on the contact", async () => {

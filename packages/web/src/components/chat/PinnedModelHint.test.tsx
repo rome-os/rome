@@ -117,7 +117,6 @@ describe("PinnedModelHint", () => {
     const followed: ChatSession = {
       id: "s1",
       name: "Trip",
-      personaId: null,
       largeModelSelection: null,
       followsDefault: true,
       pinnedModel: null,

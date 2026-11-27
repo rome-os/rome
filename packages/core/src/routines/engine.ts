@@ -69,8 +69,8 @@ export class RoutineEngine {
    * The person a fire acts for: who created the routine, read from its stored
    * row at each fire, so however a routine was activated its fires act for
    * that person. Never anyone ambient. The guardian acts through loopback, not
-   * their session cookie: no message of theirs started the fire, so what only
-   * their own message may do, such as changing a routine, stays refused.
+   * their session cookie: no message of theirs started the fire, so its usage
+   * is labelled as Rome's own work.
    */
   private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
     const creator = await this.routinesRepo.creatorOf(routine.id);
@@ -363,13 +363,10 @@ export class RoutineEngine {
 
         const mergedArgs = { ...routine.args, __triggerPayload: payload };
         const actor = await this.actorOf(routine);
-        // A fire is read where the routine's chat is read.
-        const audience = await this.routinesRepo.audienceOf(routine.id);
         // A routine fire holds no action worker, so it can wait out a busy pool.
         const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
           ...(actor ? { actor } : {}),
-          audience,
           // The root row takes the run's id, so an approval of this fire finds
           // it (and the person it acted for) under its root execution id.
           executionId: rootExecutionId,
@@ -515,7 +512,6 @@ export class RoutineEngine {
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
                           ...(actor ? { actor } : {}),
-                          audience,
                           whenWorkersBusy: "queue",
                           // A retry keeps the payload out of its record, as the first try did.
                           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),

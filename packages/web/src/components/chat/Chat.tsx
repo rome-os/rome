@@ -2220,7 +2220,6 @@ export function Chat({
               : (
                   await createSession({
                     name: t("sidebar.newChat"),
-                    personaId: snapshot.personaId,
                     projectPath: snapshot.projectPath,
                     largeModelSelection: snapshot.largeModelSelection,
                     reasoningEffort: snapshot.reasoningEffort,
@@ -2284,7 +2283,6 @@ export function Chat({
           formData.set("text", snapshot.text);
           if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
-          if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
           if (snapshot.largeModelSelection)
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
@@ -2332,9 +2330,9 @@ export function Chat({
   // part (the same resolution shape a workspace surface uses): it's persisted so
   // the card re-renders read-only on reload, and the server builds the resuming
   // turn's prompt from the artifact — the client no longer hands the model prose.
-  // The persona/reasoning metadata is pulled from the composer so this turn
-  // matches what onSend would have sent — otherwise the server silently falls
-  // back to guardian for personaId and to the stored reasoningEffort setting.
+  // The reasoning metadata is pulled from the composer so this turn matches
+  // what onSend would have sent — otherwise the server silently falls back to
+  // the stored reasoningEffort setting.
   const handleSubmitAppComponent = useCallback(
     async (sendingSessionId: string, toolUseId: string, output: Record<string, unknown>) => {
       // Post to the session that owns the component (the block's row).
@@ -2342,10 +2340,7 @@ export function Chat({
       const parts = [{ type: "interaction_result", toolUseId, output }];
       const meta = composerRef.current?.getMetadataSnapshot();
       const body: Record<string, unknown> = { parts };
-      if (meta) {
-        if (meta.personaId) body.personaId = meta.personaId;
-        body.reasoningEffort = meta.reasoningEffort;
-      }
+      if (meta) body.reasoningEffort = meta.reasoningEffort;
       const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
       if (ws) body.workspace = ws;
       await runTurnLifecycle(
@@ -2362,10 +2357,7 @@ export function Chat({
   const widgetTurnFields = useCallback(() => {
     const meta = composerRef.current?.getMetadataSnapshot();
     const turn: Record<string, unknown> = {};
-    if (meta) {
-      if (meta.personaId) turn.personaId = meta.personaId;
-      turn.reasoningEffort = meta.reasoningEffort;
-    }
+    if (meta) turn.reasoningEffort = meta.reasoningEffort;
     const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
     if (ws) turn.workspace = ws;
     return turn;

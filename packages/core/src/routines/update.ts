@@ -6,7 +6,6 @@
 
 import {
   chatNamedByArgs,
-  PERSONAL_DATA_ROUTINE_REFUSED,
   type RoutinesRepository,
   toRoutine,
 } from "../db/repositories/routines.js";
@@ -55,15 +54,8 @@ export async function updateRoutine(
     if (error) return { status: "refused", error };
   }
 
-  try {
-    // A new trigger's next fire is set again when it is activated.
-    await deps.routines.update(id, changes.trigger ? { ...changes, nextRunAt: null } : changes);
-  } catch (err) {
-    if (err instanceof Error && err.message === PERSONAL_DATA_ROUTINE_REFUSED) {
-      return { status: "refused", error: err.message };
-    }
-    throw err;
-  }
+  // A new trigger's next fire is set again when it is activated.
+  await deps.routines.update(id, changes.trigger ? { ...changes, nextRunAt: null } : changes);
   const updated = await deps.routines.findById(id);
   if (!updated) return { status: "not-found" };
   const routine = toRoutine(updated);

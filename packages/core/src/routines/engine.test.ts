@@ -283,11 +283,13 @@ describe("RoutineEngine run records", () => {
 
   it("starts no action when a stop comes after the run started but before its action did", async () => {
     let lookedUp: () => void = () => {};
-    // The fire's audience lookup waits until the stop has gone through.
-    const routines = new RoutinesRepository(
-      testDb.db,
-      () => new Promise((resolve) => (lookedUp = () => resolve("private"))),
-    );
+    // The fire's creator lookup waits until the stop has gone through.
+    const routines = new RoutinesRepository(testDb.db);
+    const creatorOf = routines.creatorOf.bind(routines);
+    rs.spyOn(routines, "creatorOf").mockImplementation(async (id) => {
+      await new Promise<void>((resolve) => (lookedUp = resolve));
+      return creatorOf(id);
+    });
     const runs = new RoutineRunsRepository(testDb.db);
     const actionEngine = {
       run: rs.fn(async () => ({ status: "success", result: null })),
@@ -423,63 +425,6 @@ describe("RoutineEngine worker admission", () => {
       "noop",
       expect.anything(),
       expect.objectContaining({ whenWorkersBusy: "queue" }),
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
-  });
-});
-
-describe("RoutineEngine fire audience", () => {
-  let testDb: TestDb;
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-  afterEach(() => testDb.close());
-
-  it("fires with the audience of the routine's chat, and shared for a routine of no chat", async () => {
-    const routines = new RoutinesRepository(testDb.db, async (chatId) =>
-      chatId === "guardian-chat" ? "private" : "shared",
-    );
-    const run = rs.fn(async () => ({ status: "ok", data: null }));
-    const engine = new RoutineEngine(
-      routines,
-      new RoutineRunsRepository(testDb.db),
-      { run } as unknown as ActionEngine,
-      0,
-      systemClock,
-    );
-    const inChat = await routines.create({
-      name: "steps",
-      trigger: { type: "manual" },
-      actionName: "core:personal_data_query",
-      args: { source: "apple_health", type: "stepCount" },
-      madeIn: "guardian-chat",
-    });
-    const nowhere = await routines.create({
-      name: "noop",
-      trigger: { type: "manual" },
-      actionName: "noop",
-      args: {},
-    });
-
-    await engine.runNow(inChat);
-    await engine.runNow(nowhere);
-
-    expect(run).toHaveBeenNthCalledWith(
-      1,
-      "core:personal_data_query",
-      expect.anything(),
-      expect.objectContaining({ audience: "private" }),
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
-    expect(run).toHaveBeenNthCalledWith(
-      2,
-      "noop",
-      expect.anything(),
-      expect.objectContaining({ audience: "shared" }),
       undefined,
       undefined,
       expect.any(Function),

@@ -88,7 +88,6 @@ describe("a pinned chat always reports it is pinned, in the chat API", () => {
   const chat = {
     id: "c1",
     name: "Chat",
-    personaId: null,
     projectName: "default",
     createdAt: new Date("2026-11-22T00:00:00.000Z"),
     activityAt: new Date("2026-11-22T00:00:00.000Z"),

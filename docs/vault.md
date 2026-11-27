@@ -19,6 +19,7 @@ vault load GITHUB_TOKEN -- gh release create v1.2.0
 ## Grants
 
 - A grant covers one secret name for the whole instance, whichever agent or chat asks.
+- A grant lasts for its whole time in every chat, wherever it was approved.
 - A request that names several secrets gets one PIN check and one duration. The signer grants all of them or none, so one unknown name grants nothing.
 - The default length is 15 minutes and the longest is 3 hours. During the window `vault load` can run as often as it needs to.
 - The window decides only whether `vault load` can still fetch the value. A command that started inside the window runs to the end, even after the grant expires.
@@ -53,10 +54,6 @@ Someone with access to the signer's key volume on the host can read the secrets,
 
 `vault load` reads the command's stdout and stderr and replaces every exact copy of a loaded value with `[vault:NAME]`. It also catches a value split across two reads of the output. Masking is always on, and no option turns it off. It matches exact values only: an encoded or transformed copy, such as base64, prints as it is.
 
-## Shared conversations
-
-`vault load` refuses when the conversation is shared, because other people read the output. The agent tells the guardian to ask in a private chat. See [audience](domains/participation.md#audience).
-
 ## Instances without a signer
 
 The vault needs the signer. An instance that runs without one shows an error in Settings, and `vault_apply`, `vault_search` and `vault load` report that the vault is not available. Secrets are not migrated from `.env` files or from other credential files. A rebuilt instance starts with an empty vault, because the store sits in the signer's key volume.
@@ -69,7 +66,7 @@ The vault also needs a signer that checks the PIN. Rome asks the signer for its 
 | --- | --- |
 | Store, grants and PIN | [`packages/signer/src/vault.ts`](../packages/signer/src/vault.ts), `secrets.json` and `vault-pin.json` in the signer's key directory (mode 0600) |
 | Signer routes | `GET /v1/secrets`, `PUT` and `DELETE /v1/secrets/:name`, `POST /v1/grants`, `POST /v1/pin`, `POST /v1/reset`, `GET /v1/health` |
-| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), the [team](concepts/people.md#team) only |
+| Dashboard routes | [`packages/core/src/api/routes/vault.ts`](../packages/core/src/api/routes/vault.ts), the [team](concepts/access.md#team) only |
 | Actions | `vault_search` and `vault_apply` in [`rome_apps/system/src/actions/`](../rome_apps/system/src/actions/) |
 | CLI | [`packages/signer/src/vault-cli.ts`](../packages/signer/src/vault-cli.ts), linked as `vault` |
 

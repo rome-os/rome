@@ -111,11 +111,7 @@ describe("a routine that reads personal data", () => {
   });
   afterEach(() => testDb.close());
 
-  // Only "guardian-chat" is private, as only the guardian's own dashboard chat is.
-  const repoWith = () =>
-    new RoutinesRepository(testDb.db, async (chatId) =>
-      chatId === "guardian-chat" ? "private" : "shared",
-    );
+  const repoWith = () => new RoutinesRepository(testDb.db);
   const query = (madeIn?: string) => ({
     name: "Morning steps",
     trigger: DAILY,
@@ -124,33 +120,12 @@ describe("a routine that reads personal data", () => {
     ...(madeIn ? { madeIn } : {}),
   });
 
-  it("is made for a private chat, and its fires read that chat's audience", async () => {
+  it("is made for any chat, for no chat, and edited into one", async () => {
     const repo = repoWith();
-    const id = await repo.create(query("guardian-chat"));
-    expect(await repo.audienceOf(id)).toBe("private");
-  });
-
-  it("is refused when it is made for a shared chat or for no chat", async () => {
-    const repo = repoWith();
-    await expect(repo.create(query("group-chat"))).rejects.toThrow("personal_data_private_only");
-    await expect(repo.create(query())).rejects.toThrow("personal_data_private_only");
-    await expect(
-      repo.create({ ...query("group-chat"), actionName: "personal_data_catalog" }),
-    ).rejects.toThrow("personal_data_private_only");
-  });
-
-  it("is refused when an edit binds a shared routine to a personal-data action", async () => {
-    const repo = repoWith();
+    expect(await repo.create(query("group-chat"))).toEqual(expect.any(String));
+    expect(await repo.create(query())).toEqual(expect.any(String));
     const id = await repo.create({ ...query("group-chat"), actionName: "send_user_message" });
-    await expect(repo.update(id, { actionName: "core:personal_data_query" })).rejects.toThrow(
-      "personal_data_private_only",
-    );
-  });
-
-  it("is refused everywhere when Rome cannot tell who reads a chat", async () => {
-    const repo = new RoutinesRepository(testDb.db);
-    await expect(repo.create(query("guardian-chat"))).rejects.toThrow("personal_data_private_only");
-    const other = await repo.create({ ...query("guardian-chat"), actionName: "send_user_message" });
-    expect(await repo.audienceOf(other)).toBe("shared");
+    await repo.update(id, { actionName: "core:personal_data_query" });
+    expect((await repo.findById(id))?.actionName).toBe("core:personal_data_query");
   });
 });

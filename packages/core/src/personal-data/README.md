@@ -12,5 +12,3 @@ It owns:
 - `actions.ts`: `core:personal_data_catalog` and `core:personal_data_query`.
 
 A source joins the store only when each item is a reading with a time range and a numeric value, and a query over a window aggregates them. Document data, such as calendar events, gets its own design.
-
-The personal-data mark and the turn audience that guard the actions live outside this folder: `apps/actions/personal-data.ts` and `agent/domain/turn-audience.ts`.

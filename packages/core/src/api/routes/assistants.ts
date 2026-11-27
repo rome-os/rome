@@ -8,7 +8,7 @@ import {
   type AssistantList,
 } from "@rome/api-types/assistants";
 import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
-import { timelinePageLimit, type TimelinePage } from "@rome/api-types/people";
+import { timelinePageLimit, type TimelinePage } from "@rome/api-types/message";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../connections/integrations/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
@@ -16,16 +16,16 @@ import type { SaidMessage } from "../../chats/storage/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/storage/message-repository.js";
 import { chatKey, placeIn } from "../../chats/storage/place.js";
 import { send } from "../../chats/send.js";
-import { directPlace } from "../../people/person-history/index.js";
+import { directPlace } from "../../chats/direct-place.js";
 import type { ApiDeps } from "../deps.js";
-import { respondToSend } from "../../people/person-history/index.js";
+import { respondToSend } from "./send-response.js";
 
 const log = createLogger("assistants-api");
 
 // The assistants surface: each agent Rome Cloud lists for this Rome, as one
 // chat (docs/domains/chats.md#assistant). The chat is the direct message keyed
 // by the agent's address on the agents channel: its history is read from that
-// place, and the guardian's lines are sent into it as on the People surface.
+// place, and the guardian's lines are sent into it through `directPlace`.
 // What the guardian
 // writes goes straight to the channel and starts no agent turn, so main
 // answers the assistant and never the guardian here.

@@ -43,14 +43,13 @@ interface Row {
   content: unknown[];
 }
 
-/** The route with its messages, its chats (`private` = the guardian's own), and a caller. */
+/** The route with its messages, its chats, and a caller. */
 function setup(
   rows: Record<string, Row>,
   caller: string | null = "guardian",
   appReply: unknown = { ok: true },
   connections: unknown[] = [],
   deviceConnections: unknown[] = [],
-  audience: "private" | "shared" = "private",
   storedDevice: string | null = null,
   setupState: SetupStartOutcome = {
     status: "started",
@@ -69,7 +68,6 @@ function setup(
     device?: string | null;
   }[] = [];
   const app = widgetEventRoutes({
-    chatAudience: async () => audience,
     webchatRepo: {
       askingDeviceOf: async () => storedDevice,
       widgetMessage: async (id) =>
@@ -92,6 +90,7 @@ function setup(
           : { id, agentName: null, ownerKey: null, triggerKind: null }) as never,
     },
     callerOwner: async () => caller,
+    callerEmail: async () => (caller?.startsWith("visitor:") ? "member@example.test" : undefined),
     startSetup: async (request) => {
       setups.push(request);
       return setupState;
@@ -148,13 +147,13 @@ describe("an event on a widget", () => {
     await fire("m2", {
       name: "rome:answer",
       context: { answers: [{ values: ["Warm"], text: "" }] },
-      turn: { personaId: "p1" },
+      turn: { reasoningEffort: "high" },
     });
     expect(forwarded).toEqual([
       {
         url: "/api/chat/sessions/c1/turns",
         body: {
-          personaId: "p1",
+          reasoningEffort: "high",
           parts: [
             {
               type: "interaction_result",
@@ -621,7 +620,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       { status: "refused", code: 404, error: "No setup for this grant." },
     );
@@ -637,7 +635,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       redirect("/settings/connections"),
     );
@@ -652,7 +649,6 @@ describe("an event on the connect card core owns", () => {
       undefined,
       github(null, link),
       [],
-      "private",
       null,
       redirect("/settings/connections"),
     );
@@ -825,7 +821,6 @@ describe("an event on the connect card for a device kind", () => {
         undefined,
         [],
         rows,
-        "private",
         storedDevice,
       );
       await fire("m", { name: "check", context }, headers);
@@ -958,41 +953,31 @@ describe("an event on the share-location card core owns", () => {
     expect(forwarded).toEqual([]);
   });
 
-  it("marks a share the client sent by itself only on a card core marked for it", async () => {
-    const marked = {
+  it("records only a press, as the location of whoever pressed", async () => {
+    // A card from when it could share by itself still carries its token.
+    const old = {
       ...locationCard,
       render: { ...locationCard.render, props: { reason: "r", autoShareToken: "t" } },
     };
-    const auto = setup({ m: { chatId: "c1", content: [marked] } });
-    await auto.fire("m", { name: "share-location", context: { ...position, auto: true } });
-    expect(
-      (auto.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
-        ?.output,
-    ).toMatchObject({ status: "shared", auto: true });
-    // An unmarked card's share says nothing of how it was sent, whatever the client claims.
-    const plain = setup({ m: { chatId: "c1", content: [locationCard] } });
-    await plain.fire("m", { name: "share-location", context: { ...position, auto: true } });
-    expect(
-      (plain.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
-        ?.output,
-    ).not.toHaveProperty("auto");
-  });
-
-  it("answers as declined, with no position, once the chat is no longer private", async () => {
-    // Visitors were let in while the card waited, so the chat is now shared.
-    const { fire, forwarded } = setup(
-      { m: { chatId: "c1", content: [locationCard] } },
-      "guardian",
-      undefined,
-      [],
-      [],
-      "shared",
-    );
-    const res = await fire("m", { name: "share-location", context: position });
-    expect(await res.json()).toMatchObject({ answered: true });
-    const output = (forwarded[0]?.body as { parts: { output: unknown }[] }).parts[0]?.output;
-    expect(output).toMatchObject({ status: "declined", dismissed: true });
-    expect(JSON.stringify(forwarded)).not.toContain(String(position.latitude));
+    const output = (s: ReturnType<typeof setup>) =>
+      (s.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]?.output;
+    // A client that answers by itself starts nothing, the guardian's included.
+    const guardian = setup({ m: { chatId: "c1", content: [old] } });
+    const res = await guardian.fire("m", {
+      name: "share-location",
+      context: { ...position, auto: true },
+    });
+    expect(res.status).toBe(409);
+    expect(guardian.forwarded).toEqual([]);
+    // A press then still answers it.
+    await guardian.fire("m", { name: "share-location", context: position });
+    expect(output(guardian)).toMatchObject({ status: "shared" });
+    expect(output(guardian)).not.toHaveProperty("auto");
+    expect(output(guardian)).not.toHaveProperty("sharedBy");
+    // A member's press is their own location.
+    const member = setup({ m: { chatId: "c1", content: [locationCard] } }, "visitor:v");
+    await member.fire("m", { name: "share-location", context: position });
+    expect(output(member)).toMatchObject({ status: "shared", sharedBy: "member@example.test" });
   });
 
   it("lets the first of two clients answer, and refuses the other", async () => {
@@ -1011,7 +996,6 @@ describe("an event on the share-location card core owns", () => {
         getSession: (async (id: string) => ({ id, ownerKey: null })) as never,
       },
       callerOwner: async () => "guardian",
-      chatAudience: async () => "private",
       forward: async (request) => {
         turns.push(await request.json());
         await held;

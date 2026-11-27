@@ -811,10 +811,6 @@
       "title": "Model selector",
       "toggleLabel": "Enable model selector in chat"
     },
-    "impersonation": {
-      "title": "Impersonation",
-      "toggleLabel": "Enable impersonation in chat"
-    },
     "aiToolUsage": {
       "title": "AI tool usage",
       "toggleLabel": "Show Claude and ChatGPT usage"

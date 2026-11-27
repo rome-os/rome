@@ -15,7 +15,7 @@
  * can find and place (I4).
  */
 
-import { compareCodePoints } from "@rome/api-types/people";
+import { compareCodePoints } from "@rome/api-types/message";
 import {
   type ExternalAgent,
   type AgentMessagingClient,

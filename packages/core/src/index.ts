@@ -259,11 +259,9 @@ import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
-import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
-import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
@@ -666,29 +664,10 @@ async function main() {
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  // Made here so the Concierge can tell whether a visitor is still served,
-  // and who can read a dashboard chat; it is loaded from the members further
-  // down, after their backfill.
+  // Made here so the Concierge can tell whether a visitor is still served; it
+  // is loaded from the members further down, after their backfill.
   const dashboardAccessState = new DashboardAccessState();
-  // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
-  const chatAudience = placeAudience({
-    connectionKindOf: connectionKindOfChannel,
-    dashboardChat: (chatId) => webchatRepo.getSession(chatId),
-    visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
-    // Main reads who sent a message itself, never the bond a caller names.
-    senderBondLevel: async (context) =>
-      context.channelUserId
-        ? (
-            await peopleRepo.byAccount({
-              platform: platformOfChannel(context.channel),
-              id: context.channelUserId,
-            })
-          )?.bondLevel
-        : undefined,
-  });
-  const routinesRepo = new RoutinesRepository(db, (chatId) =>
-    chatAudience({ channel: "webchat", threadId: chatId }),
-  );
+  const routinesRepo = new RoutinesRepository(db);
   const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
   const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
   // Which device connection answers a live read for a turn: one choice for
@@ -1102,7 +1081,6 @@ async function main() {
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       mainActions: agentToolNames,
-      placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
@@ -1529,7 +1507,6 @@ async function main() {
   const openingFor = sessionOpeningFor({
     channelSurface,
     connectionKindOfChannel,
-    placeAudience: chatAudience,
   });
   const agentSessionManager = createSessions(
     {
@@ -1592,7 +1569,6 @@ async function main() {
         actionRegistry,
         actionEngine,
         webchatRepo,
-        placeAudience: chatAudience,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
         taskOwner: async (taskId) =>
@@ -1603,10 +1579,6 @@ async function main() {
           return typeof stored === "string" ? stored : null;
         },
         deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
-        // The turn's audience, narrowed by the chat's as it stands now, so a
-        // chat that opens to visitors after the turn started is no longer private.
-        privateTurn: async (turn) =>
-          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1917,7 +1889,6 @@ async function main() {
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
   });
   registerTaskRunAction(actionRegistry, concierge);
-  registerReadPersonAction(actionRegistry, { people: peopleRepo });
   registerAgentTools(actionRegistry, {
     // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {
@@ -1943,10 +1914,7 @@ async function main() {
       registry: connectionRegistry,
     },
   });
-  const agentNameEvents = registerAgentNameAction(actionRegistry, {
-    settingsRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
-  });
+  const agentNameEvents = registerAgentNameAction(actionRegistry, { settingsRepo });
   // The messages the stopped process left open settle before any turn runs.
   const settledMarks = await settleMarksAfterRestart(
     concierge.deps.tasks.repo,
@@ -2900,7 +2868,6 @@ async function main() {
       agentNameEvents,
       personalData: personalDataRepo,
       deviceConnections: deviceConnectionsRepo,
-      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

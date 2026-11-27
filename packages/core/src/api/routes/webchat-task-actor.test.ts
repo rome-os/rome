@@ -10,7 +10,7 @@ const visitor: SessionActor = { kind: "visitor", accountId: "v", email: "v@examp
 const speaker = { platform: "webchat", id: "core:concierge" };
 const body = { text: "inspect metadata, not a data request" };
 
-function harness(owner = "guardian", audience: "private" | "shared" = "private") {
+function harness(owner = "guardian") {
   let active = true;
   const inputs = new Map<string, { inputState: InputStatusEvent["state"]; turnId?: string }>();
   const rows = new Map([
@@ -144,7 +144,6 @@ function harness(owner = "guardian", audience: "private" | "shared" = "private")
           chatId: "source",
           turnId: "source-turn",
           actor,
-          audience,
           isCurrent: () => active,
         },
         "target",
@@ -172,22 +171,6 @@ describe("webchat task actor admission without a database or provider", () => {
     );
   });
 
-  for (const [audience, actor, owner] of [
-    ["private", guardian, "guardian"],
-    ["shared", guardian, "guardian"],
-    ["shared", visitor, "visitor:v"],
-    ["shared", visitor, "guardian"],
-  ] as const) {
-    it(`keeps the ${audience} ${actor.kind} source audience in ${owner}'s chat as the task's parent boundary`, async () => {
-      const s = harness(owner, audience);
-      expect(await s.send(actor)).toMatchObject({ ok: true });
-      expect(s.submit).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ actor, parentAudience: audience }),
-      );
-    });
-  }
-
   it("keeps the task's asking device while admitting its verified actor", async () => {
     const s = harness();
     s.repo.askingDeviceOf.mockResolvedValue("synthetic-device");
@@ -196,7 +179,6 @@ describe("webchat task actor admission without a database or provider", () => {
       expect.anything(),
       expect.objectContaining({
         actor: guardian,
-        parentAudience: "private",
         threadContext: expect.objectContaining({ askingDeviceId: "synthetic-device" }),
       }),
     );

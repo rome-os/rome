@@ -4,12 +4,9 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type { PlaceAudience } from "./place-audience.js";
 import {
   type AgentAction,
   type AgentActions,
-  type Audience,
-  narrowerAudience,
   type DeferTool,
   type RomeTool,
   type SessionTools,
@@ -30,7 +27,7 @@ import type { SessionToolsProvider } from "./session-tools.js";
 import { connectServiceTools } from "./connect-service-tool.js";
 import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
-import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
+import { shareLocationTools } from "./share-location-tool.js";
 import { showCardTools } from "./show-card-tool.js";
 import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
@@ -44,8 +41,6 @@ export interface RomeToolPortsDeps {
   eventSources?: EventSources;
   /** Whose a dashboard chat is, for a wake scheduled in one. */
   webchatRepo?: Pick<WebChatRepository, "getSession">;
-  /** Who can read a chat. Absent, every chat is shared. */
-  placeAudience?: PlaceAudience;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
@@ -59,8 +54,6 @@ export interface RomeToolPortsDeps {
   deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
   /** The guardian's language (`en`, `zh-CN`), which a device connect card's words follow. */
   guardianLanguage?: () => Promise<string | null>;
-  /** Whether a turn is read by the guardian alone. When absent, none is. */
-  privateTurn?: PrivateTurn;
 }
 
 export interface RomeToolPorts {
@@ -124,7 +117,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
-            audience: await callAudience(turn, deps.placeAudience),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -235,13 +227,11 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
               const sourceChatId = thread?.threadId;
               const channel = thread?.channel;
               const threadType = thread?.threadType;
-              const audience = turn.audience();
               const sameSource = () => {
                 const live = turn.threadContext();
                 return (
                   turn.turnId() === turnId &&
                   sameActor(turn.actor(), actor) &&
-                  turn.audience() === audience &&
                   live?.channel === channel &&
                   live?.threadType === threadType &&
                   live?.threadId === sourceChatId
@@ -264,7 +254,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
                       chatId: sourceChatId,
                       turnId,
                       actor,
-                      audience,
                       isCurrent: sourceCurrent,
                     }
                   : undefined;
@@ -306,7 +295,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           turn,
           widgets: turn.widgets,
           hasSpeaker,
-          privateTurn: deps.privateTurn,
         }),
         // A session whose own tools already show an agent card (the
         // Concierge's `show_card`) keeps that one.
@@ -343,18 +331,4 @@ async function dashboardChatOwner(
   if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
   const chat = await webchatRepo.getSession(thread.threadId);
   return chat ? (chat.ownerKey ?? "guardian") : undefined;
-}
-
-/** The audience an agent's action call runs with: the turn's, read again
- *  against its chat on each call so a chat that opens to visitors after the
- *  turn started reads no personal data. A turn with no chat of its own, such
- *  as a summoned agent's, has only the audience of the turn that started it,
- *  which its own already holds. Domain: docs/domains/participation.md#audience. */
-async function callAudience(
-  turn: Pick<TurnFacts, "audience" | "threadContext">,
-  placeAudience: PlaceAudience | undefined,
-): Promise<Audience> {
-  const place = turn.threadContext();
-  if (!place) return turn.audience();
-  return narrowerAudience(turn.audience(), (await placeAudience?.(place)) ?? "shared");
 }

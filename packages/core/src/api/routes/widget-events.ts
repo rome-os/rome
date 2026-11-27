@@ -1,6 +1,6 @@
 import { isWidgetAppPath } from "@rome-os/app-runtime";
 import { Hono } from "hono";
-import { currentChatOwner } from "../../access/session-actor.js";
+import { currentChatOwner, currentSessionActor, memberEmail } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { privateOwnerOf } from "../../webchat/privacy.js";
 import { getExternalRequestOrigin } from "../../lib/request-origin.js";
@@ -31,13 +31,13 @@ interface CoreIo {
   origin: string;
   /** The props core stored with the widget, which a client cannot change. */
   props: Record<string, unknown>;
-  /** Who can read the widget's chat now, read when the event arrives. */
-  chatAudience(): Promise<"private" | "shared">;
   /** Starts a connection's setup, as the Connections page's Connect does. */
   startSetup(request: SetupStartRequest): Promise<SetupStartOutcome>;
   /** Whether the event came from this instance's own pages, which the setup
    *  route asks of a request too. */
   sameOrigin: boolean;
+  /** The email of a member who sent the event; none for the guardian. */
+  memberEmail: () => Promise<string | undefined>;
 }
 
 /** What a setup start names: as `POST /api/connections/:idOrKind/grants/:grant/setup` takes it. */
@@ -198,14 +198,15 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     [SHARE_LOCATION_EVENT]: async (context, io) => {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
-      // The chat may have become shared since the card was shown, as when
-      // visitors were let in: then the position reaches nobody, and the card
-      // is answered as declined.
-      if ((await io.chatAudience()) !== "private") return { answer: DECLINED_LOCATION };
-      // A share the client sent by itself is marked so only on a card core
-      // marked for it; a client cannot mark any other.
-      const auto = context.auto === true && typeof io.props.autoShareToken === "string";
-      return { answer: auto ? { ...shared, auto: true } : shared };
+      // Only a press shares. A client built when cards could share by
+      // themselves may still send one; it records nothing, and the client
+      // shows Share and Not now.
+      if (context.auto === true) {
+        return Response.json({ error: "Only a press shares a location." }, { status: 409 });
+      }
+      // A share is the location of whoever pressed it.
+      const email = await io.memberEmail();
+      return { answer: { ...shared, ...(email ? { sharedBy: email } : {}) } };
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
@@ -268,9 +269,8 @@ export interface WidgetEventDeps {
   forward: (request: Request, env: unknown) => Response | Promise<Response>;
   /** Whose share-location cards the caller answers. */
   callerOwner?: () => Promise<string | null>;
-  /** Who can read a dashboard chat now. Absent, every chat reads as shared,
-   *  so no location is accepted. */
-  chatAudience?: (chatId: string) => Promise<"private" | "shared">;
+  /** A member caller's email, which a location they share is recorded under. */
+  callerEmail?: () => Promise<string | undefined>;
   /** Starts a connection's setup: the operation behind the Connections page's
    *  Connect. Absent, the connect card's Connect starts none and says so. */
   startSetup?: (request: SetupStartRequest) => Promise<SetupStartOutcome>;
@@ -288,6 +288,7 @@ export interface WidgetEventDeps {
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
   const callerOwner = deps.callerOwner ?? currentChatOwner;
+  const callerEmail = deps.callerEmail ?? (async () => memberEmail(await currentSessionActor()));
   /** The cards whose answer is on its way to their chat. */
   const answering = new Set<string>();
 
@@ -358,12 +359,12 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
       const reply = await handle(context, {
         origin,
         props: widget.props,
-        chatAudience: async () => (await deps.chatAudience?.(message.chatId)) ?? "shared",
         startSetup: async (request) =>
           deps.startSetup
             ? deps.startSetup(request)
             : { status: "refused", code: 409, error: "Connect it in Settings › Connections." },
         sameOrigin: isSameOriginMutationRequest(c.req.raw),
+        memberEmail: callerEmail,
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),

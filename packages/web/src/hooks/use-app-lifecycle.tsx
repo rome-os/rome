@@ -706,7 +706,6 @@ export function useAppLifecycle(
                       commitAccessEmails(raw);
                     }}
                     onPaste={handleAccessEmailPaste}
-                    exclude={accessEmailsDraft}
                     disabled={accessSaving}
                     invalid={Boolean(accessDialogError)}
                     placeholder={t("installed.accessDialog.emailPlaceholder")}

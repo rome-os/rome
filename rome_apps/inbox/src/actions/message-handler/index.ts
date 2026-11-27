@@ -1,5 +1,6 @@
 import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
+  Access,
   Action,
   ActionConfig,
   ActionResult,
@@ -13,8 +14,6 @@ import type {
   EnsureChannelChatInput,
   MessageAddressing,
   MessageReplyReference,
-  PersonMappingRepository,
-  PersonRecord,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
 import { existsSync, readFileSync } from "node:fs";
@@ -46,7 +45,6 @@ export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
 
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
-  personMappingRepo: PersonMappingRepository;
   wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
@@ -68,7 +66,16 @@ interface MessageContext {
   selectedProjectPath?: string;
   threadName?: string;
   threadType?: string;
-  person: PersonRecord | null;
+}
+
+/** Who said a message: the guardian or a member the account belongs to, or
+ *  nobody with a role. */
+export interface MessageSender {
+  /** The person the account belongs to, for the wake gate. Null for an
+   *  account nobody holds, and where the host named no sender. */
+  person: { id: string } | null;
+  /** The person is the guardian. */
+  guardian: boolean;
 }
 
 type CollectedAgentResult =
@@ -289,8 +296,8 @@ async function runTurnAndReply(
             : undefined,
         projectName:
           typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined,
-        // Carry the sender's bond level so the core login gate can scope the
-        // guardian-only "no AI tool configured" notice to the guardian.
+        // The guardian's turns are told apart by it: a direct message only the
+        // guardian reads, the approval card, the Concierge's reminders.
         senderBondLevel: bondLevel,
       },
       contextSuffix,
@@ -353,8 +360,6 @@ export function createMessageHandlerAction(
         typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined;
       const selectedProjectPath = typeof args.workingDir === "string" ? args.workingDir : undefined;
 
-      const personOverride = args.personOverride as PersonRecord | undefined;
-
       try {
         log.info("message received", { channel, channelUserId, displayName });
 
@@ -373,20 +378,13 @@ export function createMessageHandlerAction(
           return { status: "ok", data: { action: "silent" } };
         }
 
-        // Only a link resolves a sender (docs/concepts/people.md#link). The
-        // display name is whatever the sender typed, so an unlinked account
-        // stays a stranger until the guardian links it, even when
-        // its name matches the guardian's or a known person's.
-        const person = (personOverride ??
-          (await deps.personMappingRepo.findByChannelUser(
-            channel,
-            channelUserId,
-          ))) as PersonRecord | null;
+        // Only the account names the sender. The display name is whatever the
+        // sender typed, so it never makes anyone the guardian.
+        const sender = await senderOf(deps, args);
+        const bondLevel = sender.guardian ? "guardian" : "other";
 
-        const bondLevel = (person?.bondLevel as string) ?? "other";
-
-        // The hook asked the wake gate already when the host recorded the
-        // message with People's answer; otherwise ask it here.
+        // The hook asked the wake gate already when the host named the
+        // message's sender; otherwise ask it here.
         const wake =
           args.wake === "wake"
             ? args.wake
@@ -399,7 +397,7 @@ export function createMessageHandlerAction(
                   threadName,
                   ...addressedBy(args),
                 },
-                { person: person ? { id: person.id } : null },
+                { person: sender.person },
               );
 
         if (wake === "block") {
@@ -504,7 +502,6 @@ export function createMessageHandlerAction(
           selectedProjectPath,
           threadName,
           threadType,
-          person: person as PersonRecord | null,
           resolveProfilePath: deps.resolveProfilePath,
           strangerPersonId: deps.strangerPersonId,
         });
@@ -576,6 +573,36 @@ export async function sendAnswer(
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
     await deps.appContext.runAction("system:send_message", unquoted);
+  }
+}
+
+/**
+ * Who said the message: the sender the hook passed on from the host, or, from
+ * a host that named none, the guardian when the account is one of theirs on
+ * the message's platform, and nobody otherwise.
+ */
+async function senderOf(
+  deps: MessageHandlerRuntimeDeps,
+  args: Record<string, unknown>,
+): Promise<MessageSender> {
+  const given = args.sender as MessageSender | undefined;
+  if (given && typeof given.guardian === "boolean") return given;
+  const nobody: MessageSender = { person: null, guardian: false };
+  const { platform, channelUserId } = args;
+  // A host older than the access port has none.
+  const access = deps.appContext.access as Access | undefined;
+  if (typeof platform !== "string" || !access) return nobody;
+  try {
+    const accounts = await access.guardianAccounts();
+    const guardian = accounts.some(
+      (account) => account.platform === platform && account.id === channelUserId,
+    );
+    return { person: null, guardian };
+  } catch (err) {
+    log.warn("could not ask for the guardian's accounts", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return nobody;
   }
 }
 

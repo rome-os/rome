@@ -11,17 +11,15 @@
 // The only fact about who is who that
 // Rome contributes is which person it belongs to.
 //
-// The bond ladder and the timeline paging (`TimelinePage`) live here; the
-// assistants' routes page by it. What a timeline holds — the message shape,
-// its order and its cursor — is the message module's (`./message.ts`), which
-// this file imports.
+// The bond ladder lives here. A timeline page, the send states and the send
+// answers are the message module's (`./message.ts`), which this file imports.
 //
 // The account read is a contacts list: every account, ordered by name,
 // carrying nothing about what anyone said — it is where a guardian looks
 // someone up.
 
 import type { Account } from "@rome-os/app-runtime";
-import { compareCodePoints, type Message } from "./message.js";
+import { compareCodePoints, pageLimit, type AccountSendState } from "./message.js";
 
 // ---------------------------------------------------------------------------
 // The bond ladder
@@ -181,51 +179,6 @@ export function parseFilterLevel<L extends string>(
  */
 export function isChannelIdentifier(channel: string): boolean {
   return channel.length > 0 && !channel.includes(":");
-}
-
-// ---------------------------------------------------------------------------
-// An account's timeline
-// ---------------------------------------------------------------------------
-//
-// What the timeline holds is a {@link Message}, and the order it is read in and
-// the cursor that resumes it are the message module's ({@link compareMessages},
-// {@link messageCursor}). Its paging is the People surface's own, stated below.
-
-/** One page of an account's timeline, newest first. `nextCursor` is opaque and
- *  null once the oldest message has been sent. */
-export interface TimelinePage {
-  entries: Message[];
-  nextCursor: string | null;
-}
-
-export const TIMELINE_PAGE_DEFAULT_LIMIT = 100;
-export const TIMELINE_PAGE_MAX_LIMIT = 300;
-
-/**
- * The page size a `?limit=` value asks for: clamped to `max`, and `fallback`
- * for anything that does not name a positive count — absent, empty, zero,
- * negative, or not a number.
- *
- * Never zero. A limit of zero answers an empty page with no cursor, which a
- * caller cannot tell from an exhausted listing, so it would silently truncate
- * the read rather than reporting a bad request.
- */
-function pageLimit(
-  raw: string | number | null | undefined,
-  bounds: { fallback: number; max: number },
-): number {
-  const requested = Number(raw);
-  return Number.isFinite(requested) && requested >= 1
-    ? Math.min(Math.floor(requested), bounds.max)
-    : bounds.fallback;
-}
-
-/** {@link pageLimit} for one page of a timeline. */
-export function timelinePageLimit(raw: string | number | null | undefined): number {
-  return pageLimit(raw, {
-    fallback: TIMELINE_PAGE_DEFAULT_LIMIT,
-    max: TIMELINE_PAGE_MAX_LIMIT,
-  });
 }
 
 /**
@@ -545,23 +498,6 @@ export interface LinkedAccount {
   delegate?: true;
 }
 
-/**
- * Whether Rome can send a message to an account, and why not when it cannot.
- *
- * Four states rather than a boolean, because the three failures are different
- * things to a reader and to a retry: one is fixed by connecting a channel, one
- * is a permanent fact about the channel, and one clears on its own once a
- * direct conversation exists.
- *
- * - `yes` — the channel is connected and can address this account directly.
- * - `not-connected` — no live connection for the channel. The guardian fixes
- *   this in Settings.
- * - `unsupported` — the connection is live but does not do direct messaging.
- * - `no-conversation` — the channel cannot identify a direct conversation for
- *   this account. This includes missing or ambiguous threads.
- */
-export type AccountSendState = "yes" | "not-connected" | "unsupported" | "no-conversation";
-
 export function canSend(account: Pick<LinkedAccount, "send">): boolean {
   return account.send === "yes";
 }
@@ -768,54 +704,4 @@ export function whatsAppDisplayName(contact: {
     contact.chatName ||
     formatWhatsAppPhone(contact.phoneNumber || contact.jid)
   );
-}
-
-// ---------------------------------------------------------------------------
-// Sending
-// ---------------------------------------------------------------------------
-
-/**
- * A send answered: the channel took the message.
- *
- * Not a {@link Message}. The message joins the timeline once the store that
- * answers for its conversation holds it: Rome's own record, or on a channel
- * with a mirror, the mirror's copy, which may arrive after this answer.
- * Nothing here is to be deduped against it: `ref` names the entry it becomes
- * at the address it was sent to, and a channel that folds several addresses
- * onto one account may deliver under another of them.
- */
-export interface SentMessage {
-  /** The entry this becomes at the address it was sent to, or null when the
-   *  channel named no message. */
-  ref: string | null;
-  /** Epoch seconds of the send. */
-  timestamp: number;
-}
-
-/**
- * A send the server would not attempt, and which of the reasons it was.
- *
- * Carries the same {@link AccountSendState} the person read carries, so the
- * refusal renders as the copy the composer would already have shown had the
- * read been fresh. A client that raced a disconnect therefore says the same
- * thing either way instead of surfacing a bare 409.
- *
- * `error` is a fallback line, not the copy: the dashboard keys off `send`.
- */
-export interface SendRefusal {
-  error: string;
-  send: Exclude<AccountSendState, "yes">;
-}
-
-/** The {@link SendRefusal} `error` line for each reason. A fallback, not the
- *  copy: the dashboard renders `send` through its own locale files. */
-export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): string {
-  switch (send) {
-    case "not-connected":
-      return "That channel is not connected";
-    case "unsupported":
-      return "Rome cannot send on that channel";
-    case "no-conversation":
-      return "Rome has no conversation open with that account";
-  }
 }
