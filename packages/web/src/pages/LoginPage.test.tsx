@@ -168,6 +168,25 @@ describe("use another account", () => {
     expect(JSON.parse(String(starts[0][1]?.body))).toEqual({ chooseAccount: true });
   });
 
+  it.each([
+    ["the main button", "Continue with Rome Cloud", "Use another account"],
+    ["the link", "Use another account", "Continue with Rome Cloud"],
+  ])("starts only one sign-in when %s is already starting", async (_, first, second) => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((() => new Promise<Response>(() => {})) as typeof fetch);
+    renderLogin("/login");
+
+    const secondControl = screen.getByRole("button", { name: second });
+    fireEvent.click(screen.getByRole("button", { name: first }));
+    await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+    fireEvent.click(secondControl);
+
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
+    ).toBe(1);
+  });
+
   it("is not offered on a local-first box", () => {
     renderLogin("/login", "local");
 

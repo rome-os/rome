@@ -11,7 +11,6 @@ import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/componen
 import { Input } from "@/components/ui/input";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
 import { takeLoginReturn } from "@/lib/login-return";
-import { beginCloudLogin } from "@/lib/cloud-login";
 import { beginDashboardVisitorLogin, visitorErrorReasonKey } from "@/lib/visitor-login";
 
 function envFlagEnabled(value: unknown): boolean {
@@ -33,7 +32,6 @@ export default function LoginPage() {
   const { bootstrap } = useAuthStateSnapshot();
   const [serverError, setServerError] = useState("");
   const [cloudError, setCloudError] = useState("");
-  const [choosingAccount, setChoosingAccount] = useState(false);
   const [visitorError, setVisitorError] = useState("");
   const [visitorStarting, setVisitorStarting] = useState(false);
 
@@ -120,20 +118,6 @@ export default function LoginPage() {
         result.reason === "network" ? t("networkError") : t("visitorDashboard.errorStart"),
       );
       setVisitorStarting(false);
-    }
-  }
-
-  // Signing out of this Rome keeps the Rome Cloud session, so the cloud button
-  // would sign the same account in again. This asks Rome Cloud to let the
-  // person pick an account first.
-  async function chooseAnotherAccount() {
-    if (choosingAccount) return;
-    setChoosingAccount(true);
-    setCloudError("");
-    const result = await beginCloudLogin({ chooseAccount: true });
-    if (!result.ok) {
-      setCloudError(result.reason === "network" ? t("networkError") : t("cloud.errorStart"));
-      setChoosingAccount(false);
     }
   }
 
@@ -233,13 +217,12 @@ export default function LoginPage() {
     body = (
       <>
         <div hidden={showLocalForm} className="w-full">
-          <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
+          {/* Signing out of this Rome keeps the Rome Cloud session, so the
+              button alone would sign the same account in again. */}
+          <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} chooseAccount />
           {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
-          <div className="flex flex-col items-center">
-            {switchMethod(t("login.useAnotherAccount"), () => void chooseAnotherAccount())}
-            {localPasswordAvailable &&
-              switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
-          </div>
+          {localPasswordAvailable &&
+            switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
         </div>
         {showLocalForm && (
           <>
