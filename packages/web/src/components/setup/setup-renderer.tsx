@@ -8,6 +8,7 @@
  */
 
 import { useId, useState, type ComponentType, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -21,7 +22,13 @@ import {
 } from "@/components/ui/select";
 import { isElectronShell } from "@/lib/electron-shell";
 import { isInternalHref, toInternalPath } from "@/lib/internal-href";
-import type { SetupState, SetupView, SetupViewLink, SetupViewStep } from "@/lib/setup-api";
+import type {
+  SetupFormFieldOption,
+  SetupState,
+  SetupView,
+  SetupViewLink,
+  SetupViewStep,
+} from "@/lib/setup-api";
 
 /** Everything a renderer (standard or custom) needs. */
 export interface SetupRenderProps {
@@ -54,6 +61,10 @@ const DEFAULT_LABELS: SetupLabels = {
   cancelled: "Cancelled",
 };
 
+function normalizeOption(opt: SetupFormFieldOption): { value: string; label: string } {
+  return typeof opt === "string" ? { value: opt, label: opt } : opt;
+}
+
 export interface SetupRendererProps extends SetupRenderProps {
   labels?: Partial<SetupLabels>;
   /** Custom renderer for the `presenting` state. */
@@ -71,7 +82,17 @@ export function SetupRenderer(props: SetupRendererProps): ReactElement {
 export function StandardSetupRenderer(
   props: SetupRenderProps & { labels?: Partial<SetupLabels> },
 ): ReactElement {
-  const labels = { ...DEFAULT_LABELS, ...props.labels };
+  const { t } = useTranslation("settings");
+  const labels: SetupLabels = {
+    submit: t("connections.setup.actions.submit", { defaultValue: DEFAULT_LABELS.submit }),
+    cancel: t("connections.setup.actions.cancel", { defaultValue: DEFAULT_LABELS.cancel }),
+    retry: t("connections.setup.actions.retry", { defaultValue: DEFAULT_LABELS.retry }),
+    continue: t("connections.setup.actions.continue", { defaultValue: DEFAULT_LABELS.continue }),
+    connected: t("connections.setup.actions.connected", { defaultValue: DEFAULT_LABELS.connected }),
+    failed: t("connections.setup.actions.failed", { defaultValue: DEFAULT_LABELS.failed }),
+    cancelled: t("connections.setup.actions.cancelled", { defaultValue: DEFAULT_LABELS.cancelled }),
+    ...props.labels,
+  };
   const { state } = props;
   switch (state.status) {
     case "awaiting-input":
@@ -144,60 +165,80 @@ export function StandardSetupRenderer(
 /** The awaiting-input renderer owns the controlled field values. */
 function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): ReactElement {
   const { state, labels } = props;
+  const { t } = useTranslation("settings");
   const form = state.status === "awaiting-input" ? state.form : { fields: [] };
   const error = state.status === "awaiting-input" ? state.error : undefined;
   const [values, setValues] = useState<Record<string, string>>({});
   const uid = useId();
 
+  const translateFormText = (subkey: string, fallback: string): string =>
+    form.id
+      ? t(`connections.setup.forms.${form.id}.${subkey}`, { defaultValue: fallback })
+      : fallback;
+
   const setField = (name: string, value: string): void =>
     setValues((prev) => ({ ...prev, [name]: value }));
 
   const complete = form.fields.every((f) => (values[f.name] ?? "").trim().length > 0);
+  const instructions = form.instructions
+    ? translateFormText("instructions", form.instructions)
+    : undefined;
+  const note = form.note ? translateFormText("note", form.note) : undefined;
 
   return (
     <div className="space-y-3" data-testid="setup-input">
-      {form.instructions && <p className="text-aux text-muted-foreground">{form.instructions}</p>}
+      {instructions && <p className="text-aux text-muted-foreground">{instructions}</p>}
       <StepList steps={form.steps} />
       <LinkList links={form.links} />
-      {form.fields.map((field) => (
-        <Field key={field.name}>
-          <FieldLabel htmlFor={`${uid}-${field.name}`}>{field.label}</FieldLabel>
-          {field.options ? (
-            <Select
-              /* "" keeps the Select controlled from the first render while
-                 still showing the placeholder — it reads as "nothing picked". */
-              value={values[field.name] ?? ""}
-              onValueChange={(value) => setField(field.name, value)}
-            >
-              <SelectTrigger id={`${uid}-${field.name}`} className="w-full">
-                <SelectValue placeholder="—" />
-              </SelectTrigger>
-              <SelectContent>
-                {field.options.map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : field.format === "multiline" ? (
-            <textarea
-              id={`${uid}-${field.name}`}
-              className="w-full rounded-4 border border-border-subtle bg-surface px-2 py-1 text-ui"
-              value={values[field.name] ?? ""}
-              onChange={(e) => setField(field.name, e.target.value)}
-            />
-          ) : (
-            <Input
-              id={`${uid}-${field.name}`}
-              type={field.secret ? "password" : "text"}
-              value={values[field.name] ?? ""}
-              onChange={(e) => setField(field.name, e.target.value)}
-            />
-          )}
-        </Field>
-      ))}
-      {form.note && <p className="text-aux text-muted-foreground">{form.note}</p>}
+      {form.fields.map((field) => {
+        const fieldLabel = translateFormText(`fields.${field.name}.label`, field.label);
+        return (
+          <Field key={field.name}>
+            <FieldLabel htmlFor={`${uid}-${field.name}`}>{fieldLabel}</FieldLabel>
+            {field.options ? (
+              <Select
+                /* "" keeps the Select controlled from the first render while
+                   still showing the placeholder — it reads as "nothing picked". */
+                value={values[field.name] ?? ""}
+                onValueChange={(value) => setField(field.name, value)}
+              >
+                <SelectTrigger id={`${uid}-${field.name}`} className="w-full">
+                  <SelectValue placeholder="—" />
+                </SelectTrigger>
+                <SelectContent>
+                  {field.options.map((rawOpt) => {
+                    const opt = normalizeOption(rawOpt);
+                    const optLabel = translateFormText(
+                      `fields.${field.name}.options.${opt.value}`,
+                      opt.label,
+                    );
+                    return (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {optLabel}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            ) : field.format === "multiline" ? (
+              <textarea
+                id={`${uid}-${field.name}`}
+                className="w-full rounded-4 border border-border-subtle bg-surface px-2 py-1 text-ui"
+                value={values[field.name] ?? ""}
+                onChange={(e) => setField(field.name, e.target.value)}
+              />
+            ) : (
+              <Input
+                id={`${uid}-${field.name}`}
+                type={field.secret ? "password" : "text"}
+                value={values[field.name] ?? ""}
+                onChange={(e) => setField(field.name, e.target.value)}
+              />
+            )}
+          </Field>
+        );
+      })}
+      {note && <p className="text-aux text-muted-foreground">{note}</p>}
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
       {props.error && <p className="text-aux text-destructive-fg">{props.error}</p>}
       <Button size="sm" onClick={() => props.onSubmit(values)} disabled={props.busy || !complete}>
@@ -207,26 +248,67 @@ function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): React
   );
 }
 
+/** Format known timestamp params (such as `expiresAt`) in the user's locale
+ *  instead of exposing raw UTC ISO timestamps in localized copy. */
+function formatViewParams(
+  params: Record<string, string> | undefined,
+  language: string,
+): Record<string, string> {
+  if (!params) return {};
+  const out: Record<string, string> = { ...params };
+  if (out.expiresAt) {
+    const parsed = new Date(out.expiresAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        out.expiresAt = new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(parsed);
+      } catch {
+        // Fall back to the raw value if Intl rejects the locale tag.
+      }
+    }
+  }
+  return out;
+}
+
 /** Render a view payload: title, paragraphs, a QR image, links, and a step
  *  checklist. */
 function ViewBody({ view }: { view: SetupView }): ReactElement {
+  const { t, i18n } = useTranslation("settings");
+  const formattedParams = formatViewParams(view.params, i18n.language);
+  const translateViewText = (subkey: string, fallback: string): string =>
+    view.id
+      ? t(`connections.setup.views.${view.id}.${subkey}`, {
+          ...formattedParams,
+          defaultValue: fallback,
+        })
+      : fallback;
+
+  const title = view.title ? translateViewText("title", view.title) : undefined;
+  const body = view.body?.map((item, i) => {
+    const key = typeof item === "string" ? String(i) : item.id;
+    const fallback = typeof item === "string" ? item : item.text;
+    return { key, text: translateViewText(`body.${key}`, fallback) };
+  });
+  const links = view.links?.map((link) =>
+    link.id ? { ...link, label: translateViewText(`links.${link.id}`, link.label) } : link,
+  );
+
   return (
     <div className="space-y-2">
-      {view.title && <p className="text-ui text-foreground">{view.title}</p>}
-      {view.body?.map((paragraph, i) => (
-        <p key={i} className="text-aux text-muted-foreground">
-          {paragraph}
+      {title && <p className="text-ui text-foreground">{title}</p>}
+      {body?.map((paragraph) => (
+        <p key={paragraph.key} className="text-aux text-muted-foreground">
+          {paragraph.text}
         </p>
       ))}
       {view.qr && (
         <img
           src={view.qr}
-          alt={view.title ?? "QR code"}
+          alt={title ?? "QR code"}
           className="h-44 w-44 rounded-8 border border-border bg-white p-2"
         />
       )}
       <StepList steps={view.steps} />
-      <LinkList links={view.links} />
+      <LinkList links={links} />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import "@/i18n";
 import {
   AvailableToAddLabel,
   ConnectionSlotCard,
+  SlotCeremonyFrame,
   SoleSlotScope,
 } from "@/components/connection-slot-card";
 import type { ConnectionSlot } from "@/lib/connection-cards";
@@ -210,5 +211,29 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
     expect(container.querySelector("section")?.className).toContain("border-dashed");
     expect(screen.getByTestId("icon")).toBeTruthy();
     expect(screen.getByText("Your WhatsApp")).toBeTruthy();
+  });
+
+  it("SlotCeremonyFrame wraps children in a bordered surface only inside SoleSlotScope", () => {
+    const { unmount } = render(
+      <SoleSlotScope>
+        <SlotCeremonyFrame>
+          <div data-testid="framed-child">ceremony</div>
+        </SlotCeremonyFrame>
+      </SoleSlotScope>,
+    );
+
+    const framed = screen.getByTestId("framed-child");
+    expect(framed.parentElement?.className).toContain("rounded-12");
+    expect(framed.parentElement?.className).toContain("border-border");
+    expect(framed.parentElement?.className).toContain("bg-surface");
+    unmount();
+
+    const { container } = render(
+      <SlotCeremonyFrame>
+        <div data-testid="bare-child">ceremony</div>
+      </SlotCeremonyFrame>,
+    );
+    const bare = screen.getByTestId("bare-child");
+    expect(bare.parentElement).toBe(container);
   });
 });

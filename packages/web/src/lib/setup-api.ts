@@ -8,15 +8,18 @@
 
 // ── Content schema (mirror of packages/core/.../setup/types.ts) ──────────
 
+export type SetupFormFieldOption = string | { value: string; label: string };
+
 export interface SetupFormField {
   name: string;
   label: string;
   secret: boolean;
   format?: "line" | "multiline" | "file";
-  options?: string[];
+  options?: SetupFormFieldOption[];
 }
 
 export interface SetupViewLink {
+  id?: string;
   label: string;
   url: string;
 }
@@ -27,6 +30,7 @@ export interface SetupViewStep {
 }
 
 export interface SetupForm {
+  id?: string;
   instructions?: string;
   /** A numbered how-to shown above the fields (e.g. the BotFather walkthrough). */
   steps?: SetupViewStep[];
@@ -37,9 +41,13 @@ export interface SetupForm {
   note?: string;
 }
 
+export type SetupViewBodyItem = string | { id: string; text: string };
+
 export interface SetupView {
+  id?: string;
+  params?: Record<string, string>;
   title?: string;
-  body?: string[];
+  body?: SetupViewBodyItem[];
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL (the raw
