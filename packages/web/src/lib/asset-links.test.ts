@@ -68,8 +68,12 @@ describe("asset kinds", () => {
     ["mp3", "audio"],
     ["ogg", "audio"],
     ["pdf", "pdf"],
-    ["zip", "file"],
-    ["bin", "file"],
+    ["m4v", "video"],
+    ["flac", "audio"],
+    ["docx", "docx"],
+    ["md", "text"],
+    ["zip", "binary"],
+    ["bin", "binary"],
   ])("sorts .%s as %s", (extension, kind) => {
     expect(assetKind(extension)).toBe(kind);
   });

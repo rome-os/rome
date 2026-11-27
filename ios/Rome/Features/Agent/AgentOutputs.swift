@@ -53,25 +53,21 @@ final class ChatOutputsStore {
         }
     }
 
-    func file(_ output: ChatOutput) async throws -> Data {
-        guard let url = output.contentUrl, url.hasPrefix("/api/") else { throw APIError.notFound }
-        return try await backend.chatOutputFile(path: String(url.dropFirst(4)))
-    }
 }
 
 /// What an output is, as its row names it. The web's `outputTypeOf`, kept in step.
 enum ChatOutputType: Equatable {
     case document, spreadsheet, page, picture, audio, video, code, file
 
-    init(name: String, mimeType: String?) {
+    init(name: String, kind: FileKind) {
         let ext = (name as NSString).pathExtension.lowercased()
-        let type = mimeType ?? ""
-        if ["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "ppt"].contains(ext) { self = .document }
+        if kind == .pdf || kind == .docx { self = .document }
+        else if ["md", "markdown", "txt", "doc", "pptx", "ppt"].contains(ext) { self = .document }
         else if ["csv", "tsv", "xlsx", "xls"].contains(ext) { self = .spreadsheet }
         else if ["html", "htm"].contains(ext) { self = .page }
-        else if type.hasPrefix("image/") { self = .picture }
-        else if type.hasPrefix("audio/") { self = .audio }
-        else if type.hasPrefix("video/") { self = .video }
+        else if kind == .image { self = .picture }
+        else if kind == .audio { self = .audio }
+        else if kind == .video { self = .video }
         else if Self.codeExtensions.contains(ext) { self = .code }
         else { self = .file }
     }
@@ -110,7 +106,20 @@ enum ChatOutputType: Equatable {
 }
 
 extension ChatOutput {
-    var type: ChatOutputType { ChatOutputType(name: name, mimeType: mimeType) }
+    var type: ChatOutputType { ChatOutputType(name: name, kind: previewKind) }
+
+    /// What it previews as: the server's kind, else what its MIME type or name says.
+    var previewKind: FileKind {
+        fileKind.flatMap(FileKind.init(rawValue:)) ?? FileKind(mimeType: mimeType) ?? FileKind(name: name)
+    }
+
+    /// The file as the phone opens it, the way a chat's link to it opens;
+    /// nil while it cannot be served.
+    var linkedFile: LinkedFile? {
+        guard !missing, let url = contentUrl, url.hasPrefix("/api/") else { return nil }
+        // Sent as written: the server already encoded the ids in it.
+        return LinkedFile(apiPath: String(url.dropFirst(4)), query: nil, name: name, kind: previewKind)
+    }
 
     /// A file name as a title: no extension, words for dashes and underscores,
     /// a capital first. The web's `outputTitle`.
@@ -122,17 +131,8 @@ extension ChatOutput {
         return first.uppercased() + words.dropFirst()
     }
 
-    /// A picture the picture viewer shows; an SVG is not one, as on the web.
-    var isPicture: Bool {
-        let type = mimeType ?? ""
-        return type.hasPrefix("image/") && type != "image/svg+xml"
-    }
-
-    /// Opens only as a file to share: a page or an SVG would run in a preview.
-    var sharesOnly: Bool {
-        let ext = (name as NSString).pathExtension.lowercased()
-        return ["html", "htm", "svg", "xhtml"].contains(ext) || mimeType == "text/html" || mimeType == "image/svg+xml"
-    }
+    /// A picture the picture viewer shows; an SVG is not one.
+    var isPicture: Bool { linkedFile?.opening == .picture }
 
     /// Where it came from: the task chat it came from, else how this chat's agent made it.
     var sourceLine: String {
@@ -144,17 +144,13 @@ extension ChatOutput {
 
 /// The Agent page's Outputs tab: the files the chat's agent wrote or showed,
 /// under Today and Earlier, newest first, as the Tasks tab lists its rows.
-/// A tap previews one: a picture in the picture viewer, anything Quick Look
-/// reads there, and the rest as a file to share.
+/// A tap opens one as a chat's link to it opens (`linkedFileViewer`).
 struct AgentOutputsView: View {
     let store: ChatOutputsStore?
     let backend: RomeBackend
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
 
-    @State private var opening: String?
-    @State private var picture: ChatOutput?
-    @State private var preview: URL?
-    @State private var sharing: SharedFile?
+    @State private var opening: LinkedFileRequest?
     @State private var notice: String?
 
     var body: some View {
@@ -175,18 +171,7 @@ struct AgentOutputsView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
-        .fullScreenCover(item: $picture) { output in
-            PhotoViewer(images: [Self.viewerImage(output)], start: 0)
-                .environment(\.apiFileLoader) { [backend] path, query in try await backend.apiFile(path: path, query: query) }
-        }
-        .quickLookPreview($preview)
-        .onChange(of: preview) { old, new in
-            if new == nil, let old { try? FileManager.default.removeItem(at: old.deletingLastPathComponent()) }
-        }
-        .sheet(item: $sharing) { shared in
-            ActivitySheet(items: [shared.url])
-                .presentationDetents([.medium, .large])
-        }
+        .linkedFileViewer(backend: backend, request: $opening, top: 4, shown: { _ in }, openPage: { _ in })
     }
 
     @ViewBuilder
@@ -285,7 +270,6 @@ struct AgentOutputsView: View {
                         output: output,
                         backend: backend,
                         now: now,
-                        busy: opening == output.id,
                         last: index == items.count - 1,
                         onOpen: { open(output) },
                         onOpenChat: output.from.map { from in { onOpenChat(.init(id: from.chatId, name: from.name)) } }
@@ -300,33 +284,11 @@ struct AgentOutputsView: View {
     }
 
     private func open(_ output: ChatOutput) {
-        guard opening == nil else { return }
-        guard output.contentUrl != nil, !output.missing else {
+        guard let file = output.linkedFile else {
             notice = output.missing ? String(localized: "Moved or deleted") : String(localized: "This file cannot be opened here.")
             return
         }
-        if output.isPicture {
-            picture = output
-            return
-        }
-        guard let store else { return }
-        opening = output.id
-        Task {
-            defer { opening = nil }
-            do {
-                let data = try await store.file(output)
-                guard let url = Self.write(data, name: output.name) else { throw APIError.network }
-                if !output.sharesOnly, Self.quickLookReads(url) {
-                    preview = url
-                } else {
-                    sharing = SharedFile(url: url)
-                }
-            } catch {
-                notice = (error as? APIError) == .tooLarge
-                    ? String(localized: "Too large to open on this phone.")
-                    : String(localized: "Failed to load the file")
-            }
-        }
+        opening = LinkedFileRequest(file: file)
     }
 
     /// Whether Quick Look shows this file. Mac Catalyst's SDK keeps the
@@ -337,11 +299,6 @@ struct AgentOutputsView: View {
         #else
         QLPreviewController.canPreview(url as NSURL)
         #endif
-    }
-
-    static func viewerImage(_ output: ChatOutput) -> ViewerImage {
-        let src = output.contentUrl ?? ""
-        return .markdown(ImageSource(src: src), alt: output.title, src: src, position: 0)
     }
 
     /// The bytes in a temporary folder of their own, under the file's own
@@ -367,7 +324,6 @@ private struct OutputRow: View {
     let output: ChatOutput
     let backend: RomeBackend
     let now: Date
-    let busy: Bool
     let last: Bool
     let onOpen: () -> Void
     let onOpenChat: (() -> Void)?
@@ -388,9 +344,7 @@ private struct OutputRow: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if busy {
-                    Spinner(size: 14, color: Palette.sub)
-                } else if let date = output.date {
+                if let date = output.date {
                     Text(verbatim: TaskListWords.time(date.timeIntervalSince1970 * 1000, now: now))
                         .romeFont(13)
                         .monospacedDigit()

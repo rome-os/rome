@@ -37,14 +37,14 @@ private let outputsJSON = #"""
         #expect(outputs[0].type == .document)
         #expect(outputs[1].type == .picture)
         #expect(outputs[2].type == .code)
-        #expect(ChatOutputType(name: "prices.csv", mimeType: "text/csv") == .spreadsheet)
-        #expect(ChatOutputType(name: "index.html", mimeType: "text/html") == .page)
-        #expect(ChatOutputType(name: "archive.zip", mimeType: nil) == .file)
-        #expect(ChatOutputType(name: "voice-note.wav", mimeType: "audio/wav") == .audio)
-        #expect(ChatOutputType(name: "clip.mp4", mimeType: "video/mp4") == .video)
-        #expect(ChatOutputType(name: "slides.pptx", mimeType: nil) == .document)
-        #expect(ChatOutputType(name: "fix.diff", mimeType: nil) == .code)
-        #expect(ChatOutputType(name: "build.cjs", mimeType: "text/javascript") == .code)
+        #expect(ChatOutputType(name: "prices.csv", kind: .text) == .spreadsheet)
+        #expect(ChatOutputType(name: "index.html", kind: .text) == .page)
+        #expect(ChatOutputType(name: "archive.zip", kind: .binary) == .file)
+        #expect(ChatOutputType(name: "voice-note.wav", kind: .audio) == .audio)
+        #expect(ChatOutputType(name: "clip.mp4", kind: .video) == .video)
+        #expect(ChatOutputType(name: "slides.pptx", kind: .binary) == .document)
+        #expect(ChatOutputType(name: "fix.diff", kind: .text) == .code)
+        #expect(ChatOutputType(name: "build.cjs", kind: .text) == .code)
     }
 
     @Test func aRowSaysWhereTheFileCameFrom() throws {
@@ -54,15 +54,35 @@ private let outputsJSON = #"""
         #expect(outputs[2].sourceLine == String(localized: "Moved or deleted"))
     }
 
-    @Test func nothingThatWouldRunOpensInAPreview() {
-        func output(_ name: String, _ mime: String?) -> ChatOutput {
-            ChatOutput(id: name, kind: "written", name: name, link: nil, mimeType: mime, at: "", missing: false, from: nil, contentUrl: "/api/x")
+    @Test func anOutputOpensAsAChatLinkToItDoes() {
+        func output(_ name: String, _ mime: String?, kind: String? = nil) -> ChatOutput {
+            ChatOutput(id: name, kind: "written", name: name, link: nil, mimeType: mime, fileKind: kind, at: "", missing: false, from: nil, contentUrl: "/api/chat/sessions/c1/outputs/\(name)/content")
         }
-        #expect(output("page.html", "text/html").sharesOnly)
-        #expect(output("logo.svg", "image/svg+xml").sharesOnly)
+        #expect(output("page.html", "text/html", kind: "text").linkedFile?.opening == .share)
+        #expect(output("logo.svg", "image/svg+xml", kind: "image").linkedFile?.opening == .share)
         #expect(!output("logo.svg", "image/svg+xml").isPicture)
-        #expect(!output("report.pdf", "application/pdf").sharesOnly)
+        #expect(output("report.pdf", "application/pdf", kind: "pdf").linkedFile?.opening == .preview)
         #expect(output("photo.png", "image/png").isPicture)
+        #expect(output("clip.mp4", "video/mp4", kind: "video").linkedFile?.opening == .media)
+        #expect(output("song.mp3", "audio/mpeg").linkedFile?.opening == .media)
+        // The server's kind wins over a MIME type that says nothing.
+        #expect(output("clip", nil, kind: "video").type == .video)
+        #expect(output("clip.mp4", "video/mp4").linkedFile?.apiPath == "/chat/sessions/c1/outputs/clip.mp4/content")
+        var gone = output("gone.mp4", "video/mp4")
+        gone.missing = true
+        #expect(gone.linkedFile == nil)
+    }
+
+    @Test func aChatLinkOpensByItsName() {
+        #expect(LinkedFile(apiPath: "/assets/a.mp4", query: nil, name: "a.mp4").opening == .media)
+        #expect(LinkedFile(apiPath: "/assets/a.m4a", query: nil, name: "a.m4a").opening == .media)
+        #expect(LinkedFile(apiPath: "/assets/a.png", query: nil, name: "a.png").opening == .picture)
+        #expect(LinkedFile(apiPath: "/assets/a.docx", query: nil, name: "a.docx").opening == .preview)
+        #expect(LinkedFile(apiPath: "/assets/a.html", query: nil, name: "a.html").opening == .share)
+        #expect(LinkedFile(apiPath: "/projects/download", query: "path=projects/a.mp4", name: "a.mp4").streamPath == "/projects/asset")
+        #expect(LinkedFile(apiPath: "/assets/a.mp4", query: nil, name: "a.mp4").streamPath == "/assets/a.mp4")
+        #expect(FileKind(name: "a.docx") == .docx)
+        #expect(FileKind(name: "Makefile") == .text)
     }
 
     @Test func todayIsTheDeviceCalendarsDay() throws {

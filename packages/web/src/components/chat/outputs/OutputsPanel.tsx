@@ -27,7 +27,8 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import Markdown from "@/components/markdown";
+import { describeFile, type FileKind, fileKindOfMimeType } from "@rome/api-types/file-kinds";
+import { FilePreview } from "@/components/file-preview";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -59,20 +60,15 @@ import {
 /** The most text a preview shows, so a large log cannot stall the tab. */
 export const PREVIEW_CHARS = 200_000;
 
-type Preview = "image" | "markdown" | "text" | "file";
-
-const TEXT_TYPES =
-  /^(text\/|application\/(json|xml|javascript|typescript|x-yaml|yaml|toml|sql|x-sh))/;
 const CODE_EXTENSIONS =
   /\.(c|cc|cjs|cpp|cs|css|diff|go|h|java|js|jsx|json|kt|mjs|patch|py|rb|rs|sh|sql|swift|toml|ts|tsx|xml|ya?ml)$/i;
 
-/** How the tab previews an output: never as a page that runs. */
-export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Preview {
-  const type = output.mimeType ?? "";
-  if (type.startsWith("image/") && type !== "image/svg+xml") return "image";
-  if (type === "text/markdown" || /\.(md|markdown)$/i.test(output.name)) return "markdown";
-  if (TEXT_TYPES.test(type) && type !== "text/html") return "text";
-  return "file";
+/**
+ * What an output previews as: the server's `fileKind`, else what its MIME type
+ * says (an older server's record), else its path's extension.
+ */
+export function fileKindOf(output: Pick<ChatOutput, "path" | "mimeType" | "fileKind">): FileKind {
+  return output.fileKind ?? fileKindOfMimeType(output.mimeType) ?? describeFile(output.path).kind;
 }
 
 /**
@@ -85,7 +81,7 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
  * encoded for the URL.
  */
 export function pageHrefOf(
-  output: Pick<ChatOutput, "name" | "mimeType" | "link" | "links">,
+  output: Pick<ChatOutput, "name" | "path" | "mimeType" | "fileKind" | "link" | "links">,
 ): string | null {
   if (outputTypeOf(output) !== "page" && output.mimeType !== "text/html") return null;
   const route = [output.link, ...(output.links ?? [])].find(
@@ -112,17 +108,18 @@ const OUTPUT_TYPES = [
 export type OutputType = (typeof OUTPUT_TYPES)[number];
 
 /** The iOS app's `ChatOutputType` sorts files the same way: change both together. */
-export function outputTypeOf(output: Pick<ChatOutput, "name" | "mimeType">): OutputType {
+export function outputTypeOf(
+  output: Pick<ChatOutput, "name" | "path" | "mimeType" | "fileKind">,
+): OutputType {
   const extension = /\.([a-z0-9]+)$/i.exec(output.name)?.[1]?.toLowerCase() ?? "";
-  const mimeType = output.mimeType ?? "";
-  if (["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "ppt"].includes(extension)) {
-    return "document";
-  }
+  const kind = fileKindOf(output);
+  if (kind === "pdf" || kind === "docx") return "document";
+  if (["md", "markdown", "txt", "doc", "pptx", "ppt"].includes(extension)) return "document";
   if (["csv", "tsv", "xlsx", "xls"].includes(extension)) return "spreadsheet";
   if (["html", "htm"].includes(extension)) return "page";
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType.startsWith("video/")) return "video";
+  if (kind === "image") return "image";
+  if (kind === "audio") return "audio";
+  if (kind === "video") return "video";
   if (CODE_EXTENSIONS.test(output.name)) return "code";
   return "file";
 }
@@ -183,7 +180,9 @@ export function kindsThatStillFit(size: FilterRowSize, chosen: number, previous:
  * The kinds a list holds, the one it holds most of first, for its filters.
  * None while it holds one kind, which All already shows.
  */
-export function kindsOf(outputs: readonly Pick<ChatOutput, "name" | "mimeType">[]): OutputType[] {
+export function kindsOf(
+  outputs: readonly Pick<ChatOutput, "name" | "path" | "mimeType" | "fileKind">[],
+): OutputType[] {
   const counts = new Map<OutputType, number>();
   for (const output of outputs) {
     const type = outputTypeOf(output);
@@ -783,9 +782,10 @@ function OutputPreview({
   actions?: HTMLElement | null;
 }) {
   const { t } = useTranslation("chat");
-  const kind = previewOf(output);
+  const kind = fileKindOf(output);
   const url = output.contentUrl;
-  const textual = kind === "markdown" || kind === "text";
+  const textual = kind === "text";
+  const page = pageHrefOf(output);
   const editing = editingPath !== null;
   const inTab = actions !== undefined;
   // A text file the agent wrote into the projects folder can be edited in
@@ -817,6 +817,21 @@ function OutputPreview({
       </a>
     </Button>
   );
+  // A page draws here with nothing in it running; its own tab runs it.
+  const openPage =
+    page && editingPath === null ? (
+      <Button asChild variant="ghost" size="icon-sm">
+        <a
+          href={page}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={t("outputs.openInNewTab")}
+          title={t("outputs.openInNewTab")}
+        >
+          <ExternalLink />
+        </a>
+      </Button>
+    ) : null;
   const editToggle =
     editingPath !== null ? (
       <Button variant="outline" size="sm" onClick={onDone}>
@@ -835,6 +850,7 @@ function OutputPreview({
       createPortal(
         <>
           {editToggle}
+          {openPage}
           {download}
         </>,
         actions,
@@ -854,6 +870,7 @@ function OutputPreview({
         </div>
       </div>
       {editToggle}
+      {openPage}
       {download}
     </div>
   );
@@ -882,38 +899,7 @@ function OutputPreview({
     );
   }
 
-  if (kind === "image") {
-    return (
-      <div className={frame}>
-        {header}
-        <img
-          src={url}
-          alt={output.name}
-          className="mx-4 mb-4 max-w-[calc(100%-2rem)] rounded-8 border border-border-subtle"
-        />
-      </div>
-    );
-  }
-  if (kind === "file") {
-    const page = pageHrefOf(output);
-    return (
-      <div className={frame}>
-        {header}
-        <p className="px-4 text-ui text-muted-foreground">
-          {page ? t("outputs.pageNoPreview") : t("outputs.noPreview")}
-        </p>
-        {page && (
-          <Button asChild variant="outline" size="sm" className="mx-4 self-start">
-            <a href={page} target="_blank" rel="noopener noreferrer">
-              <ExternalLink data-icon="inline-start" />
-              {t("outputs.openInNewTab")}
-            </a>
-          </Button>
-        )}
-      </div>
-    );
-  }
-  if (text.isPending) {
+  if (textual && text.isPending) {
     return (
       <div className={frame}>
         {header}
@@ -921,7 +907,7 @@ function OutputPreview({
       </div>
     );
   }
-  if (text.isError) {
+  if (textual && text.isError) {
     return (
       <div className={frame}>
         {header}
@@ -929,24 +915,36 @@ function OutputPreview({
       </div>
     );
   }
-  const { text: body, cut } = text.data;
+  const body = text.data?.text ?? "";
   return (
-    <div className={cn(frame, "pb-4")}>
+    <div className={cn(frame, "h-full")}>
       {header}
-      {cut && (
+      {text.data?.cut && (
         <p className="px-4 text-aux text-muted-foreground">
           {t("outputs.truncated", { count: PREVIEW_CHARS })}
         </p>
       )}
-      {kind === "markdown" ? (
-        <div className="px-4" data-testid="output-markdown">
-          <Markdown>{body}</Markdown>
-        </div>
-      ) : (
-        <pre className="mx-4 overflow-x-auto rounded-8 bg-surface-muted p-3 font-mono text-aux whitespace-pre text-foreground">
-          {body}
-        </pre>
-      )}
+      <div className="min-h-0 flex-1" data-testid="output-preview" data-kind={kind}>
+        <FilePreview
+          file={{
+            kind,
+            path: output.path,
+            mimeType: output.mimeType ?? "",
+            url,
+            size: null,
+          }}
+          title={output.name}
+          text={body}
+          textView="preview"
+          runPages={false}
+          source={
+            <pre className="mx-4 mb-4 overflow-x-auto rounded-8 bg-surface-muted p-3 font-mono text-aux whitespace-pre text-foreground">
+              {body}
+            </pre>
+          }
+          fallback={<p className="px-4 text-ui text-muted-foreground">{t("outputs.noPreview")}</p>}
+        />
+      </div>
     </div>
   );
 }

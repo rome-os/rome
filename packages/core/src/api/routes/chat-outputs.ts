@@ -3,7 +3,7 @@ import type { ChatOutputSource, ChatOutputsResponse } from "@rome/api-types/chat
 import { Hono } from "hono";
 import { ChatOutputs } from "../../chats/outputs/chat-outputs.js";
 import { ChatOutputsRepository } from "../../chats/outputs/repository.js";
-import { describeFile } from "../../lib/file-browser-server.js";
+import { describeFile, parseRangeHeader } from "../../lib/file-browser-server.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { ownerOf } from "../../webchat/owner.js";
 import { isConciergeChat } from "../../webchat/privacy.js";
@@ -24,6 +24,23 @@ function projectDirOf(projectPath: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The one byte range a `Range` header asks of a file `size` bytes long; null
+ * for the whole file, as for a header that is malformed or names several
+ * ranges (RFC 9110 lets a server ignore those); "unsatisfiable" for a single
+ * range that starts past the end.
+ */
+export function rangeOf(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header || size === 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  if (match[1] && match[2] && Number(match[2]) < Number(match[1])) return null;
+  return parseRangeHeader(header.trim(), size) ?? "unsatisfiable";
 }
 
 /**
@@ -68,24 +85,45 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     if (!file) return notFound();
     const described = describeFile(file.path);
     const inline = INLINE_KINDS.has(described.kind);
+    const headers: Record<string, string> = {
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "private, no-cache",
+      "Content-Disposition": inline ? "inline" : "attachment",
+      "Content-Type": described.mimeType,
+      "X-Content-Type-Options": "nosniff",
+    };
+    // Any policy on a PDF blanks the browser's own viewer, which the Projects
+    // page's asset route also serves it to without one.
+    if (described.kind !== "pdf") headers["Content-Security-Policy"] = `${CSP}; sandbox`;
+    // A player asks for parts of a video or audio file as it plays and seeks.
+    const asked = rangeOf(c.req.header("range"), file.size);
+    const range = asked === "unsatisfiable" ? null : asked;
+    if (asked === "unsatisfiable") {
+      await file.handle.close();
+      return new Response(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-store",
+          "Content-Range": `bytes */${file.size}`,
+        },
+      });
+    }
+    const start = range?.start ?? 0;
+    const end = range?.end ?? file.size - 1;
     // Streams the descriptor that was checked, never the path opened again,
     // and only the bytes fstat counted.
     let body: ReadableStream | null = null;
     if (file.size === 0) await file.handle.close();
     else {
-      body = Readable.toWeb(
-        file.handle.createReadStream({ start: 0, end: file.size - 1 }),
-      ) as ReadableStream;
+      body = Readable.toWeb(file.handle.createReadStream({ start, end })) as ReadableStream;
     }
     return new Response(body, {
-      status: 200,
+      status: range ? 206 : 200,
       headers: {
-        "Cache-Control": "private, no-cache",
-        "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
-        "Content-Disposition": inline ? "inline" : "attachment",
-        "Content-Length": String(file.size),
-        "Content-Type": described.mimeType,
-        "X-Content-Type-Options": "nosniff",
+        ...headers,
+        "Content-Length": String(file.size === 0 ? 0 : end - start + 1),
+        ...(range ? { "Content-Range": `bytes ${start}-${end}/${file.size}` } : {}),
       },
     });
   });

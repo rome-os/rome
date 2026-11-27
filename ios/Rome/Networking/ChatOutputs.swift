@@ -46,6 +46,8 @@ struct ChatOutput: Codable, Identifiable, Hashable, Sendable {
     /// or `/api/assets/<name>`; nil when it has none.
     var link: String?
     var mimeType: String?
+    /// What it previews as (`FileKind`'s raw value); nil from an older server.
+    var fileKind: String?
     /// ISO 8601.
     var at: String
     /// The file is gone from where it was written, or the shown copy is.

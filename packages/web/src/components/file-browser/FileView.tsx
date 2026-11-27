@@ -1,36 +1,12 @@
-import { Suspense, useMemo } from "react";
-import { lazyInPlace } from "@/lib/lazy-with-reload";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Markdown from "@/components/markdown";
 import { IconButton } from "@/components/ui/icon-button";
 import { MonacoFileEditor } from "@/components/monaco-file-editor";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PreviewNeedsReload } from "./PreviewNeedsReload";
+import { FilePreview } from "@/components/file-preview";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
-import {
-  getDelimitedSeparator,
-  getTextPreviewKind,
-  isSpreadsheetPath,
-  parseDelimitedContent,
-} from "@/lib/file-preview";
-
-// The agent can open a file here on its own, so a preview whose code is gone
-// after an upgrade asks for a reload rather than reloading the page.
-const lazyPreview = lazyInPlace(PreviewNeedsReload);
-
-const DocxPreviewPane = lazyPreview(() =>
-  import("@/components/docx-preview-pane").then((module) => ({
-    default: module.DocxPreviewPane,
-  })),
-);
-
-const SpreadsheetPreviewPane = lazyPreview(() =>
-  import("@/components/spreadsheet-preview-pane").then((module) => ({
-    default: module.SpreadsheetPreviewPane,
-  })),
-);
+import { getTextPreviewKind } from "@/lib/file-preview";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -283,19 +259,6 @@ export function FileViewBody() {
   const textViewMode = useFileBrowserStore((s) => s.file.textViewMode);
   const singleFile = useFileBrowserStore((s) => s.config.singleFile ?? false);
 
-  const textPreviewKind =
-    selectedFile?.kind === "text"
-      ? getTextPreviewKind(selectedFile.path, selectedFile.mimeType)
-      : null;
-
-  const delimitedRows = useMemo(() => {
-    if (!selectedFile || textPreviewKind !== "delimited") return [];
-    return parseDelimitedContent(
-      content,
-      getDelimitedSeparator(selectedFile.path, selectedFile.mimeType),
-    );
-  }, [content, selectedFile, textPreviewKind]);
-
   if (loadingFile) {
     return (
       <div className="flex h-full items-center justify-center bg-surface">
@@ -304,195 +267,47 @@ export function FileViewBody() {
     );
   }
 
-  if (
-    selectedFile?.kind === "text" &&
-    textViewMode === "preview" &&
-    textPreviewKind === "markdown"
-  ) {
+  if (!selectedFile) {
     return (
-      <div className="h-full overflow-auto bg-surface p-4 md:p-6">
-        <Markdown className="text-foreground">{content}</Markdown>
-      </div>
-    );
-  }
-
-  if (
-    selectedFile?.kind === "text" &&
-    textViewMode === "preview" &&
-    textPreviewKind === "delimited"
-  ) {
-    return (
-      <div className="h-full overflow-auto bg-surface p-4 md:p-6">
-        {delimitedRows.length === 0 ? (
-          <p className="text-ui text-muted-foreground">{t("view.noRowsToPreview")}</p>
-        ) : (
-          <table className="min-w-full border-collapse text-left text-ui">
-            <tbody>
-              {delimitedRows.map((row, rowIndex) => (
-                <tr key={rowIndex} className={rowIndex === 0 ? "bg-surface-muted" : undefined}>
-                  {row.map((cell, cellIndex) => {
-                    const Cell = rowIndex === 0 ? "th" : "td";
-                    return (
-                      <Cell
-                        key={cellIndex}
-                        className="border border-border px-3 py-2 align-top text-foreground"
-                      >
-                        {cell}
-                      </Cell>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "text" && textViewMode === "preview" && textPreviewKind === "html") {
-    if (!selectedFile.assetUrl) {
-      return (
-        <div className="flex h-full items-center justify-center bg-surface p-6">
-          <div className="max-w-md text-center">
-            <h3 className="text-section text-foreground">{t("view.htmlPreviewFailedTitle")}</h3>
-            <p className="mt-2 text-ui text-muted-foreground">
-              {t("view.htmlPreviewFailedDescription")}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="h-full bg-surface-muted p-4">
-        <iframe
-          src={selectedFile.assetUrl}
-          title={selectedPath ?? ""}
-          sandbox="allow-forms allow-modals allow-popups allow-scripts"
-          className="h-full w-full rounded-12 border border-border bg-white shadow-1"
-        />
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "text" && selectedPath) {
-    return (
-      <div className="h-full w-full bg-surface">
-        <MonacoFileEditor
-          path={selectedPath}
-          // A single-file browser can sit beside the full browser on the same
-          // file, so it keeps its own editor model: closing it must not
-          // dispose the model the other editor still shows.
-          modelPath={singleFile ? `single-file/${selectedPath}` : undefined}
-          value={content}
-          onChange={(next) => store.getState().file.setContent(next)}
-          onBlur={() => void store.getState().file.flushAutoSave()}
-          readOnly={!selectedFile.editable}
-        />
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "image" && selectedFile.assetUrl) {
-    return (
-      <div className="flex h-full items-center justify-center overflow-auto bg-surface-muted p-6">
-        <img
-          src={selectedFile.assetUrl}
-          alt={selectedPath ?? ""}
-          className="max-h-full max-w-full rounded-12 border border-border bg-surface object-contain shadow-1"
-        />
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "video" && selectedFile.assetUrl) {
-    return (
-      <div className="flex h-full items-center justify-center overflow-auto bg-surface-muted p-6">
-        <video
-          controls
-          preload="metadata"
-          className="max-h-full max-w-full rounded-12 bg-foreground shadow-1"
-        >
-          <source src={selectedFile.assetUrl} type={selectedFile.mimeType} />
-        </video>
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "audio" && selectedFile.assetUrl) {
-    return (
-      <div className="flex h-full items-center justify-center bg-surface-muted p-6">
-        <div className="w-full max-w-2xl rounded-12 border border-border bg-surface p-6 shadow-1">
-          <div className="mb-4 text-ui text-foreground">{selectedPath}</div>
-          <audio controls preload="metadata" className="w-full">
-            <source src={selectedFile.assetUrl} type={selectedFile.mimeType} />
-          </audio>
+      <div className="flex h-full items-center justify-center bg-surface p-6">
+        <div className="max-w-md text-center">
+          <h3 className="text-section text-foreground">{t("view.unsupportedTitle")}</h3>
+          <p className="mt-2 text-ui text-muted-foreground">{t("view.unsupportedDescription")}</p>
         </div>
       </div>
-    );
-  }
-
-  if (selectedFile?.kind === "pdf" && selectedFile.assetUrl) {
-    return (
-      <div className="h-full bg-surface-muted p-4">
-        <object
-          data={selectedFile.assetUrl}
-          type={selectedFile.mimeType}
-          className="h-full w-full rounded-12 border border-border bg-surface shadow-1"
-        >
-          <iframe
-            src={selectedFile.assetUrl}
-            title={selectedPath ?? ""}
-            className="h-full w-full rounded-12 border border-border bg-surface shadow-1"
-          />
-        </object>
-      </div>
-    );
-  }
-
-  if (selectedFile?.kind === "docx" && selectedFile.assetUrl) {
-    return (
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center bg-surface p-6">
-            <p className="text-ui text-subtle-foreground">{t("view.loadingDocument")}</p>
-          </div>
-        }
-      >
-        <DocxPreviewPane assetUrl={selectedFile.assetUrl} title={selectedPath ?? ""} />
-      </Suspense>
-    );
-  }
-
-  if (
-    selectedFile?.kind === "binary" &&
-    selectedFile.assetUrl &&
-    isSpreadsheetPath(selectedFile.path)
-  ) {
-    return (
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center bg-surface p-6">
-            <p className="text-ui text-subtle-foreground">{t("view.loadingSpreadsheet")}</p>
-          </div>
-        }
-      >
-        <SpreadsheetPreviewPane
-          assetUrl={selectedFile.assetUrl}
-          size={selectedFile.size}
-          title={selectedPath ?? ""}
-        />
-      </Suspense>
     );
   }
 
   return (
-    <div className="flex h-full items-center justify-center bg-surface p-6">
-      <div className="max-w-md text-center">
-        <h3 className="text-section text-foreground">{t("view.unsupportedTitle")}</h3>
-        <p className="mt-2 text-ui text-muted-foreground">{t("view.unsupportedDescription")}</p>
-      </div>
-    </div>
+    <FilePreview
+      file={{
+        kind: selectedFile.kind,
+        path: selectedFile.path,
+        mimeType: selectedFile.mimeType,
+        url: selectedFile.assetUrl,
+        size: selectedFile.size,
+      }}
+      title={selectedPath ?? ""}
+      text={content}
+      textView={textViewMode === "preview" ? "preview" : "source"}
+      runPages
+      source={
+        selectedPath ? (
+          <div className="h-full w-full bg-surface">
+            <MonacoFileEditor
+              path={selectedPath}
+              // A single-file browser can sit beside the full browser on the same
+              // file, so it keeps its own editor model: closing it must not
+              // dispose the model the other editor still shows.
+              modelPath={singleFile ? `single-file/${selectedPath}` : undefined}
+              value={content}
+              onChange={(next) => store.getState().file.setContent(next)}
+              onBlur={() => void store.getState().file.flushAutoSave()}
+              readOnly={!selectedFile.editable}
+            />
+          </div>
+        ) : null
+      }
+    />
   );
 }

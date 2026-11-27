@@ -96,8 +96,8 @@ final class APIClient: Sendable {
     /// Images past this are not shown: a reply can point at any file.
     static let imageLimit = 20 * 1024 * 1024
 
-    /// A chat's output past this is not opened on the phone: a video or a
-    /// large export is for the web.
+    /// A file past this is not downloaded to open on the phone. A video or
+    /// audio file streams instead, so this never stops one.
     static let outputLimit = 100 * 1024 * 1024
 
     /// A GET's body, stopped as soon as it passes `limit` bytes: the declared
