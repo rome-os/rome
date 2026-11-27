@@ -84,7 +84,6 @@ describe("slotCardCopy", () => {
       ["telegram", slot("bot"), false],
       ["telegram", slot("session"), false],
       ["whatsapp", slot("bot"), false],
-      ["wechat", slot("bot"), false],
       ["discord", slot("bot", { identity: "@dbot" }), true],
       ["discord", slot("bot"), false],
       ["feishu", slot("bot"), false],

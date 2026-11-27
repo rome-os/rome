@@ -104,6 +104,8 @@ export interface InstalledAppCard {
   hasFrontend: boolean;
   href: string | null;
   fullHref: string | null;
+  /** The app declares `web.shareTarget`, so it can open with text shared to it. Missing means false. */
+  acceptsSharedText?: boolean;
   capabilities: string[];
   capabilityDetails: AppArtifactDetails;
   isEnabled: boolean;

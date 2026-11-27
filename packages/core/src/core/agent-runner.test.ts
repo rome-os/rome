@@ -6875,7 +6875,7 @@ describe("AgentRunner", () => {
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: (channel) =>
           channel === "discord" ? { interactiveCards: false, promptContext: false } : null,
@@ -6933,7 +6933,7 @@ describe("AgentRunner", () => {
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [], seen: () => undefined },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
         latest,
@@ -7008,7 +7008,7 @@ describe("AgentRunner", () => {
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [], seen: () => undefined },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
         latest,
@@ -7083,7 +7083,7 @@ describe("AgentRunner", () => {
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [], seen: () => undefined },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
         latest,
@@ -7166,7 +7166,7 @@ describe("AgentRunner", () => {
       const promptFacts = chatPromptFacts({
         facts: { unseen: () => [], seen: () => undefined },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
         latest: latest as never,
@@ -7235,12 +7235,11 @@ describe("AgentRunner", () => {
         said(2, "Noted.", "rome"),
         said(1, "my sister's birthday is 12 May", "guardian"),
       ];
-      const people = new SenderLabels({
-        byAccount: async (account) =>
-          account.id === "T_A/U_GUARDIAN"
-            ? ({ id: "p1", displayName: "Ouou", bondLevel: "guardian", links: [] } as never)
-            : null,
-      });
+      const people = new SenderLabels(async (account) =>
+        account.id === "T_A/U_GUARDIAN"
+          ? { personId: "p1", name: "Ouou", role: "guardian" as const }
+          : null,
+      );
       const latest = rs.fn(async () => {
         return platform as never;
       });
@@ -7281,7 +7280,7 @@ describe("AgentRunner", () => {
       expect(latest).toHaveBeenCalledTimes(1);
       const [first, second] = providerPrompts;
       expect(first).toContain("<conversation_context>");
-      // Oldest first, each named as People names its sender, and none of
+      // Oldest first, each named by who holds its account, and none of
       // them the guardian but the guardian's own.
       const order = ["12 May", "Noted.", "4417"].map((text) => first.indexOf(text));
       expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -7349,7 +7348,7 @@ describe("AgentRunner", () => {
         const promptFacts = chatPromptFacts({
           facts: { unseen: () => [], seen: () => undefined },
           messages: { byIds: () => [] },
-          labels: new SenderLabels({ byAccount: async () => null }),
+          labels: new SenderLabels(async () => null),
           channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
           channelSurface: () => ({ interactiveCards: false, promptContext: true }),
           latest,

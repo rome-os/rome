@@ -120,7 +120,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
       chatPromptFacts({
         facts: { unseen: () => [], seen: () => {} },
         messages: { byIds: () => [] },
-        labels: new SenderLabels({ byAccount: async () => null }),
+        labels: new SenderLabels(async () => null),
         channelOfChat: () => "slack_app",
         channelSurface: () => ({ interactiveCards: false, promptContext: true }),
         latest: (place, read) => adapter.readHistory(place.threadId as never, read),
@@ -203,7 +203,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
       facts: { unseen: () => [], seen: () => {} },
       // Rome's record of the session's first message, by its Slack ts.
       messages: { byIds: () => [{ key: inSecond(500) } as never] },
-      labels: new SenderLabels({ byAccount: async () => null }),
+      labels: new SenderLabels(async () => null),
       channelOfChat: () => "slack_app",
       channelSurface: () => ({ interactiveCards: false, promptContext: true }),
       latest: (place, read) => adapter.readHistory(place.threadId as never, read),
@@ -267,7 +267,7 @@ describe("a mention inside a Slack thread (R14)", () => {
     const facts = chatPromptFacts({
       facts: { unseen: () => [], seen: () => {} },
       messages: { byIds: () => [{ key: mention.messageId }] as never },
-      labels: new SenderLabels({ byAccount: async () => null }),
+      labels: new SenderLabels(async () => null),
       channelOfChat: () => "slack_app",
       channelSurface: () => ({ interactiveCards: false, promptContext: true }),
       latest: (place, read) => adapter.readHistory(place.threadId as never, read),
@@ -333,7 +333,7 @@ describe("a mention inside a Slack thread (R14)", () => {
     const facts = chatPromptFacts({
       facts: { unseen: () => [], seen: () => {} },
       messages: { byIds: (ids) => ids.map((id) => ({ key: keys[id] })) as never },
-      labels: new SenderLabels({ byAccount: async () => null }),
+      labels: new SenderLabels(async () => null),
       channelOfChat: () => "slack_app",
       channelSurface: () => ({ interactiveCards: false, promptContext: true }),
       latest: (place, read) => adapter.readHistory(place.threadId as never, read),
@@ -406,7 +406,7 @@ describe("a mention inside a Slack thread (R14)", () => {
     const facts = chatPromptFacts({
       facts: { unseen: () => [], seen: () => {} },
       messages: { byIds: (ids) => ids.map((id) => ({ key: keys[id] })) as never },
-      labels: new SenderLabels({ byAccount: async () => null }),
+      labels: new SenderLabels(async () => null),
       channelOfChat: () => "slack_app",
       channelSurface: () => ({ interactiveCards: false, promptContext: true }),
       latest: (place, read) => adapter.readHistory(place.threadId as never, read),

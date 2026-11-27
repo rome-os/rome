@@ -72,10 +72,8 @@ export function channelMessageOf(message: Message, channel: string): ChannelMess
 }
 
 /** The published thread of `message`: a direct message, a topic under the
- *  chat its platform thread was opened in, or a group. A group's message
- *  carried on a direct chat with its sender reads as said in that group. */
+ *  chat its platform thread was opened in, or a group. */
 function threadOf({ where }: Message): NonNullable<ChannelMessage["thread"]> {
-  if (where.group) return { kind: "group", name: where.group.id };
   const name = where.name !== undefined ? { name: where.name } : {};
   if (where.thread && where.thread.id === undefined) return { kind: "topic", ...name };
   return { kind: where.kind === "direct" ? "dm" : "group", ...name };

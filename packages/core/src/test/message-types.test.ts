@@ -12,7 +12,6 @@ import type { EmailAdapter } from "../connections/kinds/email/email.js";
 import type { FeishuAdapter } from "../connections/kinds/feishu/feishu.js";
 import type { TelegramAdapter } from "../connections/kinds/telegram/telegram.js";
 import type { TelegramUserAdapter } from "../connections/kinds/telegram-user/telegram-user.js";
-import type { WechatAdapter } from "../connections/kinds/wechat/wechat.js";
 import type { WhatsAppAdapter } from "../connections/kinds/whatsapp/whatsapp.js";
 import type { Message } from "../connections/message.js";
 import { type Addressed, addressing } from "../participation/addressing.js";
@@ -75,7 +74,6 @@ holds<Equals<InboundOf<EmailAdapter>, Message>>();
 holds<Equals<InboundOf<FeishuAdapter>, Message>>();
 holds<Equals<InboundOf<TelegramAdapter>, Message>>();
 holds<Equals<InboundOf<TelegramUserAdapter>, Message>>();
-holds<Equals<InboundOf<WechatAdapter>, Message>>();
 holds<Equals<InboundOf<WhatsAppAdapter>, Message>>();
 holds<Equals<DeliveredBy<Talker>, Message>>();
 

@@ -17,7 +17,6 @@ import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "../kinds/feishu/descriptor.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
-import { createWechatDescriptor } from "./wechat.js";
 
 // Descriptor factories only STORE their deps (construction never calls them), so
 // unit tests pass empty stubs to reach the pure `reviveProfile` getter.
@@ -82,24 +81,10 @@ const CASES: ChannelCase[] = [
     sparse: { record: { domain: "feishu" }, expect: { handle: undefined } },
   },
   {
-    connectionKind: "wechat",
-    descriptor: createWechatDescriptor(),
-    grant: "account",
-    full: { accountId: "acct-1", userId: "guardian-7" },
-    expectedDisplay: {
-      displayName: undefined,
-      handle: "acct-1",
-      email: undefined,
-      avatarUrl: undefined,
-    },
-    sparse: { record: { userId: "guardian-7" }, expect: { handle: undefined } },
-  },
-  {
     connectionKind: "email",
     descriptor: makeEmailDescriptor({
       provider: stub,
       settingsRepo: stub,
-      peopleRepo: stub,
     }),
     grant: "inbox",
     full: { address: "slug@romeos.cc" },

@@ -15,7 +15,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, rs } from "@rstes
 import { ChannelType } from "discord.js";
 import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { FakeTelegramApi } from "./kit/fake-telegram.js";
-import type { PeopleRepository } from "../people/model/people-repository.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import type { MailProvider, SendMailInput } from "../connections/kinds/email/rome-cloud-mail.js";
@@ -26,7 +25,6 @@ import { FeishuAdapter } from "../connections/kinds/feishu/feishu.js";
 import { TelegramAdapter } from "../connections/kinds/telegram/telegram.js";
 import { TelegramUserAdapter } from "../connections/kinds/telegram-user/telegram-user.js";
 import { WebChatAdapter } from "../webchat/adapter.js";
-import { WechatAdapter } from "../connections/kinds/wechat/wechat.js";
 import { WhatsAppAdapter } from "../connections/kinds/whatsapp/whatsapp.js";
 
 /** An adapter under the contract, over a fake of its platform. */
@@ -177,44 +175,6 @@ function whatsapp(): Harness {
   };
 }
 
-function wechat(): Harness {
-  const requests: string[] = [];
-  rs.stubGlobal(
-    "fetch",
-    rs.fn(async (url: string, init: { body: string }) => {
-      if (url.includes("getuploadurl")) {
-        return new Response(JSON.stringify({ upload_full_url: "https://cdn.example/upload" }));
-      }
-      if (url.startsWith("https://cdn.example/")) {
-        return new Response("", { headers: { "x-encrypted-param": "param" } });
-      }
-      requests.push(init.body);
-      return new Response(JSON.stringify({ ret: 0, message_id: requests.length }));
-    }),
-  );
-  const adapter = new WechatAdapter({
-    token: "token",
-    baseUrl: "https://ilinkai.weixin.qq.com",
-    accountId: "account",
-    connectedAt: "2026-05-09T00:00:00.000Z",
-  });
-  (adapter as unknown as { contextTokens: Map<string, string> }).contextTokens.set(
-    "wx-user",
-    "ctx-1",
-  );
-  return {
-    send: (message) => adapter.send("wx-user" as ChatId, message),
-    calls: () => requests.length,
-    texts: () =>
-      requests.flatMap((body) => {
-        const items = (
-          JSON.parse(body) as { msg?: { item_list?: Array<{ text_item?: { text: string } }> } }
-        ).msg?.item_list;
-        return (items ?? []).flatMap((item) => (item.text_item ? [item.text_item.text] : []));
-      }),
-  };
-}
-
 function email(): Harness {
   const sent: SendMailInput[] = [];
   const provider = {
@@ -226,7 +186,6 @@ function email(): Harness {
   const adapter = new EmailAdapter({
     provider,
     settingsRepo: {} as unknown as SettingsRepository,
-    peopleRepo: {} as unknown as PeopleRepository,
     config: { address: "slug@mail.romeos.cc", inboundSecret: "secret" },
   });
   return {
@@ -296,7 +255,6 @@ const SUBJECTS: readonly Subject[] = [
     urls: false,
     quotes: false,
   },
-  { channel: "wechat", make: wechat, shows: [], attachments: "files", urls: false, quotes: false },
   {
     channel: "email",
     make: email,
