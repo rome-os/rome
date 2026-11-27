@@ -239,6 +239,22 @@ describe("installFirstPartyAppsAtBoot", () => {
     expect((await readLockfileEntry("alpha"))?.state).toBe("installed");
   });
 
+  it("reports a broken app whose cached bundle still fails to resolve as failed", async () => {
+    const artifactDir = await packFirstParty("alpha", "0.1.0");
+    const hash = await hashArtifact(artifactDir);
+    await bootInstall();
+    // Corrupt the cached bundle that the reinstall's prepare() will reuse.
+    await writeFile(join(harness.installedRoot, "alpha", hash, "app.yaml"), "id: [", "utf-8");
+    await harness.catalog.refresh("alpha");
+    expect(harness.catalog.get("alpha")?.state).toBe("broken");
+
+    const result = await bootInstall();
+
+    expect(result.reinstalled).toEqual([]);
+    expect(result.failed.map((failure) => failure.appId)).toEqual(["alpha"]);
+    expect((await readLockfileEntry("alpha"))?.state).toBe("broken");
+  });
+
   it("fails loudly when no packed artifacts exist at all", async () => {
     await expect(bootInstall()).rejects.toThrow(/pnpm build:apps/);
   });
