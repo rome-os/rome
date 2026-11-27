@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatOutputsResponse } from "@rome/api-types/chat-outputs";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatOutputsRoutes } from "./chat-outputs.js";
+import { chatOutputsRoutes, rangeOf } from "./chat-outputs.js";
 
 describe("chat outputs content route", () => {
   let testDb: TestDb;
@@ -67,9 +67,28 @@ describe("chat outputs content route", () => {
     expect(await response.text()).toBe("2345");
   });
 
+  it("serves the whole file for several ranges or a malformed one", async () => {
+    for (const range of ["bytes=0-1,4-5", "bytes=5-2", "items=0-1"]) {
+      const response = await app.request(contentUrl, { headers: { Range: range } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("0123456789");
+    }
+  });
+
   it("refuses a range past the end", async () => {
     const response = await app.request(contentUrl, { headers: { Range: "bytes=20-" } });
     expect(response.status).toBe(416);
     expect(response.headers.get("Content-Range")).toBe("bytes */10");
+  });
+});
+
+describe("rangeOf", () => {
+  it("reads one range, a suffix and an open end", () => {
+    expect(rangeOf("bytes=2-5", 10)).toEqual({ start: 2, end: 5 });
+    expect(rangeOf("bytes=-3", 10)).toEqual({ start: 7, end: 9 });
+    expect(rangeOf("bytes=4-", 10)).toEqual({ start: 4, end: 9 });
+    expect(rangeOf("bytes=10-", 10)).toBe("unsatisfiable");
+    expect(rangeOf("bytes=0-1,4-5", 10)).toBeNull();
+    expect(rangeOf(undefined, 10)).toBeNull();
   });
 });

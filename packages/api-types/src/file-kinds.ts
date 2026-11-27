@@ -1,6 +1,8 @@
 // What kind of file a name is, by its extension: the one rule the server, the
 // dashboard and the iOS app's wire field `fileKind` share. The projects
-// viewer, chat's inline media and a chat's Outputs tab all preview by it.
+// viewer, chat's inline media and a chat's Outputs tab all preview by it. The
+// iOS app keeps the same extensions in `FileKind.extensions`, and its
+// FileKindTests fails when the two differ.
 // docs/domains/chats.md#outputs
 
 /** What a file previews as. */

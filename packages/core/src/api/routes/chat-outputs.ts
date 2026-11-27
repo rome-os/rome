@@ -27,6 +27,23 @@ function projectDirOf(projectPath: string | null | undefined): string | null {
 }
 
 /**
+ * The one byte range a `Range` header asks of a file `size` bytes long; null
+ * for the whole file, as for a header that is malformed or names several
+ * ranges (RFC 9110 lets a server ignore those); "unsatisfiable" for a single
+ * range that starts past the end.
+ */
+export function rangeOf(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header || size === 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  if (match[1] && match[2] && Number(match[2]) < Number(match[1])) return null;
+  return parseRangeHeader(header.trim(), size) ?? "unsatisfiable";
+}
+
+/**
  * A chat's outputs, the files its agent wrote or showed, and each one's bytes.
  * Mount behind the webchat routes' chat gate, which answers for
  * `/chat/sessions/:id/*`.
@@ -79,9 +96,9 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     // page's asset route also serves it to without one.
     if (described.kind !== "pdf") headers["Content-Security-Policy"] = `${CSP}; sandbox`;
     // A player asks for parts of a video or audio file as it plays and seeks.
-    const rangeHeader = c.req.header("range");
-    const range = rangeHeader && file.size > 0 ? parseRangeHeader(rangeHeader, file.size) : null;
-    if (rangeHeader && file.size > 0 && !range) {
+    const asked = rangeOf(c.req.header("range"), file.size);
+    const range = asked === "unsatisfiable" ? null : asked;
+    if (asked === "unsatisfiable") {
       await file.handle.close();
       return new Response(null, {
         status: 416,
