@@ -76,6 +76,10 @@ web:                             # Optional — enables the web UI
   manifest: web/manifest.json    # rslib output manifest
   displayName: Coding            # Title Case, like `name`
   navLabel: Coding               # Title Case, like `name`
+  # shareTarget:                 # Optional — the page takes shared text in `?text=`
+  #   path: /quick               # App route; defaults to the app's own page
+  #   width: 380                 # Optional window size the page is designed for (280–720)
+  #   height: 460                # (200–900)
 
 api:                             # Optional — enables the HTTP API
   entry: api/index               # Without extension
@@ -1077,6 +1081,14 @@ use [<appName>](/apps/<appId>) to get the correct URL. DO NOT present the localh
   (soft pushState). From another app, deep-link with
   `navigateRome({ path: "apps", appId, subPath: "<detailId>" })`. See
   "Frontend SDK → Common helpers" above. AUTHORING.md §9 covers the design rule.
+
+### Taking shared text: `web.shareTarget`
+
+Declare `web.shareTarget` when the app does something useful with a piece of text the user is looking at elsewhere: translate it, define it, save it, reply to it. The Mac app's ⌥D shortcut then opens the page in a floating panel with the selected text, and phones list the app in their share sheet. Rome opens `/full/apps/<appId><path>?text=…`. The page:
+
+- reads `text` once on load (`new URLSearchParams(location.search).get("text")`), starts its work with it, and removes it from the URL so a reload does not repeat the work;
+- treats no `text` as an ordinary open;
+- is designed for the window it opens in. Point `path` at a compact view built for it (the answer first and large, secondary detail collapsed, a small input for the next lookup, a link to the full page) and give that view's `width` and `height`. Without a size, the Mac panel opens at 420 × 560.
 
 ### Mobile / responsive design
 

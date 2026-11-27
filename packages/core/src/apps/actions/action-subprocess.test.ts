@@ -18,6 +18,7 @@ import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { ActionRuntimeEvent } from "./runtime-events.js";
 import type { ActionWorkerPayload } from "./worker-protocol.js";
+import type { Action } from "./types.js";
 import { buildAction, createTestRome } from "../../test/kit/index.js";
 import {
   AGENT_SESSION_RUN_TURN_TIMEOUT_MS,
@@ -1091,13 +1092,12 @@ describe("main-owned action subprocess", () => {
         rootExecutionId: "root-persist",
         parentId: b.id,
       });
-      const journal = await rome.repos.executionJournal.loadJournal("root-persist");
-      expect(journal).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ actionName: "action_b", status: "completed" }),
-          expect.objectContaining({ actionName: "action_c", status: "completed" }),
-        ]),
-      );
+      // Each run journals its own direct calls: B runs as a root in W2, so its
+      // call to C is in B's journal, not numbered into A's.
+      const journalOf = async (id: string) =>
+        (await rome.repos.executionJournal.loadJournal(id)).map((e) => [e.actionName, e.status]);
+      expect(await journalOf("root-persist")).toEqual([["action_b", "completed"]]);
+      expect(await journalOf(b.id)).toEqual([["action_c", "completed"]]);
     } finally {
       await rome.cleanup();
     }
@@ -1193,5 +1193,126 @@ describe("main-owned action subprocess", () => {
     } finally {
       rs.useRealTimers();
     }
+  });
+});
+
+describe("approval replay across W1 -> main -> W2", () => {
+  // W1 runs the root; a cancellable child runs as its own root in W2. Both
+  // engines share one database, as the real processes do.
+  function workers(actions: () => Action[]) {
+    const repos = createActionEngineRepos();
+    const link = createTransportPair();
+    const registry = () => {
+      const r = new ActionRegistryImpl();
+      for (const action of actions()) r.register(action);
+      return r;
+    };
+    const w2 = new ActionEngine(registry(), repos, { processRole: "worker" });
+    registerActionSubprocessHost(
+      new IpcRpc(link.a, "main-w1"),
+      new ActionWorkerCoordinator({
+        startDelegatedAction: (payload, observer) => ({
+          result: w2.run(payload.actionName, payload.args, payload.context, observer),
+          cancel() {},
+        }),
+      }),
+      { worker: "w1" },
+    );
+    const w1 = new ActionEngine(registry(), repos, {
+      processRole: "worker",
+      actionSubprocessRunner: new DelegatedActionClient(new IpcRpc(link.b, "w1")),
+    });
+    const cardFor = async (actionName: string) =>
+      (await repos.approvals.findPending()).find(
+        (c) => (c.payload as { actionName: string }).actionName === actionName,
+      )!;
+    const approveAndReplay = async (actionName: string) => {
+      const card = await cardFor(actionName);
+      const { rootExecutionId, journalSequence } = card.payload as {
+        rootExecutionId: string;
+        journalSequence: number;
+      };
+      await repos.approvals.resolvePending(card.id, "approve", "guardian");
+      const result = await w1.run(
+        "parent",
+        {},
+        {
+          initiator: `approval:${card.id}`,
+          replayJournal: await repos.journal.loadJournal(rootExecutionId),
+          replayRootExecutionId: rootExecutionId,
+          approvedSequence: journalSequence,
+        },
+      );
+      const journal = await repos.journal.loadJournal(rootExecutionId);
+      return { result, journal: journal.map((e) => [e.sequence, e.actionName, e.status]) };
+    };
+    return { w1, repos, approveAndReplay };
+  }
+
+  it("keeps a cancellable child's own journal out of its root's replay", async () => {
+    const calls = { helper: 0, x: 0, b: 0 };
+    const { w1, repos, approveAndReplay } = workers(() => [
+      buildAction("helper", { execute: async () => (calls.helper++, { status: "ok" }) }),
+      buildAction("child_x", {
+        cancellable: true,
+        execute: async () => (calls.x++, callAction("helper", {})),
+      }),
+      buildAction("child_b", {
+        requiresApproval: true,
+        execute: async () => (calls.b++, { status: "ok" }),
+      }),
+      buildAction("parent", {
+        execute: async () => {
+          const results = [await callAction("child_x", {}), await callAction("child_b", {})];
+          return { status: "ok", data: results.map((r) => r.status) };
+        },
+      }),
+    ]);
+    await w1.run("parent", {}, { initiator: "test" });
+
+    const { result, journal } = await approveAndReplay("child_b");
+    expect(result).toEqual({ status: "ok", data: ["ok", "ok"] });
+    expect(calls).toEqual({ helper: 1, x: 1, b: 1 });
+    expect(journal).toEqual([
+      [0, "child_x", "completed"],
+      [1, "child_b", "completed"],
+    ]);
+    expect(await repos.approvals.findPending()).toHaveLength(0);
+  });
+
+  it("keeps nested calls of a cancellable call that reruns during a replay out of every journal", async () => {
+    const calls = { helper: 0, x: 0 };
+    const { w1, repos, approveAndReplay } = workers(() => [
+      buildAction("helper", { execute: async () => (calls.helper++, { status: "ok" }) }),
+      buildAction("gated_helper", { requiresApproval: true }),
+      buildAction("child_b", { requiresApproval: true }),
+      buildAction("child_x", {
+        cancellable: true,
+        execute: async () => {
+          calls.x++;
+          await callAction("helper", {});
+          return callAction("gated_helper", {});
+        },
+      }),
+      buildAction("parent", {
+        execute: async () => {
+          const results = [await callAction("child_b", {}), await callAction("child_x", {})];
+          return { status: "ok", data: results.map((r) => r.status) };
+        },
+      }),
+    ]);
+    await w1.run("parent", {}, { initiator: "test" });
+    const cardsBefore = (await repos.approvals.findPending()).length;
+
+    // child_x ran before child_b's approval, so the replay reruns it in W2.
+    // There, as in-process, its gated call is refused rather than carded.
+    const { result, journal } = await approveAndReplay("child_b");
+    expect(calls).toEqual({ helper: 2, x: 2 });
+    expect(result).toEqual({ status: "ok", data: ["ok", "error"] });
+    expect(journal).toEqual([
+      [0, "child_b", "completed"],
+      [1, "child_x", "completed"],
+    ]);
+    expect(await repos.approvals.findPending()).toHaveLength(cardsBefore - 1);
   });
 });

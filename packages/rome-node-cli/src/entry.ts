@@ -106,6 +106,8 @@ async function main(): Promise<void> {
       host: { type: "string" },
       port: { type: "string" },
       "assets-dir": { type: "string" },
+      pane: { type: "string", multiple: true },
+      locale: { type: "string", multiple: true },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -114,6 +116,65 @@ async function main(): Promise<void> {
       commandHelp(explicitTopic ? positionals.slice(1) : positionals, explicitTopic),
     );
     return;
+  }
+  if (positionals[0] === "computer-use") {
+    if (
+      positionals[1] !== "setup" ||
+      positionals.length !== 2 ||
+      Object.keys(values).some((flag) => flag !== "pane" && flag !== "locale")
+    ) {
+      throw new Error("Run rome-node computer-use setup --help for usage.");
+    }
+    const pane = values.pane?.[0];
+    if (
+      (values.pane?.length ?? 0) > 1 ||
+      (pane !== undefined &&
+        pane !== "accessibility" &&
+        pane !== "screen-recording" &&
+        pane !== "all")
+    ) {
+      throw new Error("--pane accepts one of accessibility, screen-recording, or all.");
+    }
+    const locale = values.locale?.[0];
+    if ((values.locale?.length ?? 0) > 1 || locale === "" || locale?.startsWith("-")) {
+      throw new Error("--locale accepts one language tag.");
+    }
+    const { discoverHelper, launchPermissionSetup } = await import("@rome-os/node-core/host");
+    await withShutdown(async (signal) => {
+      try {
+        await launchPermissionSetup({ appPath: await discoverHelper(), pane, locale, signal });
+      } catch (error) {
+        const code = error instanceof Error && "code" in error ? error.code : undefined;
+        switch (code) {
+          case "computer_use_unsupported_platform":
+            throw new Error("Computer Use permission setup is available on macOS.");
+          case "computer_use_helper_missing":
+            throw new Error(
+              "Rome Computer Use.app is missing. Install the latest Rome Node with optional dependencies or set ROME_NODE_COMPUTER_USE_HELPER to the signed helper app.",
+            );
+          case "invalid_helper_bundle":
+            throw new Error(
+              "Could not verify Rome Computer Use.app. Install the latest signed helper or check ROME_NODE_COMPUTER_USE_HELPER.",
+            );
+          case "invalid_request":
+            throw new Error(
+              "This Rome Computer Use.app does not support guided permission setup. Install the latest Rome Node or Rome Desktop.",
+            );
+          default:
+            throw new Error(
+              "Could not open the permission guide. Run setup from a signed-in macOS desktop session.",
+              { cause: error },
+            );
+        }
+      }
+      process.stdout.write(
+        "Follow the Rome Computer Use guide in System Settings to grant permissions.\n",
+      );
+    });
+    return;
+  }
+  if (values.pane || values.locale) {
+    throw new Error("--pane and --locale are only supported by rome-node computer-use setup.");
   }
   const config = nodeConfigFromEnvironment(process.env);
   if (values.server && !(positionals[0] === "auth" && positionals.length === 1))

@@ -35,6 +35,7 @@ import {
   ROME_CLOUD_EMAIL_PLATFORM,
   type SyncMemberContext,
   seatAccounts,
+  signInsGiveMailWithinTx,
 } from "./members.js";
 
 const log = createLogger("members-backfill");
@@ -51,9 +52,9 @@ export const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
  * away, from any person, and each `email` account of a member, which only an
  * invitation gave, becomes the same address on `rome-cloud-email`. The
  * guardian gets the seat's email as a sign-in's and every account People
- * links to its guardian person, an agent's own account included, and loses
- * the seat's address as an `email` account unless People links it too, as an
- * email connection's address. It takes no other email away: Identity cannot
+ * links to its guardian person, an agent's own account included. Every
+ * sign-in of the guardian and the members gives its person the same address
+ * as their mail account. It takes no email away: Identity cannot
  * tell an earlier seat's email from the same address carried from People, so
  * only the step beside a seat's rebind, which knows the old values, takes
  * them away. On the first run, unless a save of the invited emails came
@@ -106,20 +107,11 @@ function backfillWithinTx(tx: DrizzleTx): void {
           .all()
           .filter((link) => link.platform !== ROME_CLOUD_ID_PLATFORM)
       : [];
-    const guardian = guardianSeatCreatedWithinTx(ctx, {
+    guardianSeatCreatedWithinTx(ctx, {
       accounts: [...seatAccounts(seat), ...linked],
       name: peopleGuardian?.name,
       avatarUrl: seat.avatarUrl ?? undefined,
     });
-    const [seatSignIn] = seatAccounts(seat);
-    const seatAddress = seatSignIn && { platform: "email", accountId: seatSignIn.accountId };
-    const linkedAddress = linked.some(
-      (link) =>
-        link.platform === "email" && link.accountId.trim().toLowerCase() === seatAddress?.accountId,
-    );
-    if (seatAddress && !linkedAddress && ctx.identity.personOf(seatAddress)?.id === guardian.id) {
-      ctx.identity.removeAccount(seatAddress);
-    }
   }
 
   const done = settingValue(tx, INVITED_EMAILS_DONE_KEY);
@@ -134,6 +126,7 @@ function backfillWithinTx(tx: DrizzleTx): void {
       .onConflictDoUpdate({ target: settings.key, set: { value: storedRevision, updatedAt } })
       .run();
   }
+  signInsGiveMailWithinTx(ctx);
   const emails = memberEmailsWithinTx(ctx);
   // The guardian's email is a sign-in too: same email, same person.
   const signInEmails = [...emails, ...(seat ? seatAccounts(seat) : []).map((a) => a.accountId)];
@@ -164,19 +157,21 @@ function settingValue(tx: DrizzleTx, key: string): { value: unknown } | undefine
   return tx.select({ value: settings.value }).from(settings).where(eq(settings.key, key)).get();
 }
 
-// Each `email` account of a person with role member came from an invitation,
-// so it becomes the same address on the sign-in platform. One whose sign-in
-// account another person holds is only taken away, and the run logs it.
+// An earlier build gave a member an invitation's email as an `email` account
+// only, so one with no sign-in of the same address becomes that sign-in. One
+// whose sign-in account another person holds is only taken away, and the run
+// logs it. A member's mail account, which their sign-in gave, stays.
 function moveMemberEmailsToSignIns(ctx: SyncMemberContext): void {
   for (const { personId, role } of ctx.access.members()) {
     if (role !== "member") continue;
     for (const account of ctx.identity.accountsOf(personId)) {
       if (account.platform !== "email") continue;
-      ctx.identity.removeAccount(account);
       const signIn = { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: account.accountId };
       const holder = ctx.identity.personOf(signIn);
+      if (holder?.id === personId) continue;
+      ctx.identity.removeAccount(account);
       if (!holder) ctx.identity.addAccount(personId, signIn);
-      else if (holder.id !== personId) log.warn("a member's email is another person's sign-in");
+      else log.warn("a member's email is another person's sign-in");
     }
   }
 }
