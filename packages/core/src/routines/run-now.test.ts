@@ -28,7 +28,6 @@ const routineEngine = {
 
 beforeEach(() => {
   testDb = createTestDb();
-  // Every routine's chat is the guardian's private chat.
   routines = new RoutinesRepository(testDb.db);
   routineEngine.runNow.mockClear();
   routineEngine.cancelRun.mockClear();
