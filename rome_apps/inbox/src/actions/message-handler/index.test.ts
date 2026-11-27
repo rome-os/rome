@@ -6,7 +6,6 @@ import type {
   ActionConfig,
   AgentMessage,
   AgentRunnerInterface,
-  PersonRecord,
   RunParams,
 } from "@rome-os/app-runtime";
 import { ActionInvocationError } from "@rome-os/app-runtime";
@@ -86,7 +85,7 @@ function createAction(
 
 function createMessageHandlerDeps(
   overrides: {
-    personMappingRepo?: Record<string, unknown>;
+    guardianAccounts?: { platform: string; id: string }[];
     agentResponses?: AgentMessage[][];
     knownAgents?: string[];
     actionCapableAgents?: Record<string, string[]>;
@@ -117,15 +116,6 @@ function createMessageHandlerDeps(
 
   const deps = {
     agentRunner,
-    personMappingRepo: {
-      findByChannelUser: rs.fn(async () => null),
-      findByName: rs.fn(async () => []),
-      findByNameFuzzy: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      create: rs.fn(async () => "person-1"),
-      addChannelMapping: rs.fn(async () => undefined),
-      ...overrides.personMappingRepo,
-    },
     // Answers `wake.answer`.
     wakeGateFor: rs.fn(async () => (message: unknown, sender: WakeSender) => {
       wake.asked.push({ message, sender });
@@ -148,6 +138,7 @@ function createMessageHandlerDeps(
         return { status: "ok" };
       }),
       listRoutines: rs.fn(async () => []),
+      access: { guardianAccounts: rs.fn(async () => overrides.guardianAccounts ?? []) },
     },
     resolveProfilePath: (filePath: string) => filePath,
     strangerPersonId: STRANGER_PERSON_ID,
@@ -172,14 +163,6 @@ describe("buildMessageContext", () => {
       threadId: "thread-123",
       channelUserId: "user-456",
       displayName: "Alice",
-      person: {
-        id: "alice",
-        displayName: "Alice",
-        bondLevel: "inner-circle",
-        profilePath: "memory/relationship/alice.md",
-        channelMappings: [],
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      },
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
     });
@@ -209,7 +192,6 @@ describe("buildMessageContext", () => {
       threadType: "group",
       channelUserId: "user-456",
       displayName: "Alice",
-      person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
     });
@@ -230,7 +212,6 @@ describe("buildMessageContext", () => {
       threadType: "group" as const,
       channelUserId: "user-456",
       displayName: "Guardian",
-      person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
     };
@@ -254,7 +235,6 @@ describe("buildMessageContext", () => {
       threadId: "session-1",
       channelUserId: "guardian",
       displayName: "Guardian",
-      person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
     });
@@ -276,7 +256,6 @@ describe("buildMessageContext", () => {
       displayName: "Guardian",
       selectedProjectName: "alpha",
       selectedProjectPath: "/home/rome/.rome/default/projects/alpha",
-      person: null,
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
       strangerPersonId: STRANGER_PERSON_ID,
     });
@@ -318,18 +297,7 @@ describe("a message that wakes the agent", () => {
   });
 
   it("answers the guardian", async () => {
-    const guardian: PersonRecord = {
-      id: "alice",
-      displayName: "Alice",
-      bondLevel: "guardian",
-      channelMappings: [{ channel: "telegram", channelUserId: "alice-tg" }],
-      profilePath: null,
-    };
-
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => guardian),
-      },
       agentResponses: [[{ type: "result", content: "Sure." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -342,6 +310,7 @@ describe("a message that wakes the agent", () => {
       displayName: "Alice",
       text: "Can you answer?",
       messageId: "msg-1",
+      sender: { person: { id: "alice" }, guardian: true },
     });
 
     expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
@@ -360,29 +329,70 @@ describe("a message that wakes the agent", () => {
     ]);
   });
 
-  it("keeps an unlinked sender a stranger when their display name matches the guardian", async () => {
-    const guardian: PersonRecord = {
-      id: "alice",
-      displayName: "Alice",
-      bondLevel: "guardian",
-      channelMappings: [],
-      profilePath: null,
-    };
-    const findByNameFuzzy = rs.fn(async () => guardian);
-    const addChannelMapping = rs.fn(async () => undefined);
+  const telegram = {
+    channel: "telegram",
+    channelUserId: "alice-tg",
+    threadId: "thread-1",
+    threadType: "private",
+    displayName: "Alice",
+    text: "Can you answer?",
+    messageId: "msg-1",
+  };
 
+  const alice = { id: "alice" };
+  it.each([
+    {
+      who: "the guardian the host names",
+      args: { sender: { person: alice, guardian: true } },
+      person: alice,
+      bond: "guardian",
+    },
+    {
+      who: "a member the host names",
+      args: { sender: { person: alice, guardian: false } },
+      person: alice,
+      bond: "other",
+    },
+    {
+      who: "nobody, as the host says",
+      args: { sender: { person: null, guardian: false } },
+      person: null,
+      bond: "other",
+    },
+    {
+      who: "the guardian's account, the host naming nobody",
+      args: { platform: "telegram" },
+      person: null,
+      bond: "guardian",
+    },
+    {
+      who: "another account, the host naming nobody",
+      args: { platform: "telegram", channelUserId: "casey-tg" },
+      person: null,
+      bond: "other",
+    },
+    { who: "an account on an unknown platform", args: {}, person: null, bond: "other" },
+  ])("tells the wake gate and the turn who sent it: $who", async ({ args, person, bond }) => {
+    const { deps, agentRunner, wake } = createMessageHandlerDeps({
+      guardianAccounts: [{ platform: "telegram", id: "alice-tg" }],
+    });
+
+    await createAction(actionConfig, deps).execute({ ...telegram, ...args });
+
+    expect(wake.asked).toEqual([expect.objectContaining({ sender: { person } })]);
+    expect(agentRunner.calls[0].threadContext?.senderBondLevel).toBe(bond);
+  });
+
+  it("keeps a sender a stranger when only their display name matches the guardian", async () => {
     const { deps, agentRunner, sentMessages, wake } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => null),
-        findByNameFuzzy,
-        addChannelMapping,
-      },
+      guardianAccounts: [{ platform: "whatsapp", id: "15550199@s.whatsapp.net" }],
     });
     wake.answer = "quiet";
     const action = createAction(actionConfig, deps);
 
     const result = await action.execute({
       channel: "whatsapp",
+      platform: "whatsapp",
       channelUserId: "15550100@s.whatsapp.net",
       threadId: "thread-1",
       threadType: "private",
@@ -396,24 +406,12 @@ describe("a message that wakes the agent", () => {
       data: { action: "ignored_by_reply_settings" },
     });
     expect(wake.asked).toEqual([expect.objectContaining({ sender: { person: null } })]);
-    expect(findByNameFuzzy).not.toHaveBeenCalled();
-    expect(addChannelMapping).not.toHaveBeenCalled();
     expect(agentRunner.calls).toHaveLength(0);
     expect(sentMessages).toEqual([]);
   });
 
   it("passes provider reply context to the turn without persisting a synthetic message", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "ray",
-      displayName: "Ray",
-      bondLevel: "guardian",
-      channelMappings: [{ channel: "wechat", channelUserId: "ray-wechat" }],
-      profilePath: null,
-    };
     const { deps, agentRunner, conversations } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
       agentResponses: [[{ type: "result", content: "Sure." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -448,17 +446,7 @@ describe("a message that wakes the agent", () => {
   });
 
   it("deduplicates an inbound webhook before starting another agent turn", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "alice",
-      displayName: "Alice",
-      bondLevel: "guardian",
-      channelMappings: [{ channel: "telegram", channelUserId: "alice-tg" }],
-      profilePath: null,
-    };
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
       conversations: {
         addMessage: rs.fn(async () => ({ inserted: false })),
       },
@@ -484,18 +472,7 @@ describe("a message that wakes the agent", () => {
   });
 
   it("answers anyone else the same way, with no other agent", async () => {
-    const mappedPerson: PersonRecord = {
-      id: "casey",
-      displayName: "Casey",
-      bondLevel: "other",
-      channelMappings: [{ channel: "telegram", channelUserId: "casey-tg" }],
-      profilePath: null,
-    };
-
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: {
-        findByChannelUser: rs.fn(async () => mappedPerson),
-      },
       agentResponses: [[{ type: "result", content: "Sure." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -538,17 +515,8 @@ describe("per-channel agent routing", () => {
     rs.clearAllMocks();
   });
 
-  const guardianPerson: PersonRecord = {
-    id: "guardian",
-    displayName: "Guardian",
-    bondLevel: "guardian",
-    channelMappings: [{ channel: "discord", channelUserId: "g-discord" }],
-    profilePath: null,
-  };
-
   it("routes to the app-declared agent when channel binds one and it is in the catalog", async () => {
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main", "pm-assistant"],
       agentResponses: [[{ type: "result", content: "On it." }]],
     });
@@ -573,7 +541,6 @@ describe("per-channel agent routing", () => {
 
   it("uses the parent-derived routing for a native thread session", async () => {
     const { deps, conversations } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main", "parent-agent"],
       agentResponses: [[{ type: "result", content: "Child reply" }]],
     });
@@ -603,7 +570,6 @@ describe("per-channel agent routing", () => {
 
   it("opens the chat through a host that predates the chat names", async () => {
     const { deps, conversations } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [[{ type: "result", content: "Hi." }]],
     });
     // An older host offers the repository only as `conversations`, with only
@@ -639,7 +605,6 @@ describe("per-channel agent routing", () => {
 
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main"], // pm-assistant intentionally absent
       agentResponses: [[{ type: "result", content: "Hi from main." }]],
     });
@@ -664,7 +629,6 @@ describe("per-channel agent routing", () => {
     // validators); routing must not drop or re-route the message over that —
     // it honors the requested agent unchanged.
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [[{ type: "result", content: "Hi from pm-assistant." }]],
     });
     agentRunner.hasAgent = () => {
@@ -688,7 +652,6 @@ describe("per-channel agent routing", () => {
 
   it("defaults to main when routedAgentName is absent", async () => {
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [[{ type: "result", content: "Hi." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -718,14 +681,6 @@ describe("account agent", () => {
     rs.clearAllMocks();
   });
 
-  const guardianPerson: PersonRecord = {
-    id: "guardian",
-    displayName: "Guardian",
-    bondLevel: "guardian",
-    channelMappings: [{ channel: "feishu", channelUserId: "g-feishu" }],
-    profilePath: null,
-  };
-
   const inbound = (overrides: Record<string, unknown> = {}) => ({
     channel: "feishu-2",
     channelUserId: "g-feishu",
@@ -739,7 +694,6 @@ describe("account agent", () => {
 
   const guardianDeps = (knownAgents: string[]) =>
     createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents,
       agentResponses: [
         [{ type: "result", content: "Hi." }],
@@ -877,17 +831,8 @@ describe("guardian direct replies", () => {
     rs.clearAllMocks();
   });
 
-  const guardianPerson: PersonRecord = {
-    id: "guardian",
-    displayName: "Guardian",
-    bondLevel: "guardian",
-    channelMappings: [{ channel: "telegram", channelUserId: "g-telegram" }],
-    profilePath: null,
-  };
-
   it("sends a guardian's direct reply whole, without asking the host to stream it", async () => {
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [
         [
           { type: "result", content: "Here it is." },
@@ -913,14 +858,6 @@ describe("guardian direct replies", () => {
 });
 
 describe("a message the host recorded", () => {
-  const guardian: PersonRecord = {
-    id: "alice",
-    displayName: "Alice",
-    bondLevel: "guardian",
-    channelMappings: [{ channel: "telegram", channelUserId: "alice-tg" }],
-    profilePath: null,
-  };
-  const inner: PersonRecord = { ...guardian, bondLevel: "inner-circle" };
   const recordedArgs = {
     channel: "telegram",
     channelUserId: "alice-tg",
@@ -939,7 +876,6 @@ describe("a message the host recorded", () => {
   it("makes the recorded message the turn's prompt before the agent runs, storing nothing", async () => {
     let turnsWhenPromoted: number | undefined;
     const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => guardian) },
       agentResponses: [[{ type: "result", content: "Sure." }]],
       conversations: {
         promoteMessageToUser: rs.fn(async () => {
@@ -961,9 +897,7 @@ describe("a message the host recorded", () => {
   });
 
   it("leaves a message no agent answers as recorded", async () => {
-    const { deps, agentRunner, conversations, wake } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: rs.fn(async () => inner) },
-    });
+    const { deps, agentRunner, conversations, wake } = createMessageHandlerDeps({});
     wake.answer = "quiet";
 
     const result = await createAction(actionConfig, deps).execute(recordedArgs);
