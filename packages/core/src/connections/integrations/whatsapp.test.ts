@@ -86,16 +86,14 @@ function makeDeps(fake: FakeWhatsAppAdapter) {
     async upsertChats() {},
     async upsertMessages() {},
   };
-  const mapped: string[] = [];
   const deps = {
     syncSink: sync,
-    onAccountConnected: (jid: string) => mapped.push(jid),
     createAdapter: (authProvider: WhatsAppAuthProvider) => {
       fake.authProvider = authProvider;
       return fake as unknown as WhatsAppAdapter;
     },
   };
-  return { deps, mapped, sync };
+  return { deps, sync };
 }
 
 const runtimeKit = (persist: RuntimeKit["persist"] = async () => {}): RuntimeKit => ({
@@ -130,15 +128,13 @@ describe("whatsapp descriptor shape", () => {
     await expect(scheme.renew(sessionCred())).resolves.toBe("needs-fix");
   });
 
-  it("threads the store sink + guardian-map callback into the adapter", () => {
+  it("threads the store sink into the adapter", () => {
     const fake = new FakeWhatsAppAdapter();
-    const { deps, mapped, sync } = makeDeps(fake);
+    const { deps, sync } = makeDeps(fake);
     const desc = createWhatsAppDescriptor(deps);
     desc.capabilities.talker!.build(sessionCred(), runtimeKit());
 
     expect(fake.sync).toBe(sync);
-    fake.connectedCb?.("15550100@s.whatsapp.net");
-    expect(mapped).toEqual(["15550100@s.whatsapp.net"]);
   });
 
   it("forwards saveIncomingAttachments and awaits stop()", async () => {
@@ -308,7 +304,6 @@ describe("whatsapp inbound delivery", () => {
         async upsertChats() {},
         async upsertMessages() {},
       },
-      onAccountConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }).capabilities.talker!.build(sessionCred(), runtimeKit());
     return { talker, handlers };

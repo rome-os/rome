@@ -14,7 +14,8 @@
 // grant) critical section. `grant` resolves the ADDRESSED connection (never
 // blindly `find()[0]`, which could clobber a different connection of the same
 // connection kind), mints the placeholder for the offerable flow, persists the
-// credential + profile, and runs the write a `ConnectParticipant` joins — ALL in
+// credential + profile, and runs the write a `ConnectParticipant` joins to an
+// own-account connect — ALL in
 // one DB transaction. A failed joined write rolls the credential and the mint
 // back with it, so a failed grant leaves zero residual state instead of a
 // credential authorized while the setup reports `failed`.
@@ -47,7 +48,7 @@ export interface SetupRegistry {
 
 export interface SetupManagerDeps {
   registry: SetupRegistry;
-  /** Joins each connect whose grant reports who gave the access. */
+  /** Joins each connect signed in as the account that gave the access. */
   participant?: ConnectParticipant;
 }
 
@@ -320,11 +321,15 @@ export class SetupManager {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
       if (signal.aborted) throw new SetupAbortError();
+      const ownAccount = ownAccountOf(
+        this.#deps.registry.getDescriptor(target.connectionKind),
+        given,
+      );
       const joined =
-        given.connectedBy && this.#deps.participant
+        ownAccount && this.#deps.participant
           ? await this.#deps.participant.prepare({
               platform: platformOf(target.connectionKind),
-              connectedBy: given.connectedBy,
+              accountId: ownAccount,
             })
           : undefined;
       const opts = {
@@ -348,4 +353,12 @@ export class SetupManager {
       return { connectionId: connection.id, ...(ended ? { ended } : {}) };
     });
   }
+}
+
+/** The account a grant reaches when the account that gave the access is that
+ *  same account, as for a signed-in user session, or null for a bot or an
+ *  app, whose account is not the one that connected it. */
+function ownAccountOf(descriptor: ConnectionDescriptor | null, grant: SetupGrant): string | null {
+  const reached = grant.profile ? descriptor?.accountIdOf?.(grant.profile) : null;
+  return reached && reached === grant.connectedBy?.id ? reached : null;
 }

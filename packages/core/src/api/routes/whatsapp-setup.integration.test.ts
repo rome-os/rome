@@ -6,7 +6,7 @@
 // external WhatsApp socket boundary, which issues rotating linking QRs and then
 // opens once "scanned".
 
-import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
+import { ownAccountConnected } from "../../access/application/own-account-connect.js";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "./setups.js";
@@ -15,7 +15,6 @@ import {
   WhatsAppAdapter,
   type WhatsAppSocketFactory,
 } from "../../connections/kinds/whatsapp/whatsapp.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
@@ -71,19 +70,10 @@ function harness() {
         upsertChats: async () => {},
         insertMessages: async () => {},
       } as never,
-      onAccountConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }),
   );
-  const peopleRepo = {
-    byAccount: async () => null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [],
-  } as unknown as PeopleRepository;
-  const setupManager = new SetupManager({
-    registry,
-    participant: linkGuardianOnConnect(peopleRepo),
-  });
+  const setupManager = new SetupManager({ registry, participant: ownAccountConnected() });
   const deps = { connectionRegistry: registry, setupManager } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps));
   return { app, sockets };

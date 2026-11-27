@@ -87,6 +87,17 @@ export function linkedinProfileFromIdentity(
   return linkedinGrantProfileSchema.parse(raw);
 }
 
+/** The account a LinkedIn grant is signed in as: the member id, or the
+ *  profile URL when `whoami` names only the public id. Both the connection's
+ *  account and the account that connected it read this one value. */
+export function linkedinAccountIdOf(profile: ProfileRecord): string | null {
+  if (typeof profile.plainId === "string" && profile.plainId) return profile.plainId;
+  if (typeof profile.publicId === "string" && profile.publicId) {
+    return `https://www.linkedin.com/in/${profile.publicId}/`;
+  }
+  return null;
+}
+
 function toLinkedInDisplay(profile: LinkedInGrantProfile): ProfileDisplay {
   return Object.freeze({
     displayName: profile.displayName,
@@ -224,16 +235,11 @@ export function makeLinkedInSetup(deps: {
     }
 
     const profile = linkedinProfileFromIdentity(identity, new Date()) ?? undefined;
+    const signedInAs = profile ? linkedinAccountIdOf(profile) : null;
     return {
       credential: browserSessionCredential(),
       profile,
-      // The signed-in account, under the id `accountIdOf` records on the
-      // channel, so the two name one account.
-      ...(identity.plainId
-        ? { connectedBy: { id: identity.plainId } }
-        : identity.publicId
-          ? { connectedBy: { id: `https://www.linkedin.com/in/${identity.publicId}/` } }
-          : {}),
+      ...(signedInAs ? { connectedBy: { id: signedInAs } } : {}),
       summary: {
         title: "LinkedIn connected",
         body: [
@@ -275,7 +281,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     connectionKind: "linkedin",
     label: "LinkedIn",
     reviveProfile: (record) => reviveLinkedInProfile(record),
-    accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
+    accountIdOf: linkedinAccountIdOf,
     grant: "session",
     // Today's behaviour, stated: chats wake on every message the platform
     // delivers, and only the session reset is the guardian's to set.

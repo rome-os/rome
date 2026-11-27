@@ -3077,15 +3077,6 @@ export interface PersonRecord {
 }
 
 /**
- * Who people are, as an app may ask. An action receives it as `deps.people`.
- */
-export interface PeopleService {
-  /** The guardian's linked accounts, to reach them on with `deps.chats.dm`.
-   *  Empty while no account is linked to the guardian. */
-  guardian(): Promise<{ accounts: Account[] }>;
-}
-
-/**
  * The people the host knows and the accounts linked to each. Named for the
  * table it once read; see {@link ChannelMappingRecord}. A `channel` passed in
  * names a channel, such as a message's `channel`, and the host reads it as the
