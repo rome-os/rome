@@ -540,7 +540,7 @@ export async function buildConciergeTools(
     if (answers !== undefined) {
       if ((await webchatRepo.getReplyTarget(chatId, answers))?.role !== "user") {
         throw new Error(
-          `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
+          `No message ${answers} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
         );
       }
       return answers;
@@ -645,7 +645,7 @@ export async function buildConciergeTools(
     if (answers !== undefined) {
       if (!(await isPersonMessage(answers))) {
         throw new Error(
-          `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
+          `No message ${answers} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
         );
       }
       return answers;
@@ -767,7 +767,7 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const refusal = (id: string) =>
       new Error(
-        `No guardian message ${id} in this chat. Pass a message_id from a <chat_thread> line.`,
+        `No message ${id} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
       );
     if (messageId !== undefined) {
       if ((await webchatRepo.getReplyTarget(chatId, messageId))?.role !== "user") {
@@ -1002,7 +1002,7 @@ export async function buildConciergeTools(
             return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
           }
           if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
-            throw new Error(`No guardian message ${messageId} in this chat.`);
+            throw new Error(`Could not react to message ${messageId} in this chat.`);
           }
           // A reaction is how the turn handles the message, so it never shows
           // working (docs/domains/chats.md#status).
