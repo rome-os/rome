@@ -121,7 +121,9 @@ volumes:
 
 Before making the Web UI available on a trusted LAN, set `ROME_NODE_UI_PASSWORD` in Compose or finish first-run browser setup with access limited to the Docker host. Then replace `127.0.0.1:4310:4310` with `<LAN-IP>:4310:4310` and open `http://<LAN-IP>:4310` from another machine. When running `rome-node web` directly on a loopback bind (`127.0.0.1`), local loopback access stays passwordless until a password is set.
 
-Set `ROME_NODE_UI_PASSWORD` before starting an unattended or internet-exposed deployment. Anyone who can reach the Web UI during the 10-minute setup window can set the first password.
+First-run browser setup accepts `localhost`, names ending in `.localhost`, and IP addresses by default. To block DNS rebinding, the Web UI rejects other hostnames during setup unless you list them in `ROME_NODE_UI_SETUP_HOSTS`. For a reverse proxy with custom domains, set this variable to a comma-separated list such as `rome.example.com,rome.lan` before starting Rome Node. Include any custom hostnames the proxy forwards in `X-Forwarded-Host`. Once you set a password, the Web UI accepts reverse-proxy domains without this list.
+
+Set `ROME_NODE_UI_PASSWORD` before starting an unattended or internet-exposed deployment. Anyone who can reach the Web UI through an allowed host during the 10-minute setup window can set the first password.
 
 After approval, the container connects to the account Gateway and appears on
 **Settings → Devices** and in `rome-node device`. From the Web UI you can:

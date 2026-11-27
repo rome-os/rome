@@ -91,6 +91,10 @@ password configured, open the Web UI within 10 minutes of startup to set the fir
 password. If the window expires, restart the server to reopen it or set
 ROME_NODE_UI_PASSWORD and restart.
 
+First-run setup accepts localhost, .localhost names, and IP addresses by default
+to block DNS rebinding. For a custom domain behind a reverse proxy, list the domain
+in ROME_NODE_UI_SETUP_HOSTS.
+
 Web UI static assets are prebuilt in the official Docker image (ghcr.io/rome-os/rome-node)
 and available in a monorepo checkout after building @rome-os/node-web. The standalone
 @rome-os/node npm package does not bundle frontend assets; pass --assets-dir to serve
@@ -107,6 +111,7 @@ Environment:
   ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
   ROME_NODE_UI_PASSWORD     Optional password for the Web UI (overrides any UI-managed password
                             and skips first-run browser setup).
+  ROME_NODE_UI_SETUP_HOSTS  Comma-separated custom hostnames allowed during first-run setup.
   ROME_NODE_WEB_ASSETS_DIR  Directory containing the built Web UI assets.
 
 Example:

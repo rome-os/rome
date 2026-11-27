@@ -38,20 +38,11 @@ export async function ensurePrivateDirectory(dir: string): Promise<void> {
   } else await chmod(dir, 0o700);
 }
 
-export interface WritePrivateJsonOptions {
-  beforeCommit?: () => void;
-}
-
-export async function writePrivateJson(
-  path: string,
-  value: unknown,
-  options?: WritePrivateJsonOptions,
-): Promise<void> {
+export async function writePrivateJson(path: string, value: unknown): Promise<void> {
   await ensurePrivateDirectory(dirname(path));
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
-    options?.beforeCommit?.();
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });

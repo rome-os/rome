@@ -18,6 +18,7 @@ import {
   DEFAULT_SETUP_WINDOW_MS,
   hasDuplicateHostHeader,
   isSecureRequest,
+  parseAllowedSetupHosts,
   resolveSetupWindowMs,
   validateNewPassword,
   type PasswordSource,
@@ -39,6 +40,27 @@ const SETUP_EXPIRED = {
     "First-run setup window has expired. Restart the server or set ROME_NODE_UI_PASSWORD to continue.",
   code: "setup_expired",
 };
+const UNTRUSTED_SETUP_HOST = {
+  error:
+    "First-run setup only allows localhost, IP addresses, or hosts listed in ROME_NODE_UI_SETUP_HOSTS. Open via localhost/IP, add this host to ROME_NODE_UI_SETUP_HOSTS, or set ROME_NODE_UI_PASSWORD.",
+  code: "untrusted_setup_host",
+};
+const UNTRUSTED_SETUP_HOST_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rome Node — First-Run Setup</title>
+  </head>
+  <body>
+    <main>
+      <h1>This host is blocked during first-run setup</h1>
+      <p>Open the Web UI via <code>localhost</code> or an IP address.</p>
+      <p>To use this domain, add it to <code>ROME_NODE_UI_SETUP_HOSTS</code> and restart Rome Node.</p>
+      <p>To skip first-run setup, set <code>ROME_NODE_UI_PASSWORD</code> and restart Rome Node.</p>
+    </main>
+  </body>
+</html>`;
 
 const UNTRUSTED_HOST_HTML = `<!doctype html>
 <html lang="en">
@@ -74,6 +96,7 @@ export interface WebServerOptions {
   explicitName?: boolean;
   assetsDir?: string;
   password?: string;
+  allowedSetupHosts?: readonly string[];
   setupWindowMs?: number;
   monotonicNow?: () => number;
   version?: string;
@@ -153,6 +176,8 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     host: options.host,
     configDirectory: options.configDirectory,
     password: options.password,
+    allowedSetupHosts:
+      options.allowedSetupHosts ?? parseAllowedSetupHosts(process.env.ROME_NODE_UI_SETUP_HOSTS),
     now: options.deps?.now,
     monotonicNow: options.monotonicNow,
     setupWindowMs: options.setupWindowMs,
@@ -262,18 +287,25 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     }
 
     if (!auth.isTrustedHost(req)) {
+      const setup = auth.passwordSource === "setup";
       if (pathname.startsWith("/api/")) {
-        sendJson(res, 403, {
-          error:
-            "Local passwordless mode only allows localhost requests. Set a password from localhost or via ROME_NODE_UI_PASSWORD for remote access.",
-        });
+        sendJson(
+          res,
+          403,
+          setup
+            ? UNTRUSTED_SETUP_HOST
+            : {
+                error:
+                  "Local passwordless mode only allows localhost requests. Set a password from localhost or via ROME_NODE_UI_PASSWORD for remote access.",
+              },
+        );
       } else {
         res
           .writeHead(403, {
             "content-type": "text/html; charset=utf-8",
             "cache-control": "no-store",
           })
-          .end(UNTRUSTED_HOST_HTML);
+          .end(setup ? UNTRUSTED_SETUP_HOST_HTML : UNTRUSTED_HOST_HTML);
       }
       return;
     }

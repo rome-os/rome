@@ -45,6 +45,7 @@ export interface WebAuthOptions {
   host: string;
   configDirectory?: string;
   password?: string;
+  allowedSetupHosts?: readonly string[];
   now?: () => number;
   monotonicNow?: () => number;
   setupWindowMs?: number;
@@ -60,8 +61,6 @@ type SetupResult =
   | { status: "ok"; sessionId: string }
   | { status: "expired" }
   | { status: "conflict" };
-
-class SetupExpiredError extends Error {}
 
 type RateLimitReservation =
   | {
@@ -135,7 +134,7 @@ function parseHostHeader(
 ): { hostname: string; port: number | null } | null {
   if (typeof hostHeader !== "string" || hostHeader !== hostHeader.trim()) return null;
   const ipv6 = /^\[([0-9a-f:.]+)\](?::(\d{1,5}))?$/i.exec(hostHeader);
-  const match = ipv6 ?? /^([a-z0-9.-]+)(?::(\d{1,5}))?$/i.exec(hostHeader);
+  const match = ipv6 ?? /^([a-z0-9_.-]+)(?::(\d{1,5}))?$/i.exec(hostHeader);
   if (!match?.[1]) return null;
 
   const hostname = match[1].toLowerCase();
@@ -143,17 +142,34 @@ function parseHostHeader(
   if (port !== null && (port < 1 || port > 65535)) return null;
   if (ipv6) {
     if (isIP(hostname) !== 6) return null;
-  } else if (isIP(hostname) !== 4) {
+  } else {
     const dnsName = hostname.replace(/\.$/, "");
     if (
-      dnsName.length > 253 ||
-      /^[\d.]+$/.test(dnsName) ||
-      !dnsName.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+      isIP(dnsName) !== 4 &&
+      (dnsName.length > 253 ||
+        /^[\d.]+$/.test(dnsName) ||
+        !dnsName
+          .split(".")
+          .every((label) => /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/.test(label)))
     ) {
       return null;
     }
   }
   return { hostname, port };
+}
+
+function normalizeSetupHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.$/, "");
+}
+
+export function parseAllowedSetupHosts(raw: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const value of raw?.split(",") ?? []) {
+    const entry = value.trim();
+    const parsed = parseHostHeader(isIP(entry) === 6 ? `[${entry}]` : entry);
+    if (parsed) hosts.add(normalizeSetupHostname(parsed.hostname));
+  }
+  return [...hosts];
 }
 
 export function resolveSetupWindowMs(value?: number): number {
@@ -185,6 +201,14 @@ function parseStoredPassword(raw: unknown): ActivePassword | null {
   const hash = Buffer.from(raw.hash, "hex");
   if (salt.byteLength !== 16 || hash.byteLength !== SCRYPT_KEY_LENGTH) return null;
   return { salt, hash };
+}
+
+function storedPasswordRecord(password: ActivePassword): StoredPasswordRecord {
+  return {
+    version: 1,
+    salt: password.salt.toString("hex"),
+    hash: password.hash.toString("hex"),
+  };
 }
 
 export function validateNewPassword(candidate: unknown): string | null {
@@ -225,15 +249,15 @@ export function isSecureRequest(req: IncomingMessage): boolean {
 
 export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   const wallNow = options.now ?? (() => Date.now());
-  const monotonicNow = options.monotonicNow ?? options.now ?? (() => performance.now());
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const bindIsLoopback = isLoopbackHost(options.host);
   const authPath = options.configDirectory ? join(options.configDirectory, AUTH_FILE_NAME) : null;
   const envPassword = options.password?.trim() ? options.password : undefined;
+  const allowedSetupHosts = new Set(options.allowedSetupHosts?.map(normalizeSetupHostname));
 
   let passwordSource: PasswordSource = "none";
   let activePassword: ActivePassword | null = null;
   let setupInFlight = false;
-  let setupCommitting = false;
   let setupExpired = false;
 
   if (envPassword !== undefined) {
@@ -274,17 +298,21 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     passwordSource = "setup";
   }
   const setupWindowMs = resolveSetupWindowMs(options.setupWindowMs);
-  const setupStartedWallAt = passwordSource === "setup" ? wallNow() : 0;
+  let setupStartedWallAt = passwordSource === "setup" ? wallNow() : 0;
   let setupStartedMonoAt = passwordSource === "setup" ? monotonicNow() : null;
 
   function setupRemainingMs(): number {
     if (setupStartedMonoAt === null || setupExpired) return 0;
     const elapsed = Math.max(0, monotonicNow() - setupStartedMonoAt);
-    if (!setupCommitting && elapsed >= setupWindowMs) {
+    if (elapsed >= setupWindowMs) {
       setupExpired = true;
       return 0;
     }
     return Math.max(1, Math.min(setupWindowMs, Math.ceil(setupWindowMs - elapsed)));
+  }
+
+  function isSetupExpired(): boolean {
+    return setupRemainingMs() === 0;
   }
 
   const sessions = new Map<string, number>();
@@ -349,9 +377,33 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     return true;
   }
 
+  function isTrustedSetupHostname(hostname: string): boolean {
+    const normalized = normalizeSetupHostname(hostname);
+    return (
+      normalized === "localhost" ||
+      normalized.endsWith(".localhost") ||
+      isIP(hostname) !== 0 ||
+      allowedSetupHosts.has(normalized)
+    );
+  }
+
   function isTrustedHost(req: IncomingMessage): boolean {
-    if (passwordSource !== "none") return true;
-    return isLoopbackRequest(req);
+    if (passwordSource === "none") return isLoopbackRequest(req);
+    if (passwordSource !== "setup") return true;
+    if (hasDuplicateHostHeader(req)) return false;
+    const host = parseHostHeader(req.headers.host);
+    if (host === null || !isTrustedSetupHostname(host.hostname)) return false;
+
+    const forwardedHost = req.headers["x-forwarded-host"];
+    if (typeof forwardedHost === "string" && forwardedHost.trim() !== "") {
+      for (const [index, hop] of forwardedHost.split(",").entries()) {
+        const value = hop.trim();
+        if (index > 0 && value === "") continue;
+        const parsed = parseHostHeader(value);
+        if (parsed === null || !isTrustedSetupHostname(parsed.hostname)) return false;
+      }
+    }
+    return true;
   }
 
   async function verifyPassword(candidate: string): Promise<boolean> {
@@ -389,15 +441,14 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     if (typeof origin !== "string") return true;
     try {
       const parsedOrigin = new URL(origin);
-      const expectedProtocol = isSecureRequest(req) ? "https:" : "http:";
-      if (parsedOrigin.protocol !== expectedProtocol) return false;
+      if (parsedOrigin.protocol !== "http:" && parsedOrigin.protocol !== "https:") return false;
       if (passwordSource === "none" && !isLoopbackHost(parsedOrigin.hostname)) return false;
       const originHostname = parsedOrigin.hostname.toLowerCase().replace(/^\[|\]$/g, "");
       const hostHostname =
         isIP(host.hostname) === 6
           ? new URL(`http://[${host.hostname}]`).hostname.slice(1, -1)
           : host.hostname;
-      const defaultPort = expectedProtocol === "https:" ? 443 : 80;
+      const defaultPort = parsedOrigin.protocol === "https:" ? 443 : 80;
       const originPort = parsedOrigin.port ? Number(parsedOrigin.port) : defaultPort;
       return originHostname === hostHostname && originPort === (host.port ?? defaultPort);
     } catch {
@@ -489,56 +540,47 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     return id;
   }
 
-  async function saveFilePassword(newPassword: string, completingSetup = false): Promise<string> {
-    if (!authPath) {
-      throw new Error("Configuration directory is not available for password storage.");
-    }
-    const next = await hashPassword(newPassword);
-    const record: StoredPasswordRecord = {
-      version: 1,
-      salt: next.salt.toString("hex"),
-      hash: next.hash.toString("hex"),
-    };
-    if (completingSetup && setupRemainingMs() === 0) throw new SetupExpiredError();
-    try {
-      await writePrivateJson(authPath, record, {
-        beforeCommit: completingSetup
-          ? () => {
-              if (setupRemainingMs() === 0) throw new SetupExpiredError();
-              // Storage starts rename in the same turn. Expiry can latch again only if the write fails.
-              setupCommitting = true;
-            }
-          : undefined,
-      });
-      activePassword = next;
-      passwordSource = "file";
-      setupStartedMonoAt = null;
-      setupExpired = false;
-    } finally {
-      setupCommitting = false;
-    }
+  function activateFilePassword(next: ActivePassword): string {
+    activePassword = next;
+    passwordSource = "file";
+    setupStartedMonoAt = null;
+    setupStartedWallAt = 0;
+    setupExpired = false;
     sessions.clear();
     return createSession();
   }
 
   async function completeSetup(newPassword: string): Promise<SetupResult> {
-    if (passwordSource !== "setup") return { status: "conflict" };
-    if (setupRemainingMs() === 0) return { status: "expired" };
-    if (setupInFlight) return { status: "conflict" };
+    if (passwordSource !== "setup" || setupStartedMonoAt === null || setupInFlight) {
+      return { status: "conflict" };
+    }
+    if (isSetupExpired()) return { status: "expired" };
+    // Hold the reservation across hashing and the file write so only one setup can finish.
     setupInFlight = true;
     try {
-      const sessionId = await saveFilePassword(newPassword, true);
+      if (passwordSource !== "setup" || setupStartedMonoAt === null) return { status: "conflict" };
+      if (isSetupExpired()) return { status: "expired" };
+      if (!authPath) {
+        throw new Error("Configuration directory is not available for password storage.");
+      }
+      const next = await hashPassword(newPassword);
+      if (isSetupExpired()) return { status: "expired" };
+      const record = storedPasswordRecord(next);
+      await writePrivateJson(authPath, record);
+      const sessionId = activateFilePassword(next);
       return { status: "ok", sessionId };
-    } catch (error) {
-      if (error instanceof SetupExpiredError) return { status: "expired" };
-      throw error;
     } finally {
       setupInFlight = false;
     }
   }
 
   async function setPassword(newPassword: string): Promise<string> {
-    return saveFilePassword(newPassword);
+    if (!authPath) {
+      throw new Error("Configuration directory is not available for password storage.");
+    }
+    const next = await hashPassword(newPassword);
+    await writePrivateJson(authPath, storedPasswordRecord(next));
+    return activateFilePassword(next);
   }
 
   async function removePassword(): Promise<void> {
