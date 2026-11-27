@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.1.9](https://github.com/rome-os/rome/compare/node-core-v0.1.8...node-core-v0.1.9) (2026-11-27)
+
+
+### Features
+
+* **node-core:** bridge the Computer Use helper ([#2719](https://github.com/rome-os/rome/issues/2719)) ([1604fc9](https://github.com/rome-os/rome/commit/1604fc9fd6ef4d41d54d3c6f39c9ce26eb59de68))
+* **node-core:** serve window control on full macOS hosts ([#2767](https://github.com/rome-os/rome/issues/2767)) ([6dc564f](https://github.com/rome-os/rome/commit/6dc564ffc96c181f11e33ed24258f1b71f111116))
+* **node:** add a macOS Computer Use permission guide ([#2812](https://github.com/rome-os/rome/issues/2812)) ([143ac29](https://github.com/rome-os/rome/commit/143ac29867660a8bd54ed7c49a8298d216c9e43b))
+* **node:** add Audit log view to Rome Node Web UI ([#2542](https://github.com/rome-os/rome/issues/2542)) ([2511b5d](https://github.com/rome-os/rome/commit/2511b5d2579a7e5f8ab9c43edc6c0feb309600bb))
+* **rome-node:** add computer-use host for node daemon ([#2565](https://github.com/rome-os/rome/issues/2565)) ([f4fa3ea](https://github.com/rome-os/rome/commit/f4fa3eaa734e9fc959ac68c36a8927cfccb11431))
+* **rome-node:** add computer-use protocol bridge ([#2564](https://github.com/rome-os/rome/issues/2564)) ([8f93d6c](https://github.com/rome-os/rome/commit/8f93d6c1cf82ebf481d56782771df56d8b68992b))
+* **rome-node:** add macOS native computer-use helper ([#2563](https://github.com/rome-os/rome/issues/2563)) ([ee6ceca](https://github.com/rome-os/rome/commit/ee6cecab4d646392835ced73219cf1abdf8a20a2))
+* **rome-node:** add the macOS computer use helper ([#2713](https://github.com/rome-os/rome/issues/2713)) ([4a904d8](https://github.com/rome-os/rome/commit/4a904d86e94aedd9e09665a248fbe25f4c4197f1))
+* **rome-node:** bundle macOS computer-use in node builds ([#2566](https://github.com/rome-os/rome/issues/2566)) ([16ecc98](https://github.com/rome-os/rome/commit/16ecc98dd3f5f2dc879da309f4a9b7bc1ffd4e54))
+* **rome-node:** bundle the macOS computer-use helper ([#2792](https://github.com/rome-os/rome/issues/2792)) ([a49c3cb](https://github.com/rome-os/rome/commit/a49c3cbd2542e3df908707f10b9fc577ddf5d282))
+
+
+### Bug Fixes
+
+* **computer-use:** harden approvals, revocation, queueing, web UI, and macOS helper ([#2654](https://github.com/rome-os/rome/issues/2654)) ([ddf7451](https://github.com/rome-os/rome/commit/ddf7451a83f044bfceed71f2d33d690d16936818))
+* **node-core:** keep macOS window control in background ([#2797](https://github.com/rome-os/rome/issues/2797)) ([79e2397](https://github.com/rome-os/rome/commit/79e2397de2ba2de7a4d61741db754d5de64d64fc))
+
+
+### Reverts
+
+* remove computer-use Core & Web integration (Option 1 - Part 1/2) ([#2697](https://github.com/rome-os/rome/issues/2697)) ([b5eef6f](https://github.com/rome-os/rome/commit/b5eef6f8ab8f45dad5bf45451964ea53ea6c4d21))
+* remove computer-use macOS helper & Rome Node host (Option 1 - Part 2/2) ([#2700](https://github.com/rome-os/rome/issues/2700)) ([afd09fd](https://github.com/rome-os/rome/commit/afd09fdac09dc8264d9a805d624f5e781b4cf39a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * optionalDependencies
+    * @rome-os/node-core-darwin-arm64 bumped to 0.1.9
+
 ## [0.1.8](https://github.com/rome-os/rome/compare/node-core-v0.1.7...node-core-v0.1.8) (2026-11-11)
 
 
