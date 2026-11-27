@@ -38,7 +38,9 @@ import {
   isValidInstanceToken,
   persistInstanceToken,
 } from "../../instance/instance-identity.js";
+import { deriveInstanceOrigin } from "../../instance/instance-env.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
+import { resolveInstanceSlug } from "../../instance/runtime.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
@@ -314,8 +316,9 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         return c.json({ error: "unverified_identity" }, 401);
       }
 
-      // The phone carries no guardian session, so it never links a seat.
-      if (await seatRefuses(identity.accountId, "native", false)) {
+      // The phone carries no guardian session, so it links a seat only where
+      // Rome Cloud has already checked the owner.
+      if (await seatRefuses(identity.accountId, "native", cloudCheckedOwner(entry.redirectUri))) {
         return c.json({ error: "not_owner" }, 403);
       }
       const guardian = await getGuardianAuthState(deps.db);
@@ -436,8 +439,9 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
 
       // Checked before a vanilla box persists the instance token, so a refused
       // account never links the box either.
-      const guardianSignedIn = (await resolveGuardianSession(c, deps.db)) !== null;
-      if (await seatRefuses(accountId, "browser", guardianSignedIn)) return notOwnerRedirect(c);
+      const mayLink =
+        cloudCheckedOwner(entry.redirectUri) || (await resolveGuardianSession(c, deps.db)) !== null;
+      if (await seatRefuses(accountId, "browser", mayLink)) return notOwnerRedirect(c);
 
       // Vanilla: the token leg also minted the durable instance token. Persist it
       // before issuing the session so an enrolled box never lacks its credential.
@@ -475,17 +479,18 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
 
   // Rome decides the role from its own records, and sign-in never moves the
   // seat. The seat's account signs in as the guardian. A seat with no recorded
-  // account (a password-only Rome) is linked only while the guardian is signed
-  // in, so a bare Rome Cloud sign-in cannot claim it. A Rome with no seat is a
-  // first connect, and its first account becomes the guardian.
+  // account (a password-only Rome) is linked only when `mayLink`: the guardian
+  // is signed in, or Rome Cloud has already checked the owner. A bare Rome
+  // Cloud sign-in cannot claim it otherwise. A Rome with no seat is a first
+  // connect, and its first account becomes the guardian.
   async function seatRefuses(
     accountId: string,
     channel: PendingLogin["channel"],
-    guardianSignedIn: boolean,
+    mayLink: boolean,
   ) {
     const guardian = await getGuardianAuthState(deps.db);
     if (!guardian.exists || guardian.accountId === accountId) return false;
-    if (guardian.accountId === null && guardianSignedIn) return false;
+    if (guardian.accountId === null && mayLink) return false;
     // The seat's account beside the refused one lets support tell a stale
     // binding from a real non-owner.
     log.warn("cloud login refused: account does not own this instance", {
@@ -494,6 +499,16 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       recordedAccountId: guardian.accountId,
     });
     return true;
+  }
+
+  // Rome Cloud issues a code for its hosted `https://<slug>.<PANTHEON_DOMAIN>`
+  // origin only to the instance's owner, so a code delivered there names the
+  // owner. A hosted seat with no account (an old release, or provisioning) is
+  // repaired by that owner's sign-in.
+  function cloudCheckedOwner(redirectUri: string): boolean {
+    const slug = resolveInstanceSlug();
+    const hosted = slug ? deriveInstanceOrigin(slug) : null;
+    return hosted !== null && new URL(redirectUri).origin === hosted;
   }
 
   // A signed-in Rome Cloud account that does not own this box. The login UI has

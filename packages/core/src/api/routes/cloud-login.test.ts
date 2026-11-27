@@ -83,7 +83,12 @@ const ISSUER = "http://localhost:3100";
 // Rome Cloud always appends `iss` to the callback (RFC 9207); the callback now
 // requires it, so the happy-path requests carry it.
 const ISS = encodeURIComponent(ISSUER);
-const ENV_KEYS = ["PANTHEON_BASE_ORIGIN"] as const;
+const ENV_KEYS = [
+  "PANTHEON_BASE_ORIGIN",
+  "PANTHEON_SLUG",
+  "PANTHEON_DOMAIN",
+  "PANTHEON_INSTANCE_ORIGIN",
+] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -96,7 +101,18 @@ beforeEach(() => {
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
+  delete process.env.PANTHEON_SLUG;
+  delete process.env.PANTHEON_DOMAIN;
+  delete process.env.PANTHEON_INSTANCE_ORIGIN;
 });
+
+// A box Rome Cloud hosts at `https://<slug>.<PANTHEON_DOMAIN>`, where Rome Cloud
+// approves only the instance's owner.
+function hostAt(slug: string, domain: string, origin?: string): void {
+  process.env.PANTHEON_SLUG = slug;
+  process.env.PANTHEON_DOMAIN = domain;
+  if (origin) process.env.PANTHEON_INSTANCE_ORIGIN = origin;
+}
 
 afterEach(() => {
   for (const key of ENV_KEYS) {
@@ -617,6 +633,25 @@ describe("/api/auth/cloud — bound instance", () => {
     expect(sessionUserId(res)).toBeNull();
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBeNull();
+  });
+
+  it.each([
+    ["Rome Cloud hosts the box", undefined, "A"],
+    ["the box is served at its own domain", "https://rome.example.com", null],
+  ])("on a hosted seat with no recorded account, a bare sign-in links it when %s", async (_label, origin, linked) => {
+    hostAt("acme", "romeos.test", origin);
+    insertGuardian({ accountId: null });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(sessionUserId(res)).toBe(linked);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBe(linked);
   });
 
   it("links a seat with no recorded account while the guardian is signed in", async () => {
@@ -1505,6 +1540,16 @@ describe("/api/auth/cloud/native/complete — guardian seat", () => {
     expect(res.status).toBe(403);
     expect(body).toEqual({ error: "not_owner" });
     expect(guardianRow()?.accountId).toBeNull();
+  });
+
+  it("links a hosted seat with no recorded account, where Rome Cloud checked the owner", async () => {
+    hostAt("acme", "romeos.test");
+    insertGuardian({ accountId: null });
+
+    const { res } = await nativeSignIn({ sub: "A" });
+
+    expect(res.status).toBe(200);
+    expect(guardianRow()?.accountId).toBe("A");
   });
 
   it("creates a missing seat for the first account", async () => {
