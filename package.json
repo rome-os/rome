@@ -33,6 +33,7 @@
     "lint:prose": "node scripts/check-prose.mjs",
     "lint:agents": "tsx lint/agents-md.ts",
     "lint:agent-tools": "tsx lint/agent-tools.ts",
+    "lint:docs": "tsx lint/docs-skeleton.ts",
     "lint:imports": "tsx lint/import-rules.ts",
     "lint:inside-checks": "tsx lint/inside-checks.ts",
     "imports-of": "tsx scripts/imports-of.ts",
