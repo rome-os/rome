@@ -33,23 +33,41 @@ function read(root: string, file: string): string | null {
   return existsSync(full) && statSync(full).isFile() ? readFileSync(full, "utf8") : null;
 }
 
+/** The text of a doc without its HTML comments. A comment that never closes runs to the end of the doc. */
+function withoutComments(text: string): string {
+  let shown = "";
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf("<!--", at);
+    if (open === -1) return shown + text.slice(at);
+    shown += text.slice(at, open);
+    const close = text.indexOf("-->", open + 4);
+    if (close === -1) return shown;
+    at = close + 3;
+  }
+}
+
 /**
- * The lines of a doc outside fenced code blocks, where an example may hold a
- * label or a link. A block closes on a fence of the same character that is at
- * least as long as the one that opened it.
+ * The lines of a doc that a reader sees as prose. A comment is a note to the
+ * writer, and a fenced code block is an example that may hold a label or a
+ * link, so neither counts. A block closes on a fence of the same character
+ * that is at least as long as the one that opened it.
  */
 function proseLines(text: string): string[] {
   let open: string | null = null;
-  return text.split("\n").filter((line) => {
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (open === null) {
-      if (fence) open = fence[1];
-      return !fence;
-    }
-    const closes = fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
-    if (closes) open = null;
-    return false;
-  });
+  return withoutComments(text)
+    .split("\n")
+    .filter((line) => {
+      const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (open === null) {
+        if (fence) open = fence[1];
+        return !fence;
+      }
+      const closes =
+        fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
+      if (closes) open = null;
+      return false;
+    });
 }
 
 /** Each field of a doc by its label. A field runs to the next field or heading. */
@@ -183,9 +201,7 @@ export function docsSkeletonGaps(root: string): string[] {
   const wholeProduct = WHOLE_PRODUCT.flatMap((file) => {
     const text = read(root, file);
     if (text === null) return [`${file}: missing`];
-    // A comment is a note to the writer, so a doc that holds only a comment is still empty.
-    const shown = text.replace(/<!--[\s\S]*?-->/g, "");
-    const body = proseLines(shown).filter((line) => line.trim() && !/^#{1,6}\s/.test(line));
+    const body = proseLines(text).filter((line) => line.trim() && !/^#{1,6}\s/.test(line));
     return body.length === 0 ? [`${file}: empty`] : [];
   });
   const { gaps, parts } = partGaps(root);

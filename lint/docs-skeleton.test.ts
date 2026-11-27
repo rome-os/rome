@@ -143,6 +143,21 @@ describe("docsSkeletonGaps", () => {
     expect(docsSkeletonGaps(repo)).toEqual([`${CONCEPT}: no "Story"`]);
   });
 
+  it("does not count a field that only a comment fills, or a field inside a comment", async () => {
+    await writeSkeleton();
+    await write(
+      CONCEPT,
+      conceptDoc
+        .replace(/\*\*Purpose\.\*\* .*/, "**Purpose.** <!-- TODO -->")
+        .replace(/(\*\*Carried by\.\*\* .*)/, "<!--\n$1\n-->"),
+    );
+
+    expect(docsSkeletonGaps(repo)).toEqual([
+      `${CONCEPT}: no "Purpose"`,
+      `${CONCEPT}: no "Carried by"`,
+    ]);
+  });
+
   it("does not count a field inside a tilde block, or inside a block that a shorter fence cannot close", async () => {
     await writeSkeleton();
     await write(
