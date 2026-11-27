@@ -183,7 +183,10 @@ describe("/api/auth/visitor dashboard access", () => {
     expect((await listMembers(ctx))[0]).toEqual({
       person: { id: ada.id, name: null, avatarUrl: "https://example.com/avatar.png" },
       role: "member",
-      accounts: [{ platform: "rome-cloud-email", accountId: "ada@example.com" }],
+      accounts: [
+        { platform: "email", accountId: "ada@example.com" },
+        { platform: "rome-cloud-email", accountId: "ada@example.com" },
+      ],
     });
   });
 
@@ -203,7 +206,10 @@ describe("/api/auth/visitor dashboard access", () => {
       {
         person: { id: owner.id, name: null, avatarUrl: "https://example.com/avatar.png" },
         role: "guardian",
-        accounts: [{ platform: "rome-cloud-email", accountId: "owner@example.com" }],
+        accounts: [
+          { platform: "email", accountId: "owner@example.com" },
+          { platform: "rome-cloud-email", accountId: "owner@example.com" },
+        ],
       },
     ]);
   });

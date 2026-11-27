@@ -2,6 +2,8 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import type { FloatingPill } from "./floating-pill";
+import type { ShareShortcut } from "./share-shortcut";
+import { SHARE_SHORTCUT_LABEL } from "./share-shortcut/state";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import type { DeviceStatus } from "./cloud/device-host";
@@ -85,6 +87,23 @@ export function deviceLabel(device: DeviceStatus, showComputerUse = true): strin
   return `This Mac: ${connection}${showComputerUse && !device.computerUse ? " · Computer use off" : ""}`;
 }
 
+/** The tray's lines for the share shortcut: none until an app is chosen for it. */
+export function shareShortcutItems(
+  shareShortcut: Pick<ShareShortcut, "current" | "open" | "clear"> | null,
+): Electron.MenuItemConstructorOptions[] {
+  const target = shareShortcut?.current();
+  if (!shareShortcut || !target) return [];
+  return [
+    {
+      label: `${SHARE_SHORTCUT_LABEL} Opens ${target.name}`,
+      submenu: [
+        { label: `Open ${target.name}`, click: () => shareShortcut.open() },
+        { label: `Turn Off ${SHARE_SHORTCUT_LABEL}`, click: () => shareShortcut.clear() },
+      ],
+    },
+  ];
+}
+
 export interface SetupTrayOptions {
   getMainWindow: () => BrowserWindow | null;
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
@@ -94,6 +113,8 @@ export interface SetupTrayOptions {
   runtime: Runtime;
   /** Null where the pill does not exist (every platform but macOS). */
   floatingPill: FloatingPill | null;
+  /** The key that sends the selection to an app. Omitted or null off macOS. */
+  shareShortcut?: ShareShortcut | null;
   /** This computer as a device. Without it the menu has no line for it. */
   device?: { status(): DeviceStatus; onChange(listener: () => void): void };
   computerUseSettings?: ReturnType<typeof createComputerUseSettings>;
@@ -107,6 +128,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
     openAuditLog,
     runtime,
     floatingPill,
+    shareShortcut,
     device,
     computerUseSettings,
   } = options;
@@ -136,6 +158,11 @@ export function setupTray(options: SetupTrayOptions): Tray {
         log.warn(`Could not open macOS privacy settings (${String(error)})`);
       });
     };
+    const setupPermissions = () => {
+      void computerUseSettings?.setup().catch((error) => {
+        log.warn(`Could not open the Computer Use permission guide (${String(error)})`);
+      });
+    };
     const template: Electron.MenuItemConstructorOptions[] = [
       {
         label: "Show Rome",
@@ -160,6 +187,9 @@ export function setupTray(options: SetupTrayOptions): Tray {
             {
               label: `Computer Use: ${computerUse.enabled ? "On" : "Off"}`,
               submenu: [
+                ...(computerUse.helperPresent
+                  ? [{ label: "Set Up Permissions…", click: setupPermissions }]
+                  : []),
                 {
                   label: `Bundled helper: ${computerUse.helperPresent ? "Installed" : "Missing"}`,
                   enabled: false,
@@ -193,6 +223,8 @@ export function setupTray(options: SetupTrayOptions): Tray {
             },
           ]
         : []),
+      // Chosen from an app's menu in Rome, so it is listed only once there is one.
+      ...shareShortcutItems(shareShortcut ?? null),
       { type: "separator" },
       {
         // No accelerator: tray menus cannot register shortcuts of their own,
@@ -213,6 +245,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
   rebuildMenu(runtime.getStatus());
   device?.onChange(() => rebuildMenu(runtime.getStatus()));
   runtime.on("status", (status: RuntimeStatus) => rebuildMenu(status));
+  shareShortcut?.onChange(() => rebuildMenu(runtime.getStatus()));
   // Hiding the pill from its own menu has to untick the box here.
   floatingPill?.onEnabledChange(() => rebuildMenu(runtime.getStatus()));
 

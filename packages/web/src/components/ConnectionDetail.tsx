@@ -151,9 +151,9 @@ function SlotEntry({
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   // Talk channels all render through the single generic ChannelConnectCard,
-  // driven by a per-service config. Telegram and WeChat each carry two slots —
-  // the bot (primary) and the guardian's own account (the `session` slot, keyed
-  // to that brand's personal-account config).
+  // driven by a per-service config. Telegram carries two slots — the bot
+  // (primary) and the guardian's own account (the `session` slot, keyed to
+  // that brand's personal-account config).
   const channelConfig =
     slot.key === "session" && CHANNEL_CONFIGS[`${card.service}_user`]
       ? CHANNEL_CONFIGS[`${card.service}_user`]

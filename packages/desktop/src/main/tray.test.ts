@@ -30,7 +30,7 @@ rs.mock("./logger", () => ({
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 import type { DeviceStatus } from "./cloud/device-host";
-import { deviceLabel, setupTray, statusLabel } from "./tray";
+import { deviceLabel, setupTray, shareShortcutItems, statusLabel } from "./tray";
 
 function status(partial: Partial<RuntimeStatus>): RuntimeStatus {
   return {
@@ -93,7 +93,10 @@ describe("setupTray", () => {
       getStatus: () => status({ phase: "ready" }),
     }) as unknown as Runtime;
     const open = rs.fn(async () => undefined);
+    const setup = rs.fn(async () => undefined);
+    const revealHelper = rs.fn();
     let enabled = false;
+    let helperPresent = true;
     let currentDevice: DeviceStatus = { state: "off" };
     let notifyChange: () => void = () => {};
     setupTray({
@@ -109,23 +112,35 @@ describe("setupTray", () => {
         },
       },
       computerUseSettings: {
-        status: () => ({ enabled, helperPresent: true }),
+        status: () => ({ enabled, helperPresent }),
+        setup,
         open,
-        revealHelper: rs.fn(),
+        revealHelper,
       },
     });
     const item = menus.at(-1)?.find(({ label }) => label === "Computer Use: Off");
     const submenu = item?.submenu as Electron.MenuItemConstructorOptions[];
     expect(menus.at(-1)?.some(({ label }) => label?.startsWith("This Mac:"))).toBe(false);
-    expect(submenu[0]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
+    expect(submenu[0]?.label).toBe("Set Up Permissions…");
+    submenu[0]?.click?.({} as never, undefined, {} as never);
+    expect(setup).toHaveBeenCalledTimes(1);
+    expect(submenu[1]).toMatchObject({ label: "Bundled helper: Installed", enabled: false });
     submenu
       .find(({ label }) => label === "Screen Recording Settings…")
       ?.click?.({} as never, undefined, {} as never);
     expect(open).toHaveBeenCalledWith("screenRecording");
+    submenu
+      .find(({ label }) => label === "Show Rome Computer Use in Finder")
+      ?.click?.({} as never, undefined, {} as never);
+    expect(revealHelper).toHaveBeenCalledTimes(1);
 
     enabled = true;
+    helperPresent = false;
     notifyChange();
-    expect(menus.at(-1)?.map(({ label }) => label)).toContain("Computer Use: On");
+    const missing = menus.at(-1)?.find(({ label }) => label === "Computer Use: On");
+    expect(
+      (missing?.submenu as Electron.MenuItemConstructorOptions[]).map(({ label }) => label),
+    ).toEqual(["Bundled helper: Missing", "Accessibility Settings…", "Screen Recording Settings…"]);
 
     enabled = false;
     currentDevice = {
@@ -171,5 +186,30 @@ describe("deviceLabel", () => {
     expect(
       deviceLabel(device({ connection: "offline", computerUse: false, state: "disabled" })),
     ).toBe("This Mac: Offline · Computer use off");
+  });
+});
+
+describe("shareShortcutItems", () => {
+  const target = {
+    appId: "what-does-it-mean",
+    name: "Clear Translate",
+    url: "https://ray.romeos.cc/full/apps/what-does-it-mean",
+    param: "text",
+  };
+
+  it("lists nothing until an app is chosen", () => {
+    expect(shareShortcutItems(null)).toEqual([]);
+    expect(shareShortcutItems({ current: () => null, open: rs.fn(), clear: rs.fn() })).toEqual([]);
+  });
+
+  it("names the chosen app and offers to open it or turn the key off", () => {
+    const shortcut = { current: () => target, open: rs.fn(), clear: rs.fn() };
+    const [item] = shareShortcutItems(shortcut);
+    expect(item.label).toBe("⌥D Opens Clear Translate");
+    const [open, turnOff] = item.submenu as Electron.MenuItemConstructorOptions[];
+    open.click?.({} as never, undefined, {} as never);
+    turnOff.click?.({} as never, undefined, {} as never);
+    expect(shortcut.open).toHaveBeenCalledOnce();
+    expect(shortcut.clear).toHaveBeenCalledOnce();
   });
 });

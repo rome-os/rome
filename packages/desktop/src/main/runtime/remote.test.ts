@@ -9,13 +9,14 @@ import { RemoteRuntime } from "./remote";
 import type { RemoteInstanceRef } from "./target";
 
 const ref = { id: "instance-1", name: "ray", origin: "https://ray.romeos.cc" };
-const running: CloudInstance = { ...ref, slug: "ray", status: "running" };
+const running: CloudInstance = { ...ref, slug: "ray", status: "running", role: "owner" };
 const other: CloudInstance = {
   id: "instance-2",
   name: "lab",
   slug: "lab",
   origin: "https://lab.romeos.cc",
   status: "running",
+  role: "owner",
 };
 
 let live: RemoteRuntime[] = [];

@@ -24,7 +24,7 @@ import {
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
 // setup` + `/api/setups/:cid/input`) and the standard `SetupRenderer`. What used
 // to be seven near-identical per-service cards (telegram bot / telegram user /
-// whatsapp / discord / wechat / feishu / email) is a single component driven by
+// whatsapp / discord / feishu / email) is a single component driven by
 // the {@link ChannelConnectConfig} table below — the only things a channel
 // varies are its grant name, a couple of copy keys, and (for Feishu) a
 // genuinely custom QR-image setup renderer. That is the custom component; the
@@ -69,9 +69,6 @@ export interface ChannelConnectConfig {
    *  it differs from the setup service — the telegram personal account presents
    *  under the telegram card. Defaults to `service`. */
   copyService?: string;
-  /** i18n key for the success note shown under the connected header (the
-   *  "linked as guardian" line). Omitted for services with no such note. */
-  guardianLinkedKey?: string;
   /** Custom renderer for the `presenting` setup state — Feishu's QR image. */
   renderPresenting?: ComponentType<SetupRenderProps>;
   /** Header icon override; defaults to the service brand badge. */
@@ -137,11 +134,6 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   discord: {
     service: "discord",
     defaultGrant: "bot",
-  },
-  wechat: {
-    service: "wechat",
-    defaultGrant: "account",
-    guardianLinkedKey: "channels.wechat.guardianLinked",
   },
   feishu: {
     service: "feishu",
@@ -354,11 +346,7 @@ export function ChannelConnectCard({
         <p className="text-aux text-destructive-fg">{setup.error}</p>
       ) : null}
       {connected && !(broken && setup.state) ? (
-        config.guardianLinkedKey ? (
-          <div>
-            <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
-          </div>
-        ) : config.connectedSection && !broken ? (
+        config.connectedSection && !broken ? (
           <config.connectedSection
             onDisconnect={() =>
               confirmsDisconnect ? setConfirming(true) : void handleDisconnect()

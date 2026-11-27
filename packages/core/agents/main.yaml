@@ -1,5 +1,5 @@
 name: main
-description: Main orchestrator. Handles trusted messages, delegates to subagents.
+description: Main orchestrator. Handles messages, delegates to subagents.
 model: opus
 permissionMode: bypassPermissions
 tools:

@@ -3,8 +3,11 @@ export interface CloudCredential {
   deviceSessionId: string;
 }
 
+/** `rome_session` for the guardian, `rome_visitor` for a dashboard admin. */
+export type InstanceSessionCookie = "rome_session" | "rome_visitor";
+
 export interface InstanceSession {
-  cookieName: "rome_session";
+  cookieName: InstanceSessionCookie;
   token: string;
   expiresAt: string;
   origin: string;
@@ -16,6 +19,13 @@ export interface CloudInstance {
   slug: string;
   origin: string;
   status: string;
+  /**
+   * `owner`, or `visitor` for a Rome whose owner put this account on its
+   * dashboard allow-list. An older Rome Cloud sends no role: the owner's.
+   */
+  role: "owner" | "visitor";
+  /** The owner's display name, for a visitor's Rome. */
+  ownerName?: string;
 }
 
 export interface InstanceAuthorizationRequest {
@@ -27,6 +37,20 @@ export interface InstanceAuthorizationRequest {
   code_challenge: string;
   code_challenge_method: "S256";
   nonce: string;
+}
+
+/**
+ * The instance's request for a visitor sign-in, relayed to Rome Cloud as is.
+ * Its code is identity-only and redeems only at the instance's visitor
+ * endpoint, so no instance build can take it for the owner's.
+ */
+export interface VisitorAuthorizationRequest {
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: "S256";
+  state: string;
+  instance_name: string;
+  intent: "signin";
 }
 
 export interface CloudInstanceAuthorization {

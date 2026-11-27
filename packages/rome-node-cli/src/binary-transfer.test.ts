@@ -390,23 +390,13 @@ it.skipIf(process.platform === "win32")(
       await run("observe", { binding, screenshot: true }, ["--output", "window.png"]),
     ).toMatchObject({ result: { screenshot: { bytes: png.length, mimeType: "image/png" } } });
     expect(await readFile(join(f.root, "window.png"))).toEqual(png);
-    const shared = { ROME_TURN_AUDIENCE: "shared" };
-    const observe = (screenshot: boolean) => [
-      "device",
-      "run",
-      f.deviceA,
-      "computer.observe",
-      "--args",
-      JSON.stringify({ binding, screenshot }),
-    ];
-    for (const args of [observe(false), [...observe(true), "--output", "shared.png"]]) {
-      const blocked = await f.cli(args, undefined, shared);
-      expect(blocked.code).toBe(1);
-      expect(JSON.parse(blocked.stdout.toString())).toMatchObject({
-        error: { code: "personal_data_private_only" },
-      });
-    }
-    await expect(access(join(f.root, "shared.png"))).rejects.toMatchObject({ code: "ENOENT" });
+    // A shell in a chat others read runs a personal capability's action too.
+    const shared = await f.cli(
+      ["device", "run", f.deviceA, "computer.observe", "--args", JSON.stringify({ binding })],
+      undefined,
+      { ROME_TURN_AUDIENCE: "shared" },
+    );
+    expect(shared.code).toBe(0);
     const actionId = randomUUID();
     const act = { binding, actionId, action: "type_text", text: "private-input-text" };
     expect(await run("act", act)).toMatchObject({ result: { actionId, dispatched: true } });

@@ -284,8 +284,8 @@ export interface AuthScheme {
 }
 
 /** A live capability can remain unlocked while its provider transport is
- * temporarily impaired (for example, WeChat's one-hour stale-session
- * cooldown). This is runtime-only health: it must not mutate grant custody or
+ * temporarily impaired (for example, LinkedIn polls that keep failing while
+ * the session stays signed in). This is runtime-only health: it must not mutate grant custody or
  * remove the caller-facing capability handle. */
 export interface CapabilityDegradation {
   reason: string;

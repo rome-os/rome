@@ -15,7 +15,6 @@ const DIRECT_MESSAGE_KINDS: ReadonlySet<string> = new Set([
   "telegram_user",
   "whatsapp",
   "discord",
-  "wechat",
   "linkedin",
   "slack",
   "slack_app",

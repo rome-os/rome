@@ -207,15 +207,15 @@ it("approving only B never sends rejected A from the same replay snapshot", asyn
   await rome.repos.approvals.resolvePending(a.id, "reject", "guardian");
   await rome.repos.approvals.resolvePending(b.id, "approve", "guardian");
   await rome.approvalHandler.onApproved(b.id);
-  // Shared replay can re-ask for B after refusing A; it must never send A.
-  expect(invoke).not.toHaveBeenCalled();
-  const again = (await rome.repos.approvals.list("pending")).find(
-    (row) => (row.payload as { args: typeof second }).args.subject === second.subject,
-  )!;
-  await rome.repos.approvals.resolvePending(again.id, "approve", "guardian");
-  await rome.approvalHandler.onApproved(again.id);
+  // B's card authorizes B's exact effect independently. The rejected A entry
+  // is refused, never sent, and does not consume or duplicate B's approval.
   expect(invoke).toHaveBeenCalledTimes(1);
   expect(invoke).toHaveBeenCalledWith({ operation: "send", input: second });
+  expect(
+    (await rome.repos.approvals.list("pending")).find(
+      (row) => (row.payload as { args: typeof second }).args.subject === second.subject,
+    ),
+  ).toBeUndefined();
 });
 
 it("one approval sends once when two identical nested calls replay concurrently", async () => {
