@@ -5,6 +5,8 @@
  *
  * The skeleton is the purpose, the "never" list, how concepts work together,
  * one entry per concept, and the list of parts with each part's `AGENTS.md`.
+ * The list of parts covers every folder of code: a folder is a part, sits
+ * inside a part, or is named under "Not parts".
  * A concept entry and a part's `AGENTS.md` carry their content in fields: a
  * paragraph that opens with a bold label such as `**Purpose.**`.
  *
@@ -22,6 +24,9 @@ const CONCEPTS = `${TARGET}/concepts`;
 const WHOLE_PRODUCT = [`${TARGET}/purpose.md`, `${TARGET}/never.md`, `${TARGET}/together.md`];
 const PART_FIELDS = ["Question", "Promises", "May use"];
 const CONCEPT_FIELDS = ["Purpose", "Story", "Carried by"];
+/** Every folder directly under one of these is a part, sits inside a part, or is named under "Not parts". */
+const CODE_ROOTS = ["packages", "packages/core/src"];
+const NOT_PARTS = /^#{1,6}\s+Not parts\s*$/;
 
 function read(root: string, file: string): string | null {
   const full = path.join(root, file);
@@ -96,8 +101,15 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
   if (text === null) return { gaps: [`${PARTS}: missing`], parts };
 
   // A part is a top-level item. An indented item is a note under its part.
-  const items = proseLines(text).flatMap((line) => /^[-*]\s+(.+)$/.exec(line)?.[1] ?? []);
+  const lines = proseLines(text);
+  const split = lines.findIndex((line) => NOT_PARTS.test(line));
+  const listed = split === -1 ? lines : lines.slice(0, split);
+  const items = listed.flatMap((line) => /^[-*]\s+(.+)$/.exec(line)?.[1] ?? []);
   if (items.length === 0) gaps.push(`${PARTS}: lists no part`);
+  const notParts = (split === -1 ? [] : lines.slice(split + 1)).flatMap(
+    (line) => /^[-*]\s+`([^`]+?)\/?`/.exec(line)?.[1] ?? [],
+  );
+  const covering = [...notParts];
 
   for (const item of items) {
     const name = (/^\[([^\]]+)\]/.exec(item)?.[1] ?? item).trim();
@@ -106,6 +118,7 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
       gaps.push(`${PARTS}: part "${name}" has no link to its AGENTS.md`);
       continue;
     }
+    covering.push(path.posix.dirname(doc));
     const partText = read(root, doc);
     if (partText === null) {
       gaps.push(`${doc}: missing`);
@@ -118,7 +131,27 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
       gaps.push(`${doc}: "Promises" has no numbered promise`);
     }
   }
+  for (const folder of codeFolders(root)) {
+    const covered = covering.some((dir) => folder === dir || folder.startsWith(`${dir}/`));
+    if (!covered) gaps.push(`${PARTS}: no part covers ${folder}`);
+  }
   return { gaps, parts };
+}
+
+/** The folders that hold Rome's code: each folder directly under a code root, except one that holds another root. */
+function codeFolders(root: string): string[] {
+  return CODE_ROOTS.flatMap((codeRoot) => {
+    const dir = path.join(root, codeRoot);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
+      )
+      .map((entry) => `${codeRoot}/${entry.name}`)
+      .filter((folder) => !CODE_ROOTS.some((other) => other.startsWith(`${folder}/`)))
+      .sort();
+  });
 }
 
 function conceptGaps(root: string, parts: Set<string>): string[] {

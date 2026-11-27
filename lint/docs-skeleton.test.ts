@@ -162,6 +162,31 @@ describe("docsSkeletonGaps", () => {
     expect(docsSkeletonGaps(repo)).toEqual([]);
   });
 
+  it("reports each folder of code that no part covers and that is not named under Not parts", async () => {
+    await writeSkeleton();
+    await write("packages/core/src/chats/index.ts", "");
+    await write("packages/core/src/test/kit.ts", "");
+    await write("packages/web/src/main.ts", "");
+    await write("packages/ui/src/button.ts", "");
+    await write("packages/ui/AGENTS.md", partDoc);
+    await write(
+      "docs/target/parts.md",
+      [
+        `- [Connections](../../${PART})`,
+        "- [UI kit](../../packages/ui/AGENTS.md)",
+        "",
+        "## Not parts",
+        "",
+        "- `packages/core/src/test/`: helpers for tests.",
+      ].join("\n"),
+    );
+
+    expect(docsSkeletonGaps(repo)).toEqual([
+      "docs/target/parts.md: no part covers packages/web",
+      "docs/target/parts.md: no part covers packages/core/src/chats",
+    ]);
+  });
+
   it("reads a link that opens with a slash from the repo root", async () => {
     await writeSkeleton();
     await write("docs/target/parts.md", `- [Connections](/${PART})\n`);
