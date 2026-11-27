@@ -46,7 +46,7 @@ Verify a change before you open a pull request:
 
 The full rules are in [`docs/authoring/prs.md`](docs/authoring/prs.md). In short:
 
-- A PR either refactors or changes behavior, stays under about 400 changed lines, and leaves `main` working without a later PR.
+- A PR either refactors or changes behavior, stays under about 400 changed lines (unless it only deletes a deprecated feature), and leaves `main` working without a later PR.
 - The title is a [Conventional Commit](https://www.conventionalcommits.org/), such as `fix(web): keep the composer visible on phones`. Check it with `scripts/check-pr-title.sh "<title>"`. Squash-and-merge uses the title as the commit on `main`, and the release flow reads it.
 - The description is a short briefing under about 40 lines: Why, Sketch, Scope, Merge danger, and Evidence.
 - It opens with the problem, not with the list of changed files.
