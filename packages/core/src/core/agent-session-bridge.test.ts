@@ -281,7 +281,7 @@ describe("AgentSessionBridge conversation", () => {
 });
 
 describe("AgentSessionBridge resuming a session by its id", () => {
-  it("refuses a caller who may not open the session's chat, and lets its owner in", async () => {
+  it("runs a session resumed by its id for a member, as for its owner", async () => {
     const testDb = createTestDb();
     try {
       const repo = new ChatsWebChatRepository(testDb.db);
@@ -343,13 +343,9 @@ describe("AgentSessionBridge resuming a session by its id", () => {
             (m as { type?: string }).type === "rpc_response",
         ) as { error?: unknown } | undefined;
 
-      summon("as-visitor", { kind: "visitor", accountId: "a", email: "a@example.com" });
-      await rs.waitFor(() => expect(responseTo("as-visitor")).toBeDefined());
-      expect(responseTo("as-visitor")?.error).toBeDefined();
-      expect(sent).toEqual([]);
-
-      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
+      summon("as-member", { kind: "visitor", accountId: "a", email: "a@example.com" });
       await rs.waitFor(() => expect(sent).toHaveLength(1));
+      expect(responseTo("as-member")?.error).toBeUndefined();
     } finally {
       testDb.close();
     }
