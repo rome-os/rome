@@ -257,7 +257,6 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./app-host/agent-name-action.js";
-import { phoneBook } from "./people/phone-book/index.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
@@ -814,7 +813,7 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
-  // The agents this Rome can message, one read for the people listing and for
+  // The agents this Rome can message, one read for their accounts and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
@@ -2961,7 +2960,7 @@ async function main() {
     };
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
-    apiDeps.features = [phoneBook(apiDeps)];
+    apiDeps.features = [];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);
     }

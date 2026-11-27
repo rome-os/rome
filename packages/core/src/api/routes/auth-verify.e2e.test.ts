@@ -161,7 +161,7 @@ describe("/api/auth/verify", () => {
 
   it("returns 401 for private /api/* paths without a cookie", async () => {
     const host = buildHost(await stubDeps([]));
-    const res = await verifyRequest(host, "/api/people");
+    const res = await verifyRequest(host, "/api/settings");
     expect(res.status).toBe(401);
   });
 
@@ -198,7 +198,7 @@ describe("/api/auth/verify", () => {
   it("accepts a raw guardian session explicitly injected by a Native client", async () => {
     const host = buildHost(await stubDeps([]));
     const session = createGuardianSession("native-account");
-    const res = await verifyRequest(host, "/api/people", {
+    const res = await verifyRequest(host, "/api/settings", {
       cookie: `${COOKIE_NAME}=${session.token}`,
     });
 
@@ -229,7 +229,7 @@ describe("/api/auth/verify", () => {
       const me = await host.request("/api/auth/me", {}, peer);
       expect(await me.json()).toMatchObject({ kind: "guardian" });
 
-      const probes: Array<Record<string, string>> = [{ "X-Forwarded-Uri": "/api/people" }, {}];
+      const probes: Array<Record<string, string>> = [{ "X-Forwarded-Uri": "/api/settings" }, {}];
       for (const headers of probes) {
         const res = await host.request("/api/auth/verify", { headers }, peer);
         expect(res.status).toBe(401);
@@ -238,7 +238,7 @@ describe("/api/auth/verify", () => {
 
     it("names the guardian as their cookie does", async () => {
       const host = buildHost(await stubDeps([]));
-      const res = await verifyRequest(host, "/api/people", validCookieHeader());
+      const res = await verifyRequest(host, "/api/settings", validCookieHeader());
       expect(res.headers.get("X-Rome-User-Id")).toBe("u1");
     });
   });
@@ -614,13 +614,13 @@ describe("/api/auth/verify on a non-canonical forwarded path", () => {
   // Each of these is served by the router as a private route, so a decision
   // read from the raw string would wave it through without a cookie.
   const rewrittenPaths = [
-    "/webhooks/../api/people",
-    "/api/health/../people",
-    "/api/share/x/%2e%2e/%2e%2e/people",
-    "/app-assets/x/../../api/people",
-    "/apps/x/../../api/people",
-    "//api/people",
-    "/api/health#/../people",
+    "/webhooks/../api/settings",
+    "/api/health/../settings",
+    "/api/share/x/%2e%2e/%2e%2e/settings",
+    "/app-assets/x/../../api/settings",
+    "/apps/x/../../api/settings",
+    "//api/settings",
+    "/api/health#/../settings",
   ];
 
   it("rejects each one without a cookie", async () => {
@@ -643,13 +643,13 @@ describe("/api/auth/verify on a non-canonical forwarded path", () => {
     const host = buildHost(
       await stubDeps([buildResolvedApp("pub-app", false)], { allowedApps: ["pub-app"] }),
     );
-    const res = await verifyRequest(host, "/api/apps/pub-app/%2e%2e/%2e%2e/people");
+    const res = await verifyRequest(host, "/api/apps/pub-app/%2e%2e/%2e%2e/settings");
     expect(res.status).toBe(400);
   });
 
   it("decides a percent-encoded private path as the route it decodes to", async () => {
     const host = buildHost(await stubDeps([]));
-    for (const uri of ["/%61pi/people", "/api/%70eople"]) {
+    for (const uri of ["/%61pi/settings", "/api/%73ettings"]) {
       const res = await verifyRequest(host, uri);
       expect(res.status, uri).toBe(401);
     }
@@ -669,7 +669,7 @@ describe("/api/auth/verify on a non-canonical forwarded path", () => {
 
   it("keeps a guardian cookie working on canonical private paths", async () => {
     const host = buildHost(await stubDeps([]));
-    const res = await verifyRequest(host, "/api/people", validCookieHeader());
+    const res = await verifyRequest(host, "/api/settings", validCookieHeader());
     expect(res.status).toBe(204);
   });
 });

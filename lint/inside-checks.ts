@@ -166,12 +166,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     lines: ['return this.endTaskWork(taskId, by === "guardian" ? "stopped_by_owner" : null);'],
     why: "records who stopped a task",
   },
-  "packages/core/src/people/person-history/application/timeline-sources.ts": {
-    lines: [
-      'const guardian = (await deps.peopleRepo.all()).find((person) => person.bondLevel === "guardian");',
-    ],
-    why: "finds the guardian's person to label a timeline",
-  },
   "packages/core/src/connections/kinds/email/email.ts": {
     lines: [
       'if (raw.toLowerCase() === "guardian") return this.guardianEmail || raw;',

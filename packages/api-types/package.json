@@ -36,7 +36,6 @@
     "./message": "./src/message.ts",
     "./connected-accounts": "./src/connected-accounts.ts",
     "./account-agents": "./src/account-agents.ts",
-    "./people": "./src/people.ts",
     "./assistants": "./src/assistants.ts",
     "./platform": "./src/platform.ts",
     "./persons": "./src/persons.ts",

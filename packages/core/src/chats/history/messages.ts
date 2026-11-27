@@ -7,10 +7,10 @@
  *
  * - `query` answers a {@link ChannelMessage}, the one record every port speaks:
  *   the one `inbound` delivers, with the channel and the direction added.
- * - The account reads answer a {@link Message}, the People timeline's record,
- *   because that timeline merges several stores and pages them with one cursor.
+ * - The account reads answer a {@link Message}, so that pages read from
+ *   several stores merge under one cursor.
  *   Its ordering and cursor are the message module's (`@rome/api-types/message`),
- *   stated once there so a store and a person's timeline cut the same ranking.
+ *   stated once there so every store cuts the same ranking.
  */
 
 import { compareMessages, messageCursor, type Message } from "@rome/api-types/message";
@@ -23,12 +23,8 @@ import type { ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
  * The addresses rather than the id, because a store keys its rows by whichever
  * address a message arrived on: a WhatsApp contact is reachable under both a
  * phone JID and a `@lid` JID, and history hangs off either. A read that named
- * only the address a person mapping happens to carry would answer an empty
- * history for a conversation that plainly exists.
- *
- * What `timelineAccounts` (../../people/person-history/application/timeline-sources.ts) folds a person's
- * links into, and what every store a person's history is read from is then
- * scoped by.
+ * only one of those addresses would answer an empty history for a
+ * conversation that plainly exists.
  */
 export interface MessageAccount {
   channel: string;

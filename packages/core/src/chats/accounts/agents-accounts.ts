@@ -28,9 +28,8 @@ import { pageAccounts } from "./account-paging.js";
 
 const log = createLogger("agents-accounts");
 
-/** How long one read of Cloud's agent list answers. `GET /api/people` reads the
- *  whole listing and resolves every stored address at once, so this keeps that
- *  to one request. */
+/** How long one read of Cloud's agent list answers. A listing of every account
+ *  resolves every stored address at once, so this keeps that to one request. */
 const READ_TTL_MS = 30_000;
 
 /** An agent's account, named when Cloud has listed it. Names are labels two
