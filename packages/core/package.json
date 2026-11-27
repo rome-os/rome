@@ -45,7 +45,7 @@
     }
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.293",
+    "@anthropic-ai/claude-agent-sdk": "0.3.331",
     "@hono/node-server": "^1.19.14",
     "@larksuiteoapi/node-sdk": "^1.68.0",
     "@mozilla/readability": "^0.6.0",
