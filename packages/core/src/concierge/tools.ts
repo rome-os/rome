@@ -45,6 +45,7 @@ import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.
 import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
+import { isPerson, sessionOwnerKey } from "../access/session-actor.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { PRIVATE_CHILD_TRIGGER_KIND } from "../webchat/privacy.js";
 import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
@@ -328,6 +329,15 @@ export async function buildConciergeTools(
     const owner = await service.ownerOfChat(chatId);
     if (owner === null) throw new Error(`No Concierge chat ${chatId}`);
     return owner;
+  };
+
+  // Whose a task started this turn is: on a connection, the member whose
+  // message started the turn, as on the dashboard; the guardian's for a turn
+  // no person started.
+  const starterHere = async () => {
+    if (!onConnection) return ownerHere();
+    const actor = context.getTurnActor?.();
+    return isPerson(actor) ? sessionOwnerKey(actor) : GUARDIAN_OWNER;
   };
 
   const requireTaskChat = async (chatId: string) => {
@@ -1184,7 +1194,7 @@ export async function buildConciergeTools(
               ...(model ? { model } : {}),
               ...(effort ? { reasoningEffort: effort } : {}),
             },
-            await ownerHere(),
+            await starterHere(),
           );
           // The first message would rename the chat, so it is named again once
           // that is sent. The task already runs, so a failure here must not read
@@ -1216,7 +1226,7 @@ export async function buildConciergeTools(
             made = true;
             if (schedule) {
               await service.deps.schedules?.set(
-                { id: chatId, title, owner: await ownerHere() },
+                { id: chatId, title, owner: await starterHere() },
                 schedule,
               );
             } else {
