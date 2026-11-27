@@ -18,7 +18,6 @@ import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
-import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../webchat/repository.js";
@@ -226,7 +225,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       personMappingRepo: appPersonMapping(peopleRepo, (name) =>
         channelRecords.platformOfChannel(name),
       ),
-      people: appPeople(peopleRepo),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
