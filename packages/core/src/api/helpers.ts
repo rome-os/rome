@@ -103,7 +103,6 @@ export function toWebchatSessionResponse(
   session: {
     id: string;
     name: string;
-    personaId: string | null;
     largeModelSelection?: string | null;
     largeModelSelectionBy?: string | null;
     projectName: string;
@@ -131,7 +130,6 @@ export function toWebchatSessionResponse(
   return {
     id: session.id,
     name: session.name,
-    personaId: session.personaId ?? null,
     largeModelSelection: session.largeModelSelection ?? null,
     // Whether the chat follows the default provider, and when it does not, the
     // model it is pinned to: its owner's pick, or one a card or a change of the

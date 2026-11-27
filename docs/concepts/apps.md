@@ -87,7 +87,7 @@ Apps consume three supported packages published under the `@rome-os/` scope: `@r
 
 ## Caller identity
 
-The caller is the request identity an app observes: the [guardian](people.md#guardian), a [visitor](people.md#visitor), or anonymous. The host resolves it before an app handler runs and hands the same shape to server code and web code.
+The caller is the request identity an app observes: the [guardian](access.md#guardian), a [visitor](access.md#visitor), or anonymous. The host resolves it before an app handler runs and hands the same shape to server code and web code.
 
 **Contracts:**
 

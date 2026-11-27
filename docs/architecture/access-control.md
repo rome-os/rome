@@ -1,13 +1,13 @@
 # Access Control
 
-How a Rome instance decides who is on the other end of a request and what that request may reach. The surface has four components: the edge proxy, the verify probe behind it, the policies the probe reads, and the app-API dispatch. The callers themselves are concepts vocabulary — the [guardian](../concepts/people.md#guardian) and the [visitor](../concepts/people.md#visitor) — and the [single HTTP listener](api.md#http-surface) behind the edge is owned by `api.md`.
+How a Rome instance decides who is on the other end of a request and what that request may reach. The surface has four components: the edge proxy, the verify probe behind it, the policies the probe reads, and the app-API dispatch. The callers themselves are concepts vocabulary — the [guardian](../concepts/access.md#guardian) and the [visitor](../concepts/access.md#visitor) — and the [single HTTP listener](api.md#http-surface) behind the edge is owned by `api.md`.
 
 ## Policies
 
 Two policies decide reach, each held as its own setting:
 
 - **App access** — per app: private (the default), link-public, or restricted to an email allow-list of visitors.
-- **Dashboard access** — one email allow-list. Each visitor on it is a [dashboard admin](../concepts/people.md#dashboard-admin) on the [team](../concepts/people.md#team), with the full dashboard.
+- **Dashboard access** — one email allow-list. Each visitor on it is a [dashboard admin](../concepts/access.md#dashboard-admin) on the [team](../concepts/access.md#team), with the full dashboard.
 
 ### Invariants
 
@@ -16,14 +16,14 @@ Two policies decide reach, each held as its own setting:
 - Chat ownership filters lists, not admission or agent trust. The sidebar defaults to all chats and offers a My chats view.
 - A failed lookup of a session is a person Rome cannot tell, who never acts as the guardian. Who may write is the entry check's.
 - Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
-- Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/people.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
+- Dashboard access grants what the guardian's own session reaches, approval reads and decisions included. Every check behind the edge that admits the guardian asks whether the session actor is on the [team](../concepts/access.md#team) instead. Billing, deleting the instance, the guardian's own seat and credentials, and what is the guardian's own person stay guardian-only ([decision](../adrs/a-dashboard-admin-has-the-guardians-access.md)).
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
 - An app manifest's no-auth declaration opens only that app's public webhook paths. The dashboard-side app surface stays gated regardless.
 
 ## Entry
 
-Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/people.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)). It is asked once on each boundary, and what is inside asks nothing.
+Entry is the one question asked before anything from outside Rome runs: may this person come in? `mayEnter` in `packages/core/src/access/entry.ts` answers it for a signed-in session: the person it names, if they are the guardian or a [member](../concepts/access.md#team). On a connection, `accountEntry` in `packages/core/src/access/application/account-entry.ts` answers it for the account that said or pressed something ([Participation](../domains/participation.md#entry)). It is asked once on each boundary, and what is inside asks nothing.
 
 ### Invariants
 
@@ -43,9 +43,9 @@ browser ──every request──► edge proxy ──consults──► verify p
                        backend route ──app-API dispatch──► app handler (caller re-derived)
 ```
 
-The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/people.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
+The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session, a [dashboard admin](../concepts/access.md#dashboard-admin), or a visitor allow-listed for that app, and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, `/ws/node`, `/ws/voice-input`, and `/ws/voice-conversation` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/people.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` a dashboard admin gets every topic the guardian gets. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, `/ws/node`, `/ws/voice-input`, and `/ws/voice-conversation` bypass the edge probe. Rome checks identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. Each of these upgrades also admits a [dashboard admin](../concepts/access.md#dashboard-admin), the way the edge admits them to the rest of the dashboard. On `/ws/events` a dashboard admin gets every topic the guardian gets. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

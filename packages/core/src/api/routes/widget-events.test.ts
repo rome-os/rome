@@ -147,13 +147,13 @@ describe("an event on a widget", () => {
     await fire("m2", {
       name: "rome:answer",
       context: { answers: [{ values: ["Warm"], text: "" }] },
-      turn: { personaId: "p1" },
+      turn: { reasoningEffort: "high" },
     });
     expect(forwarded).toEqual([
       {
         url: "/api/chat/sessions/c1/turns",
         body: {
-          personaId: "p1",
+          reasoningEffort: "high",
           parts: [
             {
               type: "interaction_result",

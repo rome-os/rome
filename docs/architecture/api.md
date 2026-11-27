@@ -9,7 +9,7 @@ action worker ──fork IPC──► main ──spawn──► delegated worker
 
 ## HTTP surface
 
-A single server hosts every HTTP route behind the [edge](access-control.md#request-flow). Four categories share the listener: the dashboard API with its websockets, the access-gated [app surfaces](access-control.md#policies), the [public allow-list](access-control.md#request-flow), and the webhook ingress. [`access-control.md`](access-control.md) owns the per-category auth and the fail-closed default. The callers are concepts entries — [guardian](../concepts/people.md#guardian) and [visitor](../concepts/people.md#visitor).
+A single server hosts every HTTP route behind the [edge](access-control.md#request-flow). Four categories share the listener: the dashboard API with its websockets, the access-gated [app surfaces](access-control.md#policies), the [public allow-list](access-control.md#request-flow), and the webhook ingress. [`access-control.md`](access-control.md) owns the per-category auth and the fail-closed default. The callers are concepts entries — [guardian](../concepts/access.md#guardian) and [visitor](../concepts/access.md#visitor).
 
 ### Invariants
 

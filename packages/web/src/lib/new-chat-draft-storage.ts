@@ -25,7 +25,6 @@ const schema = z.object({
       iconUrl: z.string().nullable().optional(),
     })
     .nullable(),
-  personaId: z.string(),
   // Optional, so drafts saved before device folders existed still load.
   deviceFolder: draftDeviceFolderSchema.nullable().optional(),
 });
@@ -61,7 +60,6 @@ export function saveNewChatDraft(draft: NewChatDraft, authEpoch = currentAuthEpo
     draft.projectPath === DEFAULT_PROJECT_NAME &&
     !draft.agentMention &&
     !draft.skill &&
-    !draft.personaId &&
     !draft.deviceFolder
   ) {
     clearNewChatDraft();

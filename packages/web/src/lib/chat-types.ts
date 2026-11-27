@@ -21,7 +21,6 @@ export interface ChatErrorNotice {
 export interface ChatSession {
   id: string;
   name: string;
-  personaId: string | null;
   largeModelSelection?: string | null;
   /** Whether the chat follows the default provider. Absent from an older server. */
   followsDefault?: boolean;

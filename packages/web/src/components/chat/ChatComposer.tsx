@@ -21,7 +21,6 @@ import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useSignedInProviders } from "@/hooks/use-default-provider";
-import { usePeople } from "@/hooks/use-people";
 import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
@@ -43,7 +42,6 @@ import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
 import { useChatDraft } from "./composer/use-chat-draft";
 import { AgentMentionMenu } from "./composer/AgentMentionMenu";
-import { ImpersonationMenu } from "./composer/ImpersonationMenu";
 import { ModelSelectorMenu } from "./composer/ModelSelectorMenu";
 import { PendingUploadsList } from "./composer/PendingUploadsList";
 import { usePendingAttachments } from "./composer/use-pending-attachments";
@@ -84,7 +82,6 @@ import type { DictationStop } from "@/lib/voice-input/dictation";
 export interface ChatComposerSnapshot {
   text: string;
   uploads: PendingUpload[];
-  personaId?: string;
   largeModelSelection?: string;
   reasoningEffort: ReasoningEffort;
   projectPath: string;
@@ -127,19 +124,18 @@ export interface ChatComposerHandle {
   /**
    * Send a turn immediately with the given text, bypassing the textarea state.
    * Used by "start"-mode quick entries: it synthesizes a snapshot from the
-   * provided text plus the composer's *current* selections (model / persona /
+   * provided text plus the composer's *current* selections (model /
    * project / reasoning / skill) so a programmatic send is as faithful as a
    * user-typed one. No-op while the composer is busy or the turn is empty.
    */
   submit: (text: string, opts?: { skillName?: string }) => void;
   /**
-   * Read the per-turn metadata (persona / reasoning) the composer would
-   * currently send. Used by non-composer submit paths (e.g. inline app
-   * component results) to align with what onSend would emit, so server doesn't
-   * silently fall back to guardian persona or stored reasoning effort.
+   * Read the per-turn metadata (reasoning) the composer would currently send.
+   * Used by non-composer submit paths (e.g. inline app component results) to
+   * align with what onSend would emit, so server doesn't silently fall back to
+   * the stored reasoning effort.
    */
   getMetadataSnapshot: () => {
-    personaId?: string;
     reasoningEffort: ReasoningEffort;
   };
   /**
@@ -200,7 +196,7 @@ export interface ChatComposerProps {
   boxClassName?: string;
   // A box for plain text only, for a chat whose other end is not one of Rome's
   // agents (an assistant's chat): no attachments, reasoning effort,
-  // impersonation, workspace chips or `/` skills, none of which reach it.
+  // workspace chips or `/` skills, none of which reach it.
   textOnly?: boolean;
   // Replaces the default placeholder.
   placeholder?: string;
@@ -329,15 +325,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
 
   const { data: settings } = useSettings();
   const signedInProviders = useSignedInProviders();
-  const { data: peopleData } = usePeople();
   const invalidateSettings = useInvalidateSettings();
-  const people = peopleData ?? [];
   const modelSelectorEnabled = settings?.enableModelSelector === true;
-  const impersonationEnabled = settings?.enableImpersonation === true;
   const toolbarRail = useHorizontalScrollRail(
-    `${showProjectSelector}:${impersonationEnabled}:${showModelSelector && modelSelectorEnabled}`,
+    `${showProjectSelector}:${showModelSelector && modelSelectorEnabled}`,
   );
-  const guardianName = (settings?.guardianName as string | undefined) ?? "";
   // Persisted preferences are seeded from settings on first load, then owned
   // locally so the picker reflects the user's in-session choice immediately
   // (the save round-trip + invalidation lands afterwards).
@@ -355,14 +347,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
     seededFromSettingsRef.current = true;
   }, [settings]);
-  const [selectedPersonId, setSelectedPersonId] = useState<string>(
-    () => storedDraft?.personaId ?? "",
-  );
-
-  const personaId =
-    selectedPersonId && (impersonationEnabled || !settings) ? selectedPersonId : undefined;
-
-  const [impersonationMenuOpen, setImpersonationMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
 
@@ -410,10 +394,9 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       projectPath: draftProjectName,
       agentMention: draftAgentMention,
       skill: draftSkill,
-      personaId: selectedPersonId,
       ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
     }),
-    [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill, selectedPersonId],
+    [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill],
   );
   const { keep: keepChatDraft } = draft;
   const keepDraft = useCallback(
@@ -499,7 +482,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     if (!locked) return;
     closeMentionPicker();
     skillPicker.close();
-    setImpersonationMenuOpen(false);
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
     setDraftProjectMenuOpen(false);
@@ -538,14 +520,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     const el = textareaRef.current;
     if (el) el.setSelectionRange(el.value.length, el.value.length);
   }, []);
-
-  // If impersonation gets disabled mid-session, drop any selection so the
-  // composer doesn't carry a hidden persona id.
-  useEffect(() => {
-    if (!settings || impersonationEnabled) return;
-    setSelectedPersonId("");
-    setImpersonationMenuOpen(false);
-  }, [settings, impersonationEnabled]);
 
   // Only a draft's first send carries the pick; an open chat has stored it.
   const draftModelSelection =
@@ -654,7 +628,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         const snapshot: ChatComposerSnapshot = {
           text: trimmed,
           uploads: pendingUploads,
-          personaId,
           largeModelSelection: draftModelSelection,
           reasoningEffort,
           projectPath: draftProjectName,
@@ -670,7 +643,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           });
       },
       getMetadataSnapshot: () => ({
-        personaId,
         reasoningEffort,
       }),
       stopVoiceInput: voice.stop,
@@ -680,7 +652,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       addPendingFiles,
       removeSentUploads,
       textareaMaxHeight,
-      personaId,
       reasoningEffort,
       draftSkill,
       pendingUploads,
@@ -729,7 +700,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     const snapshot: ChatComposerSnapshot = {
       text,
       uploads,
-      personaId,
       largeModelSelection: draftModelSelection,
       reasoningEffort,
       projectPath: draftProjectName,
@@ -790,7 +760,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             projectPath: draftProjectName,
             agentMention: draftAgentMention,
             skill,
-            personaId: selectedPersonId,
             ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
           },
           authEpoch,
@@ -822,7 +791,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setPendingUploads,
     removeSentUploads,
     draftSkill,
-    personaId,
     draftModelSelection,
     reasoningEffort,
     draftProjectName,
@@ -910,24 +878,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       else void runSend();
     }
   };
-
-  const impersonationOptions = useMemo(
-    () => people.filter((p) => p.bondLevel !== "guardian"),
-    [people],
-  );
-  const selectedPerson = useMemo(
-    () => impersonationOptions.find((p) => p.id === selectedPersonId) ?? null,
-    [impersonationOptions, selectedPersonId],
-  );
-  const guardianLabel = guardianName
-    ? t("impersonation.guardianWithName", { name: guardianName })
-    : t("impersonation.guardianFallback");
-  const selectedPersonLabel = selectedPerson
-    ? t("impersonation.personLabel", {
-        name: selectedPerson.displayName,
-        bondLevel: selectedPerson.bondLevel,
-      })
-    : guardianLabel;
 
   const draftProject = projectCatalog?.projects.find((p) => p.name === draftProjectName);
   const draftProjectLabel = draftProject
@@ -1160,23 +1110,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                 onClose={() => setPendingConnectPath(null)}
               />
             ) : null}
-            {impersonationEnabled && !textOnly && (
-              <ImpersonationMenu
-                disabled={uploadInFlight}
-                open={impersonationMenuOpen}
-                onOpenChange={(next) => {
-                  if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
-                }}
-                selectedPersonId={selectedPersonId}
-                onSelectPersonId={(id) => {
-                  if (!uploadInFlightRef.current) setSelectedPersonId(id);
-                }}
-                options={impersonationOptions}
-                selectedPerson={selectedPerson}
-                selectedPersonLabel={selectedPersonLabel}
-                guardianLabel={guardianLabel}
-              />
-            )}
             {textOnly ? null : (
               <Button
                 type="button"

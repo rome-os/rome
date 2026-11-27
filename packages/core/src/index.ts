@@ -257,7 +257,6 @@ import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
-import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
@@ -1912,7 +1911,6 @@ async function main() {
     run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
   });
   registerTaskRunAction(actionRegistry, concierge);
-  registerReadPersonAction(actionRegistry, { people: peopleRepo });
   registerAgentTools(actionRegistry, {
     // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {

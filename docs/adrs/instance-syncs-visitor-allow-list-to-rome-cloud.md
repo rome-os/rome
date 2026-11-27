@@ -6,7 +6,7 @@
 
 ## Context
 
-The native app lists instances from Rome Cloud and signs in to one through a code Rome Cloud issues. A [dashboard admin](../concepts/people.md#dashboard-admin) of an instance should see that instance in the list. They should sign in to it from the phone, as they can from a browser.
+The native app lists instances from Rome Cloud and signs in to one through a code Rome Cloud issues. A [dashboard admin](../concepts/access.md#dashboard-admin) of an instance should see that instance in the list. They should sign in to it from the phone, as they can from a browser.
 
 The allow-list lives on the instance. The guardian edits it in the dashboard, and the instance re-checks it on every request. Rome Cloud knows which instances an account owns, but it does not know which instances list an account's email. Listing a visitor's instances needs that answer at list time, across every instance, for one account.
 

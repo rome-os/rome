@@ -380,7 +380,7 @@ function show(isLatestForChat = true, as?: "task" | "ask", until?: number) {
 }
 
 const MAIN_CHAT_HOST = {
-  turnFields: () => ({ personaId: "main-persona", workspace: { id: "main-ws" } }),
+  turnFields: () => ({ workspace: { id: "main-ws" } }),
 };
 
 describe("TaskChatCard shown as one card or the other", () => {
@@ -870,9 +870,8 @@ describe("TaskChatCard", () => {
       name: "send",
       context: { answers: [{ values: ["Warm"], text: "" }] },
     });
-    // The turn is the task chat's, never with the Chat's persona or workspace.
+    // The turn is the task chat's, never with the Chat's workspace.
     const turn = JSON.parse(String(init?.body)).turn;
-    expect(turn.personaId).toBeUndefined();
     expect(turn.workspace).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(await screen.findByText("Sent")).toBeTruthy();

@@ -200,7 +200,6 @@ function agentPolicySource(
   const agent = agentLoader.find(agentName);
   return agent ? { name: agent.localName, policy: agent.definition.policy } : { name: agentName };
 }
-const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
 const SESSIONS_HOST_APP_ID = "sessions";
 
 type ForkSessionPlacement = {
@@ -328,7 +327,6 @@ export interface ChatStart {
 
 export interface NewChatBody {
   name?: string;
-  personaId?: string;
   projectName?: string | null;
   projectPath?: string | null;
   largeModelSelection?: string;
@@ -2355,14 +2353,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return resolveWebchatLargeModelSelection(stored);
   };
 
-  const resolveRequestedPersonaId = async (requested: unknown): Promise<string | undefined> => {
-    if (typeof requested !== "string" || requested.trim().length === 0) {
-      return undefined;
-    }
-    const enabled = await deps.settingsRepo.get<boolean>(ENABLE_IMPERSONATION_SETTING_KEY);
-    return enabled === true ? requested : undefined;
-  };
-
   const resolveRequestedReasoningEffort = async (
     requested: unknown,
   ): Promise<ModelReasoningEffort> => {
@@ -3117,8 +3107,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     } catch (error) {
       return answer({ error: String(error) }, 409);
     }
-    const personaId = await resolveRequestedPersonaId(body.personaId);
-
     // `agentName` locks this session to a non-main agent for its lifetime.
     // Reject unknown names up-front so the user gets immediate feedback in
     // the composer rather than a delayed turn-time error.
@@ -3135,7 +3123,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await deps.webchatRepo.createSession(
       id,
       name,
-      personaId,
+      undefined,
       project.name,
       modelSelection?.id ?? null,
       project.path,
@@ -3906,7 +3894,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       commentLength: comment?.length ?? 0,
       sessionName: session.name,
       projectPath: session.projectPath,
-      personaId: session.personaId,
     });
 
     // Written feedback gets its own exact fork so the agent can understand it
@@ -4125,7 +4112,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     automatedActorKind?: unknown;
     threadId?: string;
     text?: string;
-    personaId?: string;
     largeModelSelection?: string;
     reasoningEffort?: string;
     files?: IncomingWebchatUpload[];
@@ -4213,7 +4199,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         automatedActorKind: getString("automatedActorKind"),
         threadId: getString("threadId"),
         text: getString("text"),
-        personaId: getString("personaId"),
         largeModelSelection: getString("largeModelSelection"),
         reasoningEffort: getString("reasoningEffort"),
         skillName: getString("skillName"),
@@ -4657,19 +4642,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     let displayName = "Guardian";
     let channelUserId = "guardian";
-    const personaId = await resolveRequestedPersonaId(body.personaId);
-    if (personaId) {
-      const person = await deps.peopleRepo.byId(personaId);
-      if (person) {
-        displayName = person.displayName;
-        channelUserId = person.id;
-      }
-    } else {
-      const guardian = await deps.guardianPerson();
-      if (guardian) {
-        displayName = guardian.name ?? displayName;
-        channelUserId = guardian.id;
-      }
+    const guardian = await deps.guardianPerson();
+    if (guardian) {
+      displayName = guardian.name ?? displayName;
+      channelUserId = guardian.id;
     }
 
     // WebChat owns input admission and one output drain per actual run. The

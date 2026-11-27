@@ -111,7 +111,7 @@ The actor is the authenticated session identity accountable for an action execut
 
 **Contracts:**
 
-- The actor is the [guardian](people.md#guardian), a [visitor](people.md#visitor), or anonymous. Anonymous means the chain entered a session-capable surface (the API surface, the app WebSocket server) with no session, or with one Rome could not read. An absent actor means no accountable session could exist anywhere in the chain — agent-autonomous work, routines, startup, and machine-credential surfaces such as webhooks.
+- The actor is the [guardian](access.md#guardian), a [visitor](access.md#visitor), or anonymous. Anonymous means the chain entered a session-capable surface (the API surface, the app WebSocket server) with no session, or with one Rome could not read. An absent actor means no accountable session could exist anywhere in the chain — agent-autonomous work, routines, startup, and machine-credential surfaces such as webhooks.
 - Capture is ambient, not per-route. Identity is established once where a request enters and flows to every action run during it, so a newly added route is attributed without doing anything.
 - The whole execution chain inherits the root's actor — sub-actions, detached runs, and worker-process hops — no matter how many apps or agents sit in between.
 - The trust boundary resolves the actor from primary session material, never from forwarded headers or app-supplied input ([access control](../architecture/access-control.md)).

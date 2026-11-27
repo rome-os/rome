@@ -96,7 +96,6 @@ export interface RomeSessionExplorerRecord {
   id: string;
   name: string;
   displayTitle: string;
-  personaId: string | null;
   largeModelSelection: string | null;
   projectName: string;
   projectPath: string | null;

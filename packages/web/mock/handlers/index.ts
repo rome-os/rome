@@ -98,7 +98,6 @@ const WAITLIST_QUESTIONS: Question[] = [
 
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
-import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
 import { chatOutputHandlers, outputProjectFolder } from "./chat-outputs";
@@ -1269,7 +1268,6 @@ const session = (
   return {
     id,
     name,
-    personaId: null,
     projectName,
     agentName: agentName ?? null,
     createdAt,
@@ -2241,7 +2239,6 @@ export const handlers = [
   ...taskListHandlers,
   ...chatOutputHandlers,
   ...activityHandlers,
-  ...peopleHandlers,
   ...assistantHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded

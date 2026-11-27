@@ -427,7 +427,6 @@ export async function listRomeSessionMessages(sessionId: string): Promise<ChatMe
 
 export interface CreateSessionInput {
   name: string;
-  personaId?: string;
   projectPath: string;
   largeModelSelection?: string;
   // The turn, not the session, carries reasoning effort; a turn that omits it
