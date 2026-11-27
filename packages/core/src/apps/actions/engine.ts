@@ -24,7 +24,6 @@ import type {
 } from "../repositories/action-executions.js";
 import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
-import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import {
   freshCallContext,
@@ -213,13 +212,8 @@ export interface ActionRunContext {
    * agent / user / system-initiated calls. */
   callerAppId?: string;
   channelContext?: ThreadContext;
-  /**
-   * Who can read what the calling turn says. A personal-data action runs only
-   * when the call itself is given `private`; absent, it is refused. A nested
-   * call inherits it for the turns it starts, never for this check, so a
-   * nested call reads no personal data.
-   * Domain: docs/domains/participation.md#audience.
-   */
+  /** Who can read what the calling turn says, carried on to the turns it starts.
+   * Domain: docs/domains/participation.md#audience. */
   audience?: "private" | "shared";
   sharedContext?: Record<string, unknown>;
   hookInvocationContext?: HookInvocationContext;
@@ -602,13 +596,6 @@ export class ActionEngine {
     const action = this.registry.get(name);
     if (!action) {
       throw new ActionNotFoundError(name);
-    }
-    if (isPersonalDataAction(action.config.name) && context?.audience !== "private") {
-      log.info("personal-data action refused outside a private turn", {
-        action: action.config.name,
-        initiator: context?.initiator,
-      });
-      return { status: "error", error: PERSONAL_DATA_PRIVATE_ONLY };
     }
     // Only a first-party action carries the audience on to the turns it
     // starts, so a third-party app cannot start a private turn and read
