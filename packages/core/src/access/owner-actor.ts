@@ -7,6 +7,17 @@ import { VisitorProfilesRepository } from "./visitor-profiles.js";
 
 const VISITOR_PREFIX = "visitor:";
 
+/**
+ * Whether a send was made for someone other than `owner`, the owner key of
+ * the chat it went into. An action's loopback send names its person by kind
+ * alone (`actorKind`): a member's can never be told to be the owner's, and the
+ * guardian's is only in the guardian's chat. A send that names no person is
+ * not someone else's.
+ */
+export function madeForSomeoneElse(actorKind: unknown, owner: string): boolean {
+  return actorKind === "visitor" || (actorKind === "guardian" && owner !== "guardian");
+}
+
 /** The actor for `owner`, or undefined for a key that names no person, or a guardian with no seat yet. */
 export async function actorOfOwner(
   db: DrizzleDb,
