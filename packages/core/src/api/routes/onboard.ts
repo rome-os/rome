@@ -20,6 +20,7 @@ import {
   guardianSeatCreated,
   logStepFailure,
   memberContext,
+  renameGuardianIn,
   seatAccounts,
 } from "../../access/application/members.js";
 import type { ApiDeps } from "../deps.js";
@@ -110,6 +111,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
       db: deps.db,
       settingsRepo: deps.settingsRepo,
       reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+      renameGuardian: renameGuardianIn(deps.db),
     });
 
     issueGuardianSession(c, userId);

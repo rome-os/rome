@@ -1,7 +1,8 @@
-// What People offers apps through `ctx.repositories`: the guardian's profile,
+// What Rome offers apps through `ctx.repositories`: the guardian's profile,
 // which an app writes during onboarding.
 
 import type { GuardianProfileRepository } from "@rome-os/app-runtime";
+import { renameGuardianIn } from "../access/application/members.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { applyGuardianProfile } from "../people/guardian-profile/index.js";
@@ -16,7 +17,7 @@ export function appGuardianProfile(deps: {
     write: async (input) => {
       const result = await applyGuardianProfile(
         { guardianName: input.guardianName, agentName: input.agentName },
-        deps,
+        { ...deps, renameGuardian: renameGuardianIn(deps.db) },
       );
       return { ok: result.ok };
     },

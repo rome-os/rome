@@ -19,6 +19,7 @@ import {
   guardianSeatCreated,
   logStepFailure,
   memberContext,
+  renameGuardianIn,
   seatAccounts,
 } from "../../access/application/members.js";
 import {
@@ -614,6 +615,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         db: deps.db,
         settingsRepo: deps.settingsRepo,
         reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+        renameGuardian: renameGuardianIn(deps.db),
       },
       { agentName: survey?.agentName ?? undefined },
     );

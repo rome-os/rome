@@ -22,6 +22,7 @@ import {
   accountCodesVoidedIn,
 } from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
+import { createIdentity } from "./identity/identity.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -2431,7 +2432,8 @@ async function main() {
         return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
       nameOf: async (userId) =>
-        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
+        (await createIdentity(db).personOf({ platform: "discord", accountId: userId }))?.name ??
+        undefined,
     }),
     linkedin({
       syncSink: refreshingAfter(

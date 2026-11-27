@@ -53,12 +53,7 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
     const [guardian] = testDb.db.select().from(guardianAuth).all();
     expect(guardian.userId).toBe("alex");
     expect(guardian.onboardingComplete).toBe(true);
-    const [person] = testDb.db
-      .select()
-      .from(persons)
-      .where(eq(persons.bondLevel, "guardian"))
-      .all();
-    expect(person).toMatchObject({ displayName: "alex" });
+    expect(testDb.db.select().from(persons).all()).toEqual([]);
 
     const stored = Object.fromEntries(
       testDb.db

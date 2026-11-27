@@ -27,6 +27,7 @@ import {
   readInvitedEmailsDoneRevision,
 } from "../dashboard-access-config.js";
 import {
+  guardianRenamedWithinTx,
   guardianSeatCreatedWithinTx,
   invitedEmailsSavedWithinTx,
   memberContextWithinTx,
@@ -44,6 +45,9 @@ const log = createLogger("members-backfill");
 // sign-in is now known by its email, so no account is kept on it.
 export const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
 
+// The setting the guardian's profile keeps their name in.
+const GUARDIAN_NAME_KEY = "guardianName";
+
 /**
  * Brings the members in line with the guardian's seat and, on its first run,
  * the invited emails, in one transaction that holds this run's writes only. A Rome Cloud sign-in is known by
@@ -52,7 +56,8 @@ export const ROME_CLOUD_ID_PLATFORM = "rome-cloud";
  * away, from any person, and each `email` account of a member, which only an
  * invitation gave, becomes the same address on `rome-cloud-email`. The
  * guardian gets the seat's email as a sign-in's and every account People
- * links to its guardian person, an agent's own account included. Every
+ * links to its guardian person, an agent's own account included, and the
+ * name the guardian's profile keeps in the `guardianName` setting. Every
  * sign-in of the guardian and the members gives its person the same address
  * as their mail account. It takes no email away: Identity cannot
  * tell an earlier seat's email from the same address carried from People, so
@@ -93,7 +98,7 @@ function backfillWithinTx(tx: DrizzleTx): void {
     .get();
   if (seat) {
     const peopleGuardian = tx
-      .select({ id: persons.id, name: persons.displayName })
+      .select({ id: persons.id })
       .from(persons)
       .where(eq(persons.bondLevel, "guardian"))
       .limit(1)
@@ -107,11 +112,14 @@ function backfillWithinTx(tx: DrizzleTx): void {
           .all()
           .filter((link) => link.platform !== ROME_CLOUD_ID_PLATFORM)
       : [];
+    const guardianName = settingValue(tx, GUARDIAN_NAME_KEY)?.value;
+    const name = typeof guardianName === "string" ? guardianName : undefined;
     guardianSeatCreatedWithinTx(ctx, {
       accounts: [...seatAccounts(seat), ...linked],
-      name: peopleGuardian?.name,
+      name,
       avatarUrl: seat.avatarUrl ?? undefined,
     });
+    if (name) guardianRenamedWithinTx(ctx, name);
   }
 
   const done = settingValue(tx, INVITED_EMAILS_DONE_KEY);

@@ -3,6 +3,7 @@ import { identities, members } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { GuardianRemovalError } from "../access.js";
 import {
+  guardianRenamed,
   guardianSeatCreated,
   guardianSeatRebound,
   invitedEmailsSaved,
@@ -52,6 +53,34 @@ describe("members", () => {
 
       expect(await roleOfAccount(ctx, { platform: "slack", accountId: "T1:U9" })).toBeNull();
       expect(await roleOfAccount(ctx, { platform: "slack", accountId: "T1:U1" })).toBeNull();
+    });
+  });
+
+  describe("guardianRenamed", () => {
+    it("gives the guardian's person the name, trimmed, and keeps their id", async () => {
+      const { ctx, identity } = setup();
+      const guardian = await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL], name: "alex" });
+
+      await guardianRenamed(ctx, " Alex Doe ");
+
+      expect(await identity.person(guardian.id)).toMatchObject({
+        id: guardian.id,
+        name: "Alex Doe",
+      });
+    });
+
+    it("renames no member, and nobody while Rome has no guardian or for a blank name", async () => {
+      const { ctx, identity } = setup();
+      await guardianRenamed(ctx, "Alex");
+      expect(await identity.personOf(OWNER_EMAIL)).toBeNull();
+
+      const guardian = await guardianSeatCreated(ctx, { accounts: [OWNER_EMAIL], name: "Alex" });
+      const ada = await inviteMember(ctx, "ada@example.com");
+      await guardianRenamed(ctx, "  ");
+      await guardianRenamed(ctx, "Alexandra");
+
+      expect((await identity.person(guardian.id))?.name).toBe("Alexandra");
+      expect((await identity.person(ada.id))?.name).toBeNull();
     });
   });
 

@@ -111,13 +111,6 @@ export const layerRules: ImportRule[] = [
  */
 export const listedCrossings: ListedCrossing[] = [
   {
-    rule: "drizzle-stays-in-infrastructure",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "drizzle-orm",
-    ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it goes through the People repository.",
-  },
-  {
     rule: "application-imports-inward",
     from: "people/phone-book/application/account-directory.ts",
     to: "chats/accounts/account-names.ts",
@@ -269,14 +262,14 @@ export const listedCrossings: ListedCrossing[] = [
     from: "people/guardian-profile/application/guardian-profile.ts",
     to: "db/index.ts",
     ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it does that through a port.",
+    why: "The guardian profile marks setup complete with its own query, until it does that through a port.",
   },
   {
     rule: "application-imports-inward",
     from: "people/guardian-profile/application/guardian-profile.ts",
     to: "db/schema.ts",
     ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it does that through a port.",
+    why: "The guardian profile marks setup complete with its own query, until it does that through a port.",
   },
   {
     rule: "application-imports-inward",

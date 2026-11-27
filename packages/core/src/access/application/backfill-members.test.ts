@@ -59,14 +59,17 @@ function seed(db: DrizzleDb) {
     ])
     .run();
   db.insert(settings)
-    .values({
-      key: DASHBOARD_ACCESS_SETTING_KEY,
-      value: {
-        cloudEmailAccess: ["ada@example.com", "lin@example.com", "owner@example.com"],
-        revision: 3,
+    .values([
+      {
+        key: DASHBOARD_ACCESS_SETTING_KEY,
+        value: {
+          cloudEmailAccess: ["ada@example.com", "lin@example.com", "owner@example.com"],
+          revision: 3,
+        },
+        updatedAt: now,
       },
-      updatedAt: now,
-    })
+      { key: "guardianName", value: "Olive", updatedAt: now },
+    ])
     .run();
   db.insert(visitorProfiles)
     .values([
@@ -380,6 +383,53 @@ describe("backfillMembers", () => {
     expect(listed[0]?.role).toBe("guardian");
     expect(listed[0]?.person.avatarUrl).toBe("https://example.com/visitor.png");
     expect(db.select().from(identities).all()).toHaveLength(3);
+  });
+
+  it("names the guardian's person from the guardianName setting, with People's tables empty", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    db.insert(guardianAuth)
+      .values({ id: "seat", userId: "alex", passwordHash: "x", createdAt: now })
+      .run();
+    db.insert(settings).values({ key: "guardianName", value: "Alex Doe", updatedAt: now }).run();
+
+    await backfillMembers(db);
+
+    const [guardian] = await listMembers(memberContext(db));
+    expect(guardian).toMatchObject({ role: "guardian", person: { name: "Alex Doe" } });
+    expect(db.select().from(persons).all()).toEqual([]);
+  });
+
+  it("brings the guardian's name in Identity in line with the guardianName setting", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    // The name People keeps is not read.
+    db.update(persons).set({ displayName: "Olivia" }).where(eq(persons.id, "p-owner")).run();
+    await backfillMembers(db);
+    // A local seat's person starts with the username.
+    const [before] = await listMembers(memberContext(db));
+    db.update(identities)
+      .set({ name: "acct-owner" })
+      .where(eq(identities.id, before.person.id))
+      .run();
+
+    await backfillMembers(db);
+
+    const [guardian] = await listMembers(memberContext(db));
+    expect(guardian.person).toMatchObject({ id: before.person.id, name: "Olive" });
+  });
+
+  it("leaves the guardian's name alone while no guardianName is set", async () => {
+    testDb = createTestDb();
+    const { db } = testDb;
+    seed(db);
+    db.delete(settings).where(eq(settings.key, "guardianName")).run();
+
+    await backfillMembers(db);
+
+    const [guardian] = await listMembers(memberContext(db));
+    expect(guardian.person.name).toBeNull();
   });
 
   it("takes every stored Rome Cloud id from every person, and a second run changes nothing", async () => {

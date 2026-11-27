@@ -6,7 +6,7 @@ Who is behind an account and how close they are to the guardian: people, their p
 |---|---|
 | root | Who is this: the person behind an account and their bond level, for the message path, apps and agents. |
 | `model/` | Person, link, the account results, and the `PeopleRepository` port every feature changes people through. |
-| `infrastructure/` | `DrizzlePeopleRepository`, which writes the people tables. The guardian profile still writes the guardian's person itself until ZHA-212. |
+| `infrastructure/` | `DrizzlePeopleRepository`, which writes the people tables. |
 | `phone-book/` | The people listing and the account directory. Its use cases are in `application/`; the dashboard reads them through `http/` (`GET /api/people`, `GET /api/accounts`) and agents through `actions/` (`core:list_people`). Only the wiring imports it, so it can be left out. |
 | `guardian-profile/` | The guardian's name and background, and their agent's name. Its use cases are in `application/`; agents set the agent's name through `actions/`, and onboarding, Rome Cloud sign-in and apps call its index. It has no routes of its own. |
 | `person-history/` | A person's messages across their accounts, and sending to them. Its use cases are in `application/`; the people listing reads each account's last activity and send state through them, and the assistants' routes send through them. It has no routes of its own. |

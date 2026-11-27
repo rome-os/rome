@@ -652,15 +652,18 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     return { res, deps };
   }
 
-  function guardianPerson() {
-    return testDb.db.select().from(persons).where(eq(persons.bondLevel, "guardian")).all();
+  /** The guardian's name in Identity. People's `persons` stays empty. */
+  async function guardianName() {
+    expect(testDb.db.select().from(persons).all()).toEqual([]);
+    const [guardian] = await listMembers(memberContext(testDb.db));
+    return guardian?.person.name;
   }
 
   it("writes the name claim as the guardian name", async () => {
     const { deps } = await signInFresh({ name: "Alex Doe", email: "alex@example.com" });
 
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Alex Doe");
-    expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
+    expect(await guardianName()).toBe("Alex Doe");
   });
 
   it("makes the guardian with the seat's email as their only sign-in and mail account", async () => {
@@ -682,7 +685,7 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     const { deps } = await signInFresh({ email: "alex.doe@example.com" });
 
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("alex.doe");
-    expect(guardianPerson()).toMatchObject([{ displayName: "alex.doe" }]);
+    expect(await guardianName()).toBe("alex.doe");
   });
 
   it("writes a preset agent name and purpose, and marks onboarding complete", async () => {

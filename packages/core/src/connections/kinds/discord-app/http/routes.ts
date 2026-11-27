@@ -8,7 +8,7 @@ import { type DiscordAppCloud, DiscordAppRefused } from "../worker.js";
 
 export interface DiscordAppRoutesDeps {
   cloud: DiscordAppCloud;
-  /** A Discord account's name as People knows it. */
+  /** The name of the person a Discord account belongs to. */
   nameOf: (userId: string) => Promise<string | undefined>;
 }
 
@@ -37,7 +37,7 @@ export function discordAppRoutes(deps: DiscordAppRoutesDeps): Hono {
           .catch(() => []),
       ]);
       const looks = new Map(live.map((server) => [server.id, server]));
-      // A Discord account's name as People knows it; the Worker keeps only ids.
+      // The name of the person a Discord account belongs to; the Worker keeps only ids.
       const named = await Promise.all(
         users.map(async (user) => {
           const name = await deps.nameOf(user.userId).catch(() => undefined);
