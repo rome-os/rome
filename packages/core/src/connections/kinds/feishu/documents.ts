@@ -150,6 +150,7 @@ export const documentOperations = [
         summary: "Create Feishu document",
         fields: [
           { label: "Title", inputPointer: "/title" },
+          { label: "Content", inputPointer: "/content" },
           { label: "Folder token", inputPointer: "/folderToken" },
         ],
       },
@@ -197,6 +198,7 @@ export const documentOperations = [
         fields: [
           { label: "Document ID", inputPointer: "/documentId" },
           { label: "Mode", inputPointer: "/mode" },
+          { label: "Content", inputPointer: "/content" },
         ],
       },
     },

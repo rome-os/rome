@@ -722,6 +722,24 @@ describe("Connection-scoped App access", () => {
           preset: "read_and_write",
           reason: "Read and create notes",
         },
+        preview: {
+          kind: "connection_access",
+          appId: "notes",
+          appName: "notes",
+          connectionId: "connection-1",
+          connectionKind: "fake-docs",
+          connectionLabel: "Docs",
+          identity: "account",
+          grantEpoch: "grant-1",
+          preset: "read_and_write",
+          operations: [
+            { name: "documents.get", sideEffect: "read-only" },
+            { name: "documents.create", sideEffect: "write", approvalRequired: true },
+          ],
+          reason: "Read and create notes",
+          title: "Allow notes to access Docs",
+          summary: "Read and create notes (1 read and 1 write operations)",
+        },
       },
     };
     let currentApproval: typeof pendingApproval | null = pendingApproval;
@@ -793,6 +811,100 @@ describe("Connection-scoped App access", () => {
       });
       expect(stale.status).toBe(409);
       expect(await stale.json()).toMatchObject({ code: "stale_request" });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("rejects approval as stale when preview drifted and writes zero grants if concurrent rejection wins", async () => {
+    const onApproved = rs.fn(async () => {});
+    const resolvePending = rs.fn(async () => ({
+      outcome: "already_resolved" as const,
+      approval: { id: "appr-race-1", status: "rejected" },
+    }));
+    const basePayload = {
+      actionName: "core:request_connection_access",
+      args: {
+        appId: "notes",
+        connectionKind: "fake-docs",
+        preset: "read_and_write",
+        reason: "Read and create notes",
+      },
+      preview: {
+        kind: "connection_access",
+        appId: "notes",
+        appName: "notes",
+        connectionId: "connection-1",
+        connectionKind: "fake-docs",
+        connectionLabel: "Docs",
+        identity: "account",
+        grantEpoch: "grant-1",
+        preset: "read_and_write",
+        operations: [
+          { name: "documents.get", sideEffect: "read-only" },
+          { name: "documents.create", sideEffect: "write", approvalRequired: true },
+        ],
+        reason: "Read and create notes",
+        title: "Allow notes to access Docs",
+        summary: "Read and create notes",
+      },
+    };
+    let approvalPayload: Record<string, unknown> = {
+      ...basePayload,
+      preview: {
+        ...basePayload.preview,
+        // Card only listed documents.create (e.g. documents.get was revoked afterwards)
+        operations: [{ name: "documents.create", sideEffect: "write", approvalRequired: true }],
+      },
+    };
+    const h = makeApp({
+      approvalsRepo: {
+        findById: async (id: string) =>
+          id === "appr-race-1"
+            ? { id, type: "action_execution", status: "pending", payload: approvalPayload }
+            : null,
+        resolvePending,
+      },
+      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
+    });
+    try {
+      // 1. Drifted preview returns 409 stale_request without claiming or writing any grants
+      const drifted = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({}),
+      });
+      expect(drifted.status).toBe(409);
+      expect(await drifted.json()).toMatchObject({ code: "stale_request" });
+      expect(resolvePending).not.toHaveBeenCalled();
+      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
+
+      // 2. Reconnected grantEpoch mismatch also returns 409 stale_request with zero grants
+      approvalPayload = {
+        ...basePayload,
+        preview: { ...basePayload.preview, grantEpoch: "epoch-old" },
+      };
+      const epochDrift = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({}),
+      });
+      expect(epochDrift.status).toBe(409);
+      expect(await epochDrift.json()).toMatchObject({ code: "stale_request" });
+      expect(resolvePending).not.toHaveBeenCalled();
+      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
+
+      // 3. Matching preview, but concurrent rejection wins resolvePending -> 409 and ZERO grants written
+      approvalPayload = basePayload;
+      const lostRace = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
+        method: "POST",
+        headers: sameOrigin,
+        body: JSON.stringify({}),
+      });
+      expect(lostRace.status).toBe(409);
+      expect(resolvePending).toHaveBeenCalledTimes(1);
+      expect(onApproved).not.toHaveBeenCalled();
+      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
     } finally {
       h.close();
     }

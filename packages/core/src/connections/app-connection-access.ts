@@ -268,6 +268,55 @@ export class AppConnectionAccessRepository {
     );
   }
 
+  async putManyIfAppActive(
+    appId: string,
+    inputs: ReadonlyArray<
+      Omit<Parameters<AppConnectionAccessRepository["put"]>[0], "appId"> & {
+        preserveExistingConstraints?: boolean;
+        preserveExistingExpiry?: boolean;
+      }
+    >,
+    isAppActive: () => boolean,
+  ): Promise<AppConnectionAccessRecord[] | null> {
+    return await this.appLifecycle.runExclusive(appId, () =>
+      this.db.transaction((tx) => {
+        if (!isAppActive()) return null;
+        const now = new Date();
+        const written: AppConnectionAccessRecord[] = [];
+        for (const { preserveExistingConstraints, preserveExistingExpiry, ...entry } of inputs) {
+          const input = { appId, ...entry };
+          let nextInput = input;
+          if (preserveExistingConstraints || preserveExistingExpiry) {
+            const active = tx
+              .select()
+              .from(appConnectionAccess)
+              .where(
+                and(
+                  policyKey(input),
+                  isNull(appConnectionAccess.revokedAt),
+                  or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
+                ),
+              )
+              .get();
+            if (active) {
+              nextInput = {
+                ...input,
+                ...(preserveExistingConstraints
+                  ? { constraints: toAccessRecord(active).constraints }
+                  : {}),
+                ...(preserveExistingExpiry
+                  ? { expiresAt: mergeExpiry(input.expiresAt ?? null, active.expiresAt) }
+                  : {}),
+              };
+            }
+          }
+          written.push(this.writePolicy(tx, nextInput, now));
+        }
+        return written;
+      }),
+    );
+  }
+
   private writePolicy(
     tx: DrizzleTx,
     input: Parameters<AppConnectionAccessRepository["put"]>[0],
@@ -782,4 +831,11 @@ function policyCurrentForInvocation(
       grant.grantEpoch !== null &&
       policy.grantEpoch === grant.grantEpoch,
   );
+}
+
+function mergeExpiry(requested: Date | null, existing: Date | null): Date | null {
+  if (requested && existing) {
+    return requested < existing ? requested : existing;
+  }
+  return requested ?? existing;
 }

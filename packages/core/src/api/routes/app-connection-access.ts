@@ -15,14 +15,19 @@ import type { GrantValue } from "../../connections/grant.js";
 import type { OperationDescriptor } from "../../connections/types.js";
 import { appAccessibleOperations, describeAct } from "../../connections/app-connections.js";
 import {
+  extractConnectionAccessPreview,
   grantConnectionAccessOperations,
+  matchesConnectionAccessPreview,
   REQUEST_CONNECTION_ACCESS_ACTION,
   resolveConnectionAccessRequest,
 } from "../../connections/request-connection-access.js";
 import { enteredPerson } from "../../access/require-entry.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { approvalCall, resolveApproval, resolverOf } from "./approvals.js";
+import { createLogger } from "../../logger.js";
+import { approvalCall, resolverOf } from "./approvals.js";
+
+const log = createLogger("api:app-connection-access");
 
 const ConstraintSchema = z
   .object({
@@ -334,19 +339,23 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
     if (expiresAt && expiresAt <= new Date()) {
       return c.json({ error: "expiresAt must be in the future." }, 400);
     }
+    const stale = () =>
+      c.json(
+        { error: "This request changed or was already answered.", code: "stale_request" },
+        409,
+      );
     const approvalId = c.req.param("id");
     const approval = await deps.approvalsRepo.findById(approvalId);
     const { actionName, args } = approvalCall(approval);
+    const preview = extractConnectionAccessPreview(approval?.payload);
     if (
       approval?.status !== "pending" ||
       approval.type !== "action_execution" ||
       actionName !== REQUEST_CONNECTION_ACCESS_ACTION ||
-      !args
+      !args ||
+      !preview
     ) {
-      return c.json(
-        { error: "This request changed or was already answered.", code: "stale_request" },
-        409,
-      );
+      return stale();
     }
     const registry = deps.connectionRegistry;
     if (!registry) return c.json({ error: "Connections are unavailable." }, 503);
@@ -362,19 +371,51 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
     };
     const resolvedRequest = await resolveConnectionAccessRequest(requestDeps, args);
     if (!resolvedRequest.ok) return c.json({ error: resolvedRequest.error }, 409);
-    const granted = await grantConnectionAccessOperations(requestDeps, resolvedRequest.value, {
-      expiresAt,
-    });
-    if (!granted.ok) return c.json({ error: granted.error }, 409);
-    const resolved = await resolveApproval(
-      deps,
+    if (!matchesConnectionAccessPreview(resolvedRequest.value, preview)) {
+      return stale();
+    }
+
+    // Claim the pending approval atomically BEFORE writing grants so a concurrent
+    // rejection or duplicate approval can never leave access policies behind.
+    const resolveResult = await deps.approvalsRepo.resolvePending(
       approvalId,
       "approve",
       resolverOf(enteredPerson(c)),
     );
-    return resolved.status === 202
-      ? c.json({ ok: true, grantedOperations: granted.grantedOperations }, 202)
-      : c.json(resolved.body, resolved.status);
+    if (resolveResult.outcome === "not_found") {
+      return c.json({ error: "Approval not found" }, 404);
+    }
+    if (resolveResult.outcome === "already_resolved") {
+      return c.json({ error: "Approval already resolved", approval: resolveResult.approval }, 409);
+    }
+
+    // Re-confirm that connection/policy state still matches the card preview
+    // immediately before persisting grants.
+    const confirmedRequest = await resolveConnectionAccessRequest(requestDeps, args);
+    if (!confirmedRequest.ok || !matchesConnectionAccessPreview(confirmedRequest.value, preview)) {
+      const reason = confirmedRequest.ok
+        ? "This request changed or was already answered."
+        : confirmedRequest.error;
+      await deps.approvalsRepo.markExecutionFailed?.(approvalId, reason);
+      return stale();
+    }
+
+    const granted = await grantConnectionAccessOperations(requestDeps, confirmedRequest.value, {
+      expiresAt,
+    });
+    if (!granted.ok) {
+      await deps.approvalsRepo.markExecutionFailed?.(approvalId, granted.error);
+      return c.json({ error: granted.error }, 409);
+    }
+
+    deps.approvalHandler.onApproved(approvalId).catch((err) => {
+      log.error("approval execution failed", {
+        approvalId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    return c.json({ ok: true, grantedOperations: granted.grantedOperations }, 202);
   });
 
   return app;

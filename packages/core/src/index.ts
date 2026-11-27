@@ -1072,6 +1072,7 @@ async function main() {
           ? { id: view.appId, displayName: view.displayName, enabled: view.enabled }
           : null;
       },
+      findApproval: (approvalId) => approvalsRepo.findById(approvalId),
     },
   );
   appConnections.registerActions(actionRegistry);

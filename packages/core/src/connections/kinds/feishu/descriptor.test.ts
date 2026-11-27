@@ -184,6 +184,16 @@ describe("feishu descriptor shape", () => {
     expect(
       actor.operations?.filter((op) => op.appAccess?.sideEffects === "write").map((op) => op.name),
     ).toEqual(["feishu.document.create", "feishu.document.update", "feishu.calendar.event.create"]);
+    const docCreate = actor.operations?.find((op) => op.name === "feishu.document.create");
+    const docUpdate = actor.operations?.find((op) => op.name === "feishu.document.update");
+    expect(docCreate?.appAccess?.approvalPreview?.fields).toContainEqual({
+      label: "Content",
+      inputPointer: "/content",
+    });
+    expect(docUpdate?.appAccess?.approvalPreview?.fields).toContainEqual({
+      label: "Content",
+      inputPointer: "/content",
+    });
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 

@@ -30,6 +30,7 @@ import {
   createRequestConnectionAccessAction,
   REQUEST_CONNECTION_ACCESS_ACTION,
   type AppCatalogLookup,
+  type RequestConnectionAccessDeps,
 } from "./request-connection-access.js";
 
 export { REQUEST_CONNECTION_ACCESS_ACTION };
@@ -178,6 +179,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly now: () => number;
   private readonly isReady: () => boolean;
   private readonly lookupApp?: AppCatalogLookup;
+  private readonly findApproval?: RequestConnectionAccessDeps["findApproval"];
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -189,6 +191,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       now?: () => number;
       isReady?: () => boolean;
       lookupApp?: AppCatalogLookup;
+      findApproval?: RequestConnectionAccessDeps["findApproval"];
     } = {},
   ) {
     this.invokeLimit = options.invokeLimit ?? DEFAULT_INVOKE_LIMIT;
@@ -196,6 +199,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     this.now = options.now ?? Date.now;
     this.isReady = options.isReady ?? (() => true);
     this.lookupApp = options.lookupApp;
+    this.findApproval = options.findApproval;
   }
 
   forApp(appId: string): AppConnectionsCapability {
@@ -212,6 +216,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           registry: this.registry,
           access: this.access,
           lookupApp: this.lookupApp,
+          findApproval: this.findApproval,
           isReady: this.isReady,
         }),
       );

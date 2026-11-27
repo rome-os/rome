@@ -75,8 +75,9 @@ export interface AppCatalogLookup {
 
 export interface RequestConnectionAccessDeps {
   registry: Pick<ConnectionRegistry, "all" | "getDescriptor" | "grantOf">;
-  access: Pick<AppConnectionAccessRepository, "listActiveForConnection" | "putIfAppActive">;
+  access: Pick<AppConnectionAccessRepository, "listActiveForConnection" | "putManyIfAppActive">;
   lookupApp: AppCatalogLookup;
+  findApproval?: (approvalId: string) => Promise<{ status: string; payload: unknown } | null>;
   isReady?: () => boolean;
 }
 
@@ -240,41 +241,101 @@ export async function resolveConnectionAccessRequest(
   };
 }
 
+const connectionAccessPreviewSchema = z.object({
+  kind: z.literal("connection_access"),
+  appId: z.string().min(1),
+  connectionId: z.string().min(1),
+  identity: z.string().min(1),
+  grantEpoch: z.string().min(1).optional(),
+  operations: z.array(
+    z.object({
+      name: z.string().min(1),
+      sideEffect: z.enum(["read-only", "write"]),
+      approvalRequired: z.boolean().optional(),
+    }),
+  ),
+});
+
+export type ConnectionAccessPreviewSnapshot = z.infer<typeof connectionAccessPreviewSchema>;
+
+export function extractConnectionAccessPreview(
+  payload: unknown,
+): ConnectionAccessPreviewSnapshot | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const preview = (payload as { preview?: unknown }).preview;
+  const parsed = connectionAccessPreviewSchema.safeParse(preview);
+  return parsed.success ? parsed.data : null;
+}
+
+export function matchesConnectionAccessPreview(
+  resolved: ResolvedConnectionAccessRequest,
+  preview: ConnectionAccessPreviewSnapshot,
+): boolean {
+  if (
+    preview.appId !== resolved.appId ||
+    preview.connectionId !== resolved.connectionId ||
+    preview.identity !== resolved.identity
+  ) {
+    return false;
+  }
+  if (preview.grantEpoch !== undefined && preview.grantEpoch !== resolved.grantEpoch) {
+    return false;
+  }
+  if (preview.operations.length !== resolved.missingOperations.length) {
+    return false;
+  }
+  const previewOps = [...preview.operations].sort((a, b) => a.name.localeCompare(b.name));
+  const resolvedOps = [...resolved.missingOperations].sort((a, b) => a.name.localeCompare(b.name));
+  for (let i = 0; i < previewOps.length; i += 1) {
+    const expected = previewOps[i]!;
+    const actual = resolvedOps[i]!;
+    if (
+      expected.name !== actual.name ||
+      expected.sideEffect !== actual.appAccess?.sideEffects ||
+      Boolean(expected.approvalRequired) !== Boolean(actual.appAccess?.approvalRequired)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function grantConnectionAccessOperations(
   deps: RequestConnectionAccessDeps,
   resolved: ResolvedConnectionAccessRequest,
   options: { expiresAt?: Date | null } = {},
 ): Promise<{ ok: true; grantedOperations: string[] } | { ok: false; error: string }> {
-  const grantedOperations: string[] = [];
-  for (const op of resolved.missingOperations) {
-    const sideEffects = op.appAccess!.sideEffects;
-    const approval = sideEffects === "write" ? "required" : "not_required";
-    const written = await deps.access.putIfAppActive(
-      {
-        appId: resolved.appId,
+  const written = await deps.access.putManyIfAppActive(
+    resolved.appId,
+    resolved.missingOperations.map((op) => {
+      const sideEffects = op.appAccess!.sideEffects;
+      return {
         connectionId: resolved.connectionId,
         identity: resolved.identity,
         operation: op.name,
         sideEffects,
-        approval,
+        approval: sideEffects === "write" ? "required" : "not_required",
         constraints: [],
         grantEpoch: resolved.grantEpoch,
         expiresAt: options.expiresAt ?? null,
-      },
-      () => {
-        const app = deps.lookupApp(resolved.appId);
-        return Boolean(app && app.enabled);
-      },
-    );
-    if (!written || written === "unsupported_constraints" || written === "policy_conflict") {
-      return {
-        ok: false,
-        error: `Could not grant "${op.name}" to "${resolved.appId}".`,
+        // Chat approvals never disclose or overwrite existing resource allowlists
+        // or shorten/extend an active expiry carried over across a reconnect.
+        preserveExistingConstraints: true,
+        preserveExistingExpiry: true,
       };
-    }
-    grantedOperations.push(op.name);
+    }),
+    () => {
+      const app = deps.lookupApp(resolved.appId);
+      return Boolean(app && app.enabled);
+    },
+  );
+  if (!written) {
+    return {
+      ok: false,
+      error: `Could not grant connection access to "${resolved.appId}".`,
+    };
   }
-  return { ok: true, grantedOperations };
+  return { ok: true, grantedOperations: written.map((policy) => policy.operation) };
 }
 
 function buildPreview(resolved: ResolvedConnectionAccessRequest): PreviewPayload {
@@ -297,6 +358,7 @@ function buildPreview(resolved: ResolvedConnectionAccessRequest): PreviewPayload
     connectionKind: resolved.connectionKind,
     connectionLabel: resolved.connectionLabel,
     identity: resolved.identity,
+    grantEpoch: resolved.grantEpoch,
     preset: resolved.preset,
     operations: resolved.missingOperations.map((op) => ({
       name: op.name,
@@ -353,6 +415,22 @@ export function createRequestConnectionAccessAction(deps: RequestConnectionAcces
           status: "error",
           error: "Granting app connection access requires guardian approval.",
         };
+      }
+      if (deps.findApproval) {
+        const approvalId = initiator.slice("approval:".length);
+        const approval = await deps.findApproval(approvalId);
+        const preview = extractConnectionAccessPreview(approval?.payload);
+        if (
+          approval?.status !== "approved" ||
+          !preview ||
+          !matchesConnectionAccessPreview(resolved.value, preview)
+        ) {
+          return {
+            status: "error",
+            error:
+              "This connection access request changed after it was created. Please request access again.",
+          };
+        }
       }
       const granted = await grantConnectionAccessOperations(deps, resolved.value);
       if (!granted.ok) return { status: "error", error: granted.error };

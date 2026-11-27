@@ -266,6 +266,7 @@ export type PreviewPayload =
       connectionKind: string;
       connectionLabel: string;
       identity: string;
+      grantEpoch?: string;
       preset: "read" | "read_and_write" | "custom";
       operations: {
         name: string;
