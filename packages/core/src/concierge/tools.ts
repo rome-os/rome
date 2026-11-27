@@ -39,7 +39,6 @@ import {
   isConciergeAgent,
   isConciergeChat,
   isMainConciergeChat,
-  privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
@@ -311,8 +310,8 @@ export async function buildConciergeTools(
           (await webchatRepo.listProjects()).map((stored) => stored.path),
         );
 
-  // Whose Concierge this turn is: the owner of the chat it runs in. Every
-  // chat and row the tools reach is that owner's.
+  // Whose Concierge this turn is: the owner of the chat it runs in. The
+  // chats and rows its lists show are that owner's, and so is what it makes.
   const ownerHere = async () => {
     const { chatId } = currentTurn();
     // A chat on a connection is the guardian's Concierge's.
@@ -324,11 +323,7 @@ export async function buildConciergeTools(
 
   const requireTaskChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (
-      !chat ||
-      chat.triggerKind !== TASK_CHAT_TRIGGER_KIND ||
-      privateOwnerOf(chat) !== (await ownerHere())
-    ) {
+    if (chat?.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
       throw new Error(`No task chat ${chatId}. Use chat_list to find your task chats.`);
     }
     return chat;
@@ -356,15 +351,10 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // A chat the Concierge may read: one of its task chats, or another of its
-  // Concierge chats.
+  // A chat the Concierge may read: a task chat or a Concierge chat.
   const requireReadableChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (
-      !chat ||
-      (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat)) ||
-      privateOwnerOf(chat) !== (await ownerHere())
-    ) {
+    if (!chat || (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat))) {
       throw new Error(`No task chat or Concierge chat ${chatId}. Use chat_list to find them.`);
     }
     return chat;
@@ -550,7 +540,7 @@ export async function buildConciergeTools(
     if (answers !== undefined) {
       if ((await webchatRepo.getReplyTarget(chatId, answers))?.role !== "user") {
         throw new Error(
-          `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
+          `No message ${answers} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
         );
       }
       return answers;
@@ -640,9 +630,9 @@ export async function buildConciergeTools(
     return task;
   };
 
-  // Whether message `messageKey` of this chat is one the guardian sent: an
+  // Whether message `messageKey` of this chat is one a person sent: an
   // automation's or an agent's input is stored as a user message too.
-  const isGuardianMessage = async (messageKey: string) => {
+  const isPersonMessage = async (messageKey: string) => {
     const message = await webchatRepo.getReplyTarget(currentTurn().chatId, messageKey);
     return message?.role === "user" && automatedSource(message.senderId) === null;
   };
@@ -653,18 +643,18 @@ export async function buildConciergeTools(
   // none: a guess would link and move the wrong message.
   const relayedMessage = async (answers: string | undefined) => {
     if (answers !== undefined) {
-      if (!(await isGuardianMessage(answers))) {
+      if (!(await isPersonMessage(answers))) {
         throw new Error(
-          `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
+          `No message ${answers} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
         );
       }
       return answers;
     }
-    const guardian: string[] = [];
+    const fromPeople: string[] = [];
     for (const key of await turnPrompts()) {
-      if (await isGuardianMessage(key)) guardian.push(key);
+      if (await isPersonMessage(key)) fromPeople.push(key);
     }
-    return guardian.length === 1 ? guardian[0] : undefined;
+    return fromPeople.length === 1 ? fromPeople[0] : undefined;
   };
 
   // Says `text` in this chat on a connection. Answers the platform's key.
@@ -777,7 +767,7 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const refusal = (id: string) =>
       new Error(
-        `No guardian message ${id} in this chat. Pass a message_id from a <chat_thread> line.`,
+        `No message ${id} from a person in this chat. Pass a message_id from a <chat_thread> line.`,
       );
     if (messageId !== undefined) {
       if ((await webchatRepo.getReplyTarget(chatId, messageId))?.role !== "user") {
@@ -1012,7 +1002,7 @@ export async function buildConciergeTools(
             return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
           }
           if (!(await webchatRepo.setMessageReaction(chatId, messageId, emoji as string | null))) {
-            throw new Error(`No guardian message ${messageId} in this chat.`);
+            throw new Error(`Could not react to message ${messageId} in this chat.`);
           }
           // A reaction is how the turn handles the message, so it never shows
           // working (docs/domains/chats.md#status).

@@ -3,7 +3,7 @@ import type { ConnectionKindOfChannel } from "../db/repositories/channel-records
 import { createLogger } from "../logger.js";
 import { sessionKeyChannel } from "./agent-session-key.js";
 import type { SessionOpening } from "../agent/index.js";
-import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { takesWakeUps } from "./wake-up-channels.js";
 
 const log = createLogger("session-opening");
 
@@ -52,7 +52,7 @@ export type SessionOpeningFor = (
   continuityKey: string,
   threadContext?: ThreadContext,
 ) => Promise<
-  Required<Pick<SessionOpening, "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes">>
+  Required<Pick<SessionOpening, "drawsCards" | "takesWakeUps" | "toolEnv" | "spanAttributes">>
 >;
 
 /**
@@ -74,7 +74,7 @@ export function sessionOpeningFor(deps: SessionOpeningDeps): SessionOpeningFor {
     return {
       drawsCards:
         !!openingChannel && surfaceOf(deps.channelSurface, openingChannel).interactiveCards,
-      guardianFacing: isGuardianFacingChannel(continuityKey, deps.connectionKindOfChannel),
+      takesWakeUps: takesWakeUps(continuityKey, deps.connectionKindOfChannel),
       // ROME_CHANNEL is the channel the session's turns are delivered on.
       // Shell tools such as the Discord CLI read it to act as that channel's
       // account. Set even when undefined, so a value Rome itself inherited

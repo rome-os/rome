@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.12](https://github.com/rome-os/rome/compare/node-v0.1.11...node-v0.1.12) (2026-11-27)
+
+
+### Features
+
+* **node-core:** serve window control on full macOS hosts ([#2767](https://github.com/rome-os/rome/issues/2767)) ([6dc564f](https://github.com/rome-os/rome/commit/6dc564ffc96c181f11e33ed24258f1b71f111116))
+* **node:** add a macOS Computer Use permission guide ([#2812](https://github.com/rome-os/rome/issues/2812)) ([143ac29](https://github.com/rome-os/rome/commit/143ac29867660a8bd54ed7c49a8298d216c9e43b))
+* **node:** add Audit log view to Rome Node Web UI ([#2542](https://github.com/rome-os/rome/issues/2542)) ([2511b5d](https://github.com/rome-os/rome/commit/2511b5d2579a7e5f8ab9c43edc6c0feb309600bb))
+* **node:** add lightweight Web UI and Docker image for Rome Node ([#2519](https://github.com/rome-os/rome/issues/2519)) ([044b43a](https://github.com/rome-os/rome/commit/044b43a60f3b17fcdd4c9b9ec6c2bb4ce00e2939))
+* **rome-node:** bundle macOS computer-use in node builds ([#2566](https://github.com/rome-os/rome/issues/2566)) ([16ecc98](https://github.com/rome-os/rome/commit/16ecc98dd3f5f2dc879da309f4a9b7bc1ffd4e54))
+* **rome-node:** bundle the macOS computer-use helper ([#2792](https://github.com/rome-os/rome/issues/2792)) ([a49c3cb](https://github.com/rome-os/rome/commit/a49c3cbd2542e3df908707f10b9fc577ddf5d282))
+* stop refusing shell commands in shared chats ([#2807](https://github.com/rome-os/rome/issues/2807)) ([21b5e58](https://github.com/rome-os/rome/commit/21b5e58cfa82397ba8e4a95e25a9ec05224a9f22))
+
+
+### Reverts
+
+* remove computer-use macOS helper & Rome Node host (Option 1 - Part 2/2) ([#2700](https://github.com/rome-os/rome/issues/2700)) ([afd09fd](https://github.com/rome-os/rome/commit/afd09fdac09dc8264d9a805d624f5e781b4cf39a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.9
+
 ## [0.1.11](https://github.com/rome-os/rome/compare/node-v0.1.10...node-v0.1.11) (2026-11-15)
 
 

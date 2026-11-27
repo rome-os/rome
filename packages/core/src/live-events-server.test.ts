@@ -190,11 +190,13 @@ describe("live events WebSocket", () => {
         return track(() => {});
       },
       // The guardian's main chat is the only Concierge chat there is.
-      hasChatTasks: async (chatId, owner) => chatId === "concierge" && owner === "guardian",
-      subscribeChatTasks: (chatId, _owner, emit) => {
-        emit("tasks_changed", { chatId });
-        return track(() => {});
-      },
+      chatTasks: async (chatId) =>
+        chatId === "concierge"
+          ? (emit) => {
+              emit("tasks_changed", { chatId });
+              return track(() => {});
+            }
+          : null,
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -330,18 +332,17 @@ describe("live events WebSocket", () => {
     ).toMatchObject({ event: "concierge_activity", data: { chatId: "visitor-main" } });
   });
 
-  it("serves a Concierge chat's task list topic to its owner only", async () => {
-    const guardian = await connect();
-    await guardian.subscribe("chat.tasks:concierge");
-    expect(
-      await guardian.next((m) => m.type === "event" && m.topic === "chat.tasks:concierge"),
-    ).toMatchObject({ event: "tasks_changed", data: { chatId: "concierge" } });
-
-    const visitor = await connect(visitorHeaders());
-    visitor.send({ type: "subscribe", topic: "chat.tasks:concierge" });
-    expect(
-      await visitor.next((m) => m.type === "error" && m.topic === "chat.tasks:concierge"),
-    ).toMatchObject({ message: "Not found" });
+  it("serves a Concierge chat's task list topic to every member", async () => {
+    for (const client of [await connect(), await connect(visitorHeaders())]) {
+      await client.subscribe("chat.tasks:concierge");
+      expect(
+        await client.next((m) => m.type === "event" && m.topic === "chat.tasks:concierge"),
+      ).toMatchObject({ event: "tasks_changed", data: { chatId: "concierge" } });
+      client.send({ type: "subscribe", topic: "chat.tasks:gone" });
+      expect(
+        await client.next((m) => m.type === "error" && m.topic === "chat.tasks:gone"),
+      ).toMatchObject({ message: "Not found" });
+    }
   });
 
   it("answers the retired concierge.tasks topic as unknown and keeps the socket", async () => {

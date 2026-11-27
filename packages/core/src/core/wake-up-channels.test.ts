@@ -6,11 +6,11 @@ import {
   type TestDb,
   testAccountLinkOf,
 } from "../test/helpers.js";
-import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { takesWakeUps } from "./wake-up-channels.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");
 
-describe("isGuardianFacingChannel", () => {
+describe("takesWakeUps", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
     testDb?.close();
@@ -25,9 +25,9 @@ describe("isGuardianFacingChannel", () => {
     const connectionKindOf = recordedConnectionKindOf(testDb.db);
 
     expect(second).not.toBe("telegram");
-    expect(isGuardianFacingChannel(`${second}:42`, connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("telegram:42", connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("webchat:chat-1", connectionKindOf)).toBe(true);
-    expect(isGuardianFacingChannel("slack:C1", connectionKindOf)).toBe(false);
+    expect(takesWakeUps(`${second}:42`, connectionKindOf)).toBe(true);
+    expect(takesWakeUps("telegram:42", connectionKindOf)).toBe(true);
+    expect(takesWakeUps("webchat:chat-1", connectionKindOf)).toBe(true);
+    expect(takesWakeUps("slack:C1", connectionKindOf)).toBe(false);
   });
 });

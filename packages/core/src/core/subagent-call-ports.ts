@@ -57,7 +57,7 @@ const opening = (at: SessionPlace, inherited: Inherited): SessionOpening => ({
   threadContext: at.threadContext,
   sharedContext: at.sharedContext,
   drawsCards: false,
-  guardianFacing: false,
+  takesWakeUps: false,
   ...inherited,
 });
 
