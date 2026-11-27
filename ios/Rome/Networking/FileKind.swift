@@ -1,24 +1,18 @@
 import Foundation
-import UniformTypeIdentifiers
 
 /// What a file previews as: the server's `fileKind`, from
 /// `packages/api-types/src/file-kinds.ts`.
 enum FileKind: String, Sendable {
     case text, image, video, audio, pdf, docx, binary
 
-    /// By a file's name, for a link that carries no kind: the system's type
-    /// for its extension. A name with no extension is text, as on the server.
+    /// By a file's name, for a link that carries no kind: the server's rule,
+    /// by its extension. A name with no extension is text, as on the server.
     init(name: String) {
-        let ext = (name as NSString).pathExtension.lowercased()
-        guard !ext.isEmpty else { self = .text; return }
-        if ext == "docx" { self = .docx; return }
-        guard let type = UTType(filenameExtension: ext) else { self = .binary; return }
-        if type.conforms(to: .image) { self = .image }
-        else if type.conforms(to: .audio) { self = .audio }
-        else if type.conforms(to: .movie) { self = .video }
-        else if type.conforms(to: .pdf) { self = .pdf }
-        else if type.conforms(to: .text) || type.conforms(to: .sourceCode) { self = .text }
-        else { self = .binary }
+        let file = (name as NSString).lastPathComponent
+        let dot = file.lastIndex(of: ".")
+        guard let dot, dot > file.startIndex else { self = .text; return }
+        let ext = file[file.index(after: dot)...].lowercased()
+        self = Self.byExtension[ext] ?? .binary
     }
 
     /// What a MIME type alone says, for an older server's output; nil when it says nothing.
@@ -32,4 +26,38 @@ enum FileKind: String, Sendable {
         else if type.hasPrefix("text/") || type == "application/json" { self = .text }
         else { return nil }
     }
+
+    /// The server's extensions for each kind, without the dot. Kept equal to
+    /// file-kinds.ts by `FileKindTests`.
+    static let extensions: [(FileKind, [String])] = [
+        (.image, [
+            "apng", "avif", "gif", "jpeg", "jpg", "png", "svg", "webp",
+        ]),
+        (.video, [
+            "mov", "mp4", "m4v", "ogv", "webm",
+        ]),
+        (.audio, [
+            "aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba",
+        ]),
+        (.pdf, [
+            "pdf",
+        ]),
+        (.docx, [
+            "docx",
+        ]),
+        (.text, [
+            "bash", "bat", "c", "cc", "cfg", "cjs", "conf", "cpp", "css", "cs", "cts", "cxx", "csv",
+            "dart", "dockerfile", "env", "erl", "ex", "exs", "fish", "go", "gradle", "graphql", "h",
+            "hpp", "html", "htm", "ini", "ipynb", "java", "js", "json", "jsonl", "jsx", "kt", "kts",
+            "less", "log", "lua", "md", "mdx", "mjs", "mts", "php", "pl", "pm", "proto", "ps1", "py",
+            "pyi", "r", "rb", "rs", "sass", "scala", "scss", "sh", "sql", "svelte", "swift", "toml",
+            "txt", "ts", "tsx", "vue", "xml", "yaml", "yml", "zsh",
+        ]),
+    ]
+
+    private static let byExtension: [String: FileKind] = {
+        var map: [String: FileKind] = [:]
+        for (kind, list) in extensions { for ext in list where map[ext] == nil { map[ext] = kind } }
+        return map
+    }()
 }

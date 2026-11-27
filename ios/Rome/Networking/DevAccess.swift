@@ -6,6 +6,13 @@ import Foundation
 /// `CF_ACCESS_CLIENT_SECRET`) through `Info-Debug.plist`; a Release build has
 /// neither and sends nothing.
 enum DevAccess {
+    /// Whether requests to `url` carry the access headers.
+    static func stamps(_ url: URL) -> Bool {
+        var request = URLRequest(url: url)
+        stamp(&request)
+        return request.value(forHTTPHeaderField: "CF-Access-Client-Id") != nil
+    }
+
     static func stamp(_ request: inout URLRequest) {
         #if DEBUG
         guard let host = request.url?.host()?.lowercased(),

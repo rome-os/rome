@@ -15,8 +15,9 @@ extension View {
     /// audio file streamed in the system player, anything else downloaded with
     /// the session and shown in Quick Look, whose Share button sends or saves
     /// it, or straight in the share sheet when Quick Look cannot show it or a
-    /// preview would run it. A file that fails, or that no route serves, gets
-    /// a short notice at the top.
+    /// preview would run it. A picture too large for the viewer opens in Quick
+    /// Look. A file that fails, or that no route serves, gets a short notice
+    /// at the top.
     /// A project or memory path that names a folder goes to `openPage` with
     /// the dashboard's page for it. `top` is how far below the view's top
     /// edge the notice sits.
@@ -37,7 +38,7 @@ private struct LinkedFileViewer: ViewModifier {
     let openPage: (URL) -> Void
 
     @State private var preview: URL?
-    @State private var picture: LinkedFile?
+    @State private var picture: Picture?
     @State private var playing: MediaItem?
     @State private var sharing: SharedFile?
     @State private var notice: String?
@@ -65,9 +66,10 @@ private struct LinkedFileViewer: ViewModifier {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: loading)
-            .fullScreenCover(item: $picture) { file in
-                PhotoViewer(images: [file.viewerImage], start: 0)
-                    .environment(\.apiFileLoader) { [backend] path, query in try await backend.apiFile(path: path, query: query) }
+            .fullScreenCover(item: $picture) { picture in
+                // The viewer shows this one file, already downloaded.
+                PhotoViewer(images: [picture.file.viewerImage], start: 0)
+                    .environment(\.apiFileLoader) { _, _ in picture.data }
             }
             .fullScreenCover(item: $playing) { item in
                 StreamPlayer(item: item)
@@ -113,22 +115,23 @@ private struct LinkedFileViewer: ViewModifier {
                 case .file:
                     break
                 }
-                switch file.opening {
-                case .picture:
-                    picture = file
-                    return
-                case .media:
-                    guard let origin = backend.origin,
-                          let url = APIClient.fileURL(origin: origin, apiPath: file.streamPath, percentEncodedQuery: file.query)
-                    else { throw APIError.notFound }
+                // A player streams from the instance itself, which the demo
+                // has not, and a debug build cannot hand a dev host's access
+                // headers to AVKit: those download the file instead.
+                if file.opening == .media, let origin = backend.origin,
+                   let url = APIClient.fileURL(origin: origin, apiPath: file.streamPath, percentEncodedQuery: file.query),
+                   !DevAccess.stamps(url) {
                     playing = MediaItem(url: url, cookie: backend.webSessionCookie())
                     return
-                case .preview, .share:
-                    break
                 }
                 let data = try await backend.linkedFile(file)
+                // A picture past what the viewer loads opens in Quick Look.
+                if file.opening == .picture, data.count <= APIClient.imageLimit {
+                    picture = Picture(file: file, data: data)
+                    return
+                }
                 guard let url = AgentOutputsView.write(data, name: file.name) else { throw APIError.network }
-                if file.opening == .preview, AgentOutputsView.quickLookReads(url) {
+                if file.opening != .share, AgentOutputsView.quickLookReads(url) {
                     preview = url
                 } else {
                     sharing = SharedFile(url: url)
@@ -148,7 +151,8 @@ private struct LinkedFileViewer: ViewModifier {
 enum FileOpening: Equatable {
     /// In the picture viewer.
     case picture
-    /// Streamed in the system player, never downloaded first.
+    /// Streamed in the system player, never downloaded first, where the
+    /// instance can stream it.
     case media
     /// Downloaded, then in Quick Look when it reads the file.
     case preview
@@ -183,6 +187,13 @@ extension LinkedFile: Identifiable {
     }
 }
 
+/// A picture to show, with the bytes already downloaded for it.
+private struct Picture: Identifiable {
+    let file: LinkedFile
+    let data: Data
+    var id: String { file.id }
+}
+
 /// A video or audio file to stream, with the session that reads it.
 struct MediaItem: Identifiable {
     let id = UUID()
@@ -192,48 +203,57 @@ struct MediaItem: Identifiable {
 
 /// The system player over the whole screen, streaming `item`: AVKit asks the
 /// instance for the parts it plays and seeks to, so nothing is downloaded
-/// first. Its own close button closes the cover.
+/// first. The cover holds a bare controller that presents the player the
+/// standard way, so the player's own close button and swipe down close it,
+/// and then the cover goes.
 private struct StreamPlayer: UIViewControllerRepresentable {
     let item: MediaItem
     @Environment(\.dismiss) private var dismiss
 
-    func makeCoordinator() -> Coordinator { Coordinator(close: { dismiss() }) }
+    func makeUIViewController(context: Context) -> Host {
+        Host(item: item, onClose: { dismiss() })
+    }
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        var options: [String: Any] = [:]
-        if let cookie = item.cookie { options[AVURLAssetHTTPCookiesKey] = [cookie] }
-        // A debug build reaches a dev instance behind Cloudflare Access with its client headers.
-        var stamped = URLRequest(url: item.url)
-        DevAccess.stamp(&stamped)
-        if let headers = stamped.allHTTPHeaderFields, !headers.isEmpty {
-            options["AVURLAssetHTTPHeaderFieldsKey"] = headers
+    func updateUIViewController(_ host: Host, context: Context) {}
+
+    final class Host: UIViewController {
+        private let item: MediaItem
+        private let onClose: () -> Void
+        private var shown = false
+
+        init(item: MediaItem, onClose: @escaping () -> Void) {
+            self.item = item
+            self.onClose = onClose
+            super.init(nibName: nil, bundle: nil)
+            view.backgroundColor = .black
         }
-        let player = AVPlayer(playerItem: AVPlayerItem(asset: AVURLAsset(url: item.url, options: options)))
-        let controller = AVPlayerViewController()
-        controller.delegate = context.coordinator
-        controller.player = player
-        player.play()
-        return controller
+
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard !shown else { return }
+            shown = true
+            var options: [String: Any] = [:]
+            if let cookie = item.cookie { options[AVURLAssetHTTPCookiesKey] = [cookie] }
+            let player = ClosingPlayer()
+            player.onClose = onClose
+            player.player = AVPlayer(playerItem: AVPlayerItem(asset: AVURLAsset(url: item.url, options: options)))
+            player.modalPresentationStyle = .fullScreen
+            present(player, animated: false) { player.player?.play() }
+        }
     }
 
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
+    /// Says when the person closed it.
+    final class ClosingPlayer: AVPlayerViewController {
+        var onClose: (() -> Void)?
 
-    static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
-        controller.player?.pause()
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
-        let close: () -> Void
-        init(close: @escaping () -> Void) { self.close = close }
-
-        // Filling the cover, the player reads as full screen, and its close
-        // button ends that.
-        nonisolated func playerViewController(
-            _ playerViewController: AVPlayerViewController,
-            willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
-        ) {
-            MainActor.assumeIsolated { close() }
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            guard isBeingDismissed else { return }
+            player?.pause()
+            onClose?()
+            onClose = nil
         }
     }
 }
