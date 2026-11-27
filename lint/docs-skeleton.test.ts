@@ -80,6 +80,13 @@ describe("docsSkeletonGaps", () => {
     expect(docsSkeletonGaps(repo)).toEqual(["docs/target/never.md: empty"]);
   });
 
+  it("reports a doc for the whole product that holds only its title and a comment", async () => {
+    await writeSkeleton();
+    await write("docs/target/together.md", "# Together\n\n<!-- TODO: write\nthis -->\n");
+
+    expect(docsSkeletonGaps(repo)).toEqual(["docs/target/together.md: empty"]);
+  });
+
   it("reports a listed part that has no link, and one whose AGENTS.md does not exist", async () => {
     await writeSkeleton();
     await write(

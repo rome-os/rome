@@ -150,7 +150,9 @@ export function docsSkeletonGaps(root: string): string[] {
   const wholeProduct = WHOLE_PRODUCT.flatMap((file) => {
     const text = read(root, file);
     if (text === null) return [`${file}: missing`];
-    const body = proseLines(text).filter((line) => line.trim() && !/^#{1,6}\s/.test(line));
+    // A comment is a note to the writer, so a doc that holds only a comment is still empty.
+    const shown = text.replace(/<!--[\s\S]*?-->/g, "");
+    const body = proseLines(shown).filter((line) => line.trim() && !/^#{1,6}\s/.test(line));
     return body.length === 0 ? [`${file}: empty`] : [];
   });
   const { gaps, parts } = partGaps(root);
