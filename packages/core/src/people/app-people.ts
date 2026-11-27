@@ -1,21 +1,13 @@
 // The `PeopleService` `@rome-os/app-runtime` publishes to apps, answered from
-// People's repository. Vocabulary: docs/domains/people.md.
+// the guardian's accounts in Identity. Vocabulary: docs/domains/access.md.
 
-import type { PeopleService } from "@rome-os/app-runtime";
-import type { PeopleRepository } from "./model/people-repository.js";
+import type { Access, PeopleService } from "@rome-os/app-runtime";
 
-export function appPeople(people: Pick<PeopleRepository, "byBondLevel">): PeopleService {
+/** `PeopleService` over `access`, which answers the guardian's accounts. */
+export function appPeople(access: Pick<Access, "guardianAccounts">): PeopleService {
   return {
     async guardian() {
-      const guardians = await people.byBondLevel("guardian");
-      // A delegate link is an agent's account acting for the guardian, so a
-      // direct message there reaches the agent, not the guardian.
-      const accounts = guardians.flatMap((guardian) =>
-        guardian.links
-          .filter((link) => !link.delegate)
-          .map(({ platform, id }) => ({ platform, id })),
-      );
-      return { accounts };
+      return { accounts: await access.guardianAccounts() };
     },
   };
 }

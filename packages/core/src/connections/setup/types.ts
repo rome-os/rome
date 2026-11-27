@@ -101,7 +101,9 @@ export interface SetupGrant {
    *  credential. Omit when there is no identity to record. */
   profile?: ProfileRecord;
   /** The platform account that gave Rome this access, as the platform
-   *  reported it. Omit when the platform did not say. */
+   *  reported it. Omit when the platform did not say. The account becomes the
+   *  guardian's only when its id equals `accountIdOf(profile)`, as for a
+   *  connection signed in as the guardian's own account. */
   connectedBy?: ConnectedBy;
   /** The success view the standard "done" renderer presents. */
   summary?: SetupView;
@@ -190,7 +192,9 @@ export interface SetupCommitted {
 
 /**
  * The platform account that gave Rome a connection's access: the signed-in
- * account for a user session, the person who approved the app for an app.
+ * account for a user session, the person who approved the app for an app. A
+ * kind reports it in the form its `accountIdOf` records, so a connection
+ * signed in as the guardian's own account names one account in both.
  */
 interface ConnectedBy {
   /** The platform's own id for the account, in the form the kind records it. */

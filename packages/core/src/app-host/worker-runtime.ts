@@ -50,6 +50,7 @@ import {
   AppConnectionsProxy,
 } from "./service-proxies.js";
 import { callMain } from "../apps/actions/worker-rpc-client.js";
+import { appAccess } from "../apps/app-access-port.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
@@ -226,7 +227,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       personMappingRepo: appPersonMapping(peopleRepo, (name) =>
         channelRecords.platformOfChannel(name),
       ),
-      people: appPeople(peopleRepo),
+      people: appPeople(appAccess(db)),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,

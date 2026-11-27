@@ -51,7 +51,7 @@ export const slackAppGrantProfileSchema = z
     botUserId: z.string().min(1),
     /** Kept by a grant made before the Slack gateway Worker. */
     appId: z.string().min(1).optional(),
-    /** The workspace member who approved the app: the guardian there. */
+    /** The workspace member who approved the app. */
     installerUserId: z.string().min(1).optional(),
   })
   .strict();

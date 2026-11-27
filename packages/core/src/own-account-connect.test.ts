@@ -2,8 +2,10 @@
 // as the wiring builds it: a bot or an app tells nothing, and a connection
 // signed in as the guardian's own account makes that account the guardian's.
 
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { sql } from "drizzle-orm";
+import { createLinkedInDescriptor } from "./connections/kinds/linkedin/descriptor.js";
+import type { LinkedInSyncSink } from "./connections/kinds/linkedin/linkedin-sync.js";
 import { DrizzleConnectionsRepository } from "./connections/repository-db.js";
 import { ConnectionRegistry } from "./connections/registry.js";
 import { SetupManager } from "./connections/setup/manager.js";
@@ -110,5 +112,46 @@ describe("ownAccountConnected", () => {
     expect(await run()).toBe("failed");
     expect(registry.find(KIND)).toEqual([]);
     expect(await members.identity.personOf({ platform: KIND, accountId: "self-7" })).toBeNull();
+  });
+});
+
+describe("a LinkedIn connect", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => {
+    testDb?.close();
+    testDb = undefined;
+  });
+
+  it("makes the account the guardian's when LinkedIn names only its public id", async () => {
+    testDb = createTestDb();
+    const members = memberContext(testDb.db);
+    await guardianSeatCreated(members, { accounts: [] });
+    const store = new DrizzleConnectionsRepository(testDb.db);
+    const registry = new ConnectionRegistry({ repository: store });
+    registry.register(
+      createLinkedInDescriptor({
+        syncSink: {} as LinkedInSyncSink,
+        minIntervalMs: 60_000,
+        maxIntervalMs: 60_000,
+        run: async () => ({
+          code: 0,
+          stdout: JSON.stringify({ logged_in: true, public_id: "ada-lovelace", name: "Ada" }),
+          stderr: "",
+        }),
+        openLoginTab: async () => true,
+      }),
+    );
+    const manager = new SetupManager({ registry, participant: ownAccountConnected() });
+
+    const started = await manager.start({ connectionKind: "linkedin" }, "session");
+    await rs.waitFor(() => expect(manager.state(started.cid)?.status).toBe("done"));
+
+    const account = {
+      platform: "linkedin",
+      accountId: "https://www.linkedin.com/in/ada-lovelace/",
+    };
+    expect(await roleOfAccount(members, account)).toBe("guardian");
+    const [connection] = registry.find("linkedin");
+    expect(connection && store.accountOf(connection.id)).toEqual(account);
   });
 });
