@@ -1265,8 +1265,10 @@ final class SelfTest {
                    "local stop gives the blocked response writer time to drain")
         try expect(try header + readBytes(client, count: length) == response, "the in-flight response remains intact")
         let stopHeader = try readBytes(client, count: 8)
-        let (stopLength, _) = try Wire.lengths(stopHeader, request: false)
-        try expect(try stopHeader + readBytes(client, count: stopLength) == Wire.failure(nil, "session_stopped"),
+        let (stopLength, stopBinaryLength) = try Wire.lengths(stopHeader, request: false)
+        let stop = try JSONSerialization.jsonObject(with: readBytes(client, count: stopLength)) as? NSDictionary
+        let expected: [String: Any] = ["v": 1, "id": NSNull(), "ok": false, "error": ["code": "session_stopped"]]
+        try expect(stopBinaryLength == 0 && stop?.isEqual(to: expected) == true,
                    "the terminal stop notice follows the response")
         try expect(notified.wait(timeout: .now() + .seconds(2)) == .success, "the local stop notification finishes")
     }
