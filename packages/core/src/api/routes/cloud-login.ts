@@ -441,7 +441,12 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // account never links the box either.
       const mayLink =
         cloudCheckedOwner(entry.redirectUri) || (await resolveGuardianSession(c, deps.db)) !== null;
-      if (await seatRefuses(accountId, "browser", mayLink)) return notOwnerRedirect(c);
+      const refusal = await seatRefuses(accountId, "browser", mayLink);
+      // A seat with no account is linked by its guardian signing in with the
+      // password first. An invited member still goes on to the visitor flow.
+      const member = accountEmail && deps.dashboardAccessState.isCloudEmailAllowed(accountEmail);
+      if (refusal === "link_required" && !member) return c.redirect(errorRedirect("link_required"));
+      if (refusal) return notOwnerRedirect(c);
 
       // Vanilla: the token leg also minted the durable instance token. Persist it
       // before issuing the session so an enrolled box never lacks its credential.
@@ -482,15 +487,16 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   // account (a password-only Rome) is linked only when `mayLink`: the guardian
   // is signed in, or Rome Cloud has already checked the owner. A bare Rome
   // Cloud sign-in cannot claim it otherwise. A Rome with no seat is a first
-  // connect, and its first account becomes the guardian.
+  // connect, and its first account becomes the guardian. Returns why the
+  // account is refused, or null when it signs in as the guardian.
   async function seatRefuses(
     accountId: string,
     channel: PendingLogin["channel"],
     mayLink: boolean,
-  ) {
+  ): Promise<"not_owner" | "link_required" | null> {
     const guardian = await getGuardianAuthState(deps.db);
-    if (!guardian.exists || guardian.accountId === accountId) return false;
-    if (guardian.accountId === null && mayLink) return false;
+    if (!guardian.exists || guardian.accountId === accountId) return null;
+    if (guardian.accountId === null && mayLink) return null;
     // The seat's account beside the refused one lets support tell a stale
     // binding from a real non-owner.
     log.warn("cloud login refused: account does not own this instance", {
@@ -498,7 +504,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       accountId,
       recordedAccountId: guardian.accountId,
     });
-    return true;
+    return guardian.accountId === null ? "link_required" : "not_owner";
   }
 
   // Rome Cloud issues a code for its hosted `https://<slug>.<PANTHEON_DOMAIN>`

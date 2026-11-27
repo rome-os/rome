@@ -56,7 +56,7 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 
 ## Visitor sign-in
 
-A visitor gets their credential by signing in to their [Rome Cloud](../concepts/rome-cloud.md) account through a PKCE-bound authorization round trip. The instance never sees a password — only a one-time code it exchanges with Rome Cloud for the verified account identity. The dashboard arm normally starts by dispatch. When Rome Cloud refuses a guardian sign-in because the account does not own the instance ([ownership enforcement](../concepts/rome-cloud.md#instance-sign-in)), the instance re-routes the refusal into this flow. Without a dashboard allow-list, the refusal surfaces as a not-owner error instead.
+A visitor gets their credential by signing in to their [Rome Cloud](../concepts/rome-cloud.md) account through a PKCE-bound authorization round trip. The instance never sees a password — only a one-time code it exchanges with Rome Cloud for the verified account identity. The dashboard arm normally starts by dispatch. When a guardian sign-in is refused because the account does not hold the seat ([instance sign-in](../concepts/rome-cloud.md#instance-sign-in)), whether Rome Cloud or the instance refused it, the instance re-routes the refusal into this flow. Without a dashboard allow-list, the refusal surfaces as a not-owner error instead.
 
 ### Invariants
 

@@ -86,6 +86,7 @@ const CLOUD_ERROR_REASONS = new Set([
   "network",
   "account_mismatch",
   "not_owner",
+  "link_required",
   "revoked",
 ]);
 
