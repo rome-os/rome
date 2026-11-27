@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rstest } from "@rstest/core";
+import { readdirSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import * as fsPromises from "node:fs/promises" with { rstest: "importActual" };
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,9 +15,15 @@ import {
   createFileCredentialStore,
   type HostCredential,
 } from "@rome-os/node-core/host";
-import { createWebAuth, isLoopbackHost } from "./auth.js";
+import { createWebAuth, DEFAULT_SETUP_WINDOW_MS, isLoopbackHost } from "./auth.js";
 import { HostController } from "./host-controller.js";
-import { startWebServer } from "./server.js";
+import { startWebServer, type WebServerOptions } from "./server.js";
+
+let renameOverride: typeof rename | undefined;
+rstest.mock("node:fs/promises", () => ({
+  ...fsPromises,
+  rename: (...args: Parameters<typeof rename>) => (renameOverride ?? fsPromises.rename)(...args),
+}));
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -38,6 +47,24 @@ async function listen(server: Server): Promise<string> {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing server address");
   return `http://127.0.0.1:${address.port}`;
+}
+
+function rawRequest(
+  port: number,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body?: string,
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined> }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
 }
 
 async function createAssetsFixture(): Promise<string> {
@@ -172,7 +199,7 @@ describe("rome-node web server", () => {
     const assetsDir = await createAssetsFixture();
     const logs: string[] = [];
 
-    // Default startup is passwordless on localhost even when listening on 0.0.0.0 (Docker pattern).
+    // A native 127.0.0.1 bind starts in passwordless mode.
     const first = await startWebServer({
       host: "127.0.0.1",
       port: 0,
@@ -477,24 +504,6 @@ describe("rome-node web server", () => {
   });
 
   it("blocks DNS rebinding on auth-free loopback mode, rejects Bearer auth, and sends strict script-src CSP", async () => {
-    function rawRequest(
-      port: number,
-      method: string,
-      path: string,
-      headers: Record<string, string>,
-      body?: string,
-    ): Promise<{ status: number; headers: Record<string, string | string[] | undefined> }> {
-      return new Promise((resolve, reject) => {
-        const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
-          res.resume();
-          res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers }));
-        });
-        req.on("error", reject);
-        if (body) req.write(body);
-        req.end();
-      });
-    }
-
     const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-dns-rebind-"));
     cleanup.push(() => rm(configDir, { recursive: true, force: true }));
     const assetsDir = await createAssetsFixture();
@@ -604,156 +613,520 @@ describe("rome-node web server", () => {
     expect(remoteRead.status).toBe(200);
   });
 
-  it("requires one-time setup token on 0.0.0.0 bind even with forged Host header and forbids removing password", async () => {
-    function rawRequest(
-      port: number,
-      method: string,
-      path: string,
-      headers: Record<string, string>,
-      body?: string,
-    ): Promise<{
-      status: number;
-      headers: Record<string, string | string[] | undefined>;
-      body: string;
-    }> {
-      return new Promise((resolve, reject) => {
-        const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
-          const chunks: Buffer[] = [];
-          res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-          res.on("end", () =>
-            resolve({
-              status: res.statusCode ?? 0,
-              headers: res.headers,
-              body: Buffer.concat(chunks).toString("utf8"),
-            }),
-          );
-        });
-        req.on("error", reject);
-        if (body) req.write(body);
-        req.end();
+  describe("first-run browser setup", () => {
+    const startTime = 1_000_000;
+    const ownerPassword = "owner-password-1";
+    const fileSession = {
+      authRequired: true,
+      authenticated: false,
+      passwordSource: "file",
+      canRemovePassword: false,
+    };
+
+    async function startSetupServer(overrides: Partial<WebServerOptions> = {}) {
+      const configDirectory =
+        overrides.configDirectory ?? (await mkdtemp(join(tmpdir(), "rome-node-web-setup-")));
+      if (!overrides.configDirectory) {
+        cleanup.push(() => rm(configDirectory, { recursive: true, force: true }));
+      }
+      const assetsDir = overrides.assetsDir ?? (await createAssetsFixture());
+      const logs: string[] = [];
+      const server = await startWebServer({
+        host: "0.0.0.0",
+        port: 0,
+        configDirectory,
+        assetsDir,
+        log: (line) => logs.push(line),
+        ...overrides,
+      });
+      cleanup.push(() => server.close());
+      const base = `http://127.0.0.1:${server.port}`;
+      return { server, base, configDirectory, assetsDir, logs };
+    }
+
+    function postSetup(
+      base: string,
+      body = JSON.stringify({ newPassword: ownerPassword }),
+      headers = {},
+    ) {
+      return fetch(`${base}/api/auth/setup`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: base, ...headers },
+        body,
       });
     }
 
-    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-setup-"));
-    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
-    const assetsDir = await createAssetsFixture();
-    const logs: string[] = [];
+    it("sets a private password before the deadline, issues a cookie, and persists across restart", async () => {
+      let fakeNow = startTime;
+      const { server, base, configDirectory, assetsDir, logs } = await startSetupServer({
+        deps: { now: () => fakeNow },
+      });
+      expect(server.authRequired).toBe(true);
+      expect(server.passwordSource).toBe("setup");
+      expect(logs).toEqual([
+        `Rome Node Web UI listening on ${server.url}`,
+        "First-run browser password setup is open for 10 minutes after startup. Open the Web UI to set a password, or set ROME_NODE_UI_PASSWORD and restart.",
+      ]);
+      const session = await fetch(`${base}/api/auth/session`);
+      expect(await session.json()).toEqual({
+        authRequired: true,
+        authenticated: false,
+        passwordSource: "setup",
+        canRemovePassword: false,
+        setup: {
+          expired: false,
+          remainingMs: DEFAULT_SETUP_WINDOW_MS,
+          expiresAt: new Date(startTime + DEFAULT_SETUP_WINDOW_MS).toISOString(),
+        },
+      });
 
-    const nonLoopback = await startWebServer({
-      host: "0.0.0.0",
-      port: 0,
-      configDirectory: configDir,
-      assetsDir,
-      log: (line) => logs.push(line),
+      expect((await postSetup(base, "{}", { origin: "https://evil.example" })).status).toBe(403);
+      expect((await postSetup(base, "not-json")).status).toBe(400);
+      for (const newPassword of ["12345", "      ", "a".repeat(257)]) {
+        expect((await postSetup(base, JSON.stringify({ newPassword }))).status).toBe(400);
+      }
+
+      fakeNow += DEFAULT_SETUP_WINDOW_MS - 1;
+      const response = await postSetup(base);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ...fileSession, authenticated: true });
+      const cookieHeader = response.headers.get("set-cookie") ?? "";
+      expect(cookieHeader).toContain("rome_node_session=");
+      expect(cookieHeader).toContain("HttpOnly");
+      expect(cookieHeader).toContain("SameSite=Strict");
+      const cookie = cookieHeader.split(";")[0]!;
+      const authPath = join(configDirectory, "web-auth.json");
+      if (process.platform !== "win32") {
+        expect((await stat(authPath)).mode & 0o777).toBe(0o600);
+      }
+      expect(await readFile(authPath, "utf8")).not.toContain(ownerPassword);
+      expect((await fetch(`${base}/api/status`, { headers: { cookie } })).status).toBe(200);
+
+      // A forged localhost Host header must not enable password removal.
+      const deleteAttempt = await fetch(`${base}/api/auth/password`, {
+        method: "DELETE",
+        headers: { host: `127.0.0.1:${server.port}`, "content-type": "application/json", cookie },
+        body: JSON.stringify({ currentPassword: ownerPassword }),
+      });
+      expect(deleteAttempt.status).toBe(403);
+
+      await server.close();
+      const restarted = await startSetupServer({ configDirectory, assetsDir });
+      expect(await (await fetch(`${restarted.base}/api/auth/session`)).json()).toEqual(fileSession);
+      const login = await fetch(`${restarted.base}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: ownerPassword }),
+      });
+      expect(login.status).toBe(200);
+
+      await restarted.server.close();
+      const env = await startSetupServer({ configDirectory, assetsDir, password: "env-password" });
+      expect(await (await fetch(`${env.base}/api/auth/session`)).json()).toEqual({
+        ...fileSession,
+        passwordSource: "env",
+      });
+      for (const [password, status] of [
+        [ownerPassword, 401],
+        ["env-password", 200],
+      ] as const) {
+        expect(
+          (
+            await fetch(`${env.base}/api/auth/login`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ password }),
+            })
+          ).status,
+        ).toBe(status);
+      }
     });
-    cleanup.push(() => nonLoopback.close());
 
-    expect(nonLoopback.authRequired).toBe(true);
-    expect(nonLoopback.passwordSource).toBe("setup");
-    expect(nonLoopback.setupToken).toBeTruthy();
-    const printedTokenLine = logs.find((line) => line.startsWith("Web UI setup token: "));
-    expect(printedTokenLine).toBe(`Web UI setup token: ${nonLoopback.setupToken}`);
-    const setupToken = nonLoopback.setupToken!;
+    it("keeps protected routes locked through expiry, even with forged loopback headers", async () => {
+      let fakeNow = startTime;
+      const setupWindowMs = 2000;
+      const { server, base, configDirectory, logs } = await startSetupServer({
+        setupWindowMs,
+        deps: { now: () => fakeNow },
+      });
+      expect(logs[1]).toContain("open for 2 seconds");
+      for (const time of [startTime, startTime + setupWindowMs]) {
+        fakeNow = time;
+        for (const path of ["/api/status", "/api/events", "/api/audit/summary"]) {
+          const response = await fetch(base + path, {
+            headers: { host: `127.0.0.1:${server.port}`, "sec-fetch-site": "same-origin" },
+            signal: AbortSignal.timeout(2000),
+          });
+          expect(response.status, path).toBe(401);
+        }
+        for (const [method, path] of [
+          ["PUT", "/api/auth/password"],
+          ["DELETE", "/api/auth/password"],
+          ["POST", "/api/auth/logout"],
+          ["POST", "/api/host/authorize"],
+          ["POST", "/api/host/authorize/cancel"],
+          ["POST", "/api/host/connect"],
+          ["POST", "/api/host/disconnect"],
+          ["POST", "/api/host/execution"],
+          ["POST", "/api/host/credentials/clear"],
+          ["POST", "/api/auth/login"],
+        ]) {
+          const response = await fetch(base + path, {
+            method,
+            headers: {
+              host: `127.0.0.1:${server.port}`,
+              "sec-fetch-site": "same-origin",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              cloudUrl: "https://attacker.example",
+              name: "attacker",
+              newPassword: ownerPassword,
+              password: ownerPassword,
+              enabled: false,
+            }),
+          });
+          expect(response.status, path).toBe(path === "/api/auth/login" ? 409 : 401);
+          expect(response.headers.get("set-cookie")).toBeNull();
+        }
+      }
+      expect(await (await fetch(`${base}/api/auth/session`)).json()).toEqual({
+        authRequired: true,
+        authenticated: false,
+        passwordSource: "setup",
+        canRemovePassword: false,
+        setup: { expired: true, remainingMs: 0, expiresAt: new Date(fakeNow).toISOString() },
+      });
+      for (const body of [undefined, "{}", "not-json"]) {
+        const blocked = await postSetup(base, body);
+        expect(blocked.status).toBe(410);
+        expect(await blocked.json()).toEqual({
+          error:
+            "First-run setup window has expired. Restart the server or set ROME_NODE_UI_PASSWORD to continue.",
+          code: "setup_expired",
+        });
+      }
+      await expect(stat(join(configDirectory, "web-auth.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
 
-    // Forged Host: 127.0.0.1 + Sec-Fetch-Site: same-origin MUST NOT bypass auth on a 0.0.0.0 bind.
-    const forgedHeaders = {
-      host: `127.0.0.1:${nonLoopback.port}`,
-      "sec-fetch-site": "same-origin",
-      "content-type": "application/json",
-    };
-    expect((await rawRequest(nonLoopback.port, "GET", "/api/status", forgedHeaders)).status).toBe(
-      401,
-    );
-    expect(
-      (
-        await rawRequest(
-          nonLoopback.port,
-          "POST",
-          "/api/host/authorize",
-          forgedHeaders,
-          JSON.stringify({ cloudUrl: "https://attacker.example", name: "pwned" }),
-        )
-      ).status,
-    ).toBe(401);
-    expect(
-      (
-        await rawRequest(
-          nonLoopback.port,
-          "PUT",
-          "/api/auth/password",
-          forgedHeaders,
-          JSON.stringify({ newPassword: "attacker-password" }),
-        )
-      ).status,
-    ).toBe(401);
+    it.each(["hash", "commit"])("discards setup when it expires during %s", async (stage) => {
+      const setupWindowMs = 2000;
+      let now = 0;
+      let reads = 0;
+      let configDirectory: string | undefined;
+      let stagedWhenExpired: boolean | undefined;
+      const {
+        base,
+        server,
+        configDirectory: directory,
+      } = await startSetupServer({
+        setupWindowMs,
+        monotonicNow: () => {
+          if (configDirectory) {
+            const staged = readdirSync(configDirectory).some((file) => file.endsWith(".tmp"));
+            if (stage === "hash" && ++reads === 3) {
+              // The third check precedes scrypt, after both route checks have passed.
+              queueMicrotask(() => {
+                now = setupWindowMs;
+              });
+            }
+            if (stage === "commit" && staged) now = setupWindowMs;
+            if (now === setupWindowMs) stagedWhenExpired = staged;
+          }
+          return now;
+        },
+      });
+      configDirectory = directory;
 
-    // Login before initial setup returns 409; wrong setup token returns 401.
-    expect(
-      (
-        await rawRequest(
-          nonLoopback.port,
-          "POST",
-          "/api/auth/login",
-          forgedHeaders,
-          JSON.stringify({ password: setupToken }),
-        )
-      ).status,
-    ).toBe(409);
-    expect(
-      (
-        await rawRequest(
-          nonLoopback.port,
-          "POST",
-          "/api/auth/setup",
-          forgedHeaders,
-          JSON.stringify({ token: "wrong-token", newPassword: "owner-password-1" }),
-        )
-      ).status,
-    ).toBe(401);
+      const result = await postSetup(base);
+      expect(result.status).toBe(410);
+      expect(await result.json()).toMatchObject({ code: "setup_expired" });
+      expect(stagedWhenExpired).toBe(stage === "commit");
+      expect(result.headers.get("set-cookie")).toBeNull();
+      expect(server.passwordSource).toBe("setup");
+      await expect(stat(join(directory, "web-auth.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(readdirSync(directory).filter((file) => file.endsWith(".tmp"))).toEqual([]);
+      expect((await fetch(`${base}/api/status`)).status).toBe(401);
+    });
 
-    // Valid one-time setup token sets the password, issues a session cookie, and burns the token.
-    const setupRes = await rawRequest(
-      nonLoopback.port,
-      "POST",
-      "/api/auth/setup",
-      forgedHeaders,
-      JSON.stringify({ token: setupToken, newPassword: "owner-password-1" }),
-    );
-    expect(setupRes.status).toBe(200);
-    expect(nonLoopback.passwordSource).toBe("file");
-    expect(nonLoopback.setupToken).toBeNull();
-    const setCookieHeader = Array.isArray(setupRes.headers["set-cookie"])
-      ? setupRes.headers["set-cookie"][0]
-      : setupRes.headers["set-cookie"];
-    const cookie = (setCookieHeader ?? "").split(";")[0]!;
-    expect(cookie).toContain("rome_node_session=");
+    it("keeps setup open while the password rename is pending across the deadline", async () => {
+      const setupWindowMs = 2000;
+      let now = 0;
+      const { base, configDirectory } = await startSetupServer({
+        setupWindowMs,
+        monotonicNow: () => now,
+      });
+      const authPath = join(configDirectory, "web-auth.json");
+      let signalRenameStarted!: () => void;
+      const renameStarted = new Promise<void>((resolve) => {
+        signalRenameStarted = resolve;
+      });
+      let finishRename!: () => void;
+      const renameMayFinish = new Promise<void>((resolve) => {
+        finishRename = resolve;
+      });
+      renameOverride = async (from, to) => {
+        if (to === authPath) {
+          signalRenameStarted();
+          await renameMayFinish;
+        }
+        await fsPromises.rename(from, to);
+      };
 
-    // Reusing the setup token fails with 409.
-    expect(
-      (
-        await rawRequest(
-          nonLoopback.port,
-          "POST",
-          "/api/auth/setup",
-          forgedHeaders,
-          JSON.stringify({ token: setupToken, newPassword: "owner-password-2" }),
-        )
-      ).status,
-    ).toBe(409);
+      const setup = postSetup(base);
+      try {
+        await Promise.race([
+          renameStarted,
+          setup.then(({ status }) => {
+            throw new Error(`Setup returned ${status} before rename started`);
+          }),
+        ]);
+        now = setupWindowMs + 1;
+        const duringCommit = await fetch(`${base}/api/auth/session`);
+        expect(await duringCommit.json()).toMatchObject({
+          passwordSource: "setup",
+          authenticated: false,
+          setup: { expired: false, remainingMs: 1 },
+        });
+      } finally {
+        finishRename();
+        await setup.finally(() => {
+          renameOverride = undefined;
+        });
+      }
 
-    // Session works for /api/status, but DELETE /api/auth/password is forbidden on 0.0.0.0 even with forged Host.
-    expect(
-      (await rawRequest(nonLoopback.port, "GET", "/api/status", { ...forgedHeaders, cookie }))
-        .status,
-    ).toBe(200);
-    const deleteAttempt = await rawRequest(
-      nonLoopback.port,
-      "DELETE",
-      "/api/auth/password",
-      { ...forgedHeaders, cookie },
-      JSON.stringify({ currentPassword: "owner-password-1" }),
-    );
-    expect(deleteAttempt.status).toBe(403);
+      const completed = await setup;
+      expect(completed.status).toBe(200);
+      expect(await completed.json()).toEqual({ ...fileSession, authenticated: true });
+      const cookie = completed.headers.get("set-cookie")?.split(";")[0];
+      expect(cookie).toBeTruthy();
+      const session = await fetch(`${base}/api/auth/session`, {
+        headers: { cookie: cookie ?? "" },
+      });
+      expect(await session.json()).toEqual({ ...fileSession, authenticated: true });
+      const login = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: ownerPassword }),
+      });
+      expect(login.status).toBe(200);
+    });
+
+    it("rejects setup if the window expires while reading a chunked body", async () => {
+      const setupWindowMs = 2000;
+      let now = 0;
+      const { base, configDirectory } = await startSetupServer({
+        setupWindowMs,
+        monotonicNow: () => now,
+      });
+
+      const response = await new Promise<{ status: number | undefined; body: string }>(
+        (resolve, reject) => {
+          const req = httpRequest(
+            `${base}/api/auth/setup`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json", expect: "100-continue" },
+              signal: AbortSignal.timeout(5000),
+            },
+            (res) => {
+              let body = "";
+              res.setEncoding("utf8");
+              res.on("data", (chunk) => {
+                body += chunk;
+              });
+              res.on("end", () => resolve({ status: res.statusCode, body }));
+              res.on("error", reject);
+            },
+          );
+          req.on("error", reject);
+          req.on("continue", () => {
+            now = setupWindowMs;
+            req.end(`${JSON.stringify(ownerPassword)}}`);
+          });
+          req.write('{"newPassword":');
+        },
+      );
+      expect(response.status).toBe(410);
+      expect(JSON.parse(response.body)).toMatchObject({ code: "setup_expired" });
+      await expect(stat(join(configDirectory, "web-auth.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    });
+
+    it("uses elapsed time during wall-clock rollback and keeps expiry latched", async () => {
+      let wall = startTime;
+      let monotonic = 100;
+      const setupWindowMs = 2000;
+      const { base } = await startSetupServer({
+        setupWindowMs,
+        deps: { now: () => wall },
+        monotonicNow: () => monotonic,
+      });
+      const session = async () => (await fetch(`${base}/api/auth/session`)).json();
+      const expiresAt = new Date(startTime + setupWindowMs).toISOString();
+
+      wall -= 1000;
+      monotonic -= 1;
+      expect(await session()).toMatchObject({
+        setup: { expired: false, remainingMs: setupWindowMs, expiresAt },
+      });
+      monotonic = 1099;
+      expect(await session()).toMatchObject({
+        setup: { expired: false, remainingMs: 1001, expiresAt },
+      });
+      monotonic = 2100;
+      expect(await session()).toMatchObject({
+        setup: { expired: true, remainingMs: 0, expiresAt },
+      });
+      monotonic = 100;
+      expect(await session()).toMatchObject({
+        setup: { expired: true, remainingMs: 0, expiresAt },
+      });
+      const result = await postSetup(base);
+      expect(result.status).toBe(410);
+      expect(await result.json()).toMatchObject({ code: "setup_expired" });
+    });
+
+    it("requires a valid Host without an Origin and accepts setup through an HTTPS proxy", async () => {
+      const { server } = await startSetupServer();
+      function requestSetup(headers: string[]): Promise<string> {
+        const body = JSON.stringify({ newPassword: ownerPassword });
+        return new Promise((resolve, reject) => {
+          const socket = connect(server.port, "127.0.0.1");
+          socket.setTimeout(2000, () => socket.destroy(new Error("Setup request timed out")));
+          socket.setEncoding("utf8");
+          let response = "";
+          socket.on("error", reject);
+          socket.on("data", (chunk) => {
+            response += chunk;
+          });
+          socket.on("end", () => resolve(response));
+          socket.write(
+            [
+              // HTTP/1.0 lets the request reach the application without a Host header.
+              "POST /api/auth/setup HTTP/1.0",
+              "Connection: close",
+              "Content-Type: application/json",
+              `Content-Length: ${Buffer.byteLength(body)}`,
+              ...headers,
+              "",
+              body,
+            ].join("\r\n"),
+          );
+        });
+      }
+
+      expect(await requestSetup([])).toMatch(/^HTTP\/1\.1 403/);
+      expect(await requestSetup(["Host: rome.example.com", "Host: evil.example.com"])).toMatch(
+        /^HTTP\/1\.1 400/,
+      );
+      expect(await requestSetup(["Host: rome.example.com/setup"])).toMatch(/^HTTP\/1\.1 403/);
+      expect(await requestSetup(['Host: "rome.example.com"'])).toMatch(/^HTTP\/1\.1 403/);
+      expect(await requestSetup(['Host: bad"host.example'])).toMatch(/^HTTP\/1\.1 403/);
+      expect(
+        await requestSetup(["Host: rome.example.com", "Origin: https://rome.example.com"]),
+      ).toMatch(/^HTTP\/1\.1 403/);
+      expect(
+        await requestSetup(["Host: rome.example.com:80", "Origin: https://rome.example.com"]),
+      ).toMatch(/^HTTP\/1\.1 403/);
+      expect(
+        await requestSetup(["Host: rome.example.com", "Origin: ftp://rome.example.com"]),
+      ).toMatch(/^HTTP\/1\.1 403/);
+      const proxied = await requestSetup([
+        "Host: rome.example.com",
+        "Origin: https://rome.example.com",
+        "X-Forwarded-Proto: https",
+      ]);
+      expect(proxied).toMatch(/^HTTP\/1\.1 200/);
+      expect(proxied).toMatch(/set-cookie: rome_node_session=.*; Secure/i);
+    });
+
+    it.each([
+      { mode: "setup", host: "rome.example.com:80", origin: undefined },
+      { mode: "setup", host: "rome.example.com:80", origin: "http://rome.example.com" },
+      { mode: "setup", host: "[::ffff:192.0.2.1]:4310", origin: "http://[::ffff:192.0.2.1]:4310" },
+      { mode: "env", host: "rome.example.com:80", origin: undefined },
+      { mode: "env", host: "rome.example.com:80", origin: "http://rome.example.com" },
+      { mode: "env", host: "[::ffff:192.0.2.1]:4310", origin: "http://[::ffff:192.0.2.1]:4310" },
+    ])("accepts Host $host in $mode mode with Origin $origin", async ({ mode, host, origin }) => {
+      const { server } = await startSetupServer({
+        password: mode === "env" ? ownerPassword : undefined,
+      });
+      const headers = { host, "content-type": "application/json" };
+      const body = mode === "setup" ? { newPassword: ownerPassword } : { password: ownerPassword };
+      const result = await rawRequest(
+        server.port,
+        "POST",
+        mode === "setup" ? "/api/auth/setup" : "/api/auth/login",
+        origin ? { ...headers, origin } : headers,
+        JSON.stringify(body),
+      );
+      expect(result.status).toBe(200);
+      expect(result.headers["set-cookie"]?.[0]).toContain("rome_node_session=");
+    });
+
+    it("accepts IPv4-mapped IPv6 loopback Host and Origin in passwordless mode", async () => {
+      const { server } = await startSetupServer({ host: "127.0.0.1" });
+      const host = `[::ffff:127.0.0.1]:${server.port}`;
+      const result = await rawRequest(server.port, "GET", "/api/status", {
+        host,
+        origin: `http://${host}`,
+      });
+      expect(result.status).toBe(200);
+    });
+
+    it("accepts only one concurrent setup request", async () => {
+      const { base } = await startSetupServer();
+      const results = await Promise.all([postSetup(base), postSetup(base)]);
+      expect(results.map(({ status }) => status).sort()).toEqual([200, 409]);
+      const conflict = results.find(({ status }) => status === 409);
+      expect(await conflict?.json()).toMatchObject({ code: "setup_conflict" });
+      const repeated = await postSetup(base, "not-json");
+      expect(repeated.status).toBe(409);
+      expect(await repeated.json()).toMatchObject({ code: "setup_conflict" });
+    });
+
+    it("allows setup to be retried after password persistence fails", async () => {
+      const { base, configDirectory } = await startSetupServer();
+      const authPath = join(configDirectory, "web-auth.json");
+      await mkdir(authPath);
+      const failed = await postSetup(base);
+      expect(failed.status).toBe(500);
+      expect(failed.headers.get("set-cookie")).toBeNull();
+      expect(await (await fetch(`${base}/api/auth/session`)).json()).toMatchObject({
+        passwordSource: "setup",
+        authenticated: false,
+        setup: { expired: false },
+      });
+      await rename(authPath, join(configDirectory, "blocked-auth-path"));
+      expect((await postSetup(base)).status).toBe(200);
+    });
+
+    it.each([
+      { name: "passwordless loopback", host: "127.0.0.1" },
+      { name: "environment password", host: "0.0.0.0", password: "env-password" },
+    ])("rejects setup in $name mode", async ({ name: _name, ...options }) => {
+      const { base } = await startSetupServer(options);
+      const response = await postSetup(base, "{}");
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "setup_conflict" });
+      expect(await (await fetch(`${base}/api/auth/session`)).json()).not.toHaveProperty("setup");
+    });
+
+    it.each([
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ])("uses the default window for an invalid duration (%s)", async (setupWindowMs) => {
+      const auth = await createWebAuth({ host: "0.0.0.0", setupWindowMs, now: () => startTime });
+      expect(auth.setupWindow?.remainingMs).toBe(DEFAULT_SETUP_WINDOW_MS);
+    });
   });
 
   it("does not launch host if cancelled or disposed during credential save, reports final config save failures, and preserves concurrent executionEnabled updates", async () => {

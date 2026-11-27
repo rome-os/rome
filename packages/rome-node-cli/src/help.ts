@@ -87,8 +87,9 @@ When bound to a loopback address (default: 127.0.0.1), local loopback access is
 passwordless until you set a custom password inside the Web UI (persisted as an scrypt
 hash in <config dir>/web-auth.json) or via ROME_NODE_UI_PASSWORD.
 When bound to a non-loopback address (such as --host 0.0.0.0 in Docker) with no
-password configured, a one-time setup token is printed to stderr on startup and must
-be used in the Web UI to set the first password.
+password configured, open the Web UI within 10 minutes of startup to set the first
+password. If the window expires, restart the server to reopen it or set
+ROME_NODE_UI_PASSWORD and restart.
 
 Web UI static assets are prebuilt in the official Docker image (ghcr.io/rome-os/rome-node)
 and available in a monorepo checkout after building @rome-os/node-web. The standalone
@@ -105,7 +106,7 @@ Options:
 Environment:
   ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
   ROME_NODE_UI_PASSWORD     Optional password for the Web UI (overrides any UI-managed password
-                            and skips the one-time setup token on non-loopback binds).
+                            and skips first-run browser setup).
   ROME_NODE_WEB_ASSETS_DIR  Directory containing the built Web UI assets.
 
 Example:
