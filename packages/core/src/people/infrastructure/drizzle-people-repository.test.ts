@@ -659,33 +659,4 @@ describe("PeopleRepository", () => {
       expect((await repo.byId(retried))!.displayName).toBe("Bob");
     });
   });
-
-  describe("the link-change hook", () => {
-    it("tells each change of who holds a link, and nothing for a write that changes none", async () => {
-      const told: string[] = [];
-      const people = new DrizzlePeopleRepository(testDb.db, ({ account, before, after }) => {
-        const as = (h: typeof before) => (h ? `${h.personId}${h.delegate ? "*" : ""}` : "-");
-        told.push(`${account.id} ${as(before)}>${as(after)}`);
-      });
-      const owner = await people.create({ displayName: "Owner", bondLevel: "guardian" });
-      const alice = await people.create({ displayName: "Alice", bondLevel: "other" });
-
-      people.linkStated({ platform: "wechat", id: "w1" }, owner);
-      people.linkStated({ platform: "wechat", id: "w1" }, owner);
-      people.readdress(owner, { platform: "wechat", id: "w1" }, "w2");
-      await people.move({ platform: "wechat", id: "w2" }, owner, alice);
-      people.linkDelegate({ platform: "wechat", id: "w2" }, alice);
-      await people.unlink({ platform: "wechat", id: "w2" });
-      await people.unlink({ platform: "wechat", id: "w2" });
-
-      expect(told).toEqual([
-        `w1 ->${owner}`,
-        `w1 ${owner}>-`,
-        `w2 ->${owner}`,
-        `w2 ${owner}>${alice}`,
-        `w2 ${alice}>${alice}*`,
-        `w2 ${alice}*>-`,
-      ]);
-    });
-  });
 });

@@ -171,7 +171,6 @@ import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
-import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { ownAccountConnected } from "./access/application/own-account-connect.js";
 import {
   guardianWithAccounts,
@@ -534,9 +533,7 @@ async function main() {
   // channel. People keys its links by platform, and reads every such row
   // through this.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  // Each link People writes for the guardian reaches Identity in the same
-  // transaction (docs/domains/access.md#steps-rome-takes-today).
-  const peopleRepo = new DrizzlePeopleRepository(db, (change) => peopleLinkChanged(db, change));
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
