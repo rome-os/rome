@@ -6,9 +6,7 @@ import {
   clearInstanceToken,
   getIdentityIssue,
   getInstanceToken,
-  instanceCredentialId,
   isInstanceLinked,
-  onInstanceTokenChanged,
   persistInstanceToken,
   proveIdentity,
   type ProveIdentityResult,
@@ -33,7 +31,7 @@ const log = createLogger("api:instance-enroll");
 const CALLBACK_PATH = "/api/instance/enroll/callback";
 const PENDING_TTL_MS = 10 * 60_000;
 const COMPLETED_TTL_MS = 2 * 60_000;
-const MAX_ENROLL_STATES = 64;
+const MAX_IN_FLIGHT = 64;
 const INSTANCE_CHECK_TIMEOUT_MS = 5_000;
 // The callback only ever redirects to one of these two constant internal paths —
 // never anything derived from the request — so it can't be turned into an open
@@ -142,46 +140,6 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
   const pending = new Map<string, PendingEnroll>();
   const inFlight = new Map<string, Promise<string>>();
   let lastCompleted: { state: string; expiresAt: number } | null = null;
-  let unsubscribeCompleted: (() => void) | null = null;
-
-  const clearCompleted = () => {
-    lastCompleted = null;
-    unsubscribeCompleted?.();
-    unsubscribeCompleted = null;
-  };
-
-  // Remember the most recent completed state briefly so duplicate browser/Cloud
-  // redirects land on success instead of a misleading state mismatch, while
-  // clearing automatically if the enrolled credential is later revoked or replaced.
-  const recordCompleted = (state: string, expiresAt: number) => {
-    clearCompleted();
-    lastCompleted = { state, expiresAt };
-    let credentialId = instanceCredentialId();
-    let token = getInstanceToken();
-    unsubscribeCompleted = onInstanceTokenChanged(() => {
-      const currentCredential = instanceCredentialId();
-      const currentToken = getInstanceToken();
-      if (credentialId === null && currentCredential !== null) {
-        // Signer retry finished registering the key; keep tracking the linked key.
-        credentialId = currentCredential;
-        token = currentToken;
-        return;
-      }
-      if (currentCredential !== credentialId) {
-        clearCompleted();
-        return;
-      }
-      if (currentCredential === null) {
-        if (currentToken === null || currentToken !== token) clearCompleted();
-        return;
-      }
-      if (currentToken !== null && currentToken !== token) {
-        clearCompleted();
-        return;
-      }
-      token = currentToken;
-    });
-  };
 
   // The verifier never leaves this process; only the challenge rides the
   // browser leg.
@@ -208,10 +166,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
 
     const startedAt = now();
     sweepExpired(pending, startedAt);
-    if (lastCompleted && lastCompleted.expiresAt <= startedAt) clearCompleted();
-    if (pending.size >= MAX_ENROLL_STATES) {
-      return c.json({ error: "too_many_pending_enrollments" }, 429);
-    }
+    if (lastCompleted && lastCompleted.expiresAt <= startedAt) lastCompleted = null;
 
     const pkce = createPkce();
     const state = randomBytes(16).toString("base64url");
@@ -245,7 +200,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     const entry = pending.get(state);
     const completedEntry = lastCompleted?.state === state ? lastCompleted : null;
     sweepExpired(pending, requestedAt);
-    if (lastCompleted && lastCompleted.expiresAt <= requestedAt) clearCompleted();
+    if (lastCompleted && lastCompleted.expiresAt <= requestedAt) lastCompleted = null;
 
     if (completedEntry) {
       if (
@@ -254,7 +209,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
       ) {
         return c.redirect(enrolledRedirect());
       }
-      if (lastCompleted?.state === state) clearCompleted();
+      if (lastCompleted?.state === state) lastCompleted = null;
       return c.redirect(errorRedirect("state"));
     }
 
@@ -275,7 +230,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
       return c.redirect(errorRedirect("unconfigured"));
     }
 
-    if (inFlight.size >= MAX_ENROLL_STATES) {
+    if (inFlight.size >= MAX_IN_FLIGHT) {
       log.warn("instance enrollment exchange capacity reached");
       return c.redirect(errorRedirect("exchange"));
     }
@@ -315,7 +270,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
           void deps.provisionAfterLink?.();
           log.info("instance enrolled via in-app OAuth", { instanceId });
           if (isInstanceLinked() || getInstanceToken() !== null) {
-            recordCompleted(state, now() + COMPLETED_TTL_MS);
+            lastCompleted = { state, expiresAt: now() + COMPLETED_TTL_MS };
           }
           return enrolledRedirect();
         } catch (err) {

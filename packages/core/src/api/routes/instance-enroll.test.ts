@@ -149,32 +149,6 @@ describe("POST /instance/enroll/start", () => {
     expect(store.data.get("instanceToken")).toBe(TOKEN);
     expect(getInstanceToken()).toBe(TOKEN);
   });
-
-  it("refuses new starts with 429 at pending capacity without evicting live states", async () => {
-    let time = 0;
-    const fetchImpl = rs.fn(async () => successfulExchange());
-    const app = mount(depsWithStore(memoryStore()), { fetchImpl, now: () => time });
-
-    const firstPath = await startCallbackPath(app);
-    for (let count = 1; count < 64; count++) {
-      await startCallbackPath(app);
-    }
-
-    const overflow = await app.request("/instance/enroll/start", { method: "POST" });
-    expect(overflow.status).toBe(429);
-    expect(await overflow.json()).toEqual({ error: "too_many_pending_enrollments" });
-
-    // The first live pending state was not evicted and still completes normally.
-    const callback = await app.request(firstPath);
-    expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe("/?enroll=success");
-
-    // Once pending states expire, new starts are accepted again (after clearing token).
-    setInstanceTokenInMemory(null);
-    time += 10 * 60_000;
-    const afterExpiry = await app.request("/instance/enroll/start", { method: "POST" });
-    expect(afterExpiry.status).toBe(200);
-  });
 });
 
 describe("GET /instance/enroll/callback", () => {
@@ -298,10 +272,7 @@ describe("GET /instance/enroll/callback", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    false,
-    true,
-  ])("rejects a completed state after the local token is cleared (restored: %s)", async (restoreToken) => {
+  it("rejects a completed state after the local token is cleared", async () => {
     const fetchImpl = rs.fn(async () => successfulExchange());
     const app = mount(depsWithStore(memoryStore()), { fetchImpl });
     const path = await startCallbackPath(app);
@@ -309,7 +280,6 @@ describe("GET /instance/enroll/callback", () => {
     expect(callback.headers.get("location")).toBe("/?enroll=success");
 
     setInstanceTokenInMemory(null);
-    if (restoreToken) setInstanceTokenInMemory(TOKEN);
     const replay = await app.request(path);
     expect(replay.headers.get("location")).toBe("/connect?enroll=error&reason=state");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
