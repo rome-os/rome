@@ -260,7 +260,6 @@ import { phoneBook } from "./people/phone-book/index.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
-import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
 import { PersonalDataRepository } from "./personal-data/repository.js";
 import { DeviceConnectionsRepository } from "./connections/device/repository.js";
@@ -664,26 +663,9 @@ async function main() {
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  // Made here so the Concierge can tell whether a visitor is still served,
-  // and who can read a dashboard chat; it is loaded from the members further
-  // down, after their backfill.
+  // Made here so the Concierge can tell whether a visitor is still served; it
+  // is loaded from the members further down, after their backfill.
   const dashboardAccessState = new DashboardAccessState();
-  // Who can read a chat, for every audience check (docs/domains/participation.md#audience).
-  const chatAudience = placeAudience({
-    connectionKindOf: connectionKindOfChannel,
-    dashboardChat: (chatId) => webchatRepo.getSession(chatId),
-    visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
-    // Main reads who sent a message itself, never the bond a caller names.
-    senderBondLevel: async (context) =>
-      context.channelUserId
-        ? (
-            await peopleRepo.byAccount({
-              platform: platformOfChannel(context.channel),
-              id: context.channelUserId,
-            })
-          )?.bondLevel
-        : undefined,
-  });
   const routinesRepo = new RoutinesRepository(db);
   const personalDataRepo = new PersonalDataRepository(db, PERSONAL_DATA_SOURCES);
   const deviceConnectionsRepo = new DeviceConnectionsRepository(db);
@@ -1524,7 +1506,6 @@ async function main() {
   const openingFor = sessionOpeningFor({
     channelSurface,
     connectionKindOfChannel,
-    placeAudience: chatAudience,
   });
   const agentSessionManager = createSessions(
     {

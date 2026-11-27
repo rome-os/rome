@@ -159,7 +159,6 @@ async function withRunningSession(
       { agentName: agent.name, channelThreadKey: "webchat:source" },
       {
         workingDir: directory,
-        audience: "private",
         threadContext: { channel: "webchat", threadId: "source", threadType: "private" },
       },
     );
@@ -203,14 +202,12 @@ for (const kind of ["guardian", "visitor"] as const) {
     "stop",
     "close",
     "actor",
-    "audience",
     "chat",
     "group",
     "channel",
     "unattributed",
     "expiry",
   ] as const) {
-    if (kind === "visitor" && change === "audience") continue;
     it(`${kind}: holds a pending task input through same-person now, with outcome ${change}`, async () => {
       await withRunningSession(
         async ({ session, facts, acknowledge, finishFirst, nextStarted }) => {
@@ -292,7 +289,6 @@ for (const kind of ["guardian", "visitor"] as const) {
               {
                 actor,
                 priority: "now",
-                ...(change === "audience" ? { parentAudience: "shared" as const } : {}),
                 threadContext: {
                   ...thread,
                   ...(change === "chat" ? { threadId: "other" } : {}),
