@@ -227,7 +227,7 @@ export interface GuardianInteraction {
       label: string;
       secret: boolean;
       format?: "line" | "multiline" | "file";
-      options?: string[];
+      options?: Array<string | { value: string; label: string }>;
     }>;
   }): Promise<Record<string, string>>;
 }

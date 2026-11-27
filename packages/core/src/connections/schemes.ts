@@ -16,7 +16,7 @@ export interface CredentialsPasteField {
   secret?: boolean;
   format?: "line" | "multiline" | "file";
   /** Presented as a select when set. */
-  options?: string[];
+  options?: Array<string | { value: string; label: string }>;
 }
 
 /**

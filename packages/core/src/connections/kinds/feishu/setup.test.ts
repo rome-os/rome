@@ -143,4 +143,80 @@ describe("Feishu credential setup", () => {
     await input;
     expect(commit).not.toHaveBeenCalled();
   });
+
+  it("emits semantic i18n ids and labeled domain/mode options across setup states", async () => {
+    const commit = rs.fn(async (_value: SetupGrant) => {});
+    let releaseQr!: () => void;
+    const qrReady = new Promise<void>((resolve) => {
+      releaseQr = resolve;
+    });
+    const session = new SetupSession({
+      fn: makeFeishuSetup({
+        probeCredentials: async () => {},
+        registerAgentApp: async ({ onQrCode }) => {
+          onQrCode({
+            url: "https://accounts.feishu.cn/qr/1",
+            qrDataUrl: "data:image/png;base64,QQ==",
+            expiresAt: "2026-11-27T18:00:00.000Z",
+          });
+          await qrReady;
+          return { appId: "cli_qr", appSecret: "sec", domain: "feishu" };
+        },
+        fetchBotName: async () => "Rome",
+      }),
+      commit,
+    });
+
+    await session.started();
+    expect(session.state).toMatchObject({
+      status: "awaiting-input",
+      form: {
+        id: "feishu.mode",
+        fields: [
+          {
+            name: "mode",
+            options: [
+              { value: "agent-ready", label: "Agent-ready (scan QR code)" },
+              { value: "manual", label: "Manual (App ID & App Secret)" },
+            ],
+          },
+          {
+            name: "domain",
+            options: [
+              { value: "feishu", label: "Feishu (China · feishu.com)" },
+              { value: "lark", label: "Lark (Global · larksuite.com)" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const inputPromise = session.provideInput({ mode: "agent-ready", domain: "feishu" });
+    await rs.waitFor(() =>
+      expect(session.state).toMatchObject({
+        status: "presenting",
+        view: {
+          id: "feishu.qr",
+          params: { expiresAt: "2026-11-27T18:00:00.000Z" },
+          links: [
+            { id: "openCreatePage", url: "https://accounts.feishu.cn/qr/1" },
+            { id: "qrCode", url: "data:image/png;base64,QQ==" },
+          ],
+        },
+      }),
+    );
+
+    releaseQr();
+    await inputPromise;
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    expect(session.state).toMatchObject({
+      status: "done",
+      grant: {
+        summary: {
+          id: "feishu.connected",
+          params: { appId: "cli_qr" },
+        },
+      },
+    });
+  });
 });
