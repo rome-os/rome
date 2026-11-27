@@ -22,7 +22,7 @@ let healthStatus: number;
 beforeEach(() => {
   window.sessionStorage.clear();
   reload = rs.fn();
-  rs.stubGlobal("location", { ...window.location, href: "http://x/people", reload });
+  rs.stubGlobal("location", { ...window.location, href: "http://x/projects", reload });
   serverUp = true;
   healthStatus = 200;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
@@ -66,7 +66,7 @@ describe("loadWithReload", () => {
     expect(reload).toHaveBeenCalledTimes(1);
     expect(
       Object.keys(JSON.parse(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? "{}")),
-    ).toEqual(["http://x/people"]);
+    ).toEqual(["http://x/projects"]);
   });
 
   it("reloads on a signed-out page, where the server answers 401", async () => {
@@ -150,7 +150,7 @@ describe("loadWithReload", () => {
     const at = (href: string) => rs.stubGlobal("location", { ...window.location, href, reload });
     const part = () => Promise.reject(chunkError());
 
-    at("http://x/people");
+    at("http://x/projects");
     void loadWithReload(part);
     await new Promise((resolve) => setTimeout(resolve, 0));
     at("http://x/full/apps/notes");
@@ -159,7 +159,7 @@ describe("loadWithReload", () => {
     expect(reload).toHaveBeenCalledTimes(2);
 
     // Both reloaded documents miss the part again, one after the other.
-    at("http://x/people");
+    at("http://x/projects");
     await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
     at("http://x/full/apps/notes");
     await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
@@ -174,7 +174,7 @@ describe("loadWithReload", () => {
       return { default: "page" };
     };
 
-    at("http://x/people");
+    at("http://x/projects");
     void loadWithReload(part);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -184,7 +184,7 @@ describe("loadWithReload", () => {
     await loadWithReload(part);
 
     // The page, still missing it, does not reload a second time.
-    at("http://x/people");
+    at("http://x/projects");
     missing = true;
     await expect(loadWithReload(part)).rejects.toThrow("Loading chunk 812 failed");
     expect(reload).toHaveBeenCalledTimes(1);

@@ -55,8 +55,8 @@ cases:
       - app.open:
           path: /memory
       - aiAct: >-
-          In the Memory file tree, expand the relationship folder and open BONDS.md. Finish when
-          the right-hand file viewer shows the rendered file in Preview mode.
+          In the Memory file tree, expand the relationship folder and open ray-oster.md. Finish
+          when the right-hand file viewer shows the rendered file in Preview mode.
       - aiAssert: >-
-          The file renders in Preview mode with the heading "Relationship Bonds" and an "Inner
-          Circle" section listing ray-oster and nadia-petrova.
+          The file renders in Preview mode with the heading "Ray Oster" and an "Overview" table
+          that names him a climbing partner.

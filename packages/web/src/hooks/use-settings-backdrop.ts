@@ -19,7 +19,6 @@ const REDIRECT_ONLY = [
   "/callback",
   "/chat/concierge",
   "/activity",
-  "/people/*",
   "/events",
   "/guide",
   "/apps/inbox/*",
