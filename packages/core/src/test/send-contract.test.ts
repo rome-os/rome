@@ -15,7 +15,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, rs } from "@rstes
 import { ChannelType } from "discord.js";
 import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { FakeTelegramApi } from "./kit/fake-telegram.js";
-import type { PeopleRepository } from "../people/model/people-repository.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import type { MailProvider, SendMailInput } from "../connections/kinds/email/rome-cloud-mail.js";
@@ -187,7 +186,6 @@ function email(): Harness {
   const adapter = new EmailAdapter({
     provider,
     settingsRepo: {} as unknown as SettingsRepository,
-    peopleRepo: {} as unknown as PeopleRepository,
     config: { address: "slug@mail.romeos.cc", inboundSecret: "secret" },
   });
   return {

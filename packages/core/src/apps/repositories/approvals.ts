@@ -1,4 +1,4 @@
-import { hashArgs } from "../actions/replay.js";
+import { approvedEntrySequence, hashArgs } from "../actions/replay.js";
 import { and, eq, or, desc, gte, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../../db/schema.js";
@@ -251,6 +251,30 @@ export class ApprovalsRepository {
     const resolved = read(updated[0]);
     for (const listener of this.resolvedListeners) listener(resolved);
     return { outcome: "resolved", approval: resolved };
+  }
+
+  /** The action_execution card that owns journal entry `sequence` of a
+   *  root, or only a card that can still produce its outcome when `activeOnly`. */
+  async findCardForEntry(
+    rootExecutionId: string,
+    sequence: number,
+    actionName: string,
+    activeOnly = false,
+  ): Promise<ApprovalRow | null> {
+    const rows = await this.db
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          activeOnly ? activeActionExecutionApproval() : eq(approvals.type, "action_execution"),
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+          sql`json_extract(${approvals.payload}, '$.actionName') = ${actionName}`,
+        ),
+      );
+    const owner = rows.find(
+      (row) => row.payload && approvedEntrySequence(row.payload as object) === sequence,
+    );
+    return owner ? read(owner) : null;
   }
 
   async claimExecution(id: string): Promise<boolean> {

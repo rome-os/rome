@@ -17,6 +17,11 @@ export interface JournalEntry {
 
 export interface ReplayStore {
   rootExecutionId: string;
+  /** The execution whose journal this run reads and writes, and that its
+   *  approval cards replay. It is `rootExecutionId`, except for a nested call
+   *  that another worker runs as a root: that call keeps its own journal, so
+   *  its rows never enter its tree root's replay order. */
+  journalId: string;
   rootActionName: string;
   rootArgs: Record<string, unknown>;
   journal: JournalEntry[];
@@ -29,6 +34,12 @@ export interface ReplayStore {
    * see the same signal regardless of where the approval originated.
    */
   pendingApproval?: PendingApproval;
+  /** On an approval replay, the sequence of the pending entry the approved
+   *  card owns. Only that entry executes; other pending entries stay parked. */
+  approvedSequence?: number;
+  /** Entries loaded before this run. Replay never matches past them, so rows
+   *  appended during this run are never mistaken for history. */
+  preloadedEntryCount?: number;
   /** Set on a root that main runs in-process as a coordination action. Such a
    * root may not call other actions, since a nested call would run app code
    * in main; the engine refuses the call instead. */
@@ -36,6 +47,11 @@ export interface ReplayStore {
 }
 
 export const replayContext = new AsyncLocalStorage<ReplayStore>();
+
+/** The run whose call is executing for real during a replay. That call's own
+ *  nested calls run without journal rows, so they never enter the run's
+ *  replay order. It names the run so the marker can never reach another one. */
+export const freshCallContext = new AsyncLocalStorage<ReplayStore>();
 
 /** Deterministic JSON serialization with sorted keys for stable hashing. */
 function stableStringify(value: unknown): string {
@@ -57,4 +73,27 @@ function stableStringify(value: unknown): string {
 /** Compute a stable hash for action args to detect replay divergence. */
 export function hashArgs(args: Record<string, unknown>): string {
   return createHash("sha256").update(stableStringify(args)).digest("base64url");
+}
+
+/** The journal sequence an action-execution card owns. A payload written
+ *  before `journalSequence` existed falls back to its snapshot's only pending
+ *  row for the call; two identical rows are ambiguous, so it binds nothing. */
+export function approvedEntrySequence(payload: {
+  journalSequence?: unknown;
+  actionName?: unknown;
+  args?: unknown;
+  replayJournal?: unknown;
+}): number | undefined {
+  if (typeof payload.journalSequence === "number") return payload.journalSequence;
+  if (typeof payload.actionName !== "string" || !Array.isArray(payload.replayJournal)) {
+    return undefined;
+  }
+  const argsHash = hashArgs((payload.args ?? {}) as Record<string, unknown>);
+  const matches = (payload.replayJournal as JournalEntry[]).filter(
+    (entry) =>
+      entry.status === "pending_approval" &&
+      entry.actionName === payload.actionName &&
+      entry.argsHash === argsHash,
+  );
+  return matches.length === 1 ? matches[0].sequence : undefined;
 }

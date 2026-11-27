@@ -2457,7 +2457,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 0 },
+      );
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("executed");
       expect(child.calls).toEqual([{ x: 1 }]);
@@ -2495,7 +2499,7 @@ describe("ActionEngine", () => {
         },
       ];
 
-      await rome.actionEngine.run("parent", {}, { replayJournal });
+      await rome.actionEngine.run("parent", {}, { replayJournal, approvedSequence: 0 });
       expect(modeAfterApproval).toBe("record");
     });
 
@@ -2532,6 +2536,7 @@ describe("ActionEngine", () => {
         {
           replayJournal,
           replayRootExecutionId: rootExecutionId,
+          approvedSequence: 0,
         },
       );
 
@@ -2542,15 +2547,9 @@ describe("ActionEngine", () => {
         status: "completed",
         result: { status: "ok", data: "done" },
       });
-      // The replayed execution is currently double-journaled: besides the
-      // in-place update above, it is re-appended as a fresh completed entry.
-      expect(journal).toHaveLength(2);
-      expect(journal[1]).toMatchObject({
-        sequence: 1,
-        actionName: "child",
-        status: "completed",
-        result: { status: "ok", data: "done" },
-      });
+      // The replayed execution updates the row it owns instead of appending a
+      // fresh completed copy that a later call could mistake for history.
+      expect(journal).toHaveLength(1);
     });
 
     it("advances replayIndex after each matched entry", async () => {
@@ -2592,7 +2591,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 1 },
+      );
       // "a" was cached (not re-executed), "b" was executed for real
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("B-fresh");
@@ -3010,7 +3013,11 @@ describe("ActionEngine", () => {
         },
       ];
 
-      const result = await rome.actionEngine.run("parent", {}, { replayJournal });
+      const result = await rome.actionEngine.run(
+        "parent",
+        {},
+        { replayJournal, approvedSequence: 1 },
+      );
       expect(result).toEqual({
         status: "ok",
         data: ["A-cached", "B", "C"],

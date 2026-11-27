@@ -27,6 +27,9 @@ const device = {
 const apps = {
   addToDesktop: (appId: string): Promise<{ path: string }> =>
     ipcRenderer.invoke("apps:addToDesktop", appId),
+  /** Makes the share shortcut open this app with the selected text. Resolves with the key. */
+  useWithShareShortcut: (appId: string): Promise<{ shortcut: string }> =>
+    ipcRenderer.invoke("apps:useWithShareShortcut", appId),
 };
 
 /**

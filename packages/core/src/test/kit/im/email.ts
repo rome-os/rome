@@ -9,7 +9,6 @@ import type {
   RomeMailEvent,
   RomeMailListItem,
 } from "../../../connections/kinds/email/rome-cloud-mail.js";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import { EmailAdapter } from "../../../connections/kinds/email/email.js";
 import { MessageStore, type VisibleMessage } from "./peer.js";
@@ -34,11 +33,6 @@ export class EmailPeer {
       settingsRepo: {
         get: async () => ({ enabled: true, guardianEmail: "guardian@example.com" }),
       } as unknown as SettingsRepository,
-      peopleRepo: {
-        byAccount: async () => null,
-        isDismissed: async () => false,
-        byBondLevel: async () => [],
-      } as unknown as PeopleRepository,
       config: { address: EMAIL_MAILBOX, inboundSecret: SECRET },
     });
   }

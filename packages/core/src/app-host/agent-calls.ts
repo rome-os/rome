@@ -22,13 +22,13 @@ export function agentWorkerCalls(
   deps: AgentWorkerCallsDeps,
 ): Record<string, (params: unknown) => Promise<unknown>> {
   return {
-    // Lets the inbox's trusted path tell whether a connected account's bound
-    // agent still exists or was uninstalled.
+    // Lets the inbox tell whether a connected account's bound agent still
+    // exists or was uninstalled.
     "agent.hasAgent": async (params) => {
       const { name } = parseWorkerCallParams("agent.hasAgent", HasAgentParams, params);
       return { hasAgent: deps.hasAgent(name) };
     },
-    // Lets the inbox's trusted path tell whether a bound agent can call an action.
+    // Lets the inbox tell whether a bound agent can call an action.
     "agent.hasAction": async (params) => {
       const { agentName, actionName } = parseWorkerCallParams(
         "agent.hasAction",

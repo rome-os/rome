@@ -2,7 +2,6 @@
 // position once, for one turn. Nothing it carries is stored beyond the chat's
 // own messages, and it is not a connection. Domain: docs/domains/chats.md#widget.
 
-import { randomUUID } from "node:crypto";
 import type { WidgetUi } from "@rome-os/app-runtime";
 import {
   LOCATION_CARD_ID,
@@ -32,14 +31,14 @@ export function parseShareLocationInput(
  * on the card; `builtin: true` marks it as core's own, which the drain checks
  * against the tool that emitted it.
  */
-export function shareLocationToolOutput(reason: string, autoShare = false): unknown {
+export function shareLocationToolOutput(reason: string): unknown {
   return {
     pendingInteraction: true,
     appId: "core",
     render: {
       kind: "inline",
       componentId: LOCATION_CARD_ID,
-      props: autoShare ? { reason, autoShareToken: issueAutoShareToken() } : { reason },
+      props: { reason },
       builtin: true,
     },
     message:
@@ -49,36 +48,11 @@ export function shareLocationToolOutput(reason: string, autoShare = false): unkn
   };
 }
 
-// Tokens core's own share_location issued for a card that may share by
-// itself, with when each lapses. Any tool can name itself `*__share_location`
-// and return a card, so a flag in the output proves nothing; a token only
-// this process issued does. A token outlives no restart, which only costs the
-// card its auto-share.
-const autoShareTokens = new Map<string, number>();
-const AUTO_SHARE_TOKEN_MS = 30 * 60 * 1000;
-
-function issueAutoShareToken(now = Date.now()): string {
-  for (const [token, lapses] of autoShareTokens) if (lapses <= now) autoShareTokens.delete(token);
-  const token = randomUUID();
-  autoShareTokens.set(token, now + AUTO_SHARE_TOKEN_MS);
-  return token;
-}
-
-function issuedAutoShareToken(token: unknown, now = Date.now()): boolean {
-  return typeof token === "string" && (autoShareTokens.get(token) ?? 0) > now;
-}
-
 /** The card described as data, for the reason a stored card's props give, or
- *  null when they give none. It shares by itself only when its props carry a
- *  token core's own share_location issued. */
+ *  null when they give none. It always waits for a press. */
 export function locationCardUiFromProps(props: unknown): WidgetUi | null {
-  const { reason, autoShareToken } = (props ?? {}) as {
-    reason?: unknown;
-    autoShareToken?: unknown;
-  };
-  return typeof reason === "string"
-    ? locationCardUi(reason, issuedAutoShareToken(autoShareToken))
-    : null;
+  const { reason } = (props ?? {}) as { reason?: unknown };
+  return typeof reason === "string" ? locationCardUi(reason) : null;
 }
 
 /**
@@ -122,6 +96,7 @@ export function storedLocationAnswer(output: unknown): Record<string, unknown> {
     accuracyMeters: answer.accuracyMeters,
     fixedAt: answer.fixedAt,
     ...(answer.auto === true ? { auto: true } : {}),
+    ...(answer.sharedBy ? { sharedBy: answer.sharedBy } : {}),
   };
 }
 
@@ -137,8 +112,9 @@ export function locationAnswerPrompt(output: unknown): string {
     );
   }
   const coarse = (answer.accuracyMeters ?? Number.POSITIVE_INFINITY) > COARSE_ACCURACY_METERS;
+  const who = answer.sharedBy ? `The member ${answer.sharedBy}` : "The guardian";
   return (
-    "The guardian shared their current location for this answer only:\n\n" +
+    `${who} shared their current location for this answer only:\n\n` +
     `- latitude: ${answer.latitude}\n- longitude: ${answer.longitude}\n` +
     `- accuracy: ±${answer.accuracyMeters} m\n- taken at: ${answer.fixedAt}\n\n` +
     "Use your own tools to turn it into a place if you need one. " +

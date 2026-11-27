@@ -15,7 +15,6 @@ import type {
 } from "./rome-cloud-mail.js";
 import { MailProviderError } from "./rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../people/model/people-repository.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
 const GUARDIAN = "guardian@example.com";
@@ -67,7 +66,6 @@ function makeAdapter(
   return new EmailAdapter({
     provider,
     settingsRepo: {} as unknown as SettingsRepository,
-    peopleRepo: {} as unknown as PeopleRepository,
     // The adapter runs on the provisioned coordinates (the `inbox` grant
     // material); guardianEmail is durable settings config, sourced in start().
     config: {
@@ -194,9 +192,9 @@ describe("EmailAdapter.ingestInbound", () => {
       received.push(channelMessageOf(m, "email"));
     });
 
-    // A spoofed From for a mapped non-guardian contact (e.g. inner-circle).
+    // A spoofed From for a mapped non-guardian contact (e.g. a member).
     // Without the namespace the raw address would resolve to that person and
-    // reach the trusted path, bypassing sentinel.
+    // pass the boundary check.
     const event = buildEvent({
       from: [{ email: "contact@elsewhere.com" }],
       authentication: { authenticated: false, spam: false, blocked: false },
@@ -401,11 +399,6 @@ describe("EmailAdapter.send", () => {
         get: async () => ({ enabled: true, guardianEmail: GUARDIAN }),
         set: async () => {},
       } as unknown as SettingsRepository,
-      peopleRepo: {
-        byAccount: async () => null,
-        isDismissed: async () => false,
-        byBondLevel: async () => [],
-      } as unknown as PeopleRepository,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
     });
     await adapter.start();
@@ -655,17 +648,10 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const peopleRepo = {
-      byAccount: rs.fn(async () => null),
-      isDismissed: async () => false,
-      byBondLevel: rs.fn(async () => []),
-      linkStated: rs.fn(async () => {}),
-    } as unknown as PeopleRepository;
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      peopleRepo,
       // No guardianEmail in settings → self-heal resolves it from Rome Cloud.
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: async () => "Owner@Example.com",
@@ -680,11 +666,6 @@ describe("EmailAdapter.start guardian resolution", () => {
       "email",
       expect.objectContaining({ guardianEmail: "owner@example.com" }),
     );
-    // The resolved address is used to seed the guardian channel mapping.
-    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
-      platform: "email",
-      id: "owner@example.com",
-    });
   });
 
   it("keeps a settings-configured guardian email and never calls the cloud resolver", async () => {
@@ -695,18 +676,11 @@ describe("EmailAdapter.start guardian resolution", () => {
       get: rs.fn(async () => ({ enabled: true, guardianEmail: "set@example.com" })),
       set: rs.fn(async () => {}),
     } as unknown as SettingsRepository;
-    const peopleRepo = {
-      byAccount: rs.fn(async () => null),
-      isDismissed: async () => false,
-      byBondLevel: rs.fn(async () => []),
-      linkStated: rs.fn(async () => {}),
-    } as unknown as PeopleRepository;
     const resolver = rs.fn(async () => "owner@example.com");
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      peopleRepo,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: resolver,
     });
@@ -714,10 +688,6 @@ describe("EmailAdapter.start guardian resolution", () => {
     await adapter.start();
 
     expect(resolver).not.toHaveBeenCalled();
-    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
-      platform: "email",
-      id: "set@example.com",
-    });
   });
 
   it("resolves guardianEmail from Rome Cloud on a later boot when it was unresolvable at connect", async () => {
@@ -730,12 +700,6 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const peopleRepo = {
-      byAccount: rs.fn(async () => null),
-      isDismissed: async () => false,
-      byBondLevel: rs.fn(async () => []),
-      linkStated: rs.fn(async () => {}),
-    } as unknown as PeopleRepository;
 
     // Rome Cloud can't answer yet at connect-time boot.
     let ownerEmail: string | undefined;
@@ -743,7 +707,6 @@ describe("EmailAdapter.start guardian resolution", () => {
       new EmailAdapter({
         provider,
         settingsRepo,
-        peopleRepo,
         config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
         ownerEmailResolver: async () => ownerEmail,
       });
@@ -757,9 +720,5 @@ describe("EmailAdapter.start guardian resolution", () => {
     ownerEmail = "Owner@Example.com";
     await bootAdapter().start();
     expect((stored.email as { guardianEmail?: string }).guardianEmail).toBe("owner@example.com");
-    expect(peopleRepo.byAccount).toHaveBeenLastCalledWith({
-      platform: "email",
-      id: "owner@example.com",
-    });
   });
 });
