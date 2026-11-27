@@ -63,11 +63,12 @@ describe("the guardian's links in People reaching Identity", () => {
   });
   afterEach(() => testDb.close());
 
-  /** The guardian's accounts in Identity, other than the seat's sign-in. */
+  /** The guardian's accounts in Identity, other than the seat's sign-in and
+   *  the mail account it gives. */
   async function inIdentity(): Promise<string[]> {
     const accounts = await createIdentity(testDb.db).accountsOf(guardianId);
     return accounts
-      .filter((a) => a.platform !== "rome-cloud-email")
+      .filter((a) => a.accountId !== SEAT_EMAIL)
       .map((a) => `${a.platform}:${a.accountId}`);
   }
 

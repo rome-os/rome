@@ -17,6 +17,8 @@ import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-
 import { createTestDb, type TestDb } from "./test/db.js";
 
 const SIGN_IN = { platform: "rome-cloud-email", id: "owner@example.com" };
+// The mail account the sign-in gives.
+const MAIL = { platform: "email", id: "owner@example.com" };
 
 describe("the guardian's accounts as apps read them", () => {
   let testDb: TestDb;
@@ -41,7 +43,7 @@ describe("the guardian's accounts as apps read them", () => {
     people.linkStated({ platform: "slack", id: "T1/U1" }, "owner");
     people.linkStated({ platform: "telegram", id: "42" }, "owner");
     const [before] = await people.byBondLevel("guardian");
-    const today = [...before.links.map(({ platform, id }) => ({ platform, id })), SIGN_IN];
+    const today = [...before.links.map(({ platform, id }) => ({ platform, id })), SIGN_IN, MAIL];
 
     expect(await guardianAccounts()).toEqual(expect.arrayContaining(today));
     expect(await guardianAccounts()).toHaveLength(today.length);

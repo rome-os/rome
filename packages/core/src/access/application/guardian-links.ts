@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import { persons } from "../../db/schema.js";
 import { ROME_CLOUD_ID_PLATFORM } from "./backfill-members.js";
-import { giveGuardian, memberContextWithinTx } from "./members.js";
+import { giveGuardian, isSignInMail, memberContextWithinTx } from "./members.js";
 
 /** Which person held an account's link in People, and whether as a delegate. */
 interface Holding {
@@ -25,7 +25,8 @@ export interface PeopleLinkChange {
  * inside People's transaction, so a throw rolls People's write back too. An
  * account People now links to its guardian becomes the guardian's, moving from
  * any other person. One People linked to its guardian before the write, and no
- * longer does, stops being the guardian's. A delegate link counts as a link,
+ * longer does, stops being the guardian's, unless it is the mail account of a
+ * sign-in of theirs. A delegate link counts as a link,
  * so the account of an agent in the guardian's own Rome Cloud account is the
  * guardian's like any other. A Rome Cloud id counts as no link. Nothing changes
  * while Rome has no guardian, or for an account People's write did not take
@@ -51,6 +52,11 @@ export function peopleLinkChanged(db: DrizzleDb, change: PeopleLinkChange): void
     if (!guardian) return;
     const account = { platform: change.account.platform, accountId: change.account.id };
     if (is) giveGuardian(identity, guardian.personId, account);
-    else if (identity.personOf(account)?.id === guardian.personId) identity.removeAccount(account);
+    else if (
+      identity.personOf(account)?.id === guardian.personId &&
+      !isSignInMail(identity, guardian.personId, account)
+    ) {
+      identity.removeAccount(account);
+    }
   });
 }
