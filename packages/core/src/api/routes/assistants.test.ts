@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { AssistantList } from "@rome/api-types/assistants";
-import type { TimelinePage } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/message";
 import { assistantsRoutes } from "./assistants.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";

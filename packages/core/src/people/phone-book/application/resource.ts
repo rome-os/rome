@@ -7,7 +7,8 @@
 
 import { readdir } from "node:fs/promises";
 import type { Account } from "@rome-os/app-runtime";
-import type { AccountSendState, PersonResource } from "@rome/api-types/people";
+import type { PersonResource } from "@rome/api-types/people";
+import type { AccountSendState } from "@rome/api-types/message";
 import type { Message } from "@rome/api-types/message";
 import {
   getRelationshipDir,

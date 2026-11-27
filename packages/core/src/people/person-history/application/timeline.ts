@@ -1,12 +1,12 @@
-// One account's history. The message shape, the ordering and the cursor are
-// the message module's (@rome/api-types/message), and the page that wraps them
-// is the People contract's (@rome/api-types/people); a store is the channel's
+// One account's history. The message shape, the ordering, the cursor and the
+// page that wraps them are the message module's (@rome/api-types/message); a
+// store is the channel's
 // (`AccountMessages`, in chats/history/messages.js). An account is read once per
 // channel it is stored under, and from more than one store when those channels
 // are held by different stores, so this module merges those reads into one
 // page.
 
-import { type TimelinePage } from "@rome/api-types/people";
+import { type TimelinePage } from "@rome/api-types/message";
 import {
   compareMessages,
   isAfterMessageCursor,

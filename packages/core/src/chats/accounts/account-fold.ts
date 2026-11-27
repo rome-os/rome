@@ -9,7 +9,7 @@
 // answer (messages.ts), read by the callers that show it, so the contacts list
 // never touches a message store to learn who exists.
 
-import { compareCodePoints } from "@rome/api-types/people";
+import { compareCodePoints } from "@rome/api-types/message";
 import type { Account } from "@rome-os/app-runtime";
 import type { Accounts } from "./accounts.js";
 

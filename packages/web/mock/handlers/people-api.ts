@@ -10,11 +10,11 @@ import {
   personMatchesQuery,
   sliceAccountDirectory,
   type DirectoryAccount,
-  type AccountSendState,
   type AccountState,
   type PeopleList,
   type PersonResource,
 } from "@rome/api-types/people";
+import { type AccountSendState } from "@rome/api-types/message";
 import { talkConnections } from "./connections-store";
 import { memoryProfilePath } from "./memory-files";
 import {
