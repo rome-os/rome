@@ -12,6 +12,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import type { ArtifactRef } from "../apps/state.js";
 import { loadAppHook } from "../apps/hook-loader.js";
+import { deprecatedServicesFor } from "./deprecated-app-ports.js";
 import {
   createHookDispatchResult,
   evaluateHookInvocation,
@@ -112,7 +113,11 @@ async function loadLifecycleHook(
   catalog: AppCatalog,
   appRuntimeServices: RomeAppRuntimeServices | undefined,
 ): Promise<LoadedLifecycleHook> {
-  const hook = await loadAppHook(artifact, catalog, appRuntimeServices);
+  const hook = await loadAppHook(
+    artifact,
+    catalog,
+    deprecatedServicesFor(appRuntimeServices, artifact.ownerId),
+  );
   return {
     appId: artifact.ownerId,
     hookName: artifact.publicName as TurnLifecycleHookName,

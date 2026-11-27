@@ -3,28 +3,78 @@
 // answers nobody, or refuses a write as it did before; the two that never
 // needed People keep working. Types: packages/app-runtime-sdk/src/deprecated-people.ts.
 // A later breaking release deletes this file with that one.
+//
+// Each use is reported as a log record, so a symbol is deleted once no app
+// uses it: docs/observability/schema.md#deprecated-app-sdk-symbols.
 
 import type {
+  AppRuntimeRepositories,
+  ChatStopHandler,
   GuardianProfileRepository,
   PeopleService,
   PersonMappingRepository,
   PolicyEngine,
 } from "@rome-os/app-runtime";
 import { renameGuardianIn } from "../access/application/members.js";
+import type { RomeAppRuntimeServices } from "../apps/context.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { applyGuardianProfile } from "../instance/guardian-profile/index.js";
+import { createLogger, type Logger } from "../logger.js";
 import { matchingPolicy } from "../participation/wake-gate/policy/policy-engine.js";
 import type { Policy } from "../types.js";
+
+/** The log record's component, message and the attribute naming the symbol. */
+export const DEPRECATED_USE_COMPONENT = "deprecated-app-sdk";
+export const DEPRECATED_USE_MESSAGE = "deprecated app SDK symbol used";
+export const DEPRECATED_USE_SYMBOL = "rome.sdk.symbol";
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Notes that app `appId` used `symbol`, a fixed name such as
+ *  `personMappingRepo.findByChannelUser`. */
+export type ReportDeprecatedUse = (appId: string, symbol: string) => void;
+
+/**
+ * A {@link ReportDeprecatedUse} that writes one log record per app and symbol
+ * an hour, in this process: the record says the symbol was used in that hour,
+ * not how often. It carries the symbol and, through the logger, the app id.
+ */
+export function deprecatedUseReporter(
+  options: { log?: (appId: string) => Pick<Logger, "info">; now?: () => number } = {},
+): ReportDeprecatedUse {
+  const loggers = new Map<string, Pick<Logger, "info">>();
+  const logFor =
+    options.log ?? ((appId: string) => createLogger(DEPRECATED_USE_COMPONENT, { appId }));
+  const now = options.now ?? Date.now;
+  const lastReported = new Map<string, number>();
+  return (appId, symbol) => {
+    const key = `${appId}\u0000${symbol}`;
+    const at = now();
+    const last = lastReported.get(key);
+    if (last !== undefined && at - last < HOUR_MS) return;
+    lastReported.set(key, at);
+    let log = loggers.get(appId);
+    if (!log) {
+      log = logFor(appId);
+      loggers.set(appId, log);
+    }
+    log.info(DEPRECATED_USE_MESSAGE, { [DEPRECATED_USE_SYMBOL]: symbol });
+  };
+}
+
+/** This process's reporter. */
+const reportDeprecatedUse = deprecatedUseReporter();
 
 /** The person id 0.11 handed apps for a sender linked to nobody. */
 const STRANGER_PERSON_ID = "__STRANGER__";
 
 /** `deps.people`: the guardian has no accounts here. */
-function deprecatedPeople(): PeopleService {
+function deprecatedPeople(used: (symbol: string) => void): PeopleService {
   return {
     async guardian() {
+      used("people.guardian");
       return { accounts: [] };
     },
   };
@@ -32,29 +82,26 @@ function deprecatedPeople(): PeopleService {
 
 /** `deps.personMappingRepo`: every lookup finds nobody, and every write is
  *  refused, as 0.11 already refused it. */
-function deprecatedPersonMapping(): PersonMappingRepository {
-  const refused = (what: string) => async (): Promise<never> => {
+function deprecatedPersonMapping(used: (symbol: string) => void): PersonMappingRepository {
+  const answer =
+    <T>(method: string, value: T) =>
+    async (): Promise<T> => {
+      used(`personMappingRepo.${method}`);
+      return value;
+    };
+  const refused = (method: string, what: string) => async (): Promise<never> => {
+    used(`personMappingRepo.${method}`);
     throw new Error(`Apps cannot ${what}. Rome no longer keeps persons for apps.`);
   };
   return {
-    async findByChannelUser() {
-      return null;
-    },
-    async findByAccount() {
-      return null;
-    },
-    async findByName() {
-      return [];
-    },
-    async findByNameFuzzy() {
-      return null;
-    },
-    async findByBondLevel() {
-      return [];
-    },
-    create: refused("add persons"),
-    addChannelMapping: refused("link accounts to persons"),
-    addAccount: refused("link accounts to persons"),
+    findByChannelUser: answer("findByChannelUser", null),
+    findByAccount: answer("findByAccount", null),
+    findByName: answer("findByName", []),
+    findByNameFuzzy: answer("findByNameFuzzy", null),
+    findByBondLevel: answer("findByBondLevel", []),
+    create: refused("create", "add persons"),
+    addChannelMapping: refused("addChannelMapping", "link accounts to persons"),
+    addAccount: refused("addAccount", "link accounts to persons"),
   };
 }
 
@@ -76,13 +123,135 @@ export function deprecatedPolicyEngine(input: {
   };
 }
 
-/** The action deps 0.11 handed every app action, beside `policyEngine`,
- *  which each process builds once with {@link deprecatedPolicyEngine}. */
-export function deprecatedActionDeps(): Record<string, unknown> {
+/** `target` with each method named in `uses` reporting the symbol it
+ *  answers for its arguments, if any, before it runs. */
+function reportingMethods<T extends object>(
+  target: T,
+  uses: Record<string, (args: unknown[]) => string | undefined>,
+  used: (symbol: string) => void,
+): T {
+  return new Proxy(target, {
+    get(object, property) {
+      const value = Reflect.get(object, property, object);
+      if (typeof value !== "function") return value;
+      const use = typeof property === "string" ? uses[property] : undefined;
+      if (!use) return value.bind(object);
+      return (...args: unknown[]) => {
+        const symbol = use(args);
+        if (symbol) used(symbol);
+        return value.apply(object, args);
+      };
+    },
+  });
+}
+
+const firstArg = (args: unknown[]) => args[0] as Record<string, unknown> | undefined;
+
+/** A run whose thread context still names the sender's bond level. */
+const bondLevelInRun = (args: unknown[]) => {
+  const context = firstArg(args)?.threadContext as Record<string, unknown> | undefined;
+  return context?.senderBondLevel !== undefined ? "ThreadContext.senderBondLevel" : undefined;
+};
+
+/**
+ * `deps`, the action deps of app `appId`, with what 0.11 handed every app
+ * action beside them: `people`, `personMappingRepo` and `strangerPersonId`
+ * added, and the shared `policyEngine`, `approvalsRepo` and `agentRunner`
+ * reporting their deprecated uses. Call it on the finished object, since
+ * `strangerPersonId` reports from a getter.
+ */
+export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
+  appId: string,
+  deps: T,
+  report: ReportDeprecatedUse = reportDeprecatedUse,
+): T {
+  const used = (symbol: string) => report(appId, symbol);
+  const target = deps as Record<string, unknown>;
+  target.people ??= deprecatedPeople(used);
+  target.personMappingRepo ??= deprecatedPersonMapping(used);
+  if (!("strangerPersonId" in target)) {
+    Object.defineProperty(target, "strangerPersonId", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        used("strangerPersonId");
+        return STRANGER_PERSON_ID;
+      },
+    });
+  }
+  const policyEngine = target.policyEngine as PolicyEngine | undefined;
+  if (policyEngine) {
+    target.policyEngine = {
+      evaluate(context) {
+        used("policyEngine.evaluate");
+        return policyEngine.evaluate(context);
+      },
+    } satisfies PolicyEngine;
+  }
+  if (target.approvalsRepo && typeof target.approvalsRepo === "object") {
+    target.approvalsRepo = reportingMethods(
+      target.approvalsRepo,
+      {
+        create: (args) =>
+          firstArg(args)?.type === "person_mapping" ? "APPROVAL_TYPES.person_mapping" : undefined,
+      },
+      used,
+    );
+  }
+  if (target.agentRunner && typeof target.agentRunner === "object") {
+    target.agentRunner = reportingMethods(
+      target.agentRunner,
+      { run: bondLevelInRun, fork: bondLevelInRun },
+      used,
+    );
+  }
+  return deps;
+}
+
+/** App `appId`'s repositories, with `guardianProfile` reporting each write. */
+export function deprecatedRepositoriesFor(
+  repositories: AppRuntimeRepositories,
+  appId: string,
+  report: ReportDeprecatedUse = reportDeprecatedUse,
+): AppRuntimeRepositories {
+  const guardianProfile = repositories.guardianProfile;
+  if (!guardianProfile) return repositories;
   return {
-    people: deprecatedPeople(),
-    personMappingRepo: deprecatedPersonMapping(),
-    strangerPersonId: STRANGER_PERSON_ID,
+    ...repositories,
+    guardianProfile: {
+      write(input) {
+        report(appId, "repositories.guardianProfile.write");
+        return guardianProfile.write(input);
+      },
+    },
+  };
+}
+
+/** {@link deprecatedRepositoriesFor} on the services an app hook of app
+ *  `appId` is built with. */
+export function deprecatedServicesFor(
+  services: RomeAppRuntimeServices | undefined,
+  appId: string,
+): RomeAppRuntimeServices | undefined {
+  return (
+    services && {
+      ...services,
+      repositories: deprecatedRepositoriesFor(services.repositories, appId),
+    }
+  );
+}
+
+/** App `appId`'s `chatStop`, reporting the `service` and `senderId` it
+ *  still passes, which the host ignores. */
+export function deprecatedChatStopFor(
+  chatStop: ChatStopHandler,
+  appId: string,
+  report: ReportDeprecatedUse = reportDeprecatedUse,
+): ChatStopHandler {
+  return (input) => {
+    if (input.service !== undefined) report(appId, "ChatStopInput.service");
+    if (input.senderId !== undefined) report(appId, "ChatStopInput.senderId");
+    return chatStop(input);
   };
 }
 

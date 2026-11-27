@@ -7,6 +7,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import type { ArtifactRef } from "../apps/state.js";
 import { loadAppHook } from "../apps/hook-loader.js";
+import { deprecatedServicesFor } from "./deprecated-app-ports.js";
 import { createLogger } from "../logger.js";
 import { wrapHookSpan } from "../telemetry.js";
 import type { TurnMiddleware } from "../agent/index.js";
@@ -40,7 +41,11 @@ export class AppTurnMiddleware implements TurnMiddleware {
     for (const artifact of catalog.listArtifacts("hook")) {
       if (artifact.publicName !== HOOK_NAME) continue;
       try {
-        const hook = await loadAppHook(artifact, catalog, this.options.appRuntimeServices);
+        const hook = await loadAppHook(
+          artifact,
+          catalog,
+          deprecatedServicesFor(this.options.appRuntimeServices, artifact.ownerId),
+        );
         assertTurnMiddleware(hook, artifact);
         next.push({ appId: artifact.ownerId, hook });
       } catch (err) {

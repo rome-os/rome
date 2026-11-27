@@ -311,6 +311,35 @@ GROUP BY model
 FORMAT JSONEachRow
 ```
 
+### Deprecated app SDK symbols
+
+The host writes a log record when an app uses a symbol the app SDK keeps only
+as deprecated, so a symbol is deleted once no app uses it. Component
+`deprecated-app-sdk`, body `deprecated app SDK symbol used`, and
+`LogAttributes['rome.sdk.symbol']` names the symbol, such as
+`personMappingRepo.findByChannelUser`, beside the usual `rome.app.id`. Each
+process writes at most one record per app and symbol an hour, so a count is of
+hours in which the app used it, not of calls. The record holds no arguments.
+The symbols it covers are listed in
+[`../../packages/core/src/app-host/deprecated-app-ports.ts`](../../packages/core/src/app-host/deprecated-app-ports.ts).
+
+Uses per symbol, app and instance over the last 30 days:
+
+```sql
+SELECT
+  LogAttributes['rome.sdk.symbol'] AS symbol,
+  LogAttributes['rome.app.id'] AS app,
+  ResourceAttributes['service.instance.id'] AS instance,
+  count() AS hours_used,
+  max(Timestamp) AS last_used
+FROM default.otel_logs
+WHERE LogAttributes['component'] = 'deprecated-app-sdk'
+  AND Timestamp > now() - INTERVAL 30 DAY
+GROUP BY symbol, app, instance
+ORDER BY symbol, app, instance
+FORMAT JSONEachRow
+```
+
 ## Human UI
 
 HyperDX at `$OBS_UI_URL` (dev: `http://obs.rome.localhost:3000`). Same

@@ -34,7 +34,11 @@ import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 import { AppActionSchemaCache } from "../apps/actions/app-action-schema-cache.js";
-import { deprecatedActionDeps } from "./deprecated-app-ports.js";
+import {
+  deprecatedChatStopFor,
+  deprecatedRepositoriesFor,
+  withDeprecatedActionDeps,
+} from "./deprecated-app-ports.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -127,8 +131,7 @@ function createAppActionRuntimeDeps(
   }
 
   return withRemovedMembers(
-    {
-      ...deprecatedActionDeps(),
+    withDeprecatedActionDeps(record.metadata.ownerId, {
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
         ? { hostExecution: services.hostExecution }
@@ -147,11 +150,11 @@ function createAppActionRuntimeDeps(
         db: services.db,
         actionEngine: services.actionEngine,
         routinesRepo: services.routinesRepo,
-        repositories: services.repositories,
+        repositories: deprecatedRepositoriesFor(services.repositories, record.metadata.ownerId),
         favorService: services.favorService,
         appConnections: services.appConnections,
       }),
-    } satisfies AppActionRuntimeDeps<Record<string, unknown>>,
+    } satisfies AppActionRuntimeDeps<Record<string, unknown>>),
     REMOVED_ACTION_DEPS,
   );
 }
@@ -329,7 +332,10 @@ export async function createChannelMessageHook(
 
   if (typeof module.createHook === "function") {
     const hook = module.createHook(
-      withRemovedMembers({ ...deps }, REMOVED_HOOK_DEPS),
+      withRemovedMembers(
+        { ...deps, chatStop: deprecatedChatStopFor(deps.chatStop, artifact.ownerId) },
+        REMOVED_HOOK_DEPS,
+      ),
     ) as ChannelMessageHook;
     // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
     // removed registerConnection, which the host no longer calls: it would hear
