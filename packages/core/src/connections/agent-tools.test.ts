@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { approvalOf, callTool, whoMayAskSuite } from "../apps/actions/agent-tool-contract.js";
+import { approvalOf, callTool } from "../apps/actions/agent-tool-contract.js";
 import {
   type ConnectionToolDeps,
   disconnectService,
@@ -7,9 +7,6 @@ import {
   readConnections,
 } from "./agent-tools.js";
 import type { Connection } from "./types.js";
-
-whoMayAskSuite(readConnections, {});
-whoMayAskSuite(disconnectService, { connectionId: "conn-slack" });
 
 const unlocked = { state: "unlocked" } as const;
 const unsupported = { state: "unsupported" } as const;

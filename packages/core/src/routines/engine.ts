@@ -69,8 +69,8 @@ export class RoutineEngine {
    * The person a fire acts for: who created the routine, read from its stored
    * row at each fire, so however a routine was activated its fires act for
    * that person. Never anyone ambient. The guardian acts through loopback, not
-   * their session cookie: no message of theirs started the fire, so what only
-   * their own message may do, such as changing a routine, stays refused.
+   * their session cookie: no message of theirs started the fire, so its usage
+   * is labelled as Rome's own work.
    */
   private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
     const creator = await this.routinesRepo.creatorOf(routine.id);

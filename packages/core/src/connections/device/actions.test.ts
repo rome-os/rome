@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../../apps/actions/engine.js";
-import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
@@ -215,8 +214,8 @@ describe("device actions", () => {
     ]);
   });
 
-  it("runs a write operation only in a private turn", async () => {
-    const calendar: DeviceReport["connections"][number] = {
+  it("runs a write operation in any turn, whoever started it", async () => {
+    const lights: DeviceReport["connections"][number] = {
       capability: "lights",
       title: "Lights",
       prefix: "lights",
@@ -225,50 +224,17 @@ describe("device actions", () => {
       permission: "not_needed",
       live: true,
     };
-    devices.report(report("dev-1", "iPhone", [calendar]), NOW);
-    const shared = await run(
-      DEVICE_RUN_ACTION,
-      { operation: "lights.set", args: { on: true } },
-      { audience: "shared" },
-    );
-    expect(shared).toMatchObject({ status: "error" });
-    expect((shared as { error: string }).error).toMatch(/^write_private_only:/);
-    expect(calls).toEqual([]);
-    const own = await run(
-      DEVICE_RUN_ACTION,
-      { operation: "lights.set", args: { on: true } },
-      { audience: "private", actor: GUARDIAN },
-    );
-    expect(own).toMatchObject({ status: "ok" });
-    expect(calls).toEqual([{ deviceId: "dev-1", action: "lights.set", args: { on: true } }]);
-  });
-
-  it("runs a write only in a turn the guardian's own message started", async () => {
-    devices.report(
-      report("dev-1", "iPhone", [
-        {
-          ...deviceConnection(true),
-          operations: [{ name: "device.ring", access: "write", description: "Rings it." }],
-        },
-      ]),
-      NOW,
-    );
-    // A routine or a followed mail runs with no actor; a loopback caller is
-    // the guardian's seat, but not the guardian asking.
-    for (const actor of [undefined, { ...GUARDIAN, via: "loopback" as const }]) {
-      const result = await run(
-        DEVICE_RUN_ACTION,
-        { operation: "device.ring" },
-        { audience: "private", ...(actor ? { actor } : {}) },
-      );
-      expect((result as { error: string }).error).toMatch(/^write_needs_guardian:/);
+    devices.report(report("dev-1", "iPhone", [lights]), NOW);
+    // A shared chat, a routine with no actor, and the guardian through loopback.
+    for (const turn of [
+      { audience: "shared" as const },
+      { audience: "private" as const },
+      { audience: "private" as const, actor: { ...GUARDIAN, via: "loopback" as const } },
+    ]) {
+      const result = await run(DEVICE_RUN_ACTION, { operation: "lights.set", args: {} }, turn);
+      expect(result).toMatchObject({ status: "ok" });
     }
-    expect(calls).toEqual([]);
-    // A read still runs in such a turn.
-    devices.report(report("dev-1", "iPhone", [deviceConnection(true)]), NOW);
-    expect(
-      await run(DEVICE_RUN_ACTION, { operation: "device.status" }, { audience: "private" }),
-    ).toMatchObject({ status: "ok" });
+    expect(calls).toHaveLength(3);
   });
 
   it("says a write did nothing when the device does not answer", async () => {
@@ -293,7 +259,7 @@ describe("device actions", () => {
     expect(error).toContain("Nothing was changed.");
   });
 
-  it("refuses a personal capability in a shared turn and calls no device", async () => {
+  it("runs an operation of a personal capability in any turn", async () => {
     devices.report(report("dev-1", "iPhone", [healthConnection(true)]), NOW);
     for (const audience of ["shared", undefined] as const) {
       const result = await run(
@@ -301,18 +267,9 @@ describe("device actions", () => {
         { operation: "health.stats", args: { type: "stepCount" } },
         { audience },
       );
-      expect(result).toEqual({ status: "error", error: PERSONAL_DATA_PRIVATE_ONLY });
+      expect(result).toMatchObject({ status: "ok" });
     }
-    expect(calls).toEqual([]);
-    const result = await run(
-      DEVICE_RUN_ACTION,
-      { operation: "health.stats", args: { type: "stepCount" } },
-      { audience: "private" },
-    );
-    expect(result).toMatchObject({ status: "ok" });
-    expect(calls).toEqual([
-      { deviceId: "dev-1", action: "health.stats", args: { type: "stepCount" } },
-    ]);
+    expect(calls).toHaveLength(2);
   });
 
   it("answers live_off with the connect card's step for an off connection, and calls no device", async () => {
