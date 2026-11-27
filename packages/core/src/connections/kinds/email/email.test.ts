@@ -184,7 +184,7 @@ describe("EmailAdapter.ingestInbound", () => {
     expect(received[0].senderId).toBe("stranger@elsewhere.com");
   });
 
-  it("namespaces a non-guardian sender that fails authentication so it can't match a person mapping", async () => {
+  it("namespaces a non-guardian sender that fails authentication so it can't match a member's account", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
@@ -192,7 +192,7 @@ describe("EmailAdapter.ingestInbound", () => {
       received.push(channelMessageOf(m, "email"));
     });
 
-    // A spoofed From for a mapped non-guardian contact (e.g. a member).
+    // A spoofed From for a non-guardian's account, such as a member's.
     // Without the namespace the raw address would resolve to that person and
     // pass the boundary check.
     const event = buildEvent({
