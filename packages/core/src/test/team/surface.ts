@@ -88,11 +88,9 @@ function paramValue(name: string, pattern: string, ids: SeededIds): string {
     if (under("approvals")) return ids.approvalId;
     if (under("routines")) return ids.routineId;
     if (under("sessions") || under("chats")) return ids.chatId;
-    if (under("people") || under("persons")) return ids.personId;
     if (under("action-executions") || under("executions")) return ids.executionId;
     if (under("sentinel-log")) return ids.sentinelId;
   }
-  if (name === "personId") return ids.personId;
   return `verifier-${name}`;
 }
 

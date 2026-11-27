@@ -24,7 +24,6 @@ import { seedBaseline } from "../seeds.js";
 import { guardianAuth, visitorProfiles } from "../../db/schema.js";
 import { backfillMembers } from "../../access/application/backfill-members.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
-import { phoneBook } from "../../people/phone-book/index.js";
 import { feishu } from "../../connections/kinds/feishu/index.js";
 import { discordApp, romeCloudDiscordApp } from "../../connections/kinds/discord-app/index.js";
 import { linkedin } from "../../connections/kinds/linkedin/index.js";
@@ -44,9 +43,9 @@ export const GUARDIAN = {
 export const TEAMMATE = { accountId: "acct-teammate", email: "teammate@team-verifier.test" };
 export const OUTSIDER = { accountId: "acct-outsider", email: "outsider@team-verifier.test" };
 
-/** The daemon's mount lists in `src/index.ts`, by factory name. `mountDrift`
- *  compares them with what this file mounts. */
-export const MOUNTED_FEATURES = ["phoneBook"] as const;
+/** The kinds of connection the daemon mounts in `src/index.ts`, by factory
+ *  name. `mountDrift` compares them with what this file mounts. Features need
+ *  no such list: this file mounts the ones `src/index.ts` names. */
 export const MOUNTED_KINDS = ["feishu", "discordApp", "linkedin"] as const;
 
 export interface InstanceOptions {
@@ -73,7 +72,6 @@ export interface SeededIds {
   conciergeChatIds: { guardian: string; teammate: string };
   routineId: string;
   approvalId: string;
-  personId: string;
   executionId: string;
   sentinelId: string;
 }
@@ -126,8 +124,54 @@ function connectionKinds(deps: TestDeps): KindMount[] {
   ];
 }
 
-function features(deps: ApiDeps): Feature[] {
-  return [phoneBook(deps as Parameters<typeof phoneBook>[0])];
+// The modules a daemon feature can come from: `src/<folder>/index.ts` or
+// `src/<folder>/<feature>/index.ts`. Loaded only when the daemon names one, so
+// a feature the daemon drops is neither built nor imported here.
+interface ModuleContext {
+  keys(): string[];
+  (key: string): Promise<Record<string, unknown>>;
+}
+const featureModules = (
+  import.meta as unknown as {
+    webpackContext(dir: string, options: object): ModuleContext;
+  }
+).webpackContext("../..", {
+  recursive: true,
+  regExp: /^\.\/[\w-]+(\/[\w-]+)?\/index\.ts$/,
+  mode: "lazy",
+});
+
+interface DaemonFeature {
+  /** The factory's name in the daemon's list. */
+  name: string;
+  /** Its module, as a key of `featureModules`, or null when it is not one. */
+  module: string | null;
+}
+
+/** The features the daemon mounts in `src/index.ts`, with the module each
+ *  factory is imported from there. Null when the file has no list, as when
+ *  Rome mounts no features. */
+function daemonFeatures(indexSource: string): DaemonFeature[] | null {
+  const names = listAfter(indexSource, FEATURES_MARKER);
+  if (names === null) return null;
+  return names.map((name) => {
+    const from = new RegExp(
+      `import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*"\\./([^"]+)\\.js"`,
+    ).exec(indexSource);
+    const key = from ? `./${from[1]}.ts` : null;
+    return { name, module: key && featureModules.keys().includes(key) ? key : null };
+  });
+}
+
+async function features(deps: ApiDeps): Promise<Feature[]> {
+  const mounted: Feature[] = [];
+  for (const { name, module } of daemonFeatures(readDaemonSource()) ?? []) {
+    if (!module) continue;
+    const factory = (await featureModules(module))[name];
+    if (typeof factory !== "function") throw new Error(`${module} exports no ${name}`);
+    mounted.push(factory(deps) as Feature);
+  }
+  return mounted;
 }
 
 export async function createInstance(options: InstanceOptions): Promise<Instance> {
@@ -201,7 +245,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
   };
-  deps.features = [...features(deps), ...(options.extraFeatures ?? [])];
+  deps.features = [...(await features(deps)), ...(options.extraFeatures ?? [])];
 
   // A signed-in teammate has a profile: the sign-in callback keeps it, and Rome
   // reads a chat owner's email from it.
@@ -249,7 +293,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     conciergeChatIds,
     routineId,
     approvalId: baseline.approvals.pendingId,
-    personId: baseline.persons.innerCircleId,
     executionId: baseline.actionExecutions.rootSuccessId,
     sentinelId: baseline.sentinelLog.unknownSenderId,
   };
@@ -322,46 +365,60 @@ async function saveDashboardList(
  * Names in the daemon's mount lists that this file does not mount, or mounts
  * without the daemon. Read from `src/index.ts`, so a feature or a kind added
  * there shows up here as drift instead of as routes the verifier never sees.
+ * A feature is drift only when its module cannot be found, since this file
+ * mounts every feature the daemon names.
  */
 export function mountDrift(indexSource: string = readDaemonSource()): string[] {
-  const listAfter = (marker: string): string[] => {
-    const start = indexSource.indexOf(marker);
-    if (start === -1) return [`<marker not found: ${marker}>`];
-    // Each marker ends with the array literal's opening bracket.
-    const open = start + marker.length - 1;
-    let depth = 0;
-    let end = open;
-    for (; end < indexSource.length; end++) {
-      const ch = indexSource[end];
-      if (ch === "[" || ch === "(" || ch === "{") depth++;
-      if (ch === "]" || ch === ")" || ch === "}") depth--;
-      if (depth === 0) break;
-    }
-    const body = indexSource.slice(open + 1, end);
-    // Entries are calls at the top level of the array literal: `name(`.
-    const names: string[] = [];
-    let level = 0;
-    const tokens = body.matchAll(/([A-Za-z_$][\w$]*)\s*\(|[()[\]{}]/g);
-    for (const token of tokens) {
-      const text = token[0];
-      if (token[1]) {
-        if (level === 0) names.push(token[1]);
-        level++;
-      } else if (text === "(" || text === "[" || text === "{") level++;
-      else level--;
-    }
-    return names;
-  };
   const drift: string[] = [];
-  const compare = (kind: string, daemon: string[], mounted: readonly string[]) => {
-    for (const name of daemon)
-      if (!mounted.includes(name)) drift.push(`${kind} ${name} not mounted`);
-    for (const name of mounted)
-      if (!daemon.includes(name)) drift.push(`${kind} ${name} not in daemon`);
-  };
-  compare("feature", listAfter("apiDeps.features = ["), MOUNTED_FEATURES);
-  compare("kind", listAfter("const connectionKinds: KindMount[] = ["), MOUNTED_KINDS);
+  const features = daemonFeatures(indexSource);
+  // No list is drift only when the daemon still sets features some other way.
+  if (features === null && indexSource.includes("apiDeps.features")) {
+    drift.push(`<marker not found: ${FEATURES_MARKER}>`);
+  }
+  for (const { name, module } of features ?? []) {
+    if (!module) drift.push(`feature ${name} not mounted`);
+  }
+  const kinds = listAfter(indexSource, KINDS_MARKER) ?? [`<marker not found: ${KINDS_MARKER}>`];
+  for (const name of kinds)
+    if (!(MOUNTED_KINDS as readonly string[]).includes(name))
+      drift.push(`kind ${name} not mounted`);
+  for (const name of MOUNTED_KINDS)
+    if (!kinds.includes(name)) drift.push(`kind ${name} not in daemon`);
   return drift;
+}
+
+const FEATURES_MARKER = "apiDeps.features = [";
+const KINDS_MARKER = "const connectionKinds: KindMount[] = [";
+
+/** The factory names in the array literal that `marker` opens in the daemon's
+ *  source, or null when the marker is not there. */
+function listAfter(indexSource: string, marker: string): string[] | null {
+  const start = indexSource.indexOf(marker);
+  if (start === -1) return null;
+  // Each marker ends with the array literal's opening bracket.
+  const open = start + marker.length - 1;
+  let depth = 0;
+  let end = open;
+  for (; end < indexSource.length; end++) {
+    const ch = indexSource[end];
+    if (ch === "[" || ch === "(" || ch === "{") depth++;
+    if (ch === "]" || ch === ")" || ch === "}") depth--;
+    if (depth === 0) break;
+  }
+  const body = indexSource.slice(open + 1, end);
+  // Entries are calls at the top level of the array literal: `name(`.
+  const names: string[] = [];
+  let level = 0;
+  const tokens = body.matchAll(/([A-Za-z_$][\w$]*)\s*\(|[()[\]{}]/g);
+  for (const token of tokens) {
+    const text = token[0];
+    if (token[1]) {
+      if (level === 0) names.push(token[1]);
+      level++;
+    } else if (text === "(" || text === "[" || text === "{") level++;
+    else level--;
+  }
+  return names;
 }
 
 function readDaemonSource(): string {
