@@ -5,7 +5,8 @@ import {
   reportConciergeTurn,
   type TimedEvent,
 } from "../../concierge/turn-timing.js";
-import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
+import { madeForSomeoneElse } from "../../access/owner-actor.js";
+import { ownerOf } from "../../webchat/owner.js";
 import { chatOutputsRoutes } from "./chat-outputs.js";
 import {
   type ConciergeService,
@@ -4350,9 +4351,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // An action's loopback send names its person by kind alone. One made
       // for someone the chat may not belong to is not its owner's request.
       const actorKind = sourceId ? body.automatedActorKind : undefined;
-      const anothers =
-        actorKind === "visitor" ||
-        (actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);
+      const anothers = madeForSomeoneElse(actorKind, ownerOf(session));
       void concierge
         .runSystemTurn(
           sessionId,
