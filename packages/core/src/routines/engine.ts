@@ -14,6 +14,7 @@ import { replayContext } from "../apps/actions/replay.js";
 import { runWithoutSession } from "../telemetry-context.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
 import {
+  actingInBackground,
   currentSessionActor,
   withoutSessionActor,
   type SessionActor,
@@ -77,7 +78,7 @@ export class RoutineEngine {
     if (creator === undefined) return undefined;
     const actor = creator === null ? await this.legacyActorOf(routine) : creator;
     if (!actor || actor.kind === "anonymous") return undefined;
-    return actor.kind === "guardian" ? { ...actor, via: "loopback" } : actor;
+    return actingInBackground(actor);
   }
 
   registerProvider(type: string, provider: TriggerProvider): void {

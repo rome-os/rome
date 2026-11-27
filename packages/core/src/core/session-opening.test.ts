@@ -26,7 +26,7 @@ describe("sessionOpeningFor", () => {
   it("states a web chat's session shows cards, faces the guardian, and carries its channel", async () => {
     expect(await openingFor("webchat:chat-1", { channel: "webchat", threadId: "chat-1" })).toEqual({
       drawsCards: true,
-      guardianFacing: true,
+      takesWakeUps: true,
       toolEnv: { ROME_CHANNEL: "webchat" },
       spanAttributes: { "channel.name": "webchat" },
     });
@@ -41,13 +41,13 @@ describe("sessionOpeningFor", () => {
   it("states nothing a keyless or unknown conversation would need", async () => {
     expect(await openingFor("worker:3b1f")).toEqual({
       drawsCards: false,
-      guardianFacing: false,
+      takesWakeUps: false,
       toolEnv: { ROME_CHANNEL: "worker" },
       spanAttributes: { "channel.name": "worker" },
     });
     expect(await openingFor("")).toEqual({
       drawsCards: false,
-      guardianFacing: false,
+      takesWakeUps: false,
       toolEnv: { ROME_CHANNEL: undefined },
       spanAttributes: {},
     });

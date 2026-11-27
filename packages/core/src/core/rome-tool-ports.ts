@@ -29,7 +29,11 @@ import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { shareLocationTools } from "./share-location-tool.js";
 import { showCardTools } from "./show-card-tool.js";
-import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
+import {
+  sessionOwnerKey,
+  withoutSessionActor,
+  type SessionActor,
+} from "../access/session-actor.js";
 import { withTaskInputActor } from "../webchat/task-input-actor.js";
 import { sameActor } from "../agent/index.js";
 
@@ -242,7 +246,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
               const source =
                 turn.live?.() === true &&
                 actor &&
-                (actor.kind === "guardian" || actor.kind === "visitor") &&
+                sessionOwnerKey(actor) !== null &&
                 turn.agentName === "core:concierge" &&
                 !turn.isSubagent &&
                 turnId &&

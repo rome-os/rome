@@ -144,6 +144,14 @@ export function sessionOwnerKey(actor: SessionActor | undefined): string | null 
   return null;
 }
 
+/** `actor` as Rome's own work for them, which no message of theirs started:
+ *  the guardian acts through loopback, not their signed-in session. */
+export function actingInBackground(
+  actor: Exclude<SessionActor, { kind: "anonymous" }>,
+): SessionActor {
+  return actor.kind === "guardian" ? { ...actor, via: "loopback" } : actor;
+}
+
 /** The email of a signed-in member who is not the guardian, to name them by. */
 export function memberEmail(actor: SessionActor | undefined): string | undefined {
   return actor?.kind === "visitor" ? actor.email : undefined;
