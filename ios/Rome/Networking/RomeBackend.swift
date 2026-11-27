@@ -103,10 +103,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
     /// wrote or showed, a Concierge chat's task chats' included, newest first.
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
-    /// An output's bytes, from its `contentUrl` (the path after `/api`).
-    func chatOutputFile(path: String) async throws -> Data
     /// A file a chat links to (`/projects/download`, `/memory/download` or an
-    /// asset), as large as an output may be.
+    /// asset) or an output's `contentUrl`, as large as an output may be.
     func linkedFile(_ file: LinkedFile) async throws -> Data
     /// What a linked project or memory path names, from `/<folder>/resolve`;
     /// `.file` for any other link.
@@ -400,11 +398,6 @@ final class LiveBackend: RomeBackend {
 
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
         try await client.get("/chat/sessions/\(escape(chatId))/outputs")
-    }
-
-    func chatOutputFile(path: String) async throws -> Data {
-        // Sent as written: the server already encoded the ids in it.
-        try await client.getFile(apiPath: path, percentEncodedQuery: nil, limit: APIClient.outputLimit, accept: "*/*")
     }
 
     func linkedFile(_ file: LinkedFile) async throws -> Data {
@@ -707,7 +700,6 @@ extension RomeBackend {
     func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws { throw APIError.notFound }
     func deleteListedRoutine(chatId: String, routineId: String) async throws { throw APIError.notFound }
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
-    func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.
