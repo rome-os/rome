@@ -32,7 +32,7 @@ function parseState(raw: string | null): VaultState {
       if (
         exactHttpsOrigin(origin) === origin &&
         session?.origin === origin &&
-        session.cookieName === "rome_session" &&
+        (session.cookieName === "rome_session" || session.cookieName === "rome_visitor") &&
         typeof session.token === "string" &&
         typeof session.expiresAt === "string"
       ) {

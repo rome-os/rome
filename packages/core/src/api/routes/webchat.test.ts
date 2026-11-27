@@ -50,6 +50,8 @@ import {
   chatMessages,
   conciergeMessageTurns,
   guardianAuth,
+  links,
+  persons,
   romeSessions,
   taskChats,
   webchatProjects,
@@ -58,6 +60,7 @@ import { ConciergeTasks } from "../../concierge/tasks.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../../concierge/service.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import { guardianSeatCreated, memberContext } from "../../access/application/members.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
@@ -3399,6 +3402,32 @@ describe("Webchat API", () => {
     expect(String(init?.contextSuffix)).toContain("## Guardian");
   });
 
+  it("opens a background turn's runtime for the guardian's person in Identity", async () => {
+    await testDb.db.delete(links);
+    await testDb.db.delete(persons);
+    const opened: Array<SessionOpening | undefined> = [];
+    deps.agentSessionManager = {
+      open: rs.fn(async (_key: unknown, init?: SessionOpening) => {
+        opened.push(init);
+        return { sessionId: "runtime-topic", key: {}, release: () => {} };
+      }),
+      find: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    await deps.webchatRepo.createSession("topic-1", "Calendar");
+    await deps.webchatRepo.createSession("topic-2", "Notes");
+    const { runtime } = createWebchatRuntime(deps);
+
+    await runtime.openSession("topic-1");
+    const guardian = await guardianSeatCreated(memberContext(testDb.db), { accounts: [] });
+    await runtime.openSession("topic-2");
+
+    expect(opened.map((init) => init?.threadContext?.channelUserId)).toEqual([
+      "guardian",
+      guardian.id,
+    ]);
+  });
+
   it("names an untitled topic chat from its first message, and never a named one or the main chat", async () => {
     deps.agentSessionManager = {
       open: rs.fn(async () => {
@@ -3570,6 +3599,52 @@ describe("Webchat API", () => {
       }
       return { events, sendMessageRun, sessionId: session.id, app };
     };
+
+    const emptyPeople = async () => {
+      await testDb.db.delete(links);
+      await testDb.db.delete(persons);
+    };
+
+    const sentSender = async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "result", content: "Done" };
+          })() as AsyncGenerator<never>,
+      );
+      const [, args, options] = sendMessageRun.mock.calls.at(-1) as unknown as [
+        string,
+        { channelUserId: string; displayName: string },
+        { channelContext: { channelUserId: string } },
+      ];
+      return {
+        channelUserId: args.channelUserId,
+        displayName: args.displayName,
+        contextUserId: options.channelContext.channelUserId,
+      };
+    };
+
+    it("names the guardian's person in Identity as the sender of their message", async () => {
+      await emptyPeople();
+      const guardian = await guardianSeatCreated(memberContext(testDb.db), {
+        accounts: [],
+        name: "Ada Lovelace",
+      });
+      expect(await sentSender()).toEqual({
+        channelUserId: guardian.id,
+        displayName: "Ada Lovelace",
+        contextUserId: guardian.id,
+      });
+    });
+
+    it("names the sender Guardian while Rome has no guardian", async () => {
+      await emptyPeople();
+      expect(await sentSender()).toEqual({
+        channelUserId: "guardian",
+        displayName: "Guardian",
+        contextUserId: "guardian",
+      });
+    });
 
     const assistantTexts = (events: Array<{ event: string; data: string }>) =>
       events

@@ -17,6 +17,7 @@ import {
   type Access,
   accessWithinTx,
   createAccess,
+  type Member,
   type Role,
   type SyncAccess,
 } from "../access.js";
@@ -56,6 +57,37 @@ export interface MemberDetails {
   accounts: Account[];
 }
 
+/** The platform of an address Rome's email connection hears mail from. */
+export const MAIL_PLATFORM = "email";
+
+/** The account on the email connection that a sign-in with the same email is,
+ *  or null for an account that is not a sign-in's. Rome Cloud proved the
+ *  address at sign-in, so mail from it is that person's. Identity lowercases
+ *  and trims both, so the two meet however the address was typed. */
+export function mailAccountOf(account: Account): Account | null {
+  return account.platform === ROME_CLOUD_EMAIL_PLATFORM
+    ? { platform: MAIL_PLATFORM, accountId: account.accountId }
+    : null;
+}
+
+/** Whether `account` is the mail account of a sign-in `personId` holds. */
+export function isSignInMail(identity: SyncIdentity, personId: string, account: Account): boolean {
+  if (account.platform !== MAIL_PLATFORM) return false;
+  const signIn = { platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: account.accountId };
+  return identity.personOf(signIn)?.id === personId;
+}
+
+/** Gives each person with a role the mail account of every sign-in of
+ *  theirs, as {@link giveAccount} does. Safe to call again. */
+export function signInsGiveMailWithinTx({ identity, access }: SyncMemberContext): void {
+  for (const { personId } of access.members()) {
+    for (const account of identity.accountsOf(personId)) {
+      const mail = mailAccountOf(account);
+      if (mail) giveAccount(identity, personId, mail);
+    }
+  }
+}
+
 /** The accounts a guardian's seat names: its email as a Rome Cloud sign-in's,
  *  when it has one. A Rome Cloud sign-in is known by the email Rome Cloud
  *  reports, so the seat's Rome Cloud id is no account. A local password seat
@@ -65,14 +97,43 @@ export function seatAccounts(seat: { email?: string | null }): Account[] {
   return email ? [{ platform: ROME_CLOUD_EMAIL_PLATFORM, accountId: email }] : [];
 }
 
+/** A member with the name other parts show for them. */
+export interface NamedMember extends Member {
+  /** Their name, or their Rome Cloud email when Identity has no name. Null
+   *  when they have neither. */
+  name: string | null;
+}
+
 /** The role of the person `account` belongs to, or null when it belongs to
  *  nobody or its person has no role. The one question other parts ask. */
-export async function roleOfAccount(
+export async function roleOfAccount(ctx: MemberContext, account: Account): Promise<Role | null> {
+  return (await memberBehind(ctx, account))?.role ?? null;
+}
+
+/** The member `account` belongs to, with their name, or null when it belongs
+ *  to nobody or its person has no role. {@link roleOfAccount} with who they are. */
+export async function memberOfAccount(
+  ctx: MemberContext,
+  account: Account,
+): Promise<NamedMember | null> {
+  const found = await memberBehind(ctx, account);
+  if (!found) return null;
+  const { person, role } = found;
+  const signIn = person.name
+    ? undefined
+    : (await ctx.identity.accountsOf(person.id)).find(
+        (each) => each.platform === ROME_CLOUD_EMAIL_PLATFORM,
+      );
+  return { personId: person.id, role, name: person.name ?? signIn?.accountId ?? null };
+}
+
+async function memberBehind(
   { identity, access }: MemberContext,
   account: Account,
-): Promise<Role | null> {
+): Promise<{ person: Person; role: Role } | null> {
   const person = await identity.personOf(account);
-  return person ? access.roleOf(person.id) : null;
+  const role = person && (await access.roleOf(person.id));
+  return person && role ? { person, role } : null;
 }
 
 /** Every person with a role, the guardian first, with their accounts. */
@@ -118,10 +179,11 @@ export function memberEmailsWithinTx({ identity, access }: SyncMemberContext): s
 }
 
 /**
- * Makes the guardian's person hold `accounts`, creating the person, with
- * `name` and `avatarUrl`, when there is no guardian yet. When there is one,
- * only adds the accounts they do not hold and changes nothing else. An
- * account another person holds moves to the guardian, and the move is logged.
+ * Makes the guardian's person hold `accounts`, and the mail account of each
+ * sign-in among them, creating the person, with `name` and `avatarUrl`, when
+ * there is no guardian yet. When there is one, only adds the accounts they do
+ * not hold and changes nothing else. An account another person holds moves to
+ * the guardian, and the move is logged.
  * Safe to call again with the same input.
  */
 export async function guardianSeatCreated(
@@ -146,14 +208,14 @@ export function guardianSeatCreatedWithinTx(
     });
     access.grant(guardian.id, "guardian");
   }
-  for (const account of seat.accounts) giveGuardian(identity, guardian.id, account);
+  for (const account of withMail(seat.accounts)) giveGuardian(identity, guardian.id, account);
   return guardian;
 }
 
 /**
  * Moves the guardian's person from the accounts the seat named before a
  * rebind to the ones it names now: takes from the guardian each `previous`
- * account that is not `current`, then gives it `current` as
+ * account that is not `current`, with its mail account, then gives it `current` as
  * {@link guardianSeatCreated} does. An account the guardian holds that is not
  * in `previous`, such as one carried from People's links, stays, even when it
  * is an email other than the seat's. Safe to call again with the same input.
@@ -164,8 +226,8 @@ export async function guardianSeatRebound(
 ): Promise<void> {
   const { identity, access } = ctx;
   const guardianId = (await access.members()).find((m) => m.role === "guardian")?.personId;
-  const kept = new Set(seat.current.map(accountKey));
-  for (const account of seat.previous) {
+  const kept = new Set(withMail(seat.current).map(accountKey));
+  for (const account of withMail(seat.previous)) {
     if (kept.has(accountKey(account))) continue;
     if (guardianId && (await identity.personOf(account))?.id === guardianId) {
       await identity.removeAccount(account);
@@ -176,7 +238,8 @@ export async function guardianSeatRebound(
 
 /**
  * Makes the person behind `email` a member, creating the person with the
- * email as their only account when nobody holds it. A person who already has
+ * email as their only sign-in when nobody holds it, and gives them the email
+ * as their mail account, as {@link giveAccount} does. A person who already has
  * a role keeps it, so the guardian's own email answers the guardian. Throws
  * when `email` is not an email address.
  */
@@ -270,23 +333,39 @@ export function logStepFailure(message: string): (err: unknown) => void {
 function inviteMemberWithinTx({ identity, access }: SyncMemberContext, email: string): Person {
   const account = signInAccount(email);
   const person = identity.personOf(account) ?? identity.createPerson({ accounts: [account] });
+  const mail = mailAccountOf(account);
+  if (mail) giveAccount(identity, person.id, mail);
   access.grant(person.id, "member");
   return person;
 }
 
-/** Gives the guardian's person `account`. One another person holds moves to
- *  the guardian, and the move is logged. */
+/** Gives the guardian's person `account`, as {@link giveAccount} does. */
 export function giveGuardian(identity: SyncIdentity, guardianId: string, account: Account) {
+  giveAccount(identity, guardianId, account);
+}
+
+/** Gives the person `account`. One another person holds moves to them, and
+ *  the move is logged. */
+function giveAccount(identity: SyncIdentity, personId: string, account: Account) {
   const holder = identity.personOf(account);
-  if (holder?.id === guardianId) return;
+  if (holder?.id === personId) return;
   if (holder) {
     identity.removeAccount(account);
-    log.warn("account moved to the guardian from another person", {
+    log.warn("account moved from another person", {
       platform: account.platform,
       from: holder.id,
+      to: personId,
     });
   }
-  identity.addAccount(guardianId, account);
+  identity.addAccount(personId, account);
+}
+
+/** `accounts` with the mail account of each sign-in among them. */
+function withMail(accounts: readonly Account[]): Account[] {
+  return accounts.flatMap((account) => {
+    const mail = mailAccountOf(account);
+    return mail ? [account, mail] : [account];
+  });
 }
 
 function syncOf({ identity, access }: MemberContext): SyncMemberContext {

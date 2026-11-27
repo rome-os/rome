@@ -242,9 +242,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           ...addressedBy(message),
         },
         {
-          person: sender.person
-            ? { id: sender.person.id, bondLevel: sender.person.bondLevel }
-            : null,
+          person: sender.person ? { id: sender.person.id } : null,
         },
       );
       // Logged at info, since no action span is open here to carry the
@@ -253,7 +251,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         connectionId,
         chatId: message.chatId,
         messageId: message.messageId,
-        bondLevel: sender.person?.bondLevel ?? "other",
         decision,
       });
       if (decision !== "wake") return;

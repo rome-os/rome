@@ -8,7 +8,6 @@ import {
   FEISHU_CHAT_RULES,
   type KindChatRules,
   SESSION_RESET_ONLY_CHAT_RULES,
-  WECHAT_CHAT_RULES,
 } from "@rome/api-types/chat-rules";
 import type { ChatSettings } from "@rome/api-types/chat-settings";
 
@@ -16,7 +15,6 @@ import type { ChatSettings } from "@rome/api-types/chat-settings";
 const CHAT_RULES: Record<string, KindChatRules> = {
   discord: DISCORD_CHAT_RULES,
   feishu: FEISHU_CHAT_RULES,
-  wechat: WECHAT_CHAT_RULES,
   telegram: SESSION_RESET_ONLY_CHAT_RULES,
   email: SESSION_RESET_ONLY_CHAT_RULES,
   whatsapp: SESSION_RESET_ONLY_CHAT_RULES,
@@ -88,7 +86,6 @@ export const connections: { connections: ApiConnection[] } = {
         email: "guardian@example.com",
         severalAccounts: false,
       },
-      { service: "wechat", label: "WeChat", grant: "account", email: null, severalAccounts: false },
       { service: "feishu", label: "Feishu", grant: "bot", email: null, severalAccounts: true },
     ].map(
       ({ service, label, grant, email, severalAccounts }): ApiConnection => ({

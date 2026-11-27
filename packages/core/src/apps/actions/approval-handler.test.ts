@@ -80,9 +80,12 @@ describe("delegated task approval binding", () => {
         fn: (ctx: { emit: () => void }) => Promise<void>,
       ) => fn({ emit: () => {} }),
     };
+    const journal = {
+      loadJournal: rs.fn(async () => [] as unknown[]),
+    };
     const handler = new ApprovalHandler(
       approvals as never,
-      {} as never,
+      journal as never,
       { run } as never,
       agent as never,
       backend as never,
@@ -90,7 +93,7 @@ describe("delegated task approval binding", () => {
       undefined,
       resolve,
     );
-    return { handler, run, approvals, ambient, resumed, resolve, payload };
+    return { handler, run, approvals, ambient, resumed, resolve, payload, journal };
   }
 
   it("keeps the requester, root arguments and journal instead of borrowing the approving guardian", async () => {
@@ -139,6 +142,45 @@ describe("delegated task approval binding", () => {
     const s = harness();
     await Promise.all([s.handler.onApproved("approval-1"), s.handler.onApproved("approval-1")]);
     expect(s.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks an approval that binds to no journal entry as failed, not executed", async () => {
+    const s = harness();
+    // Two pending entries for the same call cannot be told apart, so the
+    // payload binds nothing.
+    (s.payload as Record<string, unknown>).replayJournal = [
+      ...s.payload.replayJournal,
+      { ...s.payload.replayJournal[0], sequence: 1 },
+    ];
+    await runWithSessionActor(guardian, () => s.handler.onApproved("approval-1"));
+    expect(s.run).not.toHaveBeenCalled();
+    expect(s.approvals.markExecutionFailed).toHaveBeenCalledWith(
+      "approval-1",
+      "approval could not be bound to a journal entry",
+    );
+    expect(s.approvals.markExecuted).not.toHaveBeenCalled();
+  });
+
+  it("replays from the live journal when it holds more than the card's snapshot", async () => {
+    const s = harness();
+    const liveJournal = [
+      ...s.payload.replayJournal,
+      {
+        sequence: 1,
+        actionName: "synthetic:sibling",
+        argsHash: hashArgs({ id: 2 }),
+        args: { id: 2 },
+        result: { status: "ok" },
+        status: "completed",
+      },
+    ];
+    s.journal.loadJournal.mockResolvedValue(liveJournal);
+    await runWithSessionActor(guardian, () => s.handler.onApproved("approval-1"));
+    expect(s.run).toHaveBeenCalledWith(
+      "synthetic:root",
+      { value: "original argument" },
+      expect.objectContaining({ replayJournal: liveJournal }),
+    );
   });
 
   it("never runs a pending, unapproved call", async () => {

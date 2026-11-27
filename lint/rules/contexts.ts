@@ -257,21 +257,6 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     why: "A refused widget is sent as text written by Chats, until the fallback moves to Chats.",
   },
   {
-    from: "connections/integrations/email.ts",
-    to: ["people/model/people-repository.ts"],
-    why: "The email wiring hands the People repository to the kind, until it gets a port.",
-  },
-  {
-    from: "connections/integrations/index.ts",
-    to: ["people/model/people-repository.ts"],
-    why: "The wiring hands the People repository to the kinds, until they get a port.",
-  },
-  {
-    from: "connections/kinds/email/email.ts",
-    to: ["people/model/people-repository.ts", "people/guardian-mapping.ts"],
-    why: "Email reads the guardian's address from People, until it gets a port.",
-  },
-  {
     from: "connections/kinds/feishu/feishu.ts",
     to: ["chats/connected-accounts/account-agents.ts", "participation/mention-only.ts"],
     why: "Feishu still reads a chat's agent and its mention-only rule, until those move up.",

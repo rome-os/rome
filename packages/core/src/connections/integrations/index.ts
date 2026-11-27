@@ -2,7 +2,6 @@
 
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
@@ -22,14 +21,12 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
-import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
-export { createWechatDescriptor } from "./wechat.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -44,7 +41,6 @@ export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   chatSettings: ChatSettingsPort;
-  peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The commands a Discord Connection's bot offers. */
   discordCommandsOf?: (connectionId: string) => Commands;
@@ -84,12 +80,10 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
-  registry.register(createWechatDescriptor());
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,
       settingsRepo: deps.settingsRepo,
-      peopleRepo: deps.peopleRepo,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),

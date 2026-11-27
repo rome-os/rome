@@ -21,9 +21,6 @@ const TODAY: Record<
   telegram: { linksReply: true, longText: "message is too long" },
   // Discord quotes the message natively where no thread is opened on it, as in a DM.
   discord: { linksReply: true, longText: [2000, 2000, 1000] },
-  // iLink has no reply reference, so a reply is refused, and it documents no
-  // length limit for the peer to model.
-  wechat: { linksReply: false, longText: null },
 };
 
 describe.each(platforms)("%s", (platform) => {
@@ -82,7 +79,6 @@ describe.each(platforms)("%s", (platform) => {
       const channel = open();
       return runScenario(task, channel, async ({ step }) => {
         const expected = TODAY[platform].longText;
-        // WeChat can answer only after the user writes, so every platform starts there.
         await step("The user writes", () => channel.receive("tell me everything"));
         const fromRome = () =>
           channel.peer.visible(channel.conversation).filter((message) => message.from === "rome");

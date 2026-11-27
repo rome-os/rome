@@ -117,7 +117,14 @@ describe("RuntimeController", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(subject.setTarget(other)).toBe("switched");
     answer([
-      { id: "i", name: "ray", slug: "ray", origin: "https://ray.romeos.cc", status: "running" },
+      {
+        id: "i",
+        name: "ray",
+        slug: "ray",
+        origin: "https://ray.romeos.cc",
+        status: "running",
+        role: "owner",
+      },
     ]);
     await connecting;
     expect(writes).toEqual([other]);

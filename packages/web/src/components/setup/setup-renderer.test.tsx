@@ -144,16 +144,16 @@ describe("SetupRenderer standard renderers", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it("presenting renders a QR payload as an image (WeChat/WhatsApp QR grant)", () => {
+  it("presenting renders a QR payload as an image (WhatsApp QR grant)", () => {
     renderState({
       status: "presenting",
       view: {
-        title: "Scan with WeChat",
+        title: "Scan with WhatsApp",
         qr: "data:image/png;base64,abc",
-        links: [{ label: "Open QR link", url: "https://weixin.qq.com/x" }],
+        links: [{ label: "Open QR link", url: "https://wa.me/qr/x" }],
       },
     });
-    const img = screen.getByAltText("Scan with WeChat") as HTMLImageElement;
+    const img = screen.getByAltText("Scan with WhatsApp") as HTMLImageElement;
     expect(img.src).toBe("data:image/png;base64,abc");
     expect(screen.getByRole("link", { name: "Open QR link" })).toBeTruthy();
   });

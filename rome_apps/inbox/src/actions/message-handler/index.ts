@@ -6,7 +6,6 @@ import type {
   AgentRunnerInterface,
   AppActionRuntimeDeps,
   Attachment,
-  BondLevel,
   ChatId,
   ChatRecord,
   ChatRef,
@@ -39,7 +38,7 @@ export type WakeGate = (
     fromBot?: boolean;
     mentionsOthers?: boolean;
   },
-  sender: { person: { id: string; bondLevel: BondLevel } | null },
+  sender: { person: { id: string } | null },
 ) => "wake" | "quiet" | "block";
 
 /** The wake gate for a chat, built from its current settings. */
@@ -65,7 +64,6 @@ interface MessageContext {
   threadId: string;
   channelUserId: string;
   displayName: string;
-  bondLevel: string;
   selectedProjectName?: string;
   selectedProjectPath?: string;
   threadName?: string;
@@ -261,7 +259,6 @@ async function runTurnAndReply(
   log.info("running agent", {
     channel,
     channelUserId,
-    bondLevel,
     agent: targetAgent,
   });
 
@@ -402,7 +399,7 @@ export function createMessageHandlerAction(
                   threadName,
                   ...addressedBy(args),
                 },
-                { person: person ? { id: person.id, bondLevel: person.bondLevel } : null },
+                { person: person ? { id: person.id } : null },
               );
 
         if (wake === "block") {
@@ -493,9 +490,8 @@ export function createMessageHandlerAction(
           log.info("message wakes nobody", {
             channel,
             channelUserId,
-            bondLevel,
           });
-          return { status: "ok", data: { action: "ignored_by_reply_settings", bondLevel } };
+          return { status: "ok", data: { action: "ignored_by_reply_settings" } };
         }
 
         const channelThreadKey = `${channel}:${threadId}`;
@@ -504,7 +500,6 @@ export function createMessageHandlerAction(
           threadId,
           channelUserId,
           displayName,
-          bondLevel,
           selectedProjectName,
           selectedProjectPath,
           threadName,
@@ -538,7 +533,6 @@ export function createMessageHandlerAction(
         log.info("routing message", {
           channel,
           channelUserId,
-          bondLevel,
           wake,
         });
 

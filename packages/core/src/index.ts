@@ -171,7 +171,11 @@ import { ConnectedAccountsRepository } from "./db/repositories/connected-account
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
 import { peopleLinkChanged } from "./access/application/guardian-links.js";
-import { logStepFailure } from "./access/application/members.js";
+import {
+  guardianWithAccounts,
+  logStepFailure,
+  memberContext,
+} from "./access/application/members.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
@@ -2348,7 +2352,7 @@ async function main() {
   }
 
   // NO channel adapter is constructed here. Every Talk channel
-  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user)
+  // (telegram, whatsapp, discord, feishu, email, telegram_user)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
   // to the channel ports. Webchat is Rome's own channel, built above.
   //
@@ -2380,7 +2384,6 @@ async function main() {
     },
     settingsRepo,
     chatSettings,
-    peopleRepo,
     whatsAppSyncSink: refreshingAfter(
       whatsAppStoreRepo,
       ["upsertContacts", "upsertChats"],
@@ -2917,6 +2920,7 @@ async function main() {
       actionEngine,
       actionLoader,
       peopleRepo,
+      guardianPerson: async () => (await guardianWithAccounts(memberContext(db)))?.person ?? null,
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),

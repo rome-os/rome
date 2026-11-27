@@ -18,6 +18,9 @@ import {
 const OWNER_EMAIL = { platform: "rome-cloud-email", accountId: "owner@example.com" };
 const OWNER_SLACK = { platform: "slack", accountId: "T1:U0" };
 const ADA_EMAIL = { platform: "rome-cloud-email", accountId: "ada@example.com" };
+// The same addresses as accounts on the email connection, which a sign-in gives.
+const OWNER_MAIL = { platform: "email", accountId: "owner@example.com" };
+const ADA_MAIL = { platform: "email", accountId: "ada@example.com" };
 const ADA_SLACK = { platform: "slack", accountId: "T1:U2" };
 
 describe("members", () => {
@@ -62,12 +65,12 @@ describe("members", () => {
         {
           person: { id: owner.id, name: "Owner", avatarUrl: null },
           role: "guardian",
-          accounts: [OWNER_EMAIL],
+          accounts: [OWNER_MAIL, OWNER_EMAIL],
         },
         {
           person: { id: ada.id, name: null, avatarUrl: null },
           role: "member",
-          accounts: [ADA_EMAIL],
+          accounts: [ADA_MAIL, ADA_EMAIL],
         },
       ]);
     });
@@ -86,7 +89,7 @@ describe("members", () => {
       expect(again).toEqual(first);
       expect(db.select().from(members).all()).toHaveLength(1);
       expect(db.select().from(identities).all()).toHaveLength(1);
-      expect((await listMembers(ctx))[0]?.accounts).toEqual([OWNER_EMAIL, OWNER_SLACK]);
+      expect((await listMembers(ctx))[0]?.accounts).toEqual([OWNER_MAIL, OWNER_EMAIL, OWNER_SLACK]);
     });
 
     it("moves an account another person holds to the guardian", async () => {
@@ -109,7 +112,7 @@ describe("members", () => {
         {
           person: expect.objectContaining({ name: "owner" }),
           role: "guardian",
-          accounts: [OWNER_EMAIL],
+          accounts: [OWNER_MAIL, OWNER_EMAIL],
         },
       ]);
     });
@@ -131,9 +134,16 @@ describe("members", () => {
       await guardianSeatRebound(ctx, rebind);
 
       expect(await roleOfAccount(ctx, OWNER_EMAIL)).toBeNull();
+      expect(await roleOfAccount(ctx, OWNER_MAIL)).toBeNull();
       expect(await roleOfAccount(ctx, NEW_EMAIL)).toBe("guardian");
       expect((await listMembers(ctx)).map((m) => m.accounts)).toEqual([
-        [ADA_EMAIL, NEW_EMAIL, SLACK],
+        [
+          ADA_MAIL,
+          { platform: "email", accountId: NEW_EMAIL.accountId },
+          ADA_EMAIL,
+          NEW_EMAIL,
+          SLACK,
+        ],
       ]);
     });
 
@@ -180,6 +190,7 @@ describe("members", () => {
       expect(await roleOfAccount(ctx, ADA_SLACK)).toBeNull();
       expect(await identity.personOf(ADA_EMAIL)).toBeNull();
       expect(await identity.personOf(ADA_SLACK)).toBeNull();
+      expect(await identity.personOf(ADA_MAIL)).toBeNull();
       expect(db.select().from(members).all()).toEqual([]);
       await identity.createPerson({ accounts: [ADA_SLACK] });
     });
@@ -215,8 +226,8 @@ describe("members", () => {
 
       const listed = await listMembers(ctx);
       expect(listed.map((m) => [m.role, m.accounts.map((a) => a.accountId)])).toEqual([
-        ["guardian", ["owner@example.com"]],
-        ["member", ["lin@example.com"]],
+        ["guardian", ["owner@example.com", "owner@example.com"]],
+        ["member", ["lin@example.com", "lin@example.com"]],
       ]);
       expect(await roleOfAccount(ctx, ADA_EMAIL)).toBeNull();
     });
@@ -237,7 +248,7 @@ describe("members", () => {
         {
           person: { id: ada.id, name: null, avatarUrl: "https://example.com/ada.png" },
           role: "member",
-          accounts: [ADA_EMAIL],
+          accounts: [ADA_MAIL, ADA_EMAIL],
         },
       ]);
       expect(db.select().from(identities).all()).toHaveLength(1);
@@ -260,7 +271,7 @@ describe("members", () => {
         {
           person: { id: owner.id, name: null, avatarUrl: "https://example.com/visitor.png" },
           role: "guardian",
-          accounts: [OWNER_EMAIL],
+          accounts: [OWNER_MAIL, OWNER_EMAIL],
         },
       ]);
       expect(db.select().from(identities).all()).toHaveLength(1);
