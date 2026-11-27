@@ -87,15 +87,11 @@ export function linkedinProfileFromIdentity(
   return linkedinGrantProfileSchema.parse(raw);
 }
 
-/** The account a LinkedIn grant is signed in as: the member id, or the
- *  profile URL when `whoami` names only the public id. Both the connection's
- *  account and the account that connected it read this one value. */
-export function linkedinAccountIdOf(profile: ProfileRecord): string | null {
-  if (typeof profile.plainId === "string" && profile.plainId) return profile.plainId;
-  if (typeof profile.publicId === "string" && profile.publicId) {
-    return `https://www.linkedin.com/in/${profile.publicId}/`;
-  }
-  return null;
+/** The account a LinkedIn grant is signed in as: the member id. A grant
+ *  whose `whoami` names no member id reaches no account. Both the
+ *  connection's account and the account that connected it read this value. */
+function linkedinAccountIdOf(profile: ProfileRecord): string | null {
+  return (typeof profile.plainId === "string" && profile.plainId) || null;
 }
 
 function toLinkedInDisplay(profile: LinkedInGrantProfile): ProfileDisplay {
