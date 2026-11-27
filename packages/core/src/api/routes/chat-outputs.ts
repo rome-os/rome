@@ -71,11 +71,13 @@ export function chatOutputsRoutes(deps: ChatOutputsApiDeps): Hono {
     const headers: Record<string, string> = {
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, no-cache",
-      "Content-Security-Policy": described.kind === "pdf" ? CSP : `${CSP}; sandbox`,
       "Content-Disposition": inline ? "inline" : "attachment",
       "Content-Type": described.mimeType,
       "X-Content-Type-Options": "nosniff",
     };
+    // Any policy on a PDF blanks the browser's own viewer, which the Projects
+    // page's asset route also serves it to without one.
+    if (described.kind !== "pdf") headers["Content-Security-Policy"] = `${CSP}; sandbox`;
     // A player asks for parts of a video or audio file as it plays and seeks.
     const rangeHeader = c.req.header("range");
     const range = rangeHeader && file.size > 0 ? parseRangeHeader(rangeHeader, file.size) : null;
