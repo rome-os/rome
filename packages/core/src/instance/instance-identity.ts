@@ -40,7 +40,12 @@ export function isValidInstanceToken(token: string | null | undefined): token is
 // `hydrateInstanceToken` fills from the DB — it never touches the env.
 let cachedInstanceToken: string | null = null;
 let cachedKeyId: string | null = null;
+let instanceIdentityEpoch = 0;
 const instanceTokenListeners = new Set<() => void>();
+
+export function getInstanceIdentityEpoch(): number {
+  return instanceIdentityEpoch;
+}
 
 /** The signer's unix socket path, or null in legacy mode. */
 export function signerSocketPath(): string | null {
@@ -157,22 +162,78 @@ function notifyLinkChanged(): void {
   }
 }
 
-// Update the in-process cache without touching the DB. Call after persisting a
-// freshly-minted token so synchronous `getInstanceToken` callers see it at once.
-export function setInstanceTokenInMemory(token: string | null): void {
+function setCachedInstanceToken(token: string | null): boolean {
   const nextToken = isValidInstanceToken(token) ? token : null;
-  if (cachedInstanceToken === nextToken) return;
+  if (cachedInstanceToken === nextToken) return false;
   cachedInstanceToken = nextToken;
   notifyLinkChanged();
+  return true;
 }
 
-async function setKeyId(store: InstanceTokenStore, keyId: string | null): Promise<void> {
-  if (cachedKeyId === keyId) return;
+export function setInstanceTokenInMemory(token: string | null): void {
+  if (setCachedInstanceToken(token)) instanceIdentityEpoch++;
+}
+
+let storeOpTail: Promise<void> = Promise.resolve();
+
+function runStoreOp(epoch: number, fn: () => Promise<void>): Promise<boolean> {
+  const next = storeOpTail.then(async () => {
+    if (instanceIdentityEpoch !== epoch) return false;
+    await fn();
+    return instanceIdentityEpoch === epoch;
+  });
+  storeOpTail = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+async function waitForPendingStoreOps(): Promise<void> {
+  while (true) {
+    const tail = storeOpTail;
+    await tail;
+    if (storeOpTail === tail) return;
+  }
+}
+
+async function setKeyId(
+  store: InstanceTokenStore,
+  keyId: string | null,
+  expectedEpoch?: number,
+  options: { bumpOnClear?: boolean } = {},
+): Promise<number | null> {
+  if (expectedEpoch !== undefined && instanceIdentityEpoch !== expectedEpoch) return null;
+  if (cachedKeyId === keyId) return instanceIdentityEpoch;
+  const nextEpoch =
+    keyId === null && options.bumpOnClear !== false
+      ? ++instanceIdentityEpoch
+      : instanceIdentityEpoch;
   clearBearerCache();
-  if (keyId) await store.set(INSTANCE_KEY_SETTING_KEY, keyId);
-  else await store.delete(INSTANCE_KEY_SETTING_KEY);
-  cachedKeyId = keyId;
-  notifyLinkChanged();
+  const committed = await runStoreOp(nextEpoch, async () => {
+    const prevKeyId = cachedKeyId;
+    if (keyId) await store.set(INSTANCE_KEY_SETTING_KEY, keyId);
+    else await store.delete(INSTANCE_KEY_SETTING_KEY);
+    if (instanceIdentityEpoch === nextEpoch) {
+      const changed = cachedKeyId !== keyId;
+      cachedKeyId = keyId;
+      if (changed) notifyLinkChanged();
+      return;
+    }
+    if (keyId === null) {
+      const changed = cachedKeyId !== null;
+      cachedKeyId = null;
+      if (changed) notifyLinkChanged();
+      return;
+    }
+    try {
+      if (prevKeyId !== null) await store.set(INSTANCE_KEY_SETTING_KEY, prevKeyId);
+      else await store.delete(INSTANCE_KEY_SETTING_KEY);
+    } catch {
+      // Best-effort rollback of a superseded write before releasing the queue.
+    }
+  });
+  return committed ? nextEpoch : null;
 }
 
 /** Subscribe to changes in whether this instance is linked to Rome Cloud. */
@@ -184,6 +245,7 @@ export function onInstanceTokenChanged(listener: () => void): () => void {
 // Load the persisted token from the DB into the cache. Run once at boot, before
 // anything calls `getInstanceToken`.
 export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<void> {
+  instanceIdentityEpoch++;
   const keyId = await store.get<string>(INSTANCE_KEY_SETTING_KEY);
   cachedKeyId = typeof keyId === "string" ? keyId : null;
   clearBearerCache();
@@ -191,7 +253,7 @@ export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<v
   offeredHostedTokens.clear();
   hostedLinkUnsupported = false;
   const stored = await store.get<string>(INSTANCE_TOKEN_SETTING_KEY);
-  setInstanceTokenInMemory(stored ?? null);
+  setCachedInstanceToken(stored ?? null);
 }
 
 // The token a hosted `.env` injects. Dev can ignore it to boot un-enrolled.
@@ -222,10 +284,48 @@ export async function seedInstanceTokenFromEnv(store: InstanceTokenStore): Promi
 export async function persistInstanceToken(
   store: InstanceTokenStore,
   token: string,
+  options: { expectedEpoch?: number } = {},
 ): Promise<ProveIdentityResult | null> {
-  await store.set(INSTANCE_TOKEN_SETTING_KEY, token);
-  setInstanceTokenInMemory(token);
-  return signerMode() ? syncInstanceIdentity(store, { bootVersion: getBuildInfo().version }) : null;
+  if (options.expectedEpoch !== undefined && instanceIdentityEpoch !== options.expectedEpoch) {
+    return null;
+  }
+  const epoch = ++instanceIdentityEpoch;
+  const committed = await runStoreOp(epoch, async () => {
+    const prevToken = cachedInstanceToken;
+    await store.set(INSTANCE_TOKEN_SETTING_KEY, token);
+    if (instanceIdentityEpoch === epoch) {
+      setCachedInstanceToken(token);
+      return;
+    }
+    try {
+      if (prevToken !== null) await store.set(INSTANCE_TOKEN_SETTING_KEY, prevToken);
+      else await store.delete(INSTANCE_TOKEN_SETTING_KEY);
+    } catch {
+      // Best-effort rollback of a superseded write before releasing the queue.
+    }
+  });
+  if (!committed) {
+    await waitForPendingStoreOps();
+    return null;
+  }
+  const linked = signerMode()
+    ? await syncInstanceIdentityInternal(
+        store,
+        {
+          bootVersion: getBuildInfo().version,
+          fetch: (input, init) =>
+            globalThis.fetch(input, {
+              ...init,
+              signal: init?.signal ?? AbortSignal.timeout(30_000),
+            }),
+        },
+        { bumpOnClear: false },
+      )
+    : null;
+  if (instanceIdentityEpoch !== epoch) {
+    await waitForPendingStoreOps();
+  }
+  return linked;
 }
 
 // Fail closed on a token Rome Cloud has rejected (revoked/unknown): drop it from
@@ -234,13 +334,25 @@ export async function persistInstanceToken(
 // heartbeat and any caller that observes a terminal auth signal. In signer mode
 // it also forgets the registered key, because the caller has seen the instance rejected.
 export async function clearInstanceToken(store: InstanceTokenStore): Promise<void> {
-  await dropStoredToken(store);
-  await setKeyId(store, null);
+  const epoch = ++instanceIdentityEpoch;
+  clearBearerCache();
+  await runStoreOp(epoch, async () => {
+    await store.delete(INSTANCE_TOKEN_SETTING_KEY);
+    const tokenChanged = setCachedInstanceToken(null);
+    if (instanceIdentityEpoch !== epoch) return;
+    await store.delete(INSTANCE_KEY_SETTING_KEY);
+    const keyChanged = cachedKeyId !== null;
+    cachedKeyId = null;
+    if (keyChanged && !tokenChanged) notifyLinkChanged();
+  });
 }
 
-async function dropStoredToken(store: InstanceTokenStore): Promise<void> {
-  await store.delete(INSTANCE_TOKEN_SETTING_KEY);
-  setInstanceTokenInMemory(null);
+async function dropStoredToken(store: InstanceTokenStore, expectedEpoch?: number): Promise<void> {
+  const epoch = expectedEpoch ?? instanceIdentityEpoch;
+  await runStoreOp(epoch, async () => {
+    await store.delete(INSTANCE_TOKEN_SETTING_KEY);
+    setCachedInstanceToken(null);
+  });
 }
 
 export interface InstanceIdentity {
@@ -453,22 +565,38 @@ async function audienceMatches(socket: string): Promise<boolean> {
 // sign in. Faults the guardian must fix keep every credential and recheck every
 // 30 seconds, and so does an unreachable Rome Cloud while an instance token still
 // waits to be registered. Never rejects.
-export async function syncInstanceIdentity(
+export function syncInstanceIdentity(
   store: InstanceTokenStore,
   opts: ProveIdentityOptions = {},
 ): Promise<ProveIdentityResult> {
+  return syncInstanceIdentityInternal(store, opts, { bumpOnClear: true });
+}
+
+async function syncInstanceIdentityInternal(
+  store: InstanceTokenStore,
+  opts: ProveIdentityOptions,
+  options: { bumpOnClear: boolean },
+): Promise<ProveIdentityResult> {
   const socket = signerSocketPath();
+  const epochRef = { current: instanceIdentityEpoch };
   let result: ProveIdentityResult;
   try {
     if (socket && !(await audienceMatches(socket))) {
       result = { status: "audience_mismatch" };
     } else {
       result = await proveIdentity(opts);
-      if (socket) result = await linkSignerKey(store, socket, opts, result);
+      if (socket) {
+        result = await linkSignerKey(store, socket, opts, result, epochRef, options);
+      }
     }
   } catch (err) {
     if (!(err instanceof SignerError)) throw err;
     result = { status: "signer_unavailable" };
+  }
+  if (instanceIdentityEpoch !== epochRef.current) {
+    return result.status === "revoked" || result.status === "unknown"
+      ? { status: "unreachable" }
+      : result;
   }
   identityIssue = Object.hasOwn(IDENTITY_ISSUE_MESSAGES, result.status)
     ? (result.status as IdentityIssue)
@@ -581,29 +709,42 @@ async function linkSignerKey(
   socket: string,
   opts: ProveIdentityOptions,
   first: ProveIdentityResult,
+  epochRef: { current: number },
+  options: { bumpOnClear: boolean },
 ): Promise<ProveIdentityResult> {
+  if (instanceIdentityEpoch !== epochRef.current) return first;
   const link = async () => {
-    await setKeyId(store, (await signerHealth(socket)).jkt);
-    await dropStoredToken(store);
+    const { jkt } = await signerHealth(socket);
+    if ((await setKeyId(store, jkt, epochRef.current)) === null) return false;
+    await dropStoredToken(store, epochRef.current);
+    return instanceIdentityEpoch === epochRef.current;
   };
   if (first.status === "ok") {
     const keep = await offerHostedLink(socket, opts.fetch ?? globalThis.fetch);
-    await setKeyId(store, (await signerHealth(socket)).jkt);
-    if (!keep) await dropStoredToken(store);
+    if (instanceIdentityEpoch !== epochRef.current) return first;
+    const { jkt } = await signerHealth(socket);
+    if ((await setKeyId(store, jkt, epochRef.current)) === null) return first;
+    if (!keep) await dropStoredToken(store, epochRef.current);
     return first;
   }
   if (first.status !== "unknown" && first.status !== "revoked") return first;
 
-  await setKeyId(store, null);
+  const clearedEpoch = await setKeyId(store, null, epochRef.current, options);
+  if (clearedEpoch === null) return first;
+  epochRef.current = clearedEpoch;
+
   const registered = await registerInstanceKey(socket, opts.fetch ?? globalThis.fetch);
+  if (instanceIdentityEpoch !== epochRef.current) return first;
   if (registered === "registered") {
-    await link();
+    if (!(await link())) return first;
     return proveIdentity(opts);
   }
   if (registered === "no_token") return first;
   // A token Cloud rejected, or a key it holds for another signer, helps no later attempt.
-  if (registered === "unknown" || registered === "revoked" || registered === "key_conflict")
-    await dropStoredToken(store);
+  if (registered === "unknown" || registered === "revoked" || registered === "key_conflict") {
+    epochRef.current = ++instanceIdentityEpoch;
+    await dropStoredToken(store, epochRef.current);
+  }
   if (registered === "key_conflict")
     log.warn("security event: instance key registered elsewhere", { event: "key_conflict" });
   return { status: registered } as ProveIdentityResult;

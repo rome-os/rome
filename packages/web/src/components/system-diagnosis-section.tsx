@@ -5,8 +5,9 @@ import {
   FormRowHeading,
   FormRowLabel,
 } from "@rome-os/ui/layout-form";
+import { Spinner } from "@rome-os/ui/spinner";
 import { X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -70,13 +71,22 @@ export function SystemDiagnosisRow({ details }: { details?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectError, setReconnectError] = useState("");
+  const reconnectInFlight = useRef(false);
 
   async function reconnect() {
+    if (reconnectInFlight.current) return;
+    reconnectInFlight.current = true;
     setReconnecting(true);
     setReconnectError("");
-    const result = await beginInstanceEnroll();
+    let result;
+    try {
+      result = await beginInstanceEnroll();
+    } catch {
+      result = { ok: false, reason: "start" } as const;
+    }
     // Success navigates away to Rome Cloud; we only land here on failure.
     if (!result.ok) {
+      reconnectInFlight.current = false;
       setReconnectError(t("advanced.diagnosis.reconnectFailed"));
       setReconnecting(false);
     }
@@ -176,12 +186,21 @@ export function SystemDiagnosisRow({ details }: { details?: ReactNode }) {
                     <Button
                       variant="outline"
                       size="xs"
-                      disabled={reconnecting}
+                      aria-disabled={reconnecting || undefined}
+                      aria-busy={reconnecting || undefined}
                       onClick={() => void reconnect()}
                     >
-                      {reconnecting
-                        ? t("advanced.diagnosis.reconnecting")
-                        : t("advanced.diagnosis.reconnect")}
+                      {reconnecting ? (
+                        <>
+                          <Spinner
+                            data-icon="inline-start"
+                            label={t("advanced.diagnosis.reconnecting")}
+                          />
+                          <span aria-hidden>{t("advanced.diagnosis.reconnecting")}</span>
+                        </>
+                      ) : (
+                        t("advanced.diagnosis.reconnect")
+                      )}
                     </Button>
                   )}
                 </div>

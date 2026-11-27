@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,7 @@ export default function LoginPage() {
   const [cloudError, setCloudError] = useState("");
   const [visitorError, setVisitorError] = useState("");
   const [visitorStarting, setVisitorStarting] = useState(false);
+  const visitorInFlight = useRef(false);
 
   // The sign-in view is driven entirely by the bootstrap state's
   // needs-signin arm. Cloud-primary boxes show the cloud button; the local
@@ -110,10 +111,18 @@ export default function LoginPage() {
   });
 
   async function startDashboardVisitorLogin() {
+    if (visitorInFlight.current) return;
+    visitorInFlight.current = true;
     setVisitorStarting(true);
     setVisitorError("");
-    const result = await beginDashboardVisitorLogin();
+    let result;
+    try {
+      result = await beginDashboardVisitorLogin();
+    } catch {
+      result = { ok: false, reason: "start" } as const;
+    }
     if (!result.ok) {
+      visitorInFlight.current = false;
       setVisitorError(
         result.reason === "network" ? t("networkError") : t("visitorDashboard.errorStart"),
       );
@@ -245,7 +254,7 @@ export default function LoginPage() {
               className="mt-3"
               busy={visitorStarting}
               busyLabel={t("visitorDashboard.connecting")}
-              onClick={() => void startDashboardVisitorLogin()}
+              onClick={startDashboardVisitorLogin}
             >
               {t("visitorDashboard.signIn")}
             </AuthActionButton>

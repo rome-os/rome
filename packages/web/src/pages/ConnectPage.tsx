@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { AuthActionButton, AuthError, AuthScreen } from "@/components/auth-screen";
@@ -28,6 +28,7 @@ export default function ConnectPage() {
   const [searchParams] = useSearchParams();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
+  const inFlight = useRef(false);
 
   // The instance-enroll callback bounces failures back here as
   // ?enroll=error&reason=… . Surface it until the next attempt clears it. (Cloud
@@ -37,12 +38,20 @@ export default function ConnectPage() {
   const error = startError || enrollCallbackError;
 
   async function startEnroll() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setStarting(true);
     setStartError("");
-    const result = await beginInstanceEnroll();
+    let result;
+    try {
+      result = await beginInstanceEnroll();
+    } catch {
+      result = { ok: false, reason: "start" } as const;
+    }
     // On success the browser navigates away to Rome Cloud; we only land here on
     // failure, so re-enable the button and surface why.
     if (!result.ok) {
+      inFlight.current = false;
       setStartError(result.reason === "network" ? t("networkError") : t("connect.errorStart"));
       setStarting(false);
     }
@@ -50,11 +59,7 @@ export default function ConnectPage() {
 
   return (
     <AuthScreen title={t("connect.title")}>
-      <AuthActionButton
-        busy={starting}
-        busyLabel={t("connect.connecting")}
-        onClick={() => void startEnroll()}
-      >
+      <AuthActionButton busy={starting} busyLabel={t("connect.connecting")} onClick={startEnroll}>
         {t("connect.connect")}
       </AuthActionButton>
       {error && <AuthError>{error}</AuthError>}
