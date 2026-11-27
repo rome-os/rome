@@ -96,6 +96,8 @@ lives in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`), so mounting one Docker
 volume keeps the device credential, Web UI preferences, and the
 [device audit log](#device-audit-log) across container replacements.
 
+**Settings → Devices** shows the same Compose configuration and links to this section from its empty-state **Rome Node container** card and from **Link device → Rome Node container**.
+
 ```yaml
 services:
   rome-node:
@@ -104,7 +106,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     ports:
       - "127.0.0.1:4310:4310"
-    # Optional: set a custom password for remote access (you can also set one inside the Web UI).
+    # Optional: set a Web UI password for remote access.
     # environment:
     #   ROME_NODE_UI_PASSWORD: "your-custom-password"
     volumes:
@@ -113,18 +115,11 @@ volumes:
   rome-node:
 ```
 
-1. Start the container with `docker compose up -d` (or pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>`).
-2. Open `http://127.0.0.1:4310` in a browser. Because the container listens on
-   `0.0.0.0`, if you did not set `ROME_NODE_UI_PASSWORD`, run
-   `docker compose logs rome-node` to copy the one-time setup token and choose a
-   custom password on the initial setup screen (persisted as an `scrypt` hash in
-   `/var/lib/rome-node/web-auth.json`). When running `rome-node web` directly on
-   a loopback bind (`127.0.0.1`), local loopback access is passwordless until
-   you set a password. Always set `ROME_NODE_UI_PASSWORD` (or configure a custom
-   password first) before placing any reverse proxy or tunnel in front of the
-   Web UI.
-3. Click **Authorize device**, open the Rome Cloud verification link, confirm
-   the user code, and approve the container with your Rome Cloud account.
+1. Start the container with `docker compose up -d` or a Docker Compose UI (pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>` if you want fixed updates).
+2. Open `http://127.0.0.1:4310` on that Docker host. Because the container listens on `0.0.0.0`, if `ROME_NODE_UI_PASSWORD` is unset, copy the one-time setup token from `docker compose logs rome-node` and set a password on the initial setup screen. The password is saved as an `scrypt` hash in `/var/lib/rome-node/web-auth.json`.
+3. Click **Authorize device**, open the Rome Cloud verification link, confirm the user code, and approve the container with the same Rome Cloud account.
+
+To reach the Web UI from another machine on a trusted LAN, such as a NAS or remote Docker host, replace `127.0.0.1:4310:4310` with `<LAN-IP>:4310:4310`. Set `ROME_NODE_UI_PASSWORD` in Compose or complete the one-time setup token flow through a restricted local entry first, then open `http://<LAN-IP>:4310`. Set a password before placing any reverse proxy or tunnel in front of port `4310`. When running `rome-node web` directly on a loopback bind (`127.0.0.1`), local loopback access stays passwordless until a password is set.
 
 After approval, the container connects to the account Gateway and appears on
 **Settings → Devices** and in `rome-node device`. From the Web UI you can:
