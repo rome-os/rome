@@ -8,7 +8,7 @@ export function getFileExtension(path: string): string {
 
 export function getTextPreviewKind(path: string, mimeType: string): TextPreviewKind | null {
   const extension = getFileExtension(path);
-  if (extension === "md" || extension === "mdx" || mimeType === "text/markdown") {
+  if (["md", "mdx", "markdown"].includes(extension) || mimeType === "text/markdown") {
     return "markdown";
   }
 

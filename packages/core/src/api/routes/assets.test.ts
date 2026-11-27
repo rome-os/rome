@@ -184,6 +184,8 @@ describe("GET /api/assets/:name", () => {
       ["mp4", "video/mp4", "inline"],
       ["webm", "video/webm", "inline"],
       ["mp3", "audio/mpeg", "inline"],
+      ["m4v", "video/x-m4v", "inline"],
+      ["flac", "audio/flac", "inline"],
       ["pdf", "application/pdf", "inline"],
       ["html", "text/html", "attachment"],
       ["htm", "text/html", "attachment"],
@@ -221,6 +223,15 @@ describe("GET /api/assets/:name", () => {
       const bad = await app.request(url, { headers: { Range: "bytes=50-60" } });
       expect(bad.status).toBe(416);
       expect(bad.headers.get("Content-Range")).toBe("bytes */10");
+    });
+
+    it.each(["m4v", "aac", "flac"])("serves 206 for a range of a .%s", async (extension) => {
+      const stored = await store("0123456789", `clip.${extension}`);
+      const part = await app.request(`/api/assets/${stored.fileName}`, {
+        headers: { Range: "bytes=2-5" },
+      });
+      expect(part.status).toBe(206);
+      expect(await part.text()).toBe("2345");
     });
 
     it("does not range a download-only type", async () => {

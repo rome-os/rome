@@ -29,6 +29,14 @@ import Testing
         #expect(LinkedFile(apiPath: "/projects/download", query: "path=projects/a.ts", name: "a.ts").opening == .preview)
     }
 
+    @Test func onlyWhatAVFoundationPlaysStreams() {
+        #expect(LinkedFile(apiPath: "/assets/a.m4v", query: nil, name: "a.m4v").opening == .media)
+        #expect(LinkedFile(apiPath: "/assets/a.flac", query: nil, name: "a.flac").opening == .media)
+        #expect(LinkedFile(apiPath: "/assets/run.webm", query: nil, name: "run.webm").opening == .preview)
+        #expect(LinkedFile(apiPath: "/assets/a.ogg", query: nil, name: "a.ogg").opening == .preview)
+        #expect(FileKind(name: "notes.markdown") == .text)
+    }
+
     @Test func namesWithoutAKnownExtension() {
         #expect(FileKind(name: "Makefile") == .text)
         #expect(FileKind(name: ".bashrc") == .text)

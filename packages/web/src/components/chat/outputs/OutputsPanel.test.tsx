@@ -890,6 +890,7 @@ describe("fileKindOf", () => {
     expect(fileKindOf({ path: "a", mimeType: "application/pdf" })).toBe("pdf");
     expect(fileKindOf({ path: "/api/assets/a.docx", mimeType: null })).toBe("docx");
     expect(fileKindOf({ path: "a.zip", mimeType: "application/zip" })).toBe("binary");
+    expect(fileKindOf({ path: "/projects/demo/notes.markdown", mimeType: null })).toBe("text");
   });
 });
 

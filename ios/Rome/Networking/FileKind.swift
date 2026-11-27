@@ -49,7 +49,7 @@ enum FileKind: String, Sendable {
             "bash", "bat", "c", "cc", "cfg", "cjs", "conf", "cpp", "css", "cs", "cts", "cxx", "csv",
             "dart", "dockerfile", "env", "erl", "ex", "exs", "fish", "go", "gradle", "graphql", "h",
             "hpp", "html", "htm", "ini", "ipynb", "java", "js", "json", "jsonl", "jsx", "kt", "kts",
-            "less", "log", "lua", "md", "mdx", "mjs", "mts", "php", "pl", "pm", "proto", "ps1", "py",
+            "less", "log", "lua", "markdown", "md", "mdx", "mjs", "mts", "php", "pl", "pm", "proto", "ps1", "py",
             "pyi", "r", "rb", "rs", "sass", "scala", "scss", "sh", "sql", "svelte", "swift", "toml",
             "txt", "ts", "tsx", "vue", "xml", "yaml", "yml", "zsh",
         ]),

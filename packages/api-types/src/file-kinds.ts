@@ -91,6 +91,7 @@ const TEXT_MIME_TYPES = new Map<string, string>([
   [".less", "text/css"],
   [".log", "text/plain"],
   [".lua", "text/plain"],
+  [".markdown", "text/markdown"],
   [".md", "text/markdown"],
   [".mdx", "text/mdx"],
   [".mjs", "text/javascript"],

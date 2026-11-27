@@ -72,7 +72,7 @@ private struct LinkedFileViewer: ViewModifier {
                     .environment(\.apiFileLoader) { _, _ in picture.data }
             }
             .fullScreenCover(item: $playing) { item in
-                StreamPlayer(item: item)
+                StreamPlayer(item: item) { notice = String(localized: "Failed to load the file") }
                     .ignoresSafeArea()
             }
             .quickLookPreview($preview)
@@ -163,12 +163,16 @@ enum FileOpening: Equatable {
 extension LinkedFile: Identifiable {
     var id: String { apiPath + "?" + (query ?? "") }
 
+    /// The video and audio extensions AVFoundation plays. WebM and Ogg are
+    /// not among them: those download and go to Quick Look or the share sheet.
+    static let playable: Set<String> = ["mp4", "mov", "m4v", "m4a", "mp3", "aac", "wav", "flac"]
+
     var opening: FileOpening {
         let ext = (name as NSString).pathExtension.lowercased()
         if ["html", "htm", "svg", "xhtml"].contains(ext) { return .share }
         switch previewKind {
         case .image: return .picture
-        case .video, .audio: return .media
+        case .video, .audio: return Self.playable.contains(ext) ? .media : .preview
         default: return .preview
         }
     }
@@ -208,20 +212,25 @@ struct MediaItem: Identifiable {
 /// and then the cover goes.
 private struct StreamPlayer: UIViewControllerRepresentable {
     let item: MediaItem
+    /// Runs when the player cannot play the file, once the cover is gone.
+    let failed: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> Host {
-        Host(item: item, onClose: { dismiss() })
+        Host(item: item, onClose: { didFail in
+            dismiss()
+            if didFail { failed() }
+        })
     }
 
     func updateUIViewController(_ host: Host, context: Context) {}
 
     final class Host: UIViewController {
         private let item: MediaItem
-        private let onClose: () -> Void
+        private let onClose: (Bool) -> Void
         private var shown = false
 
-        init(item: MediaItem, onClose: @escaping () -> Void) {
+        init(item: MediaItem, onClose: @escaping (Bool) -> Void) {
             self.item = item
             self.onClose = onClose
             super.init(nibName: nil, bundle: nil)
@@ -238,21 +247,37 @@ private struct StreamPlayer: UIViewControllerRepresentable {
             if let cookie = item.cookie { options[AVURLAssetHTTPCookiesKey] = [cookie] }
             let player = ClosingPlayer()
             player.onClose = onClose
-            player.player = AVPlayer(playerItem: AVPlayerItem(asset: AVURLAsset(url: item.url, options: options)))
+            player.watch(AVPlayerItem(asset: AVURLAsset(url: item.url, options: options)))
             player.modalPresentationStyle = .fullScreen
             present(player, animated: false) { player.player?.play() }
         }
     }
 
-    /// Says when the person closed it.
+    /// Says when it closed: by the person, or by itself when the file
+    /// cannot be played (a refused request, a format it cannot read).
     final class ClosingPlayer: AVPlayerViewController {
-        var onClose: (() -> Void)?
+        var onClose: ((Bool) -> Void)?
+        private var failed = false
+        private var status: NSKeyValueObservation?
+
+        func watch(_ item: AVPlayerItem) {
+            player = AVPlayer(playerItem: item)
+            status = item.observe(\.status) { [weak self] item, _ in
+                guard item.status == .failed else { return }
+                Task { @MainActor in
+                    guard let self, !self.failed else { return }
+                    self.failed = true
+                    self.dismiss(animated: true)
+                }
+            }
+        }
 
         override func viewDidDisappear(_ animated: Bool) {
             super.viewDidDisappear(animated)
             guard isBeingDismissed else { return }
+            status = nil
             player?.pause()
-            onClose?()
+            onClose?(failed)
             onClose = nil
         }
     }

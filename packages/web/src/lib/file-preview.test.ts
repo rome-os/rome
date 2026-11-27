@@ -8,6 +8,7 @@ import {
 describe("file preview helpers", () => {
   it("detects markdown and delimited text preview types", () => {
     expect(getTextPreviewKind("memory/IDENTITY.md", "text/markdown")).toBe("markdown");
+    expect(getTextPreviewKind("projects/demo/notes.markdown", "")).toBe("markdown");
     expect(getTextPreviewKind("projects/data/report.csv", "text/csv")).toBe("delimited");
     expect(getTextPreviewKind("projects/data/report.tsv", "text/plain")).toBe("delimited");
     expect(getTextPreviewKind("projects/demo/index.html", "text/html")).toBe("html");
