@@ -145,12 +145,11 @@ export function registerDeviceActions(
 }
 
 /** What running one operation on a device needs of its turn. */
-export type DeviceRunTurn = LiveTurn & Pick<ToolTurn, "audience">;
+export type DeviceRunTurn = LiveTurn;
 
 /** The running turn as a device run reads it, from the action's store. */
 export function deviceRunTurnOf(store: ToolTurn | undefined): DeviceRunTurn {
   return {
-    audience: store?.audience,
     askingDeviceId: askingDeviceOf(store?.channelContext),
   };
 }
@@ -175,12 +174,11 @@ export async function runOnDevice(
     askingDeviceId: turn.askingDeviceId,
     deviceId: request.deviceId,
   });
-  return runOperation(deps, { audience: turn.audience }, request.operation, request.args, route);
+  return runOperation(deps, request.operation, request.args, route);
 }
 
 async function runOperation(
   deps: Pick<DeviceActionDeps, "run">,
-  { audience }: Pick<ToolTurn, "audience">,
   operation: string,
   args: Record<string, unknown>,
   route: ReturnType<ReturnType<typeof createLiveRoutes>["forOperation"]>,

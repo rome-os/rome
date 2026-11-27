@@ -811,10 +811,6 @@
       "title": "模型选择器",
       "toggleLabel": "在聊天中启用模型选择器"
     },
-    "impersonation": {
-      "title": "身份模拟",
-      "toggleLabel": "在聊天中启用身份模拟"
-    },
     "aiToolUsage": {
       "title": "AI 工具用量",
       "toggleLabel": "显示 Claude 和 ChatGPT 用量"

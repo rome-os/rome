@@ -1,8 +1,8 @@
 // Sending to a person: which of their accounts a message may go to, and
 // everything that has to be true before one is handed to a channel.
 //
-// Vocabulary: docs/concepts/people.md. The wire shapes are the People
-// contract's (`@rome/api-types/people`).
+// Vocabulary: docs/concepts/people.md. The wire shapes are the message
+// contract's (`@rome/api-types/message`).
 //
 // Saying the message is `chats/send.ts`'s, which takes a place. This module
 // finds the place: the direct message that reaches the account a send names.
@@ -27,20 +27,17 @@
 // through anything.
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
-import type { AccountSendState } from "@rome/api-types/people";
-import {
-  AccountNotConnected,
-  type ChannelSend,
-} from "../../../chats/connected-accounts/connected-account.js";
-import { chatKey, placeIn, type Place } from "../../../chats/place.js";
-import type { RefusedState, Sender, SendResult } from "../../../chats/send.js";
+import type { AccountSendState } from "@rome/api-types/message";
+import { AccountNotConnected, type ChannelSend } from "./connected-accounts/connected-account.js";
+import { chatKey, placeIn, type Place } from "./place.js";
+import type { RefusedState, Sender, SendResult } from "./send.js";
 import {
   senderNamed,
   soleSender,
   sendersOf,
   type SendDeps,
   type SendIntoPlaceDeps,
-} from "../../../connections/send.js";
+} from "../connections/send.js";
 
 export { sendersOf, type SendDeps };
 

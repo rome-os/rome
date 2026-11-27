@@ -14,10 +14,10 @@
 
 import {
   accountPresentation,
-  compareCodePoints,
   type AccountLink,
   type DirectoryAccount,
 } from "@rome/api-types/people";
+import { compareCodePoints } from "@rome/api-types/message";
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountNames } from "../../../chats/accounts/account-names.js";
 import { foldAccounts } from "../../../chats/accounts/account-fold.js";

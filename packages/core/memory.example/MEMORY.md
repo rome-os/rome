@@ -31,8 +31,7 @@ Route every fact to where it belongs, then keep this file lean:
   - `memory/topics/<topic>.md` — a subject the guardian cares about (e.g.
     `health.md`, `finances.md`, `house-remodel.md`).
   - `memory/relationship/GUARDIAN.md` — the guardian's full profile.
-  - `memory/relationship/BONDS.md` and `memory/relationship/<person-id>.md` —
-    relationship tiers and one profile per known person.
+  - `memory/relationship/<person-id>.md` — one profile per known person.
   - `memory/projects/<project-name>/PROJECT.md` — per-project summaries.
   - `memory/IDENTITY.md` — the agent's own name, personality, and purpose.
 - **Details and events → the journal.** Specifics, play-by-play, and anything

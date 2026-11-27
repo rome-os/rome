@@ -15,7 +15,6 @@ function session(id: string, name: string): ChatSession {
   return {
     id,
     name,
-    personaId: null,
     projectName: "default",
     agentName: null,
     archivedAt: null,

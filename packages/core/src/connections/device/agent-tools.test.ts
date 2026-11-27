@@ -275,12 +275,12 @@ describe("the Devices page's tools", () => {
       ]);
     });
 
-    it("reads a personal capability in a shared chat", async () => {
+    it("reads a personal capability", async () => {
       const result = await callTool(
         runOnDeviceTool,
         deps,
         { operation: "health.stats" },
-        { ...GUARDIAN_TURN, audience: "shared" },
+        GUARDIAN_TURN,
       );
 
       expect(result).toMatchObject({ status: "ok" });
@@ -289,7 +289,6 @@ describe("the Devices page's tools", () => {
 
     it("reads and changes in a turn no one started, such as a routine's", async () => {
       const routineTurn = {
-        audience: "private" as const,
         channelContext: GUARDIAN_TURN.channelContext,
       };
 

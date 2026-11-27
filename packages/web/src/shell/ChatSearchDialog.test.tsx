@@ -41,7 +41,6 @@ function chatSession(
   return {
     id,
     name,
-    personaId: null,
     projectName: projectPath.split("/").at(-1) ?? projectPath,
     projectPath,
     archivedAt: null,

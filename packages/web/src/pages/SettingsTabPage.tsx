@@ -117,7 +117,6 @@ import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
-  enableImpersonation?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -991,7 +990,6 @@ function DeveloperSettingsSection({
       <SettingsGroup title={t("advanced.developerSettings.title")}>
         <FormRows>
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-          <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
       </SettingsGroup>
@@ -1272,34 +1270,6 @@ function ModelSelectorAdvancedSection({
     <SettingsToggleRow
       title={t("advanced.modelSelector.title")}
       label={t("advanced.modelSelector.toggleLabel")}
-      checked={enabled}
-      onChange={toggle}
-      disabled={saving}
-    />
-  );
-}
-
-function ImpersonationAdvancedSection({
-  settings,
-  onSave,
-  saving,
-}: {
-  settings: SettingsData;
-  onSave: (p: Record<string, unknown>) => Promise<void>;
-  saving: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.enableImpersonation ?? false);
-
-  function toggle(next: boolean) {
-    setEnabled(next);
-    void onSave({ enableImpersonation: next });
-  }
-
-  return (
-    <SettingsToggleRow
-      title={t("advanced.impersonation.title")}
-      label={t("advanced.impersonation.toggleLabel")}
       checked={enabled}
       onChange={toggle}
       disabled={saving}

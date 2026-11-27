@@ -79,14 +79,6 @@ What the agent says back after a wake, through the account it was woken on.
 - A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it. A message from one of the guardian's dashboard chats into another needs no card: the guardian is the only other participant in both, so nothing leaves their sight. Concierge hands work to its task chats this way.
 - A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
 
-## Audience
-
-Who can read what a turn says: *private* (only the guardian) or *shared* (anyone else may). It is read off the turn's place and the sender when the turn starts, and it does not change during the turn.
-
-- A turn is private in a dashboard chat only the guardian can open, and in a direct message with Rome's account that the guardian sent while nobody but the guardian may open the dashboard, where Rome records that chat. The guardian's Concierge chats and its task chats open only for the guardian. Any other dashboard chat opens for every dashboard user, so it is private only while nobody but the guardian may open the dashboard. A group, a channel, an email thread, a direct message from anyone else and a visitor's chat are shared.
-- A turn whose place is unknown is shared. A turn with no place of its own, such as a summoned agent's, takes the audience of the turn that started it, and is shared when no turn did.
-- A subagent, fork or task takes its starter's audience, never a more private one. A turn an action starts, such as a summon or the reply to a channel message, takes the audience Rome read for the chat that ran the action, and is shared when Rome read none. A routine's fire takes the audience of the chat it works for, and a routine of no chat is shared.
-
 ## Decided against
 
 - **A projection setting per agent or per chat.** One default serves every chat: the place the waking message was said in. A setting would move a reading decision that belongs to the agent into chat configuration.

@@ -10,12 +10,12 @@ The guardian dashboard (`packages/web`) and the desktop shell are web surfaces. 
 
 ## Users
 
-**Guardian.** One Rome instance serves exactly one guardian, who owns its configuration, memory, policies, and approvals ([`docs/concepts/people.md`](docs/concepts/people.md#guardian)). Rome designs for two guardian populations, in this order:
+**Guardian.** One Rome instance serves exactly one guardian, who owns its configuration, memory, policies, and approvals ([`docs/concepts/access.md`](docs/concepts/access.md#guardian)). Rome designs for two guardian populations, in this order:
 
 1. **Technical builders first.** Developers and technical power users who self-host with Docker or run on Rome Cloud. They read code, git history, and agent traces, and they build or remix apps.
 2. **Capable non-developers next.** The product is deliberately moving toward people who delegate outcomes in plain language and rarely open code. Everyday use must not require code literacy, even where builders get deeper inspection.
 
-**Visitor.** A Rome Cloud account holder the guardian granted scoped access to, usually to open one shared app. A visitor never holds guardian privileges and does not need to understand Rome to use a shared app ([`docs/concepts/people.md`](docs/concepts/people.md#visitor)).
+**Visitor.** A Rome Cloud account holder the guardian granted scoped access to, usually to open one shared app. A visitor never holds guardian privileges and does not need to understand Rome to use a shared app ([`docs/concepts/access.md`](docs/concepts/access.md#visitor)).
 
 **App author.** Anyone who builds a Rome App with `@rome-os/app-runtime` and `@rome-os/app-web-sdk`, including the guardian, the in-Rome coding agent, and community authors publishing to the App Store.
 

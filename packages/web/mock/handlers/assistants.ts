@@ -6,7 +6,7 @@ import {
   type AssistantList,
 } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { SentMessage, TimelinePage } from "@rome/api-types/people";
+import type { SentMessage, TimelinePage } from "@rome/api-types/message";
 
 // Assistants: a Dot and a Muse listed by Rome Cloud. The Dot has a short chat
 // with Rome; Muse has none yet, so the empty chat and writing first are both

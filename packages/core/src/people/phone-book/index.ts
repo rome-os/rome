@@ -1,11 +1,9 @@
 // The phone book: the people listing and the directory of accounts. It serves
-// the dashboard through http/ and agents through actions/, both over the same
-// use cases. Nothing but the wiring
+// the dashboard through http/, and agents through nothing. Nothing but the wiring
 // imports it, so leaving it out leaves who-is-this and the message path
 // working. Vocabulary: docs/domains/people.md.
 
 import type { Action } from "@rome-os/app-runtime";
-import { listPeopleAction } from "./actions/list-people.js";
 import type { PhoneBookDeps } from "./deps.js";
 import { phoneBookRoutes } from "./http/index.js";
 
@@ -18,10 +16,10 @@ export { phoneBookRoutes } from "./http/index.js";
 export interface PhoneBook {
   /** Routes for the dashboard and apps, mounted under /api. */
   routes: ReturnType<typeof phoneBookRoutes>;
-  /** Actions for agents. */
+  /** Actions for agents: none. */
   actions: Action[];
 }
 
 export function phoneBook(deps: PhoneBookDeps): PhoneBook {
-  return { routes: phoneBookRoutes(deps), actions: [listPeopleAction(deps)] };
+  return { routes: phoneBookRoutes(deps), actions: [] };
 }

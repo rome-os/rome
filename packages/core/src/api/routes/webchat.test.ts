@@ -2725,45 +2725,21 @@ describe("Webchat API", () => {
     });
   });
 
-  it("drops requested impersonation from new sessions unless enabled", async () => {
-    const app = createWebchatRuntime(deps).routes;
-
-    const res = await app.request("/chat/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Impersonation off",
-        personaId: baseline.persons.innerCircleId,
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string; personaId: string | null };
-    expect(body.personaId).toBeNull();
-
-    const session = await deps.webchatRepo.getSession(body.id);
-    expect(session?.personaId).toBeNull();
-  });
-
-  it("preserves requested impersonation for new sessions when enabled", async () => {
+  it("ignores a persona a new session names, even under the old setting", async () => {
     await deps.settingsRepo.set("enableImpersonation", true);
     const app = createWebchatRuntime(deps).routes;
 
     const res = await app.request("/chat/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Impersonation on",
-        personaId: baseline.persons.innerCircleId,
-      }),
+      body: JSON.stringify({ name: "Persona", personaId: baseline.persons.innerCircleId }),
     });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string; personaId: string | null };
-    expect(body.personaId).toBe(baseline.persons.innerCircleId);
-
+    const body = (await res.json()) as { id: string };
+    expect(body).not.toHaveProperty("personaId");
     const session = await deps.webchatRepo.getSession(body.id);
-    expect(session?.personaId).toBe(baseline.persons.innerCircleId);
+    expect(session?.personaId).toBeNull();
   });
 
   it("passes requested reasoning effort to the agent session", async () => {

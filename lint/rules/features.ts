@@ -17,10 +17,6 @@ export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
  * the wiring or a test.
  */
 const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> = {
-  "people/person-history": {
-    files: ["api/routes/assistants.ts"],
-    why: "an assistant's page sends to an account through directPlace, and answers with person history's respondToSend so every send the dashboard reads has one shape",
-  },
 };
 
 /** The wiring builds the object graph and mounts the routes. It mirrors rules/wiring.ts, minus api/routes/. */

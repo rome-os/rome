@@ -109,7 +109,7 @@ provider's native structured-output API.
 
 - **[Action](actions.md)** — an action is code that runs. An agent is the LLM-backed entity that decides to run it.
 - **[Session](sessions.md)** — the session is the durable boundary around a body of agent work. The agent is the configured entity doing the work.
-- **[Guardian](people.md#guardian)** — the agent has its own identity (name, personality), separate from the human it serves.
+- **[Guardian](access.md#guardian)** — the agent has its own identity (name, personality), separate from the human it serves.
 
 ## Agent hierarchy
 

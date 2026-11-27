@@ -76,7 +76,6 @@ function consolidateByAccount(rows: WhatsAppContactAliasRow[]): WhatsAppContactR
       continue;
     }
     const primary = group[0];
-    const linked = group.find((r) => r.linkedPersonId != null);
     // The whole conversation usually lives on one JID, but take the latest row
     // defensively in case history is split across both addresses.
     const latest = group.reduce(
@@ -91,8 +90,6 @@ function consolidateByAccount(rows: WhatsAppContactAliasRow[]): WhatsAppContactR
       verifiedName: coalesceField(group, "verifiedName"),
       imgUrl: coalesceField(group, "imgUrl"),
       chatName: coalesceField(group, "chatName"),
-      linkedPersonId: linked?.linkedPersonId ?? null,
-      linkedPersonName: linked?.linkedPersonName ?? null,
       lastMessageAt: latest.lastMessageAt,
       lastMessagePreview: latest.lastMessagePreview,
       messageCount: group.reduce((n, r) => n + r.messageCount, 0),
@@ -111,8 +108,6 @@ export interface WhatsAppContactRow {
   imgUrl: string | null;
   chatName: string | null;
   isGroup: boolean;
-  linkedPersonId: string | null;
-  linkedPersonName: string | null;
   /** Unix seconds, or null when no message history exists for the contact. */
   lastMessageAt: number | null;
   lastMessagePreview: string | null;
@@ -241,8 +236,7 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   }
 
   /**
-   * The synced address book, newest-conversation-first then alphabetical,
-   * each row annotated with whether it has been promoted to a `persons` entry.
+   * The synced address book, newest-conversation-first then alphabetical.
    * Reads the table whole; callers paginate the result themselves.
    */
   async listContacts(): Promise<WhatsAppContactRow[]> {
@@ -261,8 +255,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
         c.img_url AS imgUrl,
         ch.name AS chatName,
         coalesce(ch.is_group, t.jid LIKE '%@g.us') AS isGroup,
-        cm.person_id AS linkedPersonId,
-        p.display_name AS linkedPersonName,
         -- Reactions are emoji pinned to another message, not a line of their
         -- own — exclude them so they never become a conversation's last message.
         (SELECT MAX(m.timestamp) FROM wa_messages m
@@ -274,9 +266,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       FROM wa_threads t
       LEFT JOIN wa_contacts c ON c.jid = t.jid
       LEFT JOIN wa_chats ch ON ch.jid = t.jid
-      LEFT JOIN links cm
-        ON cm.platform = 'whatsapp' AND cm.account_id = t.jid
-      LEFT JOIN persons p ON p.id = cm.person_id
       WHERE NOT (
         t.jid LIKE '%@lid'
         AND c.phone_number IS NULL
@@ -298,8 +287,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       imgUrl: (r.imgUrl as string | null) ?? null,
       chatName: (r.chatName as string | null) ?? null,
       isGroup: Boolean(r.isGroup),
-      linkedPersonId: (r.linkedPersonId as string | null) ?? null,
-      linkedPersonName: (r.linkedPersonName as string | null) ?? null,
       lastMessageAt: r.lastMessageAt == null ? null : Number(r.lastMessageAt),
       lastMessagePreview: (r.lastMessagePreview as string | null) ?? null,
       messageCount: Number(r.messageCount ?? 0),

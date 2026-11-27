@@ -1,6 +1,6 @@
 # Access
 
-Who has a role in this Rome, and which. The rest of what Access owns, such as sign-in and the permission on each app, is described in [concepts/people.md](../concepts/people.md#team) and [architecture/access-control.md](../architecture/access-control.md).
+Who has a role in this Rome, and which. The rest of what Access owns, such as sign-in and the permission on each app, is described in [concepts/access.md](../concepts/access.md#team) and [architecture/access-control.md](../architecture/access-control.md).
 
 In code, the rules of roles are the `Access` class in [`packages/core/src/access/access.ts`](../../packages/core/src/access/access.ts). It knows a person only by id and depends on no other context. The steps Rome takes that also need to know who a person is are in [`packages/core/src/access/application/`](../../packages/core/src/access/application/), which depends on [Identity](identity.md).
 

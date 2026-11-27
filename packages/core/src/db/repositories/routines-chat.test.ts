@@ -111,11 +111,7 @@ describe("a routine that reads personal data", () => {
   });
   afterEach(() => testDb.close());
 
-  // Only "guardian-chat" is private, as only the guardian's own dashboard chat is.
-  const repoWith = () =>
-    new RoutinesRepository(testDb.db, async (chatId) =>
-      chatId === "guardian-chat" ? "private" : "shared",
-    );
+  const repoWith = () => new RoutinesRepository(testDb.db);
   const query = (madeIn?: string) => ({
     name: "Morning steps",
     trigger: DAILY,
@@ -124,13 +120,7 @@ describe("a routine that reads personal data", () => {
     ...(madeIn ? { madeIn } : {}),
   });
 
-  it("is made for a private chat, and its fires read that chat's audience", async () => {
-    const repo = repoWith();
-    const id = await repo.create(query("guardian-chat"));
-    expect(await repo.audienceOf(id)).toBe("private");
-  });
-
-  it("is made for a shared chat, for no chat, and edited into one", async () => {
+  it("is made for any chat, for no chat, and edited into one", async () => {
     const repo = repoWith();
     expect(await repo.create(query("group-chat"))).toEqual(expect.any(String));
     expect(await repo.create(query())).toEqual(expect.any(String));

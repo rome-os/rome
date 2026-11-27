@@ -139,7 +139,6 @@ describe("ProfileMenu", () => {
       projectPath: "default",
       agentMention: null,
       skill: null,
-      personaId: "",
     });
     sessionStorage.setItem("rome:pending-app-remix", "unrelated");
     const assign = rs.fn(() => {
