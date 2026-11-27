@@ -1602,10 +1602,6 @@ async function main() {
           return typeof stored === "string" ? stored : null;
         },
         deviceState: (kind, turn) => deviceKindState(deviceLiveRoutes.forKind(kind, turn), turn),
-        // The turn's audience, narrowed by the chat's as it stands now, so a
-        // chat that opens to visitors after the turn started is no longer private.
-        privateTurn: async (turn) =>
-          turn.audience() === "private" && (await chatAudience(turn.threadContext())) === "private",
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -2907,7 +2903,6 @@ async function main() {
       agentNameEvents,
       personalData: personalDataRepo,
       deviceConnections: deviceConnectionsRepo,
-      placeAudience: chatAudience,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,

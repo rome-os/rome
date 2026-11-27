@@ -144,6 +144,11 @@ export function sessionOwnerKey(actor: SessionActor | undefined): string | null 
   return null;
 }
 
+/** The email of a signed-in member who is not the guardian, to name them by. */
+export function memberEmail(actor: SessionActor | undefined): string | undefined {
+  return actor?.kind === "visitor" ? actor.email : undefined;
+}
+
 /**
  * Whose chats the current request may open: the signed-in person's, and no
  * one's when no person can be told. Work Rome does on its own opens chats

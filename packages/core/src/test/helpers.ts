@@ -836,7 +836,6 @@ export async function buildTestDeps(
     routineRunsRepo,
     personalData: new PersonalDataRepository(db, PERSONAL_DATA_SOURCES),
     deviceConnections: new DeviceConnectionsRepository(db),
-    placeAudience: async () => "shared",
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,
