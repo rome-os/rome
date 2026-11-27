@@ -23,7 +23,7 @@ import {
 } from "./chats/connected-accounts/account-code-admission.js";
 import { accountCodeContext } from "./identity/application/account-codes.js";
 import { createIdentity } from "./identity/identity.js";
-import { createAgentsGuardianLink } from "./people/agents-guardian.js";
+import { ownAgentAccount } from "./access/application/own-agent-account.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -408,7 +408,7 @@ import {
 import { ConnectionRegistry, DrizzleConnectionsRepository } from "./connections/index.js";
 import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
-import { AGENTS_KIND } from "./connections/integrations/agents.js";
+import { AGENTS_KIND, ownAccountAgentOf } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import type { KindMount } from "./connections/kind-mount.js";
@@ -774,11 +774,7 @@ async function main() {
     },
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
-  const linkAgentToGuardian = createAgentsGuardianLink({
-    peopleRepo,
-    settingsRepo,
-    platform: AGENTS_KIND,
-  });
+  const giveOwnAgent = ownAgentAccount(db, AGENTS_KIND);
   // What people say or press on a connection passes this before it starts
   // anything (docs/domains/participation.md#entry).
   const entrance = entranceOf<TeamActor>({
@@ -812,7 +808,8 @@ async function main() {
   const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
-    if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
+    const ownAgent = connectionKind === AGENTS_KIND ? ownAccountAgentOf(message) : null;
+    if (ownAgent) giveOwnAgent(ownAgent);
     await readBotsOfPeople(senderPlatformOf(connectionId, message), message);
     // A code said in a chat switched off is still voided.
     if (!(await heardAccountCode(connectionId, connectionKind, message))) return false;

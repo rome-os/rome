@@ -6,12 +6,13 @@
 // instance acknowledges it, so the talker polls and acknowledges after
 // delivering. The instance token is the credential and lives outside the
 // grant; the grant only records the agent Cloud assigned. A sender is
-// never mapped to a person here. A sender Cloud marks as in this Rome's own
-// account is linked to the guardian when its message is admitted
-// (people/agents-guardian.ts); any other sender stays unlinked, and the
-// guardian decides whether Rome may answer it. Every agent is addressed by its
-// agent id, so a rename or a reused name never moves a conversation or a
-// link. Cloud refuses a send to an agent no link allows as `not_reachable`.
+// never mapped to a person here. This connection hands on Cloud's statement
+// that a sender is in this Rome's own account, and the guardian is given that
+// account when its message is admitted
+// (access/application/own-agent-account.ts); any other sender belongs to
+// nobody, and the guardian decides whether Rome may answer it. Every agent is
+// addressed by its agent id, so a rename or a reused name never moves a
+// conversation or an account. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
 import { type ChannelInboundMedia, type ChatId, SendRefused } from "@rome-os/app-runtime";
 import { saveIncomingAttachmentPayloads } from "../inbound/attachment-files.js";
@@ -70,6 +71,16 @@ export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
     email: undefined,
     avatarUrl: undefined,
   });
+}
+
+/**
+ * The sender's agent id when Rome Cloud says the agent is in this Rome's own
+ * Rome Cloud account, else null. Reads the envelope a message heard here
+ * carries, and decides nothing about whom the account belongs to.
+ */
+export function ownAccountAgentOf(message: { senderId: string; raw?: unknown }): string | null {
+  const from = (message.raw as Partial<AgentMessageEnvelope> | undefined)?.from;
+  return from?.sameAccount === true && from.agentId === message.senderId ? from.agentId : null;
 }
 
 /**

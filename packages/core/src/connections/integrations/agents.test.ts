@@ -18,6 +18,7 @@ import {
   createAgentsTalker,
   makeAgentsDescriptor,
   makeAgentsSetup,
+  ownAccountAgentOf,
   reviveAgentsProfile,
   toAgentInboundMessage,
 } from "./agents.js";
@@ -79,6 +80,24 @@ function asApp(message: AgentMessageEnvelope) {
   const inbound = toAgentInboundMessage(message);
   return inbound && channelMessageOf(inbound, "agents");
 }
+
+describe("ownAccountAgentOf", () => {
+  function heard(overrides: Partial<AgentMessageEnvelope> = {}): ChannelMessage {
+    const inbound = toAgentInboundMessage(envelope(overrides));
+    if (!inbound) throw new Error("the envelope names no sender agent");
+    return channelMessageOf(inbound, "agents");
+  }
+
+  it("hands on Rome Cloud's word that the sender is in this Rome's own account", () => {
+    expect(ownAccountAgentOf(heard())).toBe(ATLAS);
+  });
+
+  it("answers null for an agent in another account, and for a message with no envelope", () => {
+    const other = { ...envelope().from, account: "friend", sameAccount: false };
+    expect(ownAccountAgentOf(heard({ from: other }))).toBeNull();
+    expect(ownAccountAgentOf({ senderId: ATLAS })).toBeNull();
+  });
+});
 
 describe("agents channel", () => {
   it("turns an agent message into a direct message from its agent id", () => {
