@@ -6,6 +6,9 @@
  * per app and symbol, with the symbol and the app id alone. The web SDK's `people` page is
  * pinned in its own tests.
  */
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import {
   APPROVAL_TYPES,
@@ -28,6 +31,11 @@ import {
   type SaidSender,
   type ThreadContext,
 } from "@rome-os/app-runtime";
+import { createAppStartedDispatcher } from "../apps/app-started.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
+import type { AppCatalog } from "../apps/catalog.js";
+import type { RomeAppRuntimeServices } from "../apps/context.js";
+import type { ResolvedApp } from "../apps/state.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { createTestDb } from "../test/db.js";
 import type { Policy } from "../types.js";
@@ -36,6 +44,7 @@ import {
   deprecatedChatStopFor,
   deprecatedGuardianProfile,
   deprecatedPolicyEngine,
+  deprecatedPortsFor,
   deprecatedRepositoriesFor,
   deprecatedUseReporter,
   withDeprecatedActionDeps,
@@ -188,7 +197,10 @@ describe("the app SDK surface People's removal deprecated", () => {
       "old-app",
       {
         approvalsRepo: { create: async (data: unknown) => void created.push(data) },
-        agentRunner: { run: async (params: unknown) => void ran.push(params) },
+        agentRunner: {
+          run: async (params: unknown) => void ran.push(params),
+          runForked: async (params: unknown) => void ran.push(params),
+        },
       },
       report,
     );
@@ -196,6 +208,8 @@ describe("the app SDK surface People's removal deprecated", () => {
     await deps.approvalsRepo.create({ type: "action_execution" });
     await deps.agentRunner.run({ threadContext: { channel: "x", senderBondLevel: "guardian" } });
     await deps.agentRunner.run({ threadContext: { channel: "x" } });
+    await deps.agentRunner.runForked({ threadContext: { channel: "x", senderBondLevel: "other" } });
+    await deps.agentRunner.runForked({ threadContext: { channel: "x" } });
     const stop = deprecatedChatStopFor(async () => ({ status: "idle" }), "old-app", report);
     await stop({
       ref: { connectionId: "c1", chatId: "1" as ChatId },
@@ -205,15 +219,130 @@ describe("the app SDK surface People's removal deprecated", () => {
     await stop({ ref: { connectionId: "c1", chatId: "1" as ChatId } });
 
     expect(created).toHaveLength(2);
-    expect(ran).toHaveLength(2);
+    expect(ran).toHaveLength(4);
     expect(uses).toEqual([
       ["old-app", "APPROVAL_TYPES.person_mapping"],
+      ["old-app", "ThreadContext.senderBondLevel"],
       ["old-app", "ThreadContext.senderBondLevel"],
       ["old-app", "ChatStopInput.service"],
       ["old-app", "ChatStopInput.senderId"],
     ]);
   });
 });
+
+describe("strangerPersonId", () => {
+  it("reports a direct read, and nothing for copying, listing or serializing deps", () => {
+    const { uses, report } = recordedUses();
+    const deps = depsOf("old-app", report) as unknown as Record<string, unknown>;
+
+    const copy = { ...deps };
+    expect(Object.keys(deps)).not.toContain("strangerPersonId");
+    expect(JSON.parse(JSON.stringify(deps))).not.toHaveProperty("strangerPersonId");
+    expect(copy).not.toHaveProperty("strangerPersonId");
+    expect(uses).toEqual([]);
+
+    expect(deps.strangerPersonId).toBe("__STRANGER__");
+    expect(uses).toEqual([["old-app", "strangerPersonId"]]);
+  });
+});
+
+describe("an app hook's deprecated uses", () => {
+  it("reports an app-started hook's profile write and runs with a bond level", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rome-deprecated-hook-"));
+    try {
+      await writeFile(
+        join(dir, "index.js"),
+        `
+const threadContext = { channel: "x", threadId: "1", senderBondLevel: "guardian" };
+export function createHook(deps) {
+  return {
+    async onAppStarted() {
+      await deps.appContext.repositories.guardianProfile.write({ guardianName: "" });
+      for await (const _ of deps.agentRunner.run({ agentName: "a", prompt: "", threadContext }));
+      for await (const _ of deps.agentRunner.runForked({ threadContext }));
+      globalThis.__deprecatedHookDone();
+    },
+  };
+}
+`,
+        "utf-8",
+      );
+      const app = startedApp("old-app", dir);
+      const catalog = {
+        get: (appId: string) => (appId === app.appId ? app : null),
+        listResolved: () => [app],
+      } as unknown as AppCatalog;
+      const { uses, report } = recordedUses();
+      const services: RomeAppRuntimeServices = {
+        catalog,
+        db: {} as RomeAppRuntimeServices["db"],
+        actionEngine: {} as ActionEngine,
+        repositories: {
+          settings: { get: async () => null, set: async () => {} },
+          guardianProfile: { write: async () => ({ ok: true }) },
+        },
+      };
+      services.forApp = deprecatedPortsFor(services, report);
+      // Set after `forApp`, as boot sets it.
+      services.agentRunner = { async *run() {}, async *runForked() {} };
+      const done = new Promise<void>((resolve) => {
+        (globalThis as { __deprecatedHookDone?: () => void }).__deprecatedHookDone = resolve;
+      });
+
+      const dispatcher = createAppStartedDispatcher({ appRuntimeServices: services });
+      expect(await dispatcher.reconcile(catalog)).toEqual([]);
+      dispatcher.open(catalog);
+      await done;
+
+      expect(uses).toEqual([
+        ["old-app", "repositories.guardianProfile.write"],
+        ["old-app", "ThreadContext.senderBondLevel"],
+        ["old-app", "ThreadContext.senderBondLevel"],
+      ]);
+    } finally {
+      delete (globalThis as { __deprecatedHookDone?: () => void }).__deprecatedHookDone;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/** An installed app whose one hook, in `hookDir`, is `app-started`. */
+function startedApp(appId: string, hookDir: string): ResolvedApp {
+  return {
+    appId,
+    state: "installed",
+    enabled: true,
+    firstParty: false,
+    source: { mode: "bundle", path: hookDir },
+    installedHash: "1".repeat(64),
+    installedVersion: "1.0.0",
+    lastError: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    manifest: { id: appId, version: "1.0.0", agents: [], actions: [], skills: [], hooks: [] },
+    rootPath: hookDir,
+    resolveRoot: hookDir,
+    displayName: appId,
+    iconAbsolutePath: undefined,
+    artifacts: {
+      agent: [],
+      action: [],
+      skill: [],
+      hook: [
+        {
+          kind: "hook",
+          publicName: "app-started",
+          aliases: [],
+          ownerType: "app",
+          ownerId: appId,
+          absolutePath: hookDir,
+        },
+      ],
+    },
+    web: null,
+    api: null,
+    db: null,
+  } as unknown as ResolvedApp;
+}
 
 describe("deprecatedUseReporter", () => {
   it("writes one record per app and symbol an hour, holding the symbol and nothing else", async () => {

@@ -135,6 +135,17 @@ Only commits that touch files **inside one of those paths** are attributed to th
 
 When adding a new releasable package: add a `packages/<dir>` entry to `release-please-config.json` and seed its current version in `.release-please-manifest.json`. Otherwise the new workspace is silently skipped — which is the safe default.
 
+### Pinned versions
+
+Two entries in `release-please-config.json` carry a `release-as` pin, and both are temporary:
+
+- `packages/app-runtime-sdk` is pinned to `0.11.7`.
+- `packages/app-web-sdk` is pinned to `0.4.2`.
+
+The `feat!:` commit that deleted People would cut a breaking release of both SDKs. A later commit brought every removed symbol back as deprecated, so the release breaks no app, and the pins cut it as a patch. JSON holds no comments, so this section records them.
+
+Remove both pins in the first pull request after `@rome-os/app-runtime` 0.11.7 and `@rome-os/app-web-sdk` 0.4.2 publish. While a pin stays, every later release pull request tries to cut the same version again.
+
 ## Conventional Commits — what counts and what bumps
 
 Commit messages drive both the changelog and the version bump. The release workflow respects squash-and-merge: the squash commit subject is the one that release-please reads, so PR titles must be Conventional too.

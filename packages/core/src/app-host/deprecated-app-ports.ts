@@ -9,6 +9,7 @@
 
 import type {
   Access,
+  AgentRunnerInterface,
   AppRuntimeRepositories,
   ChatStopHandler,
   GuardianProfileRepository,
@@ -163,7 +164,10 @@ const bondLevelInRun = (args: unknown[]) => {
  * action beside them: `people` (answered from `deps.appContext.access`),
  * `personMappingRepo` and `strangerPersonId` added, and the shared `policyEngine`, `approvalsRepo` and `agentRunner`
  * reporting their deprecated uses. Call it on the finished object, since
- * `strangerPersonId` reports from a getter.
+ * `strangerPersonId` reports from a getter. The getter is not enumerable, so
+ * copying, listing or serializing `deps` reports nothing, and a copy such as
+ * `{ ...deps }` has no `strangerPersonId`. No app in this repository read it
+ * from a copy at 0.11: the Inbox read it from `deps` itself.
  */
 export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
   appId: string,
@@ -180,7 +184,7 @@ export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
   if (!("strangerPersonId" in target)) {
     Object.defineProperty(target, "strangerPersonId", {
       configurable: true,
-      enumerable: true,
+      enumerable: false,
       get() {
         used("strangerPersonId");
         return STRANGER_PERSON_ID;
@@ -207,13 +211,27 @@ export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
     );
   }
   if (target.agentRunner && typeof target.agentRunner === "object") {
-    target.agentRunner = reportingMethods(
-      target.agentRunner,
-      { run: bondLevelInRun, fork: bondLevelInRun },
-      used,
+    target.agentRunner = deprecatedAgentRunnerFor(
+      target.agentRunner as AgentRunnerInterface,
+      appId,
+      report,
     );
   }
   return deps;
+}
+
+/** App `appId`'s agent runner, with `run` and `runForked` reporting a
+ *  thread context that still names the sender's bond level. */
+export function deprecatedAgentRunnerFor(
+  agentRunner: AgentRunnerInterface,
+  appId: string,
+  report: ReportDeprecatedUse = reportDeprecatedUse,
+): AgentRunnerInterface {
+  return reportingMethods(
+    agentRunner,
+    { run: bondLevelInRun, runForked: bondLevelInRun },
+    (symbol) => report(appId, symbol),
+  );
 }
 
 /** App `appId`'s repositories, with `guardianProfile` reporting each write. */
@@ -235,18 +253,20 @@ export function deprecatedRepositoriesFor(
   };
 }
 
-/** {@link deprecatedRepositoriesFor} on the services an app hook of app
- *  `appId` is built with. */
-export function deprecatedServicesFor(
-  services: RomeAppRuntimeServices | undefined,
-  appId: string,
-): RomeAppRuntimeServices | undefined {
-  return (
-    services && {
-      ...services,
-      repositories: deprecatedRepositoriesFor(services.repositories, appId),
-    }
-  );
+/**
+ * A `RomeAppRuntimeServices.forApp` over `services`: app `appId`'s
+ * repositories and agent runner, each reporting that app's deprecated uses.
+ * It reads `services` on each call, so a field set after it is built counts.
+ */
+export function deprecatedPortsFor(
+  services: Pick<RomeAppRuntimeServices, "repositories" | "agentRunner">,
+  report: ReportDeprecatedUse = reportDeprecatedUse,
+): NonNullable<RomeAppRuntimeServices["forApp"]> {
+  return (appId) => ({
+    repositories: deprecatedRepositoriesFor(services.repositories, appId, report),
+    agentRunner:
+      services.agentRunner && deprecatedAgentRunnerFor(services.agentRunner, appId, report),
+  });
 }
 
 /** App `appId`'s `chatStop`, reporting the `service` and `senderId` it

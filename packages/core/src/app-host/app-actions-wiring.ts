@@ -36,7 +36,7 @@ import type { AppConnectionsContextFactory } from "../apps/app-connections-port.
 import { AppActionSchemaCache } from "../apps/actions/app-action-schema-cache.js";
 import {
   deprecatedChatStopFor,
-  deprecatedRepositoriesFor,
+  deprecatedPortsFor,
   withDeprecatedActionDeps,
 } from "./deprecated-app-ports.js";
 
@@ -150,7 +150,8 @@ function createAppActionRuntimeDeps(
         db: services.db,
         actionEngine: services.actionEngine,
         routinesRepo: services.routinesRepo,
-        repositories: deprecatedRepositoriesFor(services.repositories, record.metadata.ownerId),
+        repositories: services.repositories,
+        forApp: deprecatedPortsFor(services),
         favorService: services.favorService,
         appConnections: services.appConnections,
       }),

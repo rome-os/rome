@@ -40,8 +40,11 @@ export async function loadAppHook(
     appId: artifact.ownerId,
     logger: createAppLogger(`app:${artifact.ownerId}:${artifact.publicName}`, artifact.ownerId),
   };
-  if (appRuntimeServices?.agentRunner) {
-    deps.agentRunner = appRuntimeServices.agentRunner;
+  const agentRunner = appRuntimeServices
+    ? (appRuntimeServices.forApp?.(artifact.ownerId) ?? appRuntimeServices).agentRunner
+    : undefined;
+  if (agentRunner) {
+    deps.agentRunner = agentRunner;
   }
   const app = appRuntimeServices ? catalog.get(artifact.ownerId) : null;
   if (appRuntimeServices && isResolvedApp(app)) {
