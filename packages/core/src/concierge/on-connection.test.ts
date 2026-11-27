@@ -60,7 +60,7 @@ describe("the Concierge on a connection", () => {
     );
     expect(CONNECTION_PROMPT).toContain("say it waits for approval on the dashboard");
     expect(CONNECTION_PROMPT).toContain(
-      "Any member may read any chat of this Rome and its tasks, including another member's Concierge chat",
+      "Any member may read any chat and task you can reach, including someone else's Concierge chat",
     );
     // Nothing says whose phone, devices or data they are, so nothing reads as a reason to refuse.
     expect(CONNECTION_PROMPT).not.toMatch(
