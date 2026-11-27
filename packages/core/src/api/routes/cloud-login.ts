@@ -19,6 +19,7 @@ import {
   guardianSeatCreated,
   logStepFailure,
   memberContext,
+  renameGuardianIn,
   seatAccounts,
 } from "../../access/application/members.js";
 import {
@@ -31,7 +32,7 @@ import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../people/guardian-profile/index.js";
+} from "../../instance/guardian-profile/index.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,
@@ -618,6 +619,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         db: deps.db,
         settingsRepo: deps.settingsRepo,
         reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+        renameGuardian: renameGuardianIn(deps.db),
       },
       { agentName: survey?.agentName ?? undefined },
     );

@@ -8,7 +8,7 @@ import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Domains laid out as `<domain>/<feature>`, each with its features. A domain adopting the layout joins this list. */
 export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
-  people: ["guardian-profile", "person-history", "phone-book"],
+  people: ["person-history", "phone-book"],
 };
 
 /**
@@ -16,12 +16,7 @@ export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
  * with why. Every other file outside the domain reaches a feature only from
  * the wiring or a test.
  */
-const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> = {
-  "people/guardian-profile": {
-    files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],
-    why: "onboarding, Rome Cloud sign-in and apps set the guardian's name and background",
-  },
-};
+const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> = {};
 
 /** The wiring builds the object graph and mounts the routes. It mirrors rules/wiring.ts, minus api/routes/. */
 const WIRING_FILES = ["index.ts", "chats-wiring.ts", "api/index.ts", "api/deps.ts"];

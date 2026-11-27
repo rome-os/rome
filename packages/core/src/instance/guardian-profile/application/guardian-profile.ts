@@ -1,20 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import type { DrizzleDb } from "../../../db/index.js";
-import { guardianAuth, persons } from "../../../db/schema.js";
+import { guardianAuth } from "../../../db/schema.js";
 import { pickRandomAgentPreset } from "../../../lib/agent-presets.js";
-import { generatePersonSlug } from "@rome/api-types/persons";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import { createLogger } from "../../../logger.js";
 import {
   ensureProfileMemoryInitialized,
   getGuardianProfileFile,
   getRelationshipDir,
-  GUARDIAN_PROFILE_PATH,
 } from "../../../profile-memory.js";
-import { applyGuardianTimezoneWrite } from "../../../instance/timezone.js";
+import { applyGuardianTimezoneWrite } from "../../timezone.js";
 
 const log = createLogger("guardian-profile");
 
@@ -35,22 +31,24 @@ export interface GuardianProfileDeps {
   settingsRepo: Pick<SettingsRepository, "get" | "set" | "delete">;
   /** Reschedule floating routines after a timezone change. */
   reactivateFloating: () => Promise<void>;
+  /** Give the guardian's person this name, where other parts read who the
+   *  guardian is. */
+  renameGuardian: (name: string) => Promise<void>;
 }
 
 export type GuardianProfileResult =
-  | { ok: true; guardianName: string; personId: string }
+  | { ok: true; guardianName: string }
   | { ok: false; error: "guardian_name_required" };
 
 /**
- * The single write path for the guardian profile: the guardian person row, the
- * profile memory notes, and the profile settings. Every setup path (the
+ * The single write path for the guardian profile: the guardian's name on their
+ * person, the profile memory notes, and the profile settings. Every setup path (the
  * onboarding page, the cloud sign-in callback, the profile settings) goes
  * through here so they write the same fields.
  *
  * A blank `guardianName` with nothing stored fails before any write, so a
  * placeholder such as the cloud account id never becomes the display name.
- * A rename keeps the existing guardian person row and its id. An invalid
- * timezone is skipped, not an error.
+ * An invalid timezone is skipped, not an error.
  */
 export async function applyGuardianProfile(
   input: GuardianProfileInput,
@@ -62,7 +60,7 @@ export async function applyGuardianProfile(
     return { ok: false, error: "guardian_name_required" };
   }
 
-  const personId = await upsertGuardianPerson(deps.db, guardianName);
+  await deps.renameGuardian(guardianName);
 
   const merged: GuardianProfileInput = {
     ...stored,
@@ -94,7 +92,7 @@ export async function applyGuardianProfile(
     }
   }
 
-  return { ok: true, guardianName, personId };
+  return { ok: true, guardianName };
 }
 
 /**
@@ -214,38 +212,6 @@ function definedFields(input: GuardianProfileInput): GuardianProfileInput {
       ([key, value]) => owned.has(key) && value !== undefined && value !== null,
     ),
   ) as GuardianProfileInput;
-}
-
-async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promise<string> {
-  const [guardian] = await db
-    .select({ id: persons.id, displayName: persons.displayName })
-    .from(persons)
-    .where(eq(persons.bondLevel, "guardian"))
-    .limit(1);
-  if (guardian) {
-    if (guardian.displayName !== guardianName) {
-      await db
-        .update(persons)
-        .set({ displayName: guardianName })
-        .where(eq(persons.id, guardian.id));
-    }
-    return guardian.id;
-  }
-
-  // The slug is the readable id, unless a contact already holds it.
-  const slug = generatePersonSlug(guardianName);
-  const [taken] = slug
-    ? await db.select({ id: persons.id }).from(persons).where(eq(persons.id, slug)).limit(1)
-    : [];
-  const id = slug && !taken ? slug : uuidv4();
-  await db.insert(persons).values({
-    id,
-    displayName: guardianName,
-    bondLevel: "guardian",
-    profilePath: GUARDIAN_PROFILE_PATH,
-    createdAt: new Date(),
-  });
-  return id;
 }
 
 /**

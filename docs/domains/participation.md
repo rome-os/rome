@@ -12,7 +12,7 @@ A speaker is one of Rome's accounts in a place, with the agent that speaks for i
 
 Whether what someone says or presses on a connection may start anything. [Access](access.md) answers it, once, for the account the connection names, when the connection hands it in. A message, a command and a press all pass the one place that asks, before any agent or app sees them.
 
-- The guardian and a member are let in by any account of theirs, as they are at that moment. The account of an agent in the guardian's own Rome Cloud account is one of the guardian's ([delegate link](people.md#delegate-link)).
+- The guardian and a member are let in by any account of theirs, as they are at that moment. The account of an agent in the guardian's own Rome Cloud account is one of the guardian's ([Access](access.md#steps-rome-takes-today)).
 - Someone nobody in Rome holds is **unknown**. Anyone else is refused: a person with no role, a member whose sign-in Rome cannot find, a sender whose address the connection could not verify, and everyone when no answer can be had.
 - The answer is asked before anything hears the message, and stays with it. The message of someone not let in is recorded in its chat and wakes no agent, and no app hears it. An agent woken later may read it.
 - What a message starts is the work of who said it, so a turn acts for the guardian or the member it was let in for, and nothing inside asks again.

@@ -213,6 +213,32 @@ export function guardianSeatCreatedWithinTx(
 }
 
 /**
+ * Gives the guardian's person `name` in Identity, the name other parts show
+ * for them. Does nothing while Rome has no guardian, or when `name` is blank.
+ */
+export async function guardianRenamed(ctx: MemberContext, name: string): Promise<void> {
+  guardianRenamedWithinTx(syncOf(ctx), name);
+}
+
+/** {@link guardianRenamed} over `db`, as the guardian's profile takes it. It
+ *  runs beside the `guardianName` setting that readers still use and the
+ *  backfill at the next startup repeats it, so a failure is logged and
+ *  resolves. */
+export function renameGuardianIn(db: DrizzleDb): (name: string) => Promise<void> {
+  return (name) =>
+    guardianRenamed(memberContext(db), name).catch(logStepFailure("guardian not renamed"));
+}
+
+/** {@link guardianRenamed}, synchronously. */
+export function guardianRenamedWithinTx({ identity, access }: SyncMemberContext, name: string) {
+  const trimmed = name.trim();
+  const guardian = access.members().find((m) => m.role === "guardian");
+  const person = guardian && identity.person(guardian.personId);
+  if (!trimmed || !person || person.name === trimmed) return;
+  identity.updatePerson(person.id, { name: trimmed });
+}
+
+/**
  * Moves the guardian's person from the accounts the seat named before a
  * rebind to the ones it names now: takes from the guardian each `previous`
  * account that is not `current`, with its mail account, then gives it `current` as

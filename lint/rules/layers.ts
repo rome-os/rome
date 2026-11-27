@@ -111,13 +111,6 @@ export const layerRules: ImportRule[] = [
  */
 export const listedCrossings: ListedCrossing[] = [
   {
-    rule: "drizzle-stays-in-infrastructure",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "drizzle-orm",
-    ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it goes through the People repository.",
-  },
-  {
     rule: "application-imports-inward",
     from: "people/phone-book/application/account-directory.ts",
     to: "chats/accounts/account-names.ts",
@@ -235,54 +228,5 @@ export const listedCrossings: ListedCrossing[] = [
     to: "chats/history/messages.ts",
     ticket: "ZHA-215",
     why: "Person history merges message pages into one timeline, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "db/index.ts",
-    ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "db/schema.ts",
-    ticket: "ZHA-212",
-    why: "The guardian profile renames and creates the guardian's person with its own queries, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "lib/agent-presets.ts",
-    ticket: "ZHA-218",
-    why: "The guardian profile picks a random agent preset at setup, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "db/repositories/settings.ts",
-    ticket: "ZHA-218",
-    why: "The guardian profile stores the guardian's choices in settings, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "logger.ts",
-    ticket: "ZHA-218",
-    why: "The guardian profile logs a setup step it skips or fails, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "profile-memory.ts",
-    ticket: "ZHA-218",
-    why: "The guardian profile writes the guardian's background into their notes, until it does that through a port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: "people/guardian-profile/application/guardian-profile.ts",
-    to: "instance/timezone.ts",
-    ticket: "ZHA-218",
-    why: "The guardian profile writes the guardian's time zone, until it does that through a port.",
   },
 ];

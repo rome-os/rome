@@ -1,4 +1,4 @@
-import type { AgentNameEvents } from "../people/guardian-profile/index.js";
+import type { AgentNameEvents } from "../app-host/agent-name-action.js";
 import type { ChatProviders } from "../webchat/chat-providers.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";

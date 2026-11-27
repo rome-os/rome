@@ -73,7 +73,7 @@ export interface DiscordAppDescriptorDeps {
   /** The public address of this instance's relay mailbox, or null while Rome
    *  Cloud has not given one. Read on each connect. */
   depositUrl: () => Promise<string | null>;
-  /** A Discord account's name as People knows it, for the card. */
+  /** The name of the person a Discord account belongs to, for the card. */
   nameOf: (userId: string) => Promise<string | undefined>;
 }
 

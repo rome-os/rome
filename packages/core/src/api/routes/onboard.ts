@@ -10,7 +10,7 @@ import {
 } from "../../access/auth.js";
 import { resolveAndRecordAccount } from "../../access/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../access/bootstrap-state.js";
-import { applySetupDefaults } from "../../people/guardian-profile/index.js";
+import { applySetupDefaults } from "../../instance/guardian-profile/index.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { isInstanceLinked } from "../../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
@@ -20,6 +20,7 @@ import {
   guardianSeatCreated,
   logStepFailure,
   memberContext,
+  renameGuardianIn,
   seatAccounts,
 } from "../../access/application/members.js";
 import type { ApiDeps } from "../deps.js";
@@ -110,6 +111,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
       db: deps.db,
       settingsRepo: deps.settingsRepo,
       reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+      renameGuardian: renameGuardianIn(deps.db),
     });
 
     issueGuardianSession(c, userId);
