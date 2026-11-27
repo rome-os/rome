@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { CallRefusal } from "../apps/actions/types.js";
 import { createTestDb } from "../test/db.js";
 import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import {
@@ -193,7 +192,7 @@ describe("core:request_connection_access", () => {
           operations: ["feishu.internal.raw"],
           reason: "Try internal op",
         }),
-      ).rejects.toBeInstanceOf(CallRefusal);
+      ).rejects.toThrow(/feishu\.internal\.raw/);
     } finally {
       f1.close();
     }
@@ -202,7 +201,7 @@ describe("core:request_connection_access", () => {
     try {
       await expect(
         f2.action.preview!({ appId: "lark", connectionKind: "feishu", reason: "Read" }),
-      ).rejects.toBeInstanceOf(CallRefusal);
+      ).rejects.toThrow(/not installed or is disabled/);
     } finally {
       f2.close();
     }

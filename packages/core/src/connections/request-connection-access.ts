@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PreviewPayload } from "@rome-os/app-runtime";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { CallRefusal, withApprovalPerCall, type Action } from "../apps/actions/types.js";
+import { withApprovalPerCall, type Action } from "../apps/actions/types.js";
 import type { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { appAccessibleOperations, describeAct } from "./app-connections.js";
 import type { ConnectionRegistry } from "./registry.js";
@@ -326,7 +326,7 @@ export function createRequestConnectionAccessAction(deps: RequestConnectionAcces
     inputSchema: z.toJSONSchema(requestConnectionAccessSchema),
     preview: async (args) => {
       const resolved = await resolveConnectionAccessRequest(deps, args);
-      if (!resolved.ok) throw new CallRefusal(resolved.error);
+      if (!resolved.ok) throw new Error(resolved.error);
       if (resolved.value.missingOperations.length === 0) return undefined;
       return buildPreview(resolved.value);
     },
