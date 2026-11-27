@@ -13,6 +13,7 @@
  * Every gap is either listed in `docs-skeleton-gaps.ts` or fails the check, and
  * a listed gap that is closed fails too, so the list only shrinks.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,13 +34,23 @@ function read(root: string, file: string): string | null {
   return existsSync(full) && statSync(full).isFile() ? readFileSync(full, "utf8") : null;
 }
 
-/** The text of a doc without its HTML comments. A comment that never closes runs to the end of the doc. */
+/**
+ * The text of a doc without its HTML comments. `<!--` inside inline code is
+ * text, not a comment. A comment that never closes runs to the end of the doc.
+ */
 function withoutComments(text: string): string {
   let shown = "";
   let at = 0;
   for (;;) {
     const open = text.indexOf("<!--", at);
     if (open === -1) return shown + text.slice(at);
+    const lineStart = text.lastIndexOf("\n", open) + 1;
+    const inCode = (text.slice(lineStart, open).split("`").length - 1) % 2 === 1;
+    if (inCode) {
+      shown += text.slice(at, open + 4);
+      at = open + 4;
+      continue;
+    }
     shown += text.slice(at, open);
     const close = text.indexOf("-->", open + 4);
     if (close === -1) return shown;
@@ -48,26 +59,24 @@ function withoutComments(text: string): string {
 }
 
 /**
- * The lines of a doc that a reader sees as prose. A comment is a note to the
- * writer, and a fenced code block is an example that may hold a label or a
- * link, so neither counts. A block closes on a fence of the same character
+ * The lines of a doc that a reader sees as prose. A fenced code block is an
+ * example that may hold a label or a link, and a comment is a note to the
+ * writer, so neither counts. A block closes on a fence of the same character
  * that is at least as long as the one that opened it.
  */
 function proseLines(text: string): string[] {
   let open: string | null = null;
-  return withoutComments(text)
-    .split("\n")
-    .filter((line) => {
-      const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-      if (open === null) {
-        if (fence) open = fence[1];
-        return !fence;
-      }
-      const closes =
-        fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
-      if (closes) open = null;
-      return false;
-    });
+  const outsideFences = text.split("\n").filter((line) => {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open === null) {
+      if (fence) open = fence[1];
+      return !fence;
+    }
+    const closes = fence?.[1][0] === open[0] && fence[1].length >= open.length && !fence[2].trim();
+    if (closes) open = null;
+    return false;
+  });
+  return withoutComments(outsideFences.join("\n")).split("\n");
 }
 
 /** Each field of a doc by its label. A field runs to the next field or heading. */
@@ -156,20 +165,35 @@ function partGaps(root: string): { gaps: string[]; parts: Set<string> } {
   return { gaps, parts };
 }
 
-/** The folders that hold Rome's code: each folder directly under a code root, except one that holds another root. */
+/**
+ * The folders that hold Rome's code: each folder directly under a code root
+ * that holds a file git does not ignore, except a folder that holds another
+ * root. A folder left behind with only ignored files, such as `node_modules`,
+ * is not one, so a local run agrees with CI.
+ */
 function codeFolders(root: string): string[] {
-  return CODE_ROOTS.flatMap((codeRoot) => {
-    const dir = path.join(root, codeRoot);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir, { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
-      )
-      .map((entry) => `${codeRoot}/${entry.name}`)
-      .filter((folder) => !CODE_ROOTS.some((other) => other.startsWith(`${folder}/`)))
-      .sort();
-  });
+  const listed = spawnSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...CODE_ROOTS],
+    { cwd: root, maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (listed.error || listed.status !== 0) {
+    throw new Error(`git ls-files failed: ${listed.error?.message ?? listed.stderr.toString()}`);
+  }
+  const files = listed.stdout.toString("utf8").split("\0");
+  const folders = new Set<string>();
+  for (const codeRoot of CODE_ROOTS) {
+    for (const file of files) {
+      const [name, ...rest] = file.startsWith(`${codeRoot}/`)
+        ? file.slice(codeRoot.length + 1).split("/")
+        : [];
+      if (name && rest.length > 0) folders.add(`${codeRoot}/${name}`);
+    }
+  }
+  // A set keeps the order of the roots, and git lists the files of a root by path.
+  return [...folders].filter(
+    (folder) => !CODE_ROOTS.some((other) => other.startsWith(`${folder}/`)),
+  );
 }
 
 function conceptGaps(root: string, parts: Set<string>): string[] {

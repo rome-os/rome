@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { docsSkeletonGaps, judge } from "./docs-skeleton.js";
 
@@ -50,6 +52,7 @@ async function writeSkeleton(): Promise<void> {
 
 beforeEach(async () => {
   repo = await mkdtemp(path.join(tmpdir(), "docs-skeleton-lint-"));
+  await promisify(execFile)("git", ["init", "-q"], { cwd: repo });
 });
 
 afterEach(async () => {
@@ -158,6 +161,19 @@ describe("docsSkeletonGaps", () => {
     ]);
   });
 
+  it("reads a comment opener in inline code or in a code block as text", async () => {
+    await writeSkeleton();
+    await write(
+      CONCEPT,
+      conceptDoc.replace(
+        "**Story.**",
+        "A doc never holds `<!--` in a line.\n\n```\n<!--\n```\n\n**Story.**",
+      ),
+    );
+
+    expect(docsSkeletonGaps(repo)).toEqual([]);
+  });
+
   it("does not count a field inside a tilde block, or inside a block that a shorter fence cannot close", async () => {
     await writeSkeleton();
     await write(
@@ -177,13 +193,15 @@ describe("docsSkeletonGaps", () => {
     expect(docsSkeletonGaps(repo)).toEqual([]);
   });
 
-  it("reports each folder of code that no part covers and that is not named under Not parts", async () => {
+  it("reports each folder of code that no part covers, except one named under Not parts or one git ignores", async () => {
     await writeSkeleton();
     await write("packages/core/src/chats/index.ts", "");
     await write("packages/core/src/test/kit.ts", "");
     await write("packages/web/src/main.ts", "");
     await write("packages/ui/src/button.ts", "");
     await write("packages/ui/AGENTS.md", partDoc);
+    await write(".gitignore", "node_modules\n");
+    await write("packages/old/node_modules/left/index.js", "");
     await write(
       "docs/target/parts.md",
       [
