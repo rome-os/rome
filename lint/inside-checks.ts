@@ -167,12 +167,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
     lines: ['return this.endTaskWork(taskId, by === "guardian" ? "stopped_by_owner" : null);'],
     why: "records who stopped a task",
   },
-  "packages/core/src/people/person-history/application/timeline-sources.ts": {
-    lines: [
-      'const guardian = (await deps.peopleRepo.all()).find((person) => person.bondLevel === "guardian");',
-    ],
-    why: "finds the guardian's person to label a timeline",
-  },
   "packages/core/src/connections/kinds/email/email.ts": {
     lines: [
       'if (raw.toLowerCase() === "guardian") return this.guardianEmail || raw;',
@@ -209,13 +203,6 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
       'presser?.kind === "visitor" || (presser?.kind === "guardian" && presser.via === "cookie");',
     ],
     why: "labels usage by whether a person pressed Run",
-  },
-  "packages/core/src/people/infrastructure/drizzle-people-repository.ts": {
-    lines: [
-      'if (protectedPersonReason(source) === "guardian") {',
-      'if (protectedPersonReason(row) === "guardian") return { deleted: false, reason: "guardian" };',
-    ],
-    why: "the guardian's person is never merged or deleted away",
   },
 };
 

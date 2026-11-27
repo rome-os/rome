@@ -43,21 +43,13 @@ describe("whoSaid", () => {
 });
 
 describe("whoIs", () => {
-  it("answers the guardian as the guardian bond level", () => {
-    expect(whoIs(ANA)).toEqual({
-      person: { id: "p-ana", name: "Ana Lopez", bondLevel: "guardian" },
-      delegate: false,
-      label: "Ana Lopez, guardian",
-    });
+  it("answers the guardian by name and role", () => {
+    expect(whoIs(ANA)).toBe("Ana Lopez, guardian");
   });
 
-  it("answers a member with the lowest bond level, and a nameless one by role", () => {
-    expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toEqual({
-      person: { id: "p-bo", name: "member", bondLevel: "other" },
-      delegate: false,
-      label: "member",
-    });
-    expect(whoIs(null)).toEqual({ person: null, delegate: false, label: "not linked" });
+  it("answers a member by role, and a nameless one by role alone", () => {
+    expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toBe("member");
+    expect(whoIs(null)).toBe("not linked");
   });
 });
 
@@ -129,56 +121,45 @@ describe("SenderLabels over memberOfAccount", () => {
     const labels = new SenderLabels((account) =>
       memberOfAccount(ctx, { platform: account.platform, accountId: account.id }),
     );
-    return { db: testDb.db, ctx, guardian, member, labels };
+    /** Who a message from `account` is labelled as, read now. */
+    const whoOf = async (account: Account) => (await labels.read([line(1, null, account)]))[0]?.who;
+    return { db: testDb.db, ctx, guardian, member, whoOf };
   }
 
   it("labels the guardian's account and an agent's account of the guardian's alike", async () => {
-    const { db, guardian, labels } = await rome();
+    const { db, whoOf } = await rome();
     expect(db.select().from(persons).all()).toEqual([]);
     expect(db.select().from(links).all()).toEqual([]);
 
-    const said = {
-      person: { id: guardian.id, name: "Ana Lopez", bondLevel: "guardian" },
-      delegate: false,
-      label: "Ana Lopez, guardian",
-    };
-    expect(await labels.sender({ platform: "slack", id: "T1/U1" })).toEqual(said);
-    expect(await labels.sender({ platform: "agent", id: "ana-bot" })).toEqual(said);
+    expect(await whoOf({ platform: "slack", id: "T1/U1" })).toBe("Ana Lopez, guardian");
+    expect(await whoOf({ platform: "agent", id: "ana-bot" })).toBe("Ana Lopez, guardian");
   });
 
   it("labels a member's account by their sign-in email when they have no name", async () => {
-    const { member, labels } = await rome();
+    const { whoOf } = await rome();
 
-    expect(await labels.sender({ platform: "slack", id: "T1/U2" })).toEqual({
-      person: { id: member.id, name: "bo@example.com", bondLevel: "other" },
-      delegate: false,
-      label: "bo@example.com, member",
-    });
+    expect(await whoOf({ platform: "slack", id: "T1/U2" })).toBe("bo@example.com, member");
   });
 
   it("labels an account added with an account code as its person's", async () => {
-    const { db, ctx, member, labels } = await rome();
+    const { db, ctx, member, whoOf } = await rome();
     const discord = { platform: "discord", accountId: "bo-discord" };
     const codes = accountCodeContext(db);
     const { code } = await accountCodeIssued(codes, member.id);
     await accountCodeRedeemed(codes, code, discord);
 
-    expect(await labels.sender({ platform: "discord", id: "bo-discord" })).toMatchObject({
-      person: { id: member.id, bondLevel: "other" },
-      label: "bo@example.com, member",
-    });
+    expect(await whoOf({ platform: "discord", id: "bo-discord" })).toBe("bo@example.com, member");
     expect((await ctx.identity.personOf(discord))?.id).toBe(member.id);
   });
 
   it("labels an account nobody holds, and one whose person has no role, as nobody", async () => {
-    const { ctx, labels } = await rome();
+    const { ctx, whoOf } = await rome();
     await ctx.identity.createPerson({
       name: "Cy",
       accounts: [{ platform: "slack", accountId: "T1/U3" }],
     });
 
-    const nobody = { person: null, delegate: false, label: "not linked" };
-    expect(await labels.sender({ platform: "slack", id: "T1/U9" })).toEqual(nobody);
-    expect(await labels.sender({ platform: "slack", id: "T1/U3" })).toEqual(nobody);
+    expect(await whoOf({ platform: "slack", id: "T1/U9" })).toBe("not linked");
+    expect(await whoOf({ platform: "slack", id: "T1/U3" })).toBe("not linked");
   });
 });

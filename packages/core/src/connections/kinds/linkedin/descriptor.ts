@@ -16,7 +16,7 @@
 // to "needs-fix".
 //
 // The inbox poller mirrors history without delivering inbound agent turns.
-// Replies use the same browser session and the shared People send.
+// Replies use the same browser session and the shared send to an account.
 
 import { z } from "zod";
 import type { ChatId } from "@rome-os/app-runtime";

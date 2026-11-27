@@ -100,8 +100,13 @@ export const sessionTurnCheckpoints = sqliteTable(
   (table) => [primaryKey({ columns: [table.sessionId, table.turnId] })],
 );
 
-/** The people the guardian knows (docs/concepts/people.md#person). Table name
- *  kept: renaming it needs a migration, and every reader already holds it. */
+/**
+ * The persons an earlier build kept, each with how close they were to the
+ * guardian. Nothing writes it. The startup step in
+ * `access/application/backfill-members.ts` reads which row is the guardian, to
+ * carry that person's `links` to the guardian in Identity. Kept, with `links`
+ * and `dismissed_accounts`, until a migration drops them.
+ */
 export const persons = sqliteTable("persons", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
@@ -113,11 +118,9 @@ export const persons = sqliteTable("persons", {
 });
 
 /**
- * Which person each account belongs to: a
- * [link](docs/domains/people.md#link). It names the account the way Chats
- * does, by the platform and the platform's own id for it
- * (docs/domains/chats.md#account), so one account is one row whichever of
- * Rome's accounts met it.
+ * Which `persons` row each account belonged to in an earlier build, by the
+ * platform and the platform's own id (docs/domains/chats.md#account). Nothing
+ * writes it. Startup reads the guardian's rows into Identity.
  */
 export const links = sqliteTable(
   "links",
@@ -128,26 +131,17 @@ export const links = sqliteTable(
       .notNull(),
     platform: text("platform").notNull(),
     accountId: text("account_id").notNull(),
-    /** A [delegate link](docs/domains/people.md#delegate-link): the account is
-     *  an agent's, acting for the person it is linked to. */
+    /** Set where the account was an agent's, acting for the person. */
     delegate: integer("delegate", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
-    // One account belongs to exactly one person. Held in the database rather
-    // than checked before each write: two concurrent placements of the same
-    // waiting sender both read "unlinked" and both insert, and the people listing
-    // would then show that account under two people at once.
+    // One account belonged to exactly one person.
     uniqueIndex("idx_links_account").on(table.platform, table.accountId),
   ],
 );
 
-/**
- * The accounts the guardian dismissed: decided to belong to nobody they track
- * (docs/domains/people.md#account). A dismissal is a decision about an
- * account, not a person, so it is keyed by the account the way a link is and
- * names no one. An account is linked or dismissed, never both: every write
- * that links an account deletes its dismissal in the same transaction.
- */
+/** The accounts the guardian, in an earlier build, decided belong to nobody.
+ *  Nothing reads or writes it. */
 export const dismissedAccounts = sqliteTable(
   "dismissed_accounts",
   {
@@ -158,9 +152,8 @@ export const dismissedAccounts = sqliteTable(
 );
 
 /**
- * The people Rome knows, one row each (docs/domains/identity.md#person).
- * Separate from People's `persons`: nothing here grades a relationship or
- * knows who is a member.
+ * The persons Rome knows, one row each (docs/domains/identity.md#person).
+ * Nothing here knows who is a member.
  */
 export const identities = sqliteTable("identities", {
   id: text("id").primaryKey(),

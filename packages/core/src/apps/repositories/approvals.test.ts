@@ -67,7 +67,7 @@ describe("ApprovalsRepository", () => {
 
   it("create() inserts approval with pending status", async () => {
     const id = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add new person: Alice",
       payload: { personId: "p-1", displayName: "Alice" },
@@ -77,7 +77,7 @@ describe("ApprovalsRepository", () => {
     const approval = await repo.findById(id);
     expect(approval).not.toBeNull();
     expect(approval!.status).toBe("pending");
-    expect(approval!.type).toBe("person_mapping");
+    expect(approval!.type).toBe("outgoing_message");
     expect(approval!.requestedBy).toBe("sentinel");
   });
 
@@ -85,7 +85,7 @@ describe("ApprovalsRepository", () => {
     const seen: Array<{ id: string; status: string; description: string; payload: unknown }> = [];
     const unsubscribe = repo.onCreated((approval) => seen.push(approval));
     const id = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add new person: Alice",
       payload: { channelContext: { threadId: "chat-1" } },
@@ -93,7 +93,7 @@ describe("ApprovalsRepository", () => {
     expect(seen).toEqual([
       {
         id,
-        type: "person_mapping",
+        type: "outgoing_message",
         status: "pending",
         description: "Add new person: Alice",
         payload: { channelContext: { threadId: "chat-1" } },
@@ -103,14 +103,14 @@ describe("ApprovalsRepository", () => {
     // The row is stored by the time the listener runs, its chat kept apart.
     expect((await repo.findById(id))?.threadId).toBe("chat-1");
     unsubscribe();
-    await repo.create({ type: "person_mapping", requestedBy: "x", description: "y" });
+    await repo.create({ type: "outgoing_message", requestedBy: "x", description: "y" });
     expect(seen).toHaveLength(1);
   });
 
   it("lists one chat's approvals by its thread, and none asked in no chat", async () => {
     const asked = (threadId?: string) =>
       repo.create({
-        type: "person_mapping",
+        type: "outgoing_message",
         requestedBy: "x",
         description: "y",
         ...(threadId ? { payload: { channelContext: { threadId } } } : {}),
@@ -140,7 +140,7 @@ describe("ApprovalsRepository", () => {
 
   it("findPending() returns only pending approvals", async () => {
     const id1 = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add Alice",
     });
@@ -159,7 +159,7 @@ describe("ApprovalsRepository", () => {
 
   it("resolvePending(approve) sets status=approved and resolvedAt/resolvedBy", async () => {
     const id = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add Bob",
     });
@@ -174,7 +174,7 @@ describe("ApprovalsRepository", () => {
 
   it("resolvePending(reject) sets status=rejected and resolvedAt/resolvedBy", async () => {
     const id = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add Charlie",
     });
@@ -194,7 +194,7 @@ describe("ApprovalsRepository", () => {
       channels: ["telegram", "slack"],
     };
     const id = await repo.create({
-      type: "person_mapping",
+      type: "outgoing_message",
       requestedBy: "sentinel",
       description: "Add Diana",
       payload,

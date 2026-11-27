@@ -3,7 +3,7 @@
 // `Accounts` (accounts.ts) is one channel's address book and `AccountNames`
 // (account-names.ts) is the display-name half of all of them. This is the fold
 // underneath both reads that have to show every account there is: which
-// addresses are one account. Vocabulary: docs/concepts/people.md.
+// addresses are one account. Vocabulary: docs/concepts/messaging.md#address.
 //
 // Nothing here reads a history. What an account last did is a `Messages` store's
 // answer (messages.ts), read by the callers that show it, so the contacts list

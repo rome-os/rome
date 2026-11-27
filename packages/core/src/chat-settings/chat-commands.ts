@@ -194,8 +194,6 @@ async function stop(deps: ChatCommandsDeps, command: Command): Promise<string> {
   if (!deps.chatStop) return "Stop is unavailable for this connection.";
   const result = await deps.chatStop({
     ref: { connectionId: deps.connectionId, chatId: command.where.chatId },
-    service: deps.service,
-    senderId: command.sender.accountId,
   });
   return chatStopReceipt(result.status);
 }

@@ -2,7 +2,7 @@
 
 ## Memory
 
-The memory system provides persistent, git-tracked knowledge that survives across agent [sessions](sessions.md). It holds general memory (preferences, key facts, privacy boundaries), the agent's identity, a daily journal, relationship profiles for [persons](people.md#person), and summaries of the guardian's [projects](#projects).
+The memory system provides persistent, git-tracked knowledge that survives across agent [sessions](sessions.md). It holds general memory (preferences, key facts, privacy boundaries), the agent's identity, a daily journal, relationship profiles for [persons](../domains/identity.md#person), and summaries of the guardian's [projects](#projects).
 
 **Contracts:**
 

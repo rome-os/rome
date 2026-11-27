@@ -20,13 +20,12 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "favors",
     "instance",
     "participation",
-    "people",
     "relay",
     "routines",
     "webchat",
   ],
   apps: ["access", "instance"],
-  chats: ["access", "agent", "apps", "connections", "identity", "participation", "people"],
+  chats: ["access", "agent", "apps", "connections", "identity", "participation"],
   concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
   connections: ["apps", "desktops", "instance"],
   desktops: ["access", "instance"],
@@ -34,7 +33,6 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   identity: [],
   instance: [],
   participation: [],
-  people: ["apps", "chats", "connections", "instance"],
   relay: ["apps", "instance"],
   routines: ["access", "agent", "apps"],
   webchat: ["access", "agent", "apps", "chats", "participation"],
@@ -42,11 +40,10 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
 
 /**
  * Contexts a context's tests may import beyond ALLOWED_IMPORTS. A connection's
- * test drives it end to end, through the Chats port that admits its messages
- * and the People repository its setup reads.
+ * test drives it end to end, through the Chats port that admits its messages.
  */
 const TEST_ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  connections: ["chats", "participation", "people"],
+  connections: ["chats", "participation"],
 };
 
 function isTest(path: string): boolean {
@@ -67,12 +64,8 @@ const REASONS: Record<string, string> = {
     "A favor request never names a chat or an account, so no file in favors/ imports chats/.",
   "favors-never-imports-connections":
     "A favor request never names a connection, so no file in favors/ imports connections/.",
-  "favors-never-imports-people":
-    "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
   "connections-never-imports-chats":
     "A connection only translates what the platform says into its own Message. Chats records it and decides who said it, so no file in connections/ imports chats/.",
-  "connections-never-imports-people":
-    "A connection names a sender by the platform's account id. People decides who that is, so no file in connections/ imports people/.",
   "connections-never-imports-participation":
     "A connection never decides whom a message addresses or whether Rome answers it. Participation does, for each of Rome's accounts, so no file in connections/ imports participation/.",
   "connections-never-imports-identity":
@@ -85,8 +78,6 @@ const REASONS: Record<string, string> = {
     "Desktops never names a chat or an account, so no file in desktops/ imports chats/.",
   "desktops-never-imports-connections":
     "Desktops never names a connection, so no file in desktops/ imports connections/.",
-  "desktops-never-imports-people":
-    "Desktops never names a person or an account, so no file in desktops/ imports people/.",
   "desktops-never-imports-apps":
     "Desktops answers whichever app asks and never knows which one it is, so no file in desktops/ imports apps/.",
   "desktops-never-imports-favors":
@@ -95,8 +86,6 @@ const REASONS: Record<string, string> = {
     "Desktops never knows what woke an agent or where it speaks, so no file in desktops/ imports participation/.",
   "identity-never-imports-access":
     "Identity says which person an account belongs to. Access's steps on members ask Identity who a person is, so no file in identity/ imports access/.",
-  "identity-never-imports-people":
-    "Identity says who a person is, whoever they are to the guardian. People grades that relationship, so no file in identity/ imports people/.",
   "instance-never-imports-agent":
     "Instance says which Rome this is and whether it is healthy, whoever runs on it, so no file in instance/ imports agent/.",
   "instance-never-imports-apps":
@@ -111,8 +100,6 @@ const REASONS: Record<string, string> = {
     "Favors asks Rome Cloud on the instance's behalf through Instance, never the other way round, so no file in instance/ imports favors/.",
   "instance-never-imports-participation":
     "Instance never decides when an agent takes part in a chat, so no file in instance/ imports participation/.",
-  "instance-never-imports-people":
-    "Instance never names a person, so no file in instance/ imports people/.",
   "instance-never-imports-access":
     "Access asks Instance which Rome Cloud this Rome belongs to, so no file in instance/ imports access/.",
 };
@@ -186,7 +173,7 @@ export const contextEntryRules: ImportRule[] = [
 ];
 
 /**
- * Files in connections/ that still import Chats, People or Participation,
+ * Files in connections/ that still import Chats or Participation,
  * with the files they import there, until ZHA-230 moves the work out.
  */
 const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; why: string }> = [

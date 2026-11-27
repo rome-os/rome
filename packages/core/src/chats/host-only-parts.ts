@@ -2,7 +2,7 @@
  * Message parts only the host may author. A routine card can create, pause and
  * delete routines, so only the webchat drain writes one (directly to the
  * repository). Every outbound path that stores sender-supplied parts —
- * `system:send_message`, `channels.send`, a People send — strips them, so a forged card
+ * `system:send_message`, `channels.send`, a send to an account — strips them, so a forged card
  * can't bind those controls to a routine or schedule an arbitrary action. A
  * connect card makes the dashboard open a link and call an API path it carries,
  * so only the Concierge's own tool may write one. A widget mounts an app's code

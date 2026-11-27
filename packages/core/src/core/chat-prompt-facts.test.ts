@@ -137,7 +137,7 @@ describe("chatPromptFacts earlier messages", () => {
       "x".repeat(10),
     ]);
     expect(earlier?.at(-1)?.text.length).toBe(501);
-    // Its sender is the platform's account, for People to name.
+    // Its sender is the platform's account, for Identity to name.
     expect(read.mock.calls[0][0][0]).toMatchObject({
       senderName: "Sam",
       account: { platform: "slack", id: "T_A/U_SAM" },

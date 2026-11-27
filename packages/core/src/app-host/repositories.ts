@@ -2,7 +2,6 @@ import type {
   AppRuntimeRepositories,
   AppSettingsRepository,
   ChatRepository,
-  GuardianProfileRepository,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
@@ -23,9 +22,6 @@ export interface CreateAppRuntimeRepositoriesDeps {
    *  `sendEmail`. Its `open` opens every channel session, so it has to put
    *  the session in Chats. The Chats switch passes it. */
   inChats?: { reads: AppChatReadsDeps; writes: AppChatWritesDeps };
-  /** Present in the main process only, where the profile write can reschedule
-   *  floating routines. An action worker gets no guardianProfile repository. */
-  guardianProfile?: GuardianProfileRepository;
 }
 
 export function createAppRuntimeRepositories(
@@ -47,7 +43,6 @@ export function createAppRuntimeRepositories(
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
     chats,
     conversations: chats,
-    ...(deps.guardianProfile ? { guardianProfile: deps.guardianProfile } : {}),
   };
 }
 

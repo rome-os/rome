@@ -23,7 +23,7 @@ import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import { createIdentity } from "../../identity/identity.js";
 import {
   createTestDb,
   grantReaching,
@@ -901,13 +901,13 @@ describe("DELETE /connections/:id", () => {
   });
 });
 
-describe("guardian links across a disconnect", () => {
-  // A link is a fact about who is who, not about Rome's access
-  // (docs/domains/people.md#link), so connecting again finds the guardian known.
+describe("the guardian's accounts across a disconnect", () => {
+  // Whose an account is says who is who, not what Rome can reach
+  // (docs/domains/identity.md#person), so connecting again finds the guardian known.
   it.each([
     "connection",
     "grant",
-  ])("keeps the guardian link when the %s teardown removes Rome's access", async (teardown) => {
+  ])("keeps the guardian's account when the %s teardown removes Rome's access", async (teardown) => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
@@ -916,11 +916,10 @@ describe("guardian links across a disconnect", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-    const peopleRepo = new DrizzlePeopleRepository(db);
-    await peopleRepo.create({
-      displayName: "Guardian",
-      bondLevel: "guardian",
-      links: [{ platform: "discord", id: "linked" }],
+    const identity = createIdentity(db);
+    const guardian = await identity.createPerson({
+      name: "Guardian",
+      accounts: [{ platform: "discord", accountId: "theirs" }],
     });
     const suffix = teardown === "connection" ? "" : "/grants/bot";
 
@@ -930,6 +929,8 @@ describe("guardian links across a disconnect", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await peopleRepo.byAccount({ platform: "discord", id: "linked" })).not.toBeNull();
+    expect((await identity.personOf({ platform: "discord", accountId: "theirs" }))?.id).toBe(
+      guardian.id,
+    );
   });
 });

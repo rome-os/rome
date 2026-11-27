@@ -205,7 +205,7 @@ describe("applyGuardianProfile", () => {
     expect(await settingsRepo.get("onboardingComplete")).toBeNull();
   });
 
-  it("names the guardian's person, and writes the settings and the profile notes but no People row", async () => {
+  it("names the guardian's person, and writes the settings and the profile notes but no `persons` row", async () => {
     const result = await applyGuardianProfile(
       { guardianName: " Alex Doe ", agentName: "Atlas", agentPurpose: "A creature of weight." },
       deps(),

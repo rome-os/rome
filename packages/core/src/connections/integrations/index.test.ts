@@ -428,16 +428,13 @@ describe("chat rule conformance", () => {
             policies: [],
             connectionKindOf: () => descriptor.connectionKind,
           });
-          const decision = gate(
-            {
-              connectionId: "c1",
-              chatId: "chat-1",
-              channel: descriptor.connectionKind,
-              place: "group",
-              ...c.message,
-            },
-            { person: { id: "guardian" } },
-          );
+          const decision = gate({
+            connectionId: "c1",
+            chatId: "chat-1",
+            channel: descriptor.connectionKind,
+            place: "group",
+            ...c.message,
+          });
           expect({ rule, value: c.value, message: c.message, decision }).toEqual({
             rule,
             value: c.value,

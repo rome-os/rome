@@ -139,8 +139,6 @@ export interface FeishuDescriptorDeps {
   chatSettings: ChatSettingsPort;
   /** Takes a press on a card, or an ask for one. Absent, nothing is answered. */
   pressed?: FeishuConfig["pressed"];
-  /** Read by nothing. test/team/instance.ts still passes it. */
-  peopleRepo?: unknown;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */

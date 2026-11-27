@@ -15,7 +15,7 @@ one report artifact.
 
 | Suite | Cases | Target | Main coverage |
 | --- | ---: | --- | --- |
-| mock | 38 | The strict MSW mock build with synthetic fixtures | Chat, apps, sessions, routines, files, people, settings, shell |
+| mock | 36 | The strict MSW mock build with synthetic fixtures | Chat, apps, sessions, routines, files, settings, shell |
 | backend | 2 | A real Rome container from the published image, with a real model | First-run onboarding, a project file read back by Rome |
 
 Every case starts with `app.open`, uses `aiAct` for user interaction, uses
@@ -55,8 +55,6 @@ Each suite's config selects its cases by path: `midscene.config.ts` reads
 | FILE-02 | Open a project file | mock |
 | FILE-03 | Handle a duplicate project-file rename | mock |
 | FILE-04 | Open a Memory file | mock |
-| PPL-01 | Open the people directory | mock |
-| PPL-02 | Switch a person's timeline to another account | mock |
 | SET-01 | Open the appearance-mode choices | mock |
 | SET-02 | Open connection details | mock |
 | SET-03 | Inspect channel activation settings | mock |

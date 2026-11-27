@@ -13,7 +13,6 @@ import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../apps/actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import type { PeopleRepository } from "../people/model/people-repository.js";
 import type { Person } from "../identity/identity.js";
 import type {
   Channels,
@@ -121,7 +120,6 @@ export interface ApiDeps {
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
-  peopleRepo: PeopleRepository;
   /** The guardian's person in Identity, as Access names them, or null while
    *  Rome has no guardian. */
   guardianPerson: () => Promise<Person | null>;

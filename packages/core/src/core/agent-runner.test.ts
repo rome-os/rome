@@ -7626,8 +7626,8 @@ describe("AgentRunner", () => {
         threadId: "queued-who",
         agentName: "main",
       });
-      // What People answers for the sender. The guardian links the account
-      // while the turn waits behind another.
+      // Who the sender is. The account becomes a person's while the turn
+      // waits behind another.
       let who = "not linked";
       const turnLinks: PromptFacts = {
         unseen: async () => [],

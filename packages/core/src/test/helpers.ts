@@ -1,5 +1,4 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
-import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
@@ -84,8 +83,6 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../people/model/people-repository.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -343,7 +340,7 @@ function talkerOver(transport: FakeTransport): TestTalker {
   };
 }
 
-/** An address book with nobody in it, for a rig that reads no People. */
+/** An address book with nobody in it. */
 export const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
   resolve: async () => null,
@@ -535,7 +532,6 @@ export async function buildTestDeps(
   }
 
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new DrizzlePeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -584,11 +580,6 @@ export async function buildTestDeps(
       adapters: chatsWired.adapters,
       speakers: chatsWired.speakers,
     },
-    guardianProfile: appGuardianProfile({
-      db,
-      settingsRepo,
-      reactivateFloating: () => routineEngine.reactivateFloating(),
-    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
@@ -793,7 +784,6 @@ export async function buildTestDeps(
     db,
     appConnectionAccessRepo,
     sessionRepository,
-    peopleRepo,
     guardianPerson: async () => (await guardianWithAccounts(memberContext(db)))?.person ?? null,
     whatsAppStoreRepo,
     whatsAppAccounts,
@@ -1316,46 +1306,6 @@ export async function createAppLifecycleHarness(
     restart,
     cleanup,
   } as AppLifecycleHarness;
-}
-
-/**
- * Make each named channel one of the guardian's own connected accounts: a
- * channel record that knows its account, a live grant reaching that account,
- * and a link from it to the guardian. People reads and sends only over the
- * guardian's own accounts, so a test of those reads names the channels here. `guardianId` is the seeded guardian's.
- */
-export function ownedByGuardian(
-  db: DrizzleDb,
-  peopleRepo: PeopleRepository,
-  guardianId: string,
-  owned: readonly { channel: string; platform: string }[],
-): void {
-  for (const { channel, platform } of owned) {
-    const account = { platform, id: `guardian-on-${channel}` };
-    db.insert(schema.channels)
-      .values({
-        id: channel,
-        connectionKind: channel,
-        platform,
-        platformAccountId: account.id,
-        connectionId: null,
-        createdAt: new Date(0),
-      })
-      .onConflictDoUpdate({
-        target: schema.channels.id,
-        set: { platformAccountId: account.id },
-      })
-      .run();
-    db.insert(schema.connectionGrants)
-      .values({
-        custody: `test:guardian:${channel}`,
-        state: "authorized",
-        platform,
-        accountId: account.id,
-      })
-      .run();
-    peopleRepo.linkStated(account, guardianId);
-  }
 }
 
 /** A grant, as a fix or a connect leaves it, that reaches the account

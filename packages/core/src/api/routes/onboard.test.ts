@@ -84,8 +84,8 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
   });
 });
 
-// A Rome set up here has no guardian in People, so connecting the guardian's
-// own account must make it theirs through Identity alone.
+// A Rome set up here has no row in the earlier `persons` table, so connecting
+// the guardian's own account must make it theirs through Identity alone.
 describe("an own-account connect on a Rome set up through onboarding", () => {
   /** A setup signed in as the account `id`, which is also the one it reaches. */
   const signedInAs =
@@ -96,7 +96,7 @@ describe("an own-account connect on a Rome set up through onboarding", () => {
       connectedBy: { id },
     });
 
-  it("lets a message from that account in as the guardian, and People stays empty", async () => {
+  it("lets a message from that account in as the guardian, writing no row to `persons`", async () => {
     const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => false };
     const app = new Hono().route("/api", onboardRoutes(deps));
     const created = await app.request("/api/onboard/create-account", {

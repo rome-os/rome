@@ -2,7 +2,6 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks } from "./concierge/open-tasks.js";
-import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import {
   startUsageLimitContinuation,
   usageLimitContinuationTakes,
@@ -130,8 +129,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
-import { appPersonMapping } from "./people/app-person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./chats/accounts/linkedin.js";
@@ -171,7 +168,6 @@ import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountEntry } from "./access/application/account-entry.js";
 import { backfillMembers } from "./access/application/backfill-members.js";
-import { peopleLinkChanged } from "./access/application/guardian-links.js";
 import { ownAccountConnected } from "./access/application/own-account-connect.js";
 import {
   guardianWithAccounts,
@@ -258,7 +254,6 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./app-host/agent-name-action.js";
-import { phoneBook } from "./people/phone-book/index.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
@@ -347,7 +342,6 @@ import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { entrance as entranceOf } from "./participation/entrance.js";
 import { unknownSenders } from "./participation/unknown-senders.js";
 import { answerUnknownSenders } from "./chats/connected-accounts/unknown-sender-answer.js";
-import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -386,7 +380,6 @@ import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
 } from "./capabilities/image-generation/index.js";
-import { STRANGER_PERSON_ID } from "./constants.js";
 import {
   buildRuntimeStatusEntries,
   createRuntimeStatusSubscriber,
@@ -531,12 +524,8 @@ async function main() {
   // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
   // The platform a channel's accounts live on, for a row that still names a
-  // channel. People keys its links by platform, and reads every such row
-  // through this.
+  // channel.
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
-  // Each link People writes for the guardian reaches Identity in the same
-  // transaction (docs/domains/access.md#steps-rome-takes-today).
-  const peopleRepo = new DrizzlePeopleRepository(db, (change) => peopleLinkChanged(db, change));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
@@ -623,8 +612,6 @@ async function main() {
   if (endedTurns.length > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns.length });
   }
-  // `routineEngine` is built further down; the closure only runs on a profile
-  // write, which happens after boot.
   const appSpeakers = {
     chats: chatsWired.chats,
     adapters: chatsWired.adapters,
@@ -652,11 +639,6 @@ async function main() {
         open: (input) => openChannelChat({ records: sessionRecords, speakers: appSpeakers }, input),
       },
     },
-    guardianProfile: appGuardianProfile({
-      db,
-      settingsRepo,
-      reactivateFloating: () => routineEngine.reactivateFloating(),
-    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
@@ -779,8 +761,7 @@ async function main() {
     settings: { get: (ref) => chatSettings.get(ref) },
     rulesOf: (connectionKind) => connectionRegistry.getDescriptor(connectionKind)?.chatRules,
   });
-  // Every sender is admitted: Rome never asks a sender to pair
-  // (docs/domains/people.md#stranger). Only an account code is taken out of
+  // Every sender is admitted: Rome never asks a sender to pair. Only an account code is taken out of
   // the chat, and every message said in a chat switched off but a stop said to
   // Rome.
   const admit: Admission = async (connectionId, connectionKind, message) => {
@@ -817,7 +798,7 @@ async function main() {
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
-  // The agents this Rome can message, one read for the people listing and for
+  // The agents this Rome can message, one read for their accounts and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
@@ -1049,8 +1030,6 @@ async function main() {
       publicOrigin: () => getConfiguredInstanceOrigin() ?? undefined,
     }),
   });
-
-  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
   // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
@@ -2032,10 +2011,8 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
     sentinelLogRepo,
     approvalsRepo,
-    policyEngine,
     wakeGateFor,
     routinesRepo,
     routineEngine,
@@ -2066,7 +2043,6 @@ async function main() {
     actionRegistry,
     emitAgentMessage,
     resolveProfilePath: resolveProfileMemoryPath,
-    strangerPersonId: STRANGER_PERSON_ID,
     // The `system:resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
@@ -2513,7 +2489,6 @@ async function main() {
     recording: inboundRecorder,
     events: chatsEvents,
     wakes: chatsWired.links,
-    labels: chatsWired.labels,
   });
   // A hook may also hear a channel itself. The host appends to this list too.
   const hookHeardChannels = enteredChannels(hookChannels);
@@ -2875,7 +2850,6 @@ async function main() {
       chatSettings,
       actionEngine,
       actionLoader,
-      peopleRepo,
       guardianPerson: async () => (await guardianWithAccounts(memberContext(db)))?.person ?? null,
       channels,
       platformOfChannel,
@@ -2964,7 +2938,7 @@ async function main() {
     };
     // Each feature serves both of its interfaces from one value: leaving one
     // out of this list leaves it out of Rome.
-    apiDeps.features = [phoneBook(apiDeps)];
+    apiDeps.features = [];
     for (const feature of apiDeps.features) {
       for (const action of feature.actions) actionRegistry.register(action);
     }

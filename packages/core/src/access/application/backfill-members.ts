@@ -1,5 +1,5 @@
-// The members' starting data: the persons and roles the guardian's seat,
-// People's links to the guardian and the invited emails an older build kept
+// The members' starting data: the persons and roles the guardian's seat, the
+// earlier `links` rows of the guardian and the invited emails an older build kept
 // in the `dashboardAccess` setting say (docs/domains/access.md). It runs at
 // every startup, after migrations, and a run on members that already match
 // changes nothing, so it also repairs a step that failed beside a seat write
@@ -55,12 +55,12 @@ const GUARDIAN_NAME_KEY = "guardianName";
  * build stored move there: every Rome Cloud id stored as an account is taken
  * away, from any person, and each `email` account of a member, which only an
  * invitation gave, becomes the same address on `rome-cloud-email`. The
- * guardian gets the seat's email as a sign-in's and every account People
- * links to its guardian person, an agent's own account included, and the
+ * guardian gets the seat's email as a sign-in's and every account an earlier
+ * build's `links` table gives its guardian row, an agent's own account included, and the
  * name the guardian's profile keeps in the `guardianName` setting. Every
  * sign-in of the guardian and the members gives its person the same address
  * as their mail account. It takes no email away: Identity cannot
- * tell an earlier seat's email from the same address carried from People, so
+ * tell an earlier seat's email from the same address carried from `links`, so
  * only the step beside a seat's rebind, which knows the old values, takes
  * them away. On the first run, unless a save of the invited emails came
  * first, each invited email becomes a member and a member off the list is
@@ -97,17 +97,17 @@ function backfillWithinTx(tx: DrizzleTx): void {
     .limit(1)
     .get();
   if (seat) {
-    const peopleGuardian = tx
+    const earlierGuardian = tx
       .select({ id: persons.id })
       .from(persons)
       .where(eq(persons.bondLevel, "guardian"))
       .limit(1)
       .get();
-    const linked = peopleGuardian
+    const linked = earlierGuardian
       ? tx
           .select({ platform: links.platform, accountId: links.accountId })
           .from(links)
-          .where(eq(links.personId, peopleGuardian.id))
+          .where(eq(links.personId, earlierGuardian.id))
           .orderBy(links.platform, links.accountId)
           .all()
           .filter((link) => link.platform !== ROME_CLOUD_ID_PLATFORM)

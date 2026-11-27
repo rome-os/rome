@@ -253,11 +253,6 @@ function makeSetupApp() {
     },
   });
   const registry = new ConnectionRegistry({ repository: ledger });
-  const peopleRepo = {
-    byAccount: async () => null,
-    isDismissed: async () => false,
-    byBondLevel: async () => [],
-  } as unknown as ApiDeps["peopleRepo"];
   registry.register(
     makeEmailDescriptor({
       provider: makeMailProvider(provisionMock),
@@ -275,7 +270,6 @@ function makeSetupApp() {
     setupManager,
     db: testDb,
     approvalsRepo: new ApprovalsRepository(testDb),
-    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return {

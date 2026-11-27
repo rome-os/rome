@@ -3,11 +3,11 @@
 // (docs/domains/chats.md#message).
 //
 // It lives on its own, not inside any one surface's contract, because more than
-// one surface reads it. A person's timeline pages messages, and a conversation
-// on a channel answers what it holds with the same shape — and a conversation
-// is not a person's timeline. The shape, the order it is read in, and the
-// cursor that names a position in it are stated once, here, so no reader has to
-// import a surface it has nothing to do with to say "message".
+// one surface reads it. An account's timeline pages messages, and a
+// conversation on a channel answers what it holds with the same shape. The
+// shape, the order it is read in, and the cursor that names a position in it
+// are stated once, here, so no reader has to import a surface it has nothing to
+// do with to say "message".
 
 /**
  * One message: a line, whichever surface produced it.
@@ -19,8 +19,8 @@
  * and with what attached ride along wherever the producer recorded them.
  *
  * `ref` must be unique across everything one `source` can put on one timeline,
- * not merely within the conversation it came from. A person holds several
- * accounts, and a producer whose ids are per-conversation (WhatsApp message ids
+ * not merely within the conversation it came from. A timeline can span several
+ * conversations, and a producer whose ids are per-conversation (WhatsApp message ids
  * are unique within a chat, not within an account) has to qualify them —
  * `<chat>:<messageId>` — before writing them here. {@link compareMessages}
  * settles ties on `(source, ref)`, so two messages sharing one within the same
@@ -75,11 +75,10 @@ export interface MessageAttachment {
  * acceptable where an order has to be total and has to mean the same thing on
  * both ends of a cursor.
  *
- * It lives here because the message order is the leaf both a store and a
- * person's timeline read through. The People contract re-exports it for the
- * account and display-name orders, which settle their own ties the same way, so
- * "how two strings order for a cursor" has one definition rather than two that
- * can drift.
+ * It lives here because the message order is the leaf every store and
+ * timeline reads through. The account orders settle their own ties the same
+ * way, so "how two strings order for a cursor" has one definition rather than
+ * two that can drift.
  */
 export function compareCodePoints(a: string, b: string): number {
   if (a === b) return 0;
@@ -237,10 +236,8 @@ export interface SentMessage {
 /**
  * A send the server would not attempt, and which of the reasons it was.
  *
- * Carries the same {@link AccountSendState} the person read carries, so the
- * refusal renders as the copy the composer would already have shown had the
- * read been fresh. A client that raced a disconnect therefore says the same
- * thing either way instead of surfacing a bare 409.
+ * Carries the {@link AccountSendState} that stopped it, so a client that raced
+ * a disconnect says why instead of surfacing a bare 409.
  *
  * `error` is a fallback line, not the copy: the dashboard keys off `send`.
  */

@@ -16,8 +16,6 @@ import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
-import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
-import { appPersonMapping } from "../people/app-person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../webchat/repository.js";
@@ -26,7 +24,6 @@ import { chatsWiring } from "../chats-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { PolicyEngine } from "../participation/wake-gate/policy/policy-engine.js";
 import { wakeGateLoader } from "../participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "../profile-memory.js";
 import {
@@ -58,7 +55,6 @@ import {
   createImageGenerationService,
 } from "../capabilities/image-generation/index.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
 import {
@@ -117,7 +113,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const peopleRepo = new DrizzlePeopleRepository(db);
   const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
     channelRecords.platformOfChannel(name),
   );
@@ -178,7 +173,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
   });
-  const policyEngine = new PolicyEngine(policiesRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
@@ -222,12 +216,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo: appPersonMapping(peopleRepo, (name) =>
-        channelRecords.platformOfChannel(name),
-      ),
       sentinelLogRepo,
       approvalsRepo,
-      policyEngine,
       wakeGateFor,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>
@@ -250,7 +240,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       actionRegistry: new ActionRegistryProxy(),
       emitAgentMessage,
       resolveProfilePath: resolveProfileMemoryPath,
-      strangerPersonId: STRANGER_PERSON_ID,
       // Same capability the main process wires, minus AiToolState (main-only):
       // the worker-side Codex provider reports available and relies on the
       // pinned image_gen agent's model resolution failing closed in main, whose

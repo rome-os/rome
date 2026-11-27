@@ -1,6 +1,5 @@
 import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
-  Access,
   Action,
   ActionConfig,
   ActionResult,
@@ -26,19 +25,16 @@ const log = createAppLogger("message-handler");
 // ---------------------------------------------------------------------------
 
 /** Core's wake gate, which the SDK does not describe yet. */
-export type WakeGate = (
-  message: {
-    connectionId: string;
-    chatId: string;
-    channel: string;
-    place: "direct" | "group";
-    threadName?: string;
-    addressing?: MessageAddressing;
-    fromBot?: boolean;
-    mentionsOthers?: boolean;
-  },
-  sender: { person: { id: string } | null },
-) => "wake" | "quiet" | "block";
+export type WakeGate = (message: {
+  connectionId: string;
+  chatId: string;
+  channel: string;
+  place: "direct" | "group";
+  threadName?: string;
+  addressing?: MessageAddressing;
+  fromBot?: boolean;
+  mentionsOthers?: boolean;
+}) => "wake" | "quiet" | "block";
 
 /** The wake gate for a chat, built from its current settings. */
 export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
@@ -48,7 +44,6 @@ export interface MessageHandlerDeps {
   wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
-  strangerPersonId: string;
 }
 
 type MessageHandlerRuntimeDeps = AppActionRuntimeDeps<MessageHandlerDeps>;
@@ -66,16 +61,6 @@ interface MessageContext {
   selectedProjectPath?: string;
   threadName?: string;
   threadType?: string;
-}
-
-/** Who said a message: the guardian or a member the account belongs to, or
- *  nobody with a role. */
-export interface MessageSender {
-  /** The person the account belongs to, for the wake gate. Null for an
-   *  account nobody holds, and where the host named no sender. */
-  person: { id: string } | null;
-  /** The person is the guardian. */
-  guardian: boolean;
 }
 
 type CollectedAgentResult =
@@ -146,7 +131,6 @@ function getRuntimeThreadPath(): string | undefined {
 export function buildMessageContext(
   ctx: MessageContext & {
     resolveProfilePath(filePath: string): string;
-    strangerPersonId: string;
   },
 ): string {
   const readContext = (filePath: string) => {
@@ -258,7 +242,6 @@ async function runTurnAndReply(
     string,
     string
   >;
-  const bondLevel = (args.bondLevel as string) ?? "other";
   const workingDir =
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
   const threadPath = getRuntimeThreadPath();
@@ -296,9 +279,6 @@ async function runTurnAndReply(
             : undefined,
         projectName:
           typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined,
-        // The guardian's turns are told apart by it: a direct message only the
-        // guardian reads, the approval card, the Concierge's reminders.
-        senderBondLevel: bondLevel,
       },
       contextSuffix,
       workingDir,
@@ -378,27 +358,19 @@ export function createMessageHandlerAction(
           return { status: "ok", data: { action: "silent" } };
         }
 
-        // Only the account names the sender. The display name is whatever the
-        // sender typed, so it never makes anyone the guardian.
-        const sender = await senderOf(deps, args);
-        const bondLevel = sender.guardian ? "guardian" : "other";
-
-        // The hook asked the wake gate already when the host named the
-        // message's sender; otherwise ask it here.
+        // The hook asked the wake gate already for a recorded message;
+        // otherwise ask it here.
         const wake =
           args.wake === "wake"
             ? args.wake
-            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
-                {
-                  connectionId,
-                  chatId: threadId,
-                  channel,
-                  place: threadType === "private" ? "direct" : "group",
-                  threadName,
-                  ...addressedBy(args),
-                },
-                { person: sender.person },
-              );
+            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))({
+                connectionId,
+                chatId: threadId,
+                channel,
+                place: threadType === "private" ? "direct" : "group",
+                threadName,
+                ...addressedBy(args),
+              });
 
         if (wake === "block") {
           log.info("message blocked by policy", { channel, channelUserId });
@@ -503,10 +475,9 @@ export function createMessageHandlerAction(
           threadName,
           threadType,
           resolveProfilePath: deps.resolveProfilePath,
-          strangerPersonId: deps.strangerPersonId,
         });
 
-        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo };
+        const enrichedArgs = { ...args, text: promptText, replyTo };
 
         if (recorded) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
@@ -573,36 +544,6 @@ export async function sendAnswer(
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
     await deps.appContext.runAction("system:send_message", unquoted);
-  }
-}
-
-/**
- * Who said the message: the sender the hook passed on from the host, or, from
- * a host that named none, the guardian when the account is one of theirs on
- * the message's platform, and nobody otherwise.
- */
-async function senderOf(
-  deps: MessageHandlerRuntimeDeps,
-  args: Record<string, unknown>,
-): Promise<MessageSender> {
-  const given = args.sender as MessageSender | undefined;
-  if (given && typeof given.guardian === "boolean") return given;
-  const nobody: MessageSender = { person: null, guardian: false };
-  const { platform, channelUserId } = args;
-  // A host older than the access port has none.
-  const access = deps.appContext.access as Access | undefined;
-  if (typeof platform !== "string" || !access) return nobody;
-  try {
-    const accounts = await access.guardianAccounts();
-    const guardian = accounts.some(
-      (account) => account.platform === platform && account.id === channelUserId,
-    );
-    return { person: null, guardian };
-  } catch (err) {
-    log.warn("could not ask for the guardian's accounts", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return nobody;
   }
 }
 

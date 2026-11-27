@@ -3,7 +3,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
-import { STRANGER_PERSON_ID } from "../constants.js";
+
+/** The id of the stranger sentinel the migration ranks last. */
+const STRANGER_PERSON_ID = "__STRANGER__";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
 const IDENTITY_INDEX = "idx_channel_mappings_identity";

@@ -124,8 +124,6 @@ describe("chat ids for apps written for SDK 0.7", () => {
 
     await legacyChatIdStop(stop)({
       ref: { connectionId: "conn-1", conversationId: CHAT } as unknown as ChatRef,
-      service: "telegram",
-      senderId: "u1",
     });
 
     expect(stop).toHaveBeenCalledWith(

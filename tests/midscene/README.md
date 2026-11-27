@@ -110,7 +110,7 @@ HEADLESS=false pnpm test
 | --- | --- |
 | `poc` | Accepted PoC storylines (AUTH-01, E2E-01/02/03) |
 | `story` | Cross-page end-to-end storylines (slower) |
-| `auth` / `chat` / `apps` / `sessions` / `routines` / `activity` / `people` / `files` / `settings` / `shell` / `global` | Functional topics |
+| `auth` / `chat` / `apps` / `sessions` / `routines` / `activity` / `files` / `settings` / `shell` / `global` | Functional topics |
 | `zh` | Chinese-UI (i18n) cases |
 | `mobile` | Narrow-viewport cases |
 

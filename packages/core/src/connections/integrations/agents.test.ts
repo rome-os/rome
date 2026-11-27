@@ -334,7 +334,7 @@ describe("agents channel", () => {
     expect(client.sent).toEqual([]);
   });
 
-  it("reaches a dot directly at its agent id, so People can write to it first", async () => {
+  it("reaches a dot directly at its agent id, so Rome can write to it first", async () => {
     const direct = createAgentsTalker(fakeClient([])).directMessaging;
     expect(await direct?.chatFor(ATLAS)).toBe(ATLAS);
     expect(await direct?.chatFor(" ")).toBeNull();

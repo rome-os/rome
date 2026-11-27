@@ -62,11 +62,6 @@ export interface MessageHandlerInput {
   fromBot?: boolean;
   /** It mentions only others, as the connection reported it. */
   mentionsOthers?: boolean;
-  /** Who said the message, as the host named it to the hook. Absent where
-   *  the host named nobody: the handler then knows the guardian by account. */
-  sender?: { person: { id: string } | null; guardian: boolean };
-  /** The platform of Rome's account the message arrived on, where known. */
-  platform?: string;
   /** Optional project working directory for this dedicated chat session. */
   workingDir?: string;
   /** The conversation's agent choice (`routing.agentName`), which the

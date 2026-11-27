@@ -19,13 +19,10 @@ import type {
   MessagesSaid,
   RunParams,
   SaidInboundEvent,
-  SaidSender,
 } from "@rome-os/app-runtime";
 import type { WakeGate } from "./actions/message-handler/index.js";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
-
-const STRANGER_PERSON_ID = "__STRANGER__";
 
 const actionConfig: ActionConfig = {
   name: "inbox:message_handler",
@@ -38,9 +35,6 @@ const actionConfig: ActionConfig = {
 };
 
 interface Setup {
-  /** Who the host says sent the message: the guardian, a member, or
-   *  `stranger` for an account nobody holds. */
-  sender: "guardian" | "member" | "stranger";
   /** What Core's wake gate answers, `wake` when absent. */
   wake?: ReturnType<WakeGate>;
   /** The hook's decision passed on with the message, so Inbox asks no gate. */
@@ -103,7 +97,6 @@ async function handle(setup: Setup) {
       },
     },
     resolveProfilePath: (filePath: string) => `/nonexistent/${filePath}`,
-    strangerPersonId: STRANGER_PERSON_ID,
   } as unknown as Parameters<typeof createAction>[1]);
 
   const outcome = await action.execute({
@@ -116,10 +109,6 @@ async function handle(setup: Setup) {
     displayName: "Alice",
     text: "Can you help?",
     messageId: "message-1",
-    sender:
-      setup.sender === "stranger"
-        ? { person: null, guardian: false }
-        : { person: { id: `person-${setup.sender}` }, guardian: setup.sender === "guardian" },
     ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
     ...(setup.decidedByHook ? { wake: setup.decidedByHook } : {}),
   });
@@ -144,14 +133,14 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     { wake: "quiet", outcome: "quiet" },
     { wake: "block", outcome: "blocked" },
   ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
-    const handled = await handle({ sender: "member", wake });
+    const handled = await handle({ wake });
     expect(wakeOf(handled)).toBe(outcome);
   });
 
   it("records a message that wakes the agent as said to it, and any other as said around it", async () => {
-    const woke = await handle({ sender: "guardian", wake: "wake" });
-    const quiet = await handle({ sender: "stranger", wake: "quiet" });
-    const blocked = await handle({ sender: "guardian", wake: "block" });
+    const woke = await handle({ wake: "wake" });
+    const quiet = await handle({ wake: "quiet" });
+    const blocked = await handle({ wake: "block" });
 
     expect(woke.stored.map((m) => m.role)).toEqual(["user"]);
     expect(quiet.stored.map((m) => m.role)).toEqual(["notification"]);
@@ -159,9 +148,9 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
   });
 
   it("on a message the host recorded, makes it the turn's prompt only when it wakes the agent", async () => {
-    const woke = await handle({ sender: "guardian", wake: "wake", recorded: true });
-    const quiet = await handle({ sender: "stranger", wake: "quiet", recorded: true });
-    const blocked = await handle({ sender: "guardian", wake: "block", recorded: true });
+    const woke = await handle({ wake: "wake", recorded: true });
+    const quiet = await handle({ wake: "quiet", recorded: true });
+    const blocked = await handle({ wake: "block", recorded: true });
 
     for (const handled of [woke, quiet, blocked]) {
       expect(handled.stored).toEqual([]);
@@ -171,11 +160,10 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
     expect(blocked.promoted).toEqual([]);
   });
 
-  it("asks the gate about the chat and the linked person, or no one for a stranger", async () => {
-    const linked = await handle({ sender: "member" });
-    const stranger = await handle({ sender: "stranger" });
+  it("asks the gate about the chat, whoever sent the message", async () => {
+    const handled = await handle({});
 
-    expect(linked.wakeRequests).toEqual([
+    expect(handled.wakeRequests).toEqual([
       [
         {
           connectionId: "connection:telegram",
@@ -184,14 +172,12 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
           place: "group",
           threadName: "Dev Chat",
         },
-        { person: { id: "person-member" } },
       ],
     ]);
-    expect(stranger.wakeRequests).toEqual([[expect.anything(), { person: null }]]);
   });
 
   it("takes the hook's decision without asking the gate again", async () => {
-    const woke = await handle({ sender: "guardian", wake: "block", decidedByHook: "wake" });
+    const woke = await handle({ wake: "block", decidedByHook: "wake" });
 
     expect(wakeOf(woke)).toBe("woke");
     expect(woke.wakeRequests).toEqual([]);
@@ -199,11 +185,8 @@ describe("wake: what Inbox does with the wake gate's answer", () => {
 });
 
 describe("send: the agent's reply", () => {
-  it.each([
-    "guardian",
-    "stranger",
-  ] as const)("goes out as it is, with no other agent, to %s", async (sender) => {
-    const handled = await handle({ sender, answers: [[result("Hi")]] });
+  it("goes out as it is, with no other agent", async () => {
+    const handled = await handle({ answers: [[result("Hi")]] });
 
     expect(handled.outcome.data).toEqual({ action: "sent", response: "Hi" });
     expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
@@ -211,7 +194,7 @@ describe("send: the agent's reply", () => {
   });
 
   it("sends nothing when the agent says nothing", async () => {
-    const handled = await handle({ sender: "member" });
+    const handled = await handle({});
 
     expect(handled.outcome.data).toMatchObject({ action: "no_response" });
     expect(handled.runs.map((run) => run.agentName)).toEqual(["main"]);
@@ -224,10 +207,9 @@ describe("wake: in the hook", () => {
     enabled: boolean;
     accountAgent: string | null | undefined;
     recorded: boolean;
-    /** The wake gate's answer, for a recorded message that names its sender. */
+    /** The wake gate's answer for a recorded message. Unset, it wakes
+     *  whatever an enabled chat hears, as core's gate does. */
     gate?: ReturnType<WakeGate>;
-    /** Who the host says sent it, where it names a sender. */
-    person?: SaidSender["person"];
   }) {
     const run = rs.fn(async () => ({ status: "ok" as const }));
     const typing = rs.fn(async () => null);
@@ -266,7 +248,7 @@ describe("wake: in the hook", () => {
       {
         accountAgentOf: () => options.accountAgent,
         ...(options.recorded ? { messagesSaid } : {}),
-        wakeGateFor: async () => () => options.gate ?? "wake",
+        wakeGateFor: async () => () => options.gate ?? (options.enabled ? "wake" : "quiet"),
       },
     );
     await hook.register();
@@ -290,19 +272,15 @@ describe("wake: in the hook", () => {
       await recordedHandler?.({
         ...event,
         recorded: { chatRecordId: "chat-1", messageId: "recorded-1" },
-        ...(options.gate
-          ? { sender: { person: options.person ?? null, delegate: false, label: "not linked" } }
-          : {}),
       });
     } else {
       await handler?.(event);
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const args = run.mock.calls[0]?.[1] as { wake?: string; sender?: unknown } | undefined;
+    const args = run.mock.calls[0]?.[1] as { wake?: string } | undefined;
     return {
       heard: run.mock.calls.length > 0 ? "handled" : "quiet",
       wake: args?.wake,
-      sender: args?.sender,
       typing: typing.mock.calls.length > 0,
     };
   }
@@ -319,24 +297,22 @@ describe("wake: in the hook", () => {
       { ...row, recorded: true },
       { ...row, recorded: false },
     ]),
-  )("with no sender named: recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
+  )("recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
     heard,
     agent: _label,
     ...options
   }) => {
     const result = await hear(options);
     expect(result.heard).toBe(heard);
-    expect(result.sender).toBeUndefined();
   });
 
-  // The hook asks the gate once People's answer comes with the message, so a
-  // message that wakes nobody shows no typing. Before
-  // the wake gate, the hook showed typing for it and Inbox dropped it after.
+  // The hook asks the gate for a recorded message, so a message that wakes
+  // nobody shows no typing.
   it.each([
     { gate: "wake", heard: "handled", wake: "wake", typing: true },
     { gate: "quiet", heard: "quiet", wake: undefined, typing: false },
     { gate: "block", heard: "quiet", wake: undefined, typing: false },
-  ] as const)("with the sender named, the gate says $gate → $heard", async ({
+  ] as const)("for a recorded message, the gate says $gate → $heard", async ({
     gate,
     heard,
     wake,
@@ -344,22 +320,5 @@ describe("wake: in the hook", () => {
   }) => {
     const result = await hear({ enabled: true, accountAgent: "main", recorded: true, gate });
     expect(result).toMatchObject({ heard, wake, typing });
-  });
-
-  it.each([
-    { bondLevel: "guardian", guardian: true },
-    { bondLevel: "other", guardian: false },
-  ] as const)("passes the sender the host names on to the handler, guardian $guardian", async ({
-    bondLevel,
-    guardian,
-  }) => {
-    const result = await hear({
-      enabled: true,
-      accountAgent: "main",
-      recorded: true,
-      gate: "wake",
-      person: { id: "person-1", name: "Ana", bondLevel },
-    });
-    expect(result.sender).toEqual({ person: { id: "person-1" }, guardian });
   });
 });

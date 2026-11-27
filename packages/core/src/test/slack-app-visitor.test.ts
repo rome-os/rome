@@ -1,9 +1,8 @@
-// Who the Slack app connection answers as the guardian: only the member who
-// signed in. Built in test/ because it crosses the connection and People. The setup names that member as the guardian's account
-// (`T_A/U_GUARDIAN`, pinned in integrations/slack-app.test.ts); here the
-// registry's mapping of it is applied as the setup manager applies it, and
-// direct messages from that member and from another are heard through the
-// connection and read as the inbox reads them.
+// Who the Slack app connection answers as the guardian: only the member whose
+// account is the guardian's. Built in test/ because it crosses the connection
+// and Access. The guardian's account (`T_A/U_GUARDIAN`) is theirs in Identity,
+// and direct messages from that member and from another are heard through the
+// connection and let in as the message path lets them in.
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -15,8 +14,10 @@ import {
   SLACK_SIGNATURE_HEADER,
 } from "../connections/kinds/slack-app/deposit.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
-import { appPersonMapping } from "../people/app-person-mapping.js";
-import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import { accountEntry } from "../access/application/account-entry.js";
+import { guardianSeatCreated, memberContext, seatAccounts } from "../access/application/members.js";
+import { guardianAuth } from "../db/schema.js";
+import { createIdentity } from "../identity/identity.js";
 import { createTestDb, type TestDb } from "./db.js";
 import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
@@ -59,13 +60,19 @@ describe("Slack app members who did not sign in (R12)", () => {
   afterEach(() => testDb.close());
 
   it("answers the member who signed in as the guardian, and another member as a visitor", async () => {
-    const people = new DrizzlePeopleRepository(testDb.db);
-    await people.createWithId("guardian", { displayName: "Ouou", bondLevel: "guardian" });
-    // The guardian's Slack account, linked to the guardian in People.
-    await people.linkStated(
-      { platform: platformOf(SLACK_APP_KIND), id: `${TEAM}/${INSTALLER}` },
-      "guardian",
-    );
+    const email = "owner@example.com";
+    testDb.db
+      .insert(guardianAuth)
+      .values({ id: "seat", userId: "u", passwordHash: "x", email, createdAt: new Date() })
+      .run();
+    const guardian = await guardianSeatCreated(memberContext(testDb.db), {
+      accounts: seatAccounts({ email }),
+    });
+    // The guardian's Slack account, theirs in Identity.
+    await createIdentity(testDb.db).addAccount(guardian.id, {
+      platform: platformOf(SLACK_APP_KIND),
+      accountId: `${TEAM}/${INSTALLER}`,
+    });
 
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
     const adapter = new SlackAppAdapter({
@@ -95,13 +102,13 @@ describe("Slack app members who did not sign in (R12)", () => {
     await onFrame!(dm(2, "D_MEMBER", "U_MEMBER"));
     expect(heard).toHaveLength(2);
 
-    // The inbox reads a sender's bond from People by the account it spoke
-    // from, and a sender no link names is "other".
-    const mapping = appPersonMapping(people);
-    const bondOf = async (message: ChannelMessage) =>
-      (await mapping.findByChannelUser(message.channel, message.senderId))?.bondLevel ?? "other";
-    const [guardian, member] = heard;
-    expect(await bondOf(guardian)).toBe("guardian");
-    expect(await bondOf(member)).toBe("other");
+    // Who a sender is comes from the account it spoke from, and an account
+    // nobody holds is nobody.
+    const enter = accountEntry({ db: testDb.db });
+    const entryOf = async (message: ChannelMessage) =>
+      (await enter({ platform: platformOf(message.channel), id: message.senderId })).kind;
+    const [fromGuardian, fromMember] = heard;
+    expect(await entryOf(fromGuardian)).toBe("entered");
+    expect(await entryOf(fromMember)).toBe("unknown");
   });
 });

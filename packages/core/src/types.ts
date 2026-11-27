@@ -3,11 +3,8 @@
 // re-exported from here exists in the SDK; types unique to core (sessions,
 // configs, policies, etc.) stay defined locally.
 
-import type { PolicyRule } from "@rome-os/app-runtime";
-
 export type {
   Attachment,
-  PolicyRule,
   OutgoingAttachment,
   OutgoingMessage,
   ApprovalCardStatus,
@@ -31,6 +28,13 @@ import type { McpServerConfig } from "./agent/index.js";
 
 export type { McpServerConfig };
 
+/** What a stored policy decides for a message it matches. Only `block` keeps
+ *  the agent quiet; the other actions are stored by earlier releases. */
+export interface PolicyRule {
+  action: "allow" | "block" | "require_approval" | "sentinel_review";
+  conditions?: Record<string, unknown>;
+}
+
 export interface Policy {
   id: string;
   scope: PolicyScope;
@@ -40,8 +44,6 @@ export interface Policy {
 
 export type PolicyScope =
   | { type: "channel"; channel: string }
-  | { type: "sender"; bondLevel: string }
-  | { type: "sender_specific"; personId: string }
   | { type: "thread"; threadName: string; threadType: string }
   | { type: "global" };
 

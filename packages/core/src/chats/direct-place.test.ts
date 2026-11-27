@@ -1,12 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
+import type { Account, ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import {
   type Channel,
   AccountNotConnected,
   type ChannelSend,
 } from "./connected-accounts/connected-account.js";
 import { send } from "./send.js";
-import { directPlace, readSendStates, resolveSendTarget } from "./direct-place.js";
+import { directPlace, resolveSendTarget, type SendDeps } from "./direct-place.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
   return { name, send, inbound: null, accounts: null, messages: null, directory: null };
@@ -17,8 +17,14 @@ function sending(talker: Pick<ChannelDirectMessaging, "chatFor"> | null): Channe
   return { send: async (chatId) => ({ chatId }), direct, activity: null };
 }
 
-describe("readSendStates", () => {
-  it("answers each state from the channel's send port", async () => {
+/** What a send to `account` that names no sender meets: "yes", or why not. */
+async function sendState(deps: SendDeps, account: Account) {
+  const resolution = await resolveSendTarget(deps, account);
+  return resolution.ok ? "yes" : resolution.send;
+}
+
+describe("resolveSendTarget", () => {
+  it("answers each refusal from the channel's send port", async () => {
     const channels = [
       channel(
         "unbacked",
@@ -38,10 +44,11 @@ describe("readSendStates", () => {
       channel("open", sending({ chatFor: async (id) => id as ChatId })),
     ];
 
-    const states = await readSendStates({ channels }, [
+    const accounts = [
       { platform: "unknown", id: "u" },
       ...channels.map((c) => ({ platform: c.name, id: "u" })),
-    ]);
+    ];
+    const states = await Promise.all(accounts.map((account) => sendState({ channels }, account)));
 
     expect(states).toEqual([
       "not-connected",
@@ -75,7 +82,6 @@ describe("a link on a platform Rome holds accounts on", () => {
       sendersOn: (platform: string) => (platform === "telegram" ? ["tg-opaque"] : null),
     };
 
-    expect(await readSendStates(deps, [link])).toEqual(["yes"]);
     const resolution = await resolveSendTarget(deps, link);
     expect(resolution.ok && resolution.target.channel).toBe("tg-opaque");
   });
@@ -103,8 +109,6 @@ describe("a link on a platform Rome holds accounts on", () => {
     expect(asked).toBe(0);
     const named = await resolveSendTarget(deps, link, "tg-second");
     expect(named.ok && named.target.channel).toBe("tg-second");
-    // Either account can reach the person, so the person reads as sendable.
-    expect(await readSendStates(deps, [link])).toEqual(["yes"]);
   });
 
   // The first account is disconnected while its channel looks the chat up,
@@ -153,6 +157,6 @@ describe("a link on a platform Rome holds accounts on", () => {
       sendersOn: (platform: string) => (platform === "telegram" ? [] : null),
     };
 
-    expect(await readSendStates(deps, [link])).toEqual(["not-connected"]);
+    expect(await sendState(deps, link)).toBe("not-connected");
   });
 });

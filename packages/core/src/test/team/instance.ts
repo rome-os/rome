@@ -24,7 +24,6 @@ import { seedBaseline } from "../seeds.js";
 import { guardianAuth, visitorProfiles } from "../../db/schema.js";
 import { backfillMembers } from "../../access/application/backfill-members.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
-import { phoneBook } from "../../people/phone-book/index.js";
 import { feishu } from "../../connections/kinds/feishu/index.js";
 import { discordApp, romeCloudDiscordApp } from "../../connections/kinds/discord-app/index.js";
 import { linkedin } from "../../connections/kinds/linkedin/index.js";
@@ -46,7 +45,7 @@ export const OUTSIDER = { accountId: "acct-outsider", email: "outsider@team-veri
 
 /** The daemon's mount lists in `src/index.ts`, by factory name. `mountDrift`
  *  compares them with what this file mounts. */
-export const MOUNTED_FEATURES = ["phoneBook"] as const;
+export const MOUNTED_FEATURES = [] as const;
 export const MOUNTED_KINDS = ["feishu", "discordApp", "linkedin"] as const;
 
 export interface InstanceOptions {
@@ -73,7 +72,6 @@ export interface SeededIds {
   conciergeChatIds: { guardian: string; teammate: string };
   routineId: string;
   approvalId: string;
-  personId: string;
   executionId: string;
   sentinelId: string;
 }
@@ -109,7 +107,6 @@ function connectionKinds(deps: TestDeps): KindMount[] {
   return [
     feishu({
       chatSettings: deps.chatSettings,
-      peopleRepo: deps.peopleRepo,
       listAgents: () => deps.agentLoader.list().map((agent) => agent.name),
       hasAgent: () => false,
     }),
@@ -124,10 +121,6 @@ function connectionKinds(deps: TestDeps): KindMount[] {
       maxIntervalMs: 120_000,
     }),
   ];
-}
-
-function features(deps: ApiDeps): Feature[] {
-  return [phoneBook(deps as Parameters<typeof phoneBook>[0])];
 }
 
 export async function createInstance(options: InstanceOptions): Promise<Instance> {
@@ -201,7 +194,7 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
   };
-  deps.features = [...features(deps), ...(options.extraFeatures ?? [])];
+  deps.features = [...(options.extraFeatures ?? [])];
 
   // A signed-in teammate has a profile: the sign-in callback keeps it, and Rome
   // reads a chat owner's email from it.
@@ -249,7 +242,6 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
     conciergeChatIds,
     routineId,
     approvalId: baseline.approvals.pendingId,
-    personId: baseline.persons.innerCircleId,
     executionId: baseline.actionExecutions.rootSuccessId,
     sentinelId: baseline.sentinelLog.unknownSenderId,
   };

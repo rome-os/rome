@@ -23,22 +23,16 @@ export interface WakeMessage {
   mentionsOthers?: boolean;
 }
 
-/** People's answer for the account that said the message. */
-export interface WakeSender {
-  /** The linked person, or null when the account is linked to nobody. */
-  person: { id: string } | null;
-}
-
 /**
  * - `wake`: the agent starts a turn on the message.
  * - `quiet`: the message stays in the record and wakes nobody.
- * - `block`: the same, because a policy blocks the sender or chat.
+ * - `block`: the same, because a policy blocks the chat.
  */
 export type WakeDecision = "wake" | "quiet" | "block";
 
-/** Pure: no model call, no send, no storage. The same message from the same
- *  sender always gets the same decision. */
-export type WakeGate = (message: WakeMessage, sender: WakeSender) => WakeDecision;
+/** Pure: no model call, no send, no storage. The same message always gets the
+ *  same decision: whoever sent it was let in before the gate is asked. */
+export type WakeGate = (message: WakeMessage) => WakeDecision;
 
 /** The wake gate for a chat, built from the settings current when it is
  *  asked for. Ask again for each message, so a changed setting applies. */

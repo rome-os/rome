@@ -76,8 +76,7 @@ export interface LinkedInParticipantBackfillResult {
  * A thread is what carries messages, and only a direct thread's messages are
  * unambiguously *this* person's history: a timeline entry names no sender, so
  * folding a ten-person thread into one member's history would put nine other
- * people's words in their mouth. People holds group chats out for the same
- * reason: a group cannot hold a bond.
+ * people's words in their mouth.
  *
  * Membership decides it, not LinkedIn's `is_group` flag alone: that flag is
  * null until a thread snapshot reports one, and a thread seeded from stored

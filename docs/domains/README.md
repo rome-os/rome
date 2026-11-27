@@ -1,6 +1,6 @@
 # docs/domains/
 
-The language Rome's code, docs and dashboard share for chats, accounts, agents, connections and people, written with the guardian as the domain expert. It follows Domain-Driven Design: the language is split into contexts, each answering one question, and inside a context every word has one meaning. The code carries the same words, so a reader of the code reads the model.
+The language Rome's code, docs and dashboard share for chats, accounts, agents, connections and persons, written with the guardian as the domain expert. It follows Domain-Driven Design: the language is split into contexts, each answering one question, and inside a context every word has one meaning. The code carries the same words, so a reader of the code reads the model.
 
 This folder is the source of truth for what these words mean. Other docs link here instead of defining them again, and [`concepts/`](../concepts/index.md) holds the terms that lie outside these contexts.
 
@@ -12,7 +12,6 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Connections** | What access Rome has to which external account | [connections.md](connections.md) |
 | **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
-| **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
 | **Identity** | Which person an account belongs to, and which accounts are a person's | [identity.md](identity.md) |
 | **Access** | Who has a role in this Rome, and which | [access.md](access.md) |
 
@@ -22,19 +21,16 @@ flowchart LR
     Chats["Chats<br/><i>who said what, where, and as whom</i>"]
     Participation["Participation<br/><i>what wakes an agent, what it reads, and where it speaks</i>"]
     Agents["Agents<br/><i>what an agent is and how it runs</i>"]
-    People["People<br/><i>who is behind an account, and how close they are</i>"]
     Connections -- carries messages --> Chats
     Participation -- reads --> Chats
     Participation -- speaks --> Chats
     Participation -- starts a turn --> Agents
     Chats -. which agent speaks through this account .-> Agents
-    People -- platform and account --> Chats
-    Participation -- who is this --> People
 ```
 
 Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
 
-People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
+Who is behind an account is [Identity](identity.md)'s answer, and which role that person has is [Access](access.md)'s. Neither decides what happens to a message. Connections and Identity do not depend on each other, so a disconnect takes no account from anyone.
 
 The code in `@rome/core` is split into more contexts than these, one folder each under `packages/core/src`. Each folder's `README.md` says what it owns, such as [`chats/README.md`](../../packages/core/src/chats/README.md).
 
@@ -59,14 +55,14 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
 - Feishu and Lark are two platforms.
 - The dashboard and docs say account, agent, connect and disconnect.
-- An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
-- Links, dismissals and who is this are keyed by platform, not by kind of connection.
-- Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
-- The People and Assistants pages send to a place, the direct message that reaches the account. Rome does not store a message's delivery yet: a message is recorded once the platform took it, and a refused one is not recorded.
+- An account belongs to at most one person, and Rome never decides whose it is from what a sender says about itself.
+- Whose an account is is keyed by platform, not by kind of connection.
+- Rome never asks a sender to pair. A sender whose account belongs to nobody is admitted.
+- The Assistants page sends to a place, the direct message that reaches the account. Rome does not store a message's delivery yet: a message is recorded once the platform took it, and a refused one is not recorded.
 - An assistant's chat is on one Assistants page that switches between assistants, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
-- A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
-- Disconnecting the last of Rome's accounts on a platform keeps every link on it.
+- An [account code](identity.md#account-code), sent in a direct message to one of Rome's accounts, adds the account it came from to the person the code belongs to.
+- Disconnecting the last of Rome's accounts on a platform takes no account from anyone.
 - The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and a follow's alerts and digest go to that chat.
 - The dashboard's chat list has two modes. Chat mode lists the common chats and fork chats under Projects, and Concierge mode lists the main chat, its topic chats and the task chats. The home page opens the main chat, and so does the rail's Chat entry in Concierge mode. Only a common chat or a fork chat can be forked.
 - The guardian and every dashboard admin each have their own Concierge, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
@@ -109,7 +105,6 @@ Diffs still owed to the model, each a change of its own:
 - A message to a chat other than the one the agent was woken in waits on an approval card.
 - A sign-in to Rome makes no connection and changes none. Today a sign-in with GitHub or Google still connects that provider when Rome holds no connection to it, and renews the grant of a connection that reaches the same account (#1667).
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
-- People's labels and docs say platform where they say channel.
 - The channel record goes.
 - Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.

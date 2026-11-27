@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
 import { contextEntryRules, contextRules } from "./rules/contexts.js";
-import { featureRules } from "./rules/features.js";
+import { featureRulesFor } from "./rules/features.js";
 import { kindRulesFor } from "./rules/kinds.js";
-import { layerRules } from "./rules/layers.js";
+import { layerRules, layerRulesFor } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 
 const root = mkdtempSync(join(tmpdir(), "import-rules-"));
@@ -90,41 +90,42 @@ write(
   ].join("\n"),
 );
 
-write("src/people/read.ts", 'import "./phone-book/index.js";\n');
-write("src/people/model/person.ts", "export type Person = { id: string };\n");
-write("src/people/infrastructure/repo.ts", 'import "drizzle-orm";\nimport "../model/person.js";\n');
-write("src/people/phone-book/index.ts", 'export * from "./edit.js";\n');
+write("src/shop/read.ts", 'import "./cart/index.js";\n');
+write("src/shop/model/item.ts", "export type Item = { id: string };\n");
+write("src/shop/infrastructure/repo.ts", 'import "drizzle-orm";\nimport "../model/item.js";\n');
+write("src/shop/cart/index.ts", 'export * from "./edit.js";\n');
 write(
-  "src/people/phone-book/edit.ts",
-  ['import "../read.js";', 'import "../person-history/index.js";', 'import "drizzle-orm";'].join(
-    "\n",
-  ),
+  "src/shop/cart/edit.ts",
+  ['import "../read.js";', 'import "../orders/index.js";', 'import "drizzle-orm";'].join("\n"),
 );
-write("src/people/phone-book/edit.test.ts", 'import "drizzle-orm";\n');
-write("src/people/phone-book/list.ts", 'import "hono";\n');
-write("src/people/phone-book/http/people.ts", 'import "hono";\nimport "../list.js";\n');
+write("src/shop/cart/edit.test.ts", 'import "drizzle-orm";\n');
+write("src/shop/cart/list.ts", 'import "hono";\n');
+write("src/shop/cart/http/items.ts", 'import "hono";\nimport "../list.js";\n');
 write(
-  "src/people/phone-book/application/edit.ts",
-  'import "../http/people.js";\nimport "../../model/person.js";\n',
+  "src/shop/cart/application/edit.ts",
+  'import "../http/items.js";\nimport "../../model/item.js";\n',
 );
 write(
-  "src/people/phone-book/actions/list.ts",
-  'import "../http/people.js";\nimport "../application/edit.js";\n',
+  "src/shop/cart/actions/list.ts",
+  'import "../http/items.js";\nimport "../application/edit.js";\n',
 );
-write("src/people/person-history/index.ts", "export const history = 1;\n");
-write("src/people/link-code/index.ts", "export const code = 1;\n");
+write("src/shop/orders/index.ts", "export const orders = 1;\n");
+write("src/identity/account-code/index.ts", "export const code = 1;\n");
 write(
-  "src/chats/people-probe.ts",
+  "src/chats/shop-probe.ts",
   [
-    'import "../people/read.js";',
-    'import "../people/phone-book/index.js";',
-    'import "../people/phone-book/edit.js";',
+    'import "../shop/read.js";',
+    'import "../shop/cart/index.js";',
+    'import "../shop/cart/edit.js";',
   ].join("\n"),
 );
-write("src/chats/people-probe.test.ts", 'import "../people/phone-book/index.js";\n');
-write("src/api/routes/people/phone-book.ts", 'import "../../../people/phone-book/index.js";\n');
-write("src/index.ts", 'import "./people/phone-book/index.js";\n');
-write("src/connections/kinds/discord/discord.ts", 'import "../../../people/link-code/index.js";\n');
+write("src/chats/shop-probe.test.ts", 'import "../shop/cart/index.js";\n');
+write("src/api/routes/shop/cart.ts", 'import "../../../shop/cart/index.js";\n');
+write("src/index.ts", 'import "./shop/cart/index.js";\n');
+write(
+  "src/connections/kinds/discord/discord.ts",
+  'import "../../../identity/account-code/index.js";\n',
+);
 
 write("src/connections/registry.ts", 'import "./kinds/slack/index.js";\n');
 write("src/connections/registry.test.ts", 'import "./kinds/slack/slack.js";\n');
@@ -199,7 +200,7 @@ describe("checkImports with the context rules", () => {
     expect(lines).toEqual([
       "agent/infrastructure/apps-probe.ts:1 → ../../apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
       "agent/infrastructure/apps-probe.ts:2 → @/apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
-      "connections/kinds/discord/discord.ts:1 → ../../../people/link-code/index.js (people/link-code/index.ts) [connections-never-imports-people]",
+      "connections/kinds/discord/discord.ts:1 → ../../../identity/account-code/index.js (identity/account-code/index.ts) [connections-never-imports-identity]",
     ]);
   });
 });
@@ -220,12 +221,12 @@ describe("checkImports with the rules around a connection's message", () => {
   put("src/chats/connected-accounts/connection-ports.ts", 'import "./channel-message.js";\n');
   put("src/chats/history/reader.ts", 'import "../connected-accounts/channel-message.js";\n');
   put("src/participation/addressing.ts", "export const addressing = 1;\n");
-  put("src/people/person.ts", "export const person = 1;\n");
+  put("src/identity/person.ts", "export const person = 1;\n");
   put(
     "src/connections/kinds/x/x.ts",
     [
       'import "../../../participation/addressing.js";',
-      'import "../../../people/person.js";',
+      'import "../../../identity/person.js";',
       'import "../../../chats/connected-accounts/channel-message.js";',
       "",
     ].join("\n"),
@@ -243,10 +244,10 @@ describe("checkImports with the rules around a connection's message", () => {
     .map(formatImportViolation)
     .map((line) => line.replace(/ \(.*\)/, "").replace(/: .*$/, ""));
 
-  it("rejects a connection that imports Participation, People or Chats, and lets its tests reach Chats", () => {
+  it("rejects a connection that imports Participation, Identity or Chats, and lets its tests reach Chats", () => {
     expect(lines.filter((line) => line.startsWith("connections/"))).toEqual([
       "connections/kinds/x/x.ts:1 → ../../../participation/addressing.js [connections-never-imports-participation]",
-      "connections/kinds/x/x.ts:2 → ../../../people/person.js [connections-never-imports-people]",
+      "connections/kinds/x/x.ts:2 → ../../../identity/person.js [connections-never-imports-identity]",
       "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [connections-never-imports-chats]",
       "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [channel-message-built-in-one-place]",
     ]);
@@ -312,32 +313,33 @@ describe("checkImports with the library rule", () => {
 
 describe("checkImports with the feature rules", () => {
   it("keeps features apart and off the root, and lets only the wiring, tests and listed files use them", () => {
+    const shop = { shop: ["cart", "orders"] };
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), [
-      ...featureRules,
-      ...layerRules,
+      ...featureRulesFor(shop),
+      ...layerRulesFor(shop),
     ])
       .map(formatImportViolation)
       .map((line) => line.replace(/: .*$/, ""))
       .filter(
         (line) =>
-          line.startsWith("people/") ||
+          line.startsWith("shop/") ||
           line.startsWith("chats/") ||
           line.startsWith("api/") ||
           line.startsWith("connections/") ||
           line.startsWith("index.ts"),
       );
     expect(lines).toEqual([
-      "api/routes/people/phone-book.ts:1 → ../../../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
-      "chats/people-probe.ts:2 → ../people/phone-book/index.js (people/phone-book/index.ts) [features-used-from-wiring]",
-      "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [features-used-from-wiring]",
-      "chats/people-probe.ts:3 → ../people/phone-book/edit.js (people/phone-book/edit.ts) [enter-through-index]",
-      "people/phone-book/actions/list.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [adapters-import-inward]",
-      "people/phone-book/application/edit.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [adapters-import-inward]",
-      "people/phone-book/application/edit.ts:1 → ../http/people.js (people/phone-book/http/people.ts) [application-imports-inward]",
-      "people/phone-book/edit.ts:2 → ../person-history/index.js (people/person-history/index.ts) [features-import-no-sibling]",
-      "people/phone-book/edit.ts:3 → drizzle-orm [drizzle-stays-in-infrastructure]",
-      "people/phone-book/list.ts:1 → hono [hono-stays-in-http]",
-      "people/read.ts:1 → ./phone-book/index.js (people/phone-book/index.ts) [domain-root-imports-no-feature]",
+      "api/routes/shop/cart.ts:1 → ../../../shop/cart/index.js (shop/cart/index.ts) [features-used-from-wiring]",
+      "chats/shop-probe.ts:2 → ../shop/cart/index.js (shop/cart/index.ts) [features-used-from-wiring]",
+      "chats/shop-probe.ts:3 → ../shop/cart/edit.js (shop/cart/edit.ts) [features-used-from-wiring]",
+      "chats/shop-probe.ts:3 → ../shop/cart/edit.js (shop/cart/edit.ts) [enter-through-index]",
+      "shop/cart/actions/list.ts:1 → ../http/items.js (shop/cart/http/items.ts) [adapters-import-inward]",
+      "shop/cart/application/edit.ts:1 → ../http/items.js (shop/cart/http/items.ts) [adapters-import-inward]",
+      "shop/cart/application/edit.ts:1 → ../http/items.js (shop/cart/http/items.ts) [application-imports-inward]",
+      "shop/cart/edit.ts:2 → ../orders/index.js (shop/orders/index.ts) [features-import-no-sibling]",
+      "shop/cart/edit.ts:3 → drizzle-orm [drizzle-stays-in-infrastructure]",
+      "shop/cart/list.ts:1 → hono [hono-stays-in-http]",
+      "shop/read.ts:1 → ./cart/index.js (shop/cart/index.ts) [domain-root-imports-no-feature]",
     ]);
   });
 });

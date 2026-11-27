@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { v4 as uuidv4 } from "uuid";
-import { guardianAuth, persons } from "../../db/schema.js";
+import { guardianAuth } from "../../db/schema.js";
 import {
   COOKIE_NAME,
   hashPassword,

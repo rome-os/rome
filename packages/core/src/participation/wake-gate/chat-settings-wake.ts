@@ -26,7 +26,7 @@ export interface ChatWakeSettings extends PolicyInput {
  * before the gate was asked (../entry.ts).
  */
 export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
-  return (message, sender) => {
+  return (message) => {
     if (!settings.enabled) return "quiet";
     if (message.fromBot) {
       if (settings.botMessages === "ignore") return "quiet";
@@ -35,7 +35,6 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
     if (addressingRuleKeepsQuiet(message, settings)) return "quiet";
     const policy = matchingPolicy(settings, {
       channel: message.channel,
-      sender: sender.person,
       threadName: message.threadName,
       threadType: message.place === "direct" ? "private" : "group",
     });

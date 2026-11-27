@@ -199,8 +199,6 @@ describe("ChannelMessageHook", () => {
 
     expect(harness.stop).toHaveBeenCalledWith({
       ref: { connectionId: TELEGRAM_ID, chatId: "chat-1" },
-      service: "telegram",
-      senderId: "user-1",
     });
     expect(harness.send).toHaveBeenCalledWith(TELEGRAM_ID, "chat-1", {
       text: "Stopped.",

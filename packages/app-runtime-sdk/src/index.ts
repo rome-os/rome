@@ -582,9 +582,6 @@ export interface LifecycleThreadContext {
   threadType?: "private" | "group";
   projectName?: string;
   projectPath?: string;
-  /** The bond level of the person whose message started the turn, as the
-   *  inbox passed it; absent for a turn no person started. */
-  senderBondLevel?: string;
 }
 
 export interface AgentTurnRef {
@@ -1243,11 +1240,6 @@ export interface ThreadContext {
     platform: string | null;
     path: string;
   };
-  /**
-   * Bond level of the message sender, when known. Lets turn-level logic tell the
-   * guardian apart from a member let in on the same `<channel>:<thread>`.
-   */
-  senderBondLevel?: string;
 }
 
 export interface RunParams {
@@ -1995,7 +1987,7 @@ export function isStopCommand(text: string): boolean {
   return text.trim().toLowerCase() === "/stop";
 }
 
-export type ChatStopStatus = "stop_requested" | "idle" | "forbidden";
+export type ChatStopStatus = "stop_requested" | "idle";
 
 export interface ChatStopResult {
   status: ChatStopStatus;
@@ -2006,8 +1998,6 @@ export function chatStopReceipt(status: ChatStopStatus): string {
   switch (status) {
     case "stop_requested":
       return "Stopped.";
-    case "forbidden":
-      return "You can only stop a response that you started.";
     case "idle":
       return "There is no active response to stop.";
   }
@@ -2015,8 +2005,6 @@ export function chatStopReceipt(status: ChatStopStatus): string {
 
 export interface ChatStopInput {
   ref: ChatRef;
-  service: string;
-  senderId: string;
 }
 
 /** Stops the active agent turn for a provider conversation. */
@@ -2226,34 +2214,6 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
-  /**
-   * Who said the message: the person the account it came from belongs to,
-   * the same answer Rome's own turns read. The name the message showed stays
-   * on {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
-   * host that predates it, and when the host could not be asked.
-   */
-  readonly sender?: SaidSender;
-}
-
-/** How close a person is to the guardian. */
-export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
-
-/** Who said a message: the person the account it came from belongs to. */
-export interface SaidSender {
-  /** The guardian or a member the account belongs to, or null when it
-   *  belongs to nobody with a role. `bondLevel` is `guardian` for the
-   *  guardian and `other` for a member. */
-  readonly person: {
-    readonly id: string;
-    readonly name: string;
-    readonly bondLevel: BondLevel;
-  } | null;
-  /** Always false. An agent's account in the guardian's Rome Cloud account
-   *  is the guardian's, and its message is named as the guardian's. */
-  readonly delegate: boolean;
-  /** The answer as Rome's own turns read it, such as "Ana Lopez, guardian",
-   *  "ana@example.com, member" or "not linked". */
-  readonly label: string;
 }
 
 /**
@@ -2546,23 +2506,6 @@ export interface AppRuntimeRepositories {
   chats?: ChatRepository;
   /** @deprecated Use `chats`, which is the same repository. */
   conversations?: ChatRepository;
-  guardianProfile?: GuardianProfileRepository;
-}
-
-/** The guardian and agent names an app may set on the guardian's behalf. */
-export interface GuardianProfileWrite {
-  guardianName?: string;
-  agentName?: string;
-}
-
-/**
- * Writes the guardian profile through the host's single setup path: the
- * guardian person row, the profile notes in memory, and the profile settings.
- * A field left out keeps its stored value. Rejects a blank guardian name when
- * none is stored yet.
- */
-export interface GuardianProfileRepository {
-  write(input: GuardianProfileWrite): Promise<{ ok: boolean }>;
 }
 
 export interface AppSettingsRepository {
@@ -3046,74 +2989,6 @@ export function upgradeWebSocket(
 }
 
 /**
- * One account linked to a person, as {@link PersonRecord.channelMappings}
- * spells it.
- *
- * A channel mapping is a link and `channelUserId` is the account's own address
- * (docs/domains/people.md#link). `channel` holds the account's platform, such
- * as `telegram` for an account Rome met through a Telegram bot or a signed-in
- * Telegram account alike. A host that predates platform-keyed links held the
- * kind of connection there instead.
- */
-export interface ChannelMappingRecord {
-  channel: string;
-  channelUserId: string;
-}
-
-export interface PersonRecord {
-  id: string;
-  displayName: string;
-  bondLevel: BondLevel;
-  /** Superseded by {@link PersonRecord.accounts}, which names the same links
-   *  by the {@link Account} value. Still filled. */
-  channelMappings: ChannelMappingRecord[];
-  /** Every account linked to the person, as the platform and the platform's
-   *  own id. Absent from a host that predates it. */
-  accounts?: Account[];
-  profilePath?: string | null;
-  approved?: boolean | null;
-  createdAt?: Date;
-  [key: string]: unknown;
-}
-
-/**
- * The people the host knows and the accounts linked to each. Named for the
- * table it once read; see {@link ChannelMappingRecord}. A `channel` passed in
- * names a channel, such as a message's `channel`, and the host reads it as the
- * platform that channel's accounts live on.
- */
-export interface PersonMappingRepository {
-  findByChannelUser(channel: string, channelUserId: string): Promise<PersonRecord | null>;
-  /** The person linked to `account`, or null when none is. Absent from a host
-   *  that predates it. */
-  findByAccount?(account: Account): Promise<PersonRecord | null>;
-  findByName(displayName: string): Promise<PersonRecord[]>;
-  findByNameFuzzy(displayName: string): Promise<PersonRecord | null>;
-  findByBondLevel(
-    bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other",
-  ): Promise<PersonRecord[]>;
-  create(data: {
-    displayName: string;
-    bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
-    profilePath?: string;
-    approved?: boolean;
-    channelMappings?: { channel: string; channelUserId: string }[];
-    /** Accounts to link, beside any `channelMappings`. Ignored by a host that
-     *  predates it. */
-    accounts?: Account[];
-  }): Promise<string>;
-  addChannelMapping(
-    personId: string,
-    channel: string,
-    channelUserId: string,
-    displayName?: string,
-  ): Promise<unknown>;
-  /** Link `account` to the person `personId`. Absent from a host that
-   *  predates it. */
-  addAccount?(personId: string, account: Account): Promise<unknown>;
-}
-
-/**
  * The approval lifecycles an app may create. Closed, because `type` selects how
  * the record is resolved rather than describing what it is about: the host
  * queues an execution only for `action_execution`, and only that kind offers a
@@ -3121,7 +2996,7 @@ export interface PersonMappingRepository {
  * resolve, so the host rejects it at write time. Describe the subject in
  * `payload` and `description` instead.
  */
-export const APPROVAL_TYPES = ["action_execution", "outgoing_message", "person_mapping"] as const;
+export const APPROVAL_TYPES = ["action_execution", "outgoing_message"] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "auto_approved"] as const;
@@ -3181,27 +3056,6 @@ export interface SentinelLogRepository {
 }
 
 export type SettingsRepository = AppSettingsRepository;
-
-/** @deprecated Rome decides whose message wakes an agent before an app hears
- *  it, so an app has no policy to evaluate. */
-export interface PolicyRule {
-  action: "allow" | "block" | "require_approval" | "sentinel_review";
-  conditions?: Record<string, unknown>;
-}
-
-/** @deprecated See {@link PolicyRule}. */
-export interface PolicyContext {
-  channel: string;
-  sender: { id: string; bondLevel: string } | null;
-  bondLevel: string;
-  threadName?: string;
-  threadType?: string;
-}
-
-/** @deprecated See {@link PolicyRule}. */
-export interface PolicyEngine {
-  evaluate(context: PolicyContext): Promise<PolicyRule>;
-}
 
 // Routine contracts. Action model: docs/concepts/actions.md.
 
