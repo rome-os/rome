@@ -30,5 +30,4 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/routines/engine.ts": 4,
   "packages/core/src/routines/update.ts": 1,
   "packages/core/src/webchat/task-input-actor.ts": 1,
-  "packages/rome-node-cli/src/audience.ts": 5,
 };
