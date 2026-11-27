@@ -32,7 +32,7 @@ import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../people/guardian-profile/index.js";
+} from "../../instance/guardian-profile/index.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,

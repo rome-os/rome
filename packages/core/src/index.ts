@@ -256,7 +256,7 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
-import { registerAgentNameAction } from "./people/guardian-profile/index.js";
+import { registerAgentNameAction } from "./instance/guardian-profile/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";

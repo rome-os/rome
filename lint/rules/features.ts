@@ -8,7 +8,7 @@ import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Domains laid out as `<domain>/<feature>`, each with its features. A domain adopting the layout joins this list. */
 export const FEATURED_DOMAINS: Record<string, readonly string[]> = {
-  people: ["guardian-profile", "person-history", "phone-book"],
+  people: ["person-history", "phone-book"],
 };
 
 /**
@@ -20,10 +20,6 @@ const FEATURE_USERS: Record<string, { files: readonly string[]; why: string }> =
   "people/person-history": {
     files: ["api/routes/assistants.ts"],
     why: "an assistant's page sends to an account through directPlace, and answers with person history's respondToSend so every send the dashboard reads has one shape",
-  },
-  "people/guardian-profile": {
-    files: ["api/routes/onboard.ts", "api/routes/cloud-login.ts", "app-host/guardian-profile.ts"],
-    why: "onboarding, Rome Cloud sign-in and apps set the guardian's name and background",
   },
 };
 

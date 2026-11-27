@@ -5,7 +5,7 @@ import type { GuardianProfileRepository } from "@rome-os/app-runtime";
 import { renameGuardianIn } from "../access/application/members.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import { applyGuardianProfile } from "../people/guardian-profile/index.js";
+import { applyGuardianProfile } from "../instance/guardian-profile/index.js";
 
 export function appGuardianProfile(deps: {
   db: DrizzleDb;

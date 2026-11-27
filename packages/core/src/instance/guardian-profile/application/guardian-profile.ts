@@ -10,7 +10,7 @@ import {
   getGuardianProfileFile,
   getRelationshipDir,
 } from "../../../profile-memory.js";
-import { applyGuardianTimezoneWrite } from "../../../instance/timezone.js";
+import { applyGuardianTimezoneWrite } from "../../timezone.js";
 
 const log = createLogger("guardian-profile");
 

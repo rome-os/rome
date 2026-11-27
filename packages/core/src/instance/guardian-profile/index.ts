@@ -1,5 +1,5 @@
 // The guardian's profile: their name and background, and the name they give
-// their agent. Vocabulary: docs/domains/people.md.
+// their agent. Vocabulary: docs/domains/access.md.
 
 export { type AgentNameEvents, registerAgentNameAction } from "./actions/agent-name.js";
 export {
