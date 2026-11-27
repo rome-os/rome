@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/node-core-darwin-arm64",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "macOS Apple Silicon native computer-use helper for @rome-os/node-core",
   "license": "MIT",
   "type": "module",
