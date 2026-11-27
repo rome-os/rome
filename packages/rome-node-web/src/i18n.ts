@@ -64,13 +64,15 @@ export const messages = {
       submitting: "Verifying…",
       empty: "Enter your password.",
       setupTitle: "Set up Web UI password",
-      setupDescription:
-        "Paste the one-time setup token printed to stderr / docker logs and choose a custom password for this Web UI.",
-      setupTokenLabel: "One-time setup token",
-      setupTokenPlaceholder: "Paste setup token from logs",
-      setupTokenEmpty: "Enter the one-time setup token from stderr or docker logs.",
+      setupDescription: "Create a password to secure this Web UI before the setup window closes.",
+      setupRemaining: (time: string) => `Time left to set a password: ${time}`,
       setupSubmit: "Set password & unlock",
       setupSubmitting: "Setting up…",
+      setupExpiredTitle: "First-run setup locked",
+      setupExpiredDescription: "The startup window for setting the first password has expired.",
+      setupRecovery:
+        "Restart the container or the rome-node web process to reopen setup. You can also set ROME_NODE_UI_PASSWORD and restart to sign in with that password.",
+      setupRefresh: "Check status again",
     },
     password: {
       title: "Web UI access",
@@ -263,13 +265,15 @@ export const messages = {
       submitting: "验证中…",
       empty: "请输入访问密码。",
       setupTitle: "初始化访问密码",
-      setupDescription:
-        "请输入启动日志（stderr / docker logs）中的一次性初始化令牌，并设置 Web UI 访问密码。",
-      setupTokenLabel: "一次性初始化令牌",
-      setupTokenPlaceholder: "粘贴日志中的初始化令牌",
-      setupTokenEmpty: "请输入启动日志中的一次性初始化令牌。",
+      setupDescription: "请在初始化窗口关闭前设置密码，保护 Web UI 的访问。",
+      setupRemaining: (time: string) => `设置密码的剩余时间：${time}`,
       setupSubmit: "设置密码并进入",
       setupSubmitting: "正在初始化…",
+      setupExpiredTitle: "首次初始化已锁定",
+      setupExpiredDescription: "启动时开放的首次密码设置窗口已过期。",
+      setupRecovery:
+        "重启容器或 rome-node web 进程可重新开放初始化。也可以设置 ROME_NODE_UI_PASSWORD 并重启，然后使用该密码登录。",
+      setupRefresh: "重新检查状态",
     },
     password: {
       title: "Web UI 访问保护",

@@ -23,6 +23,7 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
   }
@@ -38,23 +39,25 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
+    let code: string | undefined;
     try {
-      const parsed = (await res.json()) as { error?: string };
-      if (parsed.error) message = parsed.error;
+      const parsed = (await res.json()) as { error?: unknown; code?: unknown } | null;
+      if (typeof parsed?.error === "string" && parsed.error) message = parsed.error;
+      if (typeof parsed?.code === "string") code = parsed.code;
     } catch {
       // Fall back to status message.
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, code);
   }
   return (await res.json()) as T;
 }
 
 export const api = {
   session: () => requestJson<AuthSession>("/api/auth/session"),
-  setup: (input: { token: string; newPassword: string }) =>
+  setup: (newPassword: string) =>
     requestJson<AuthSession>("/api/auth/setup", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ newPassword }),
     }),
   login: (password: string) =>
     requestJson<AuthSession>("/api/auth/login", {
