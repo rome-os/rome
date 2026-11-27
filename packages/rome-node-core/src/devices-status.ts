@@ -2,6 +2,15 @@ import { isRecord } from "./actions.js";
 import type { ConnectionStatus } from "./client.js";
 import type { DeviceConnector } from "./connector.js";
 
+export interface DeviceCapability {
+  id: string;
+  prefix: string;
+  title: string;
+  state: "on" | "needs_permission" | "off";
+  personal: boolean;
+  actions: string[];
+}
+
 export interface DeviceStatus {
   id: string;
   name: string;
@@ -9,6 +18,10 @@ export interface DeviceStatus {
   status: "connected" | "not_connected" | "unknown";
   /** The device's audit log, from system.info. Absent for hosts that predate it. */
   audit?: { state: "ok" | "unavailable"; code?: string; message?: string };
+  /** Actions advertised by the device's system.info, when online and reported. */
+  actions?: string[];
+  /** Capabilities advertised by the device's system.info, such as computer_use (Window Control). */
+  capabilities?: DeviceCapability[];
 }
 
 export interface DevicesStatus {
@@ -19,6 +32,24 @@ export interface DevicesStatus {
 
 /** A snapshot at least this old starts a new check when it is read. */
 const REFRESH_AFTER_MS = 10_000;
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function parseDeviceCapability(value: unknown): DeviceCapability | undefined {
+  if (!isRecord(value)) return;
+  const { id, prefix, title, state, personal, actions } = value;
+  if (
+    typeof id === "string" &&
+    typeof prefix === "string" &&
+    typeof title === "string" &&
+    (state === "on" || state === "needs_permission" || state === "off") &&
+    typeof personal === "boolean" &&
+    isStringArray(actions)
+  )
+    return { id, prefix, title, state, personal, actions: [...actions] };
+}
 
 /** Shares read-only probes across clients. A timeout does not establish that a device is offline. */
 export class DeviceStatusReader {
@@ -88,20 +119,32 @@ export class DeviceStatusReader {
             : response.error.code === "target_unavailable"
               ? "not_connected"
               : "unknown";
-          const audit =
-            response.ok && isRecord(response.result) ? response.result.audit : undefined;
+          if (!response.ok || !isRecord(response.result)) continue;
+          const { audit, actions, capabilities: rawCapabilities } = response.result;
           if (isRecord(audit) && (audit.state === "ok" || audit.state === "unavailable"))
             device.audit = {
               state: audit.state,
               ...(typeof audit.code === "string" ? { code: audit.code } : {}),
               ...(typeof audit.message === "string" ? { message: audit.message } : {}),
             };
+          if (isStringArray(actions)) device.actions = [...actions];
+          if (Array.isArray(rawCapabilities)) {
+            const capabilities = rawCapabilities
+              .map(parseDeviceCapability)
+              .filter((capability) => capability !== undefined);
+            if (rawCapabilities.length === 0 || capabilities.length > 0)
+              device.capabilities = capabilities;
+          }
         }
       }),
     );
     const connection = this.connector.getStatus();
     if (connection !== "online") {
-      for (const device of devices) device.status = "unknown";
+      for (const device of devices) {
+        device.status = "unknown";
+        delete device.actions;
+        delete device.capabilities;
+      }
     }
     return { connection, checkedAt: new Date().toISOString(), devices };
   }

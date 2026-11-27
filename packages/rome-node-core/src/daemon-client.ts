@@ -43,7 +43,7 @@ export type {
   CopyRequest,
   CopySummary,
 } from "./daemon-protocol.js";
-export type { DevicesStatus, DeviceStatus } from "./devices-status.js";
+export type { DeviceCapability, DevicesStatus, DeviceStatus } from "./devices-status.js";
 export {
   openConsoleBridge,
   MAX_CONSOLE_MESSAGE_BYTES,

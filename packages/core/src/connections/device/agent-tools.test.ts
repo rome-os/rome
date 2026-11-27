@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { DevicesStatus } from "@rome/api-types/devices";
 import { approvalOf, callTool, GUARDIAN_TURN } from "../../apps/actions/agent-tool-contract.js";
-import type { DeviceManageResult, DeviceRunResult } from "../../desktops/node-devices.js";
+import {
+  createNodeDevicesService,
+  type DeviceManageResult,
+  type DeviceRunResult,
+} from "../../desktops/node-devices.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import {
   type DeviceToolDeps,
@@ -52,6 +56,15 @@ const healthCapability: DeviceReport["connections"][number] = {
   permission: "unknown",
   live: true,
   feeds: "apple_health",
+};
+
+const windowControl = {
+  id: "computer_use",
+  prefix: "computer",
+  title: "Window Control",
+  state: "on" as const,
+  personal: true,
+  actions: ["computer.windows"],
 };
 
 /** The status the Devices page reads: the phone and a computer, both online. */
@@ -137,6 +150,135 @@ describe("the Devices page's tools", () => {
       expect(runs).toEqual([]);
     });
 
+    it.each([
+      "on",
+      "needs_permission",
+      "off",
+    ] as const)("lists a CLI node's actions and Window Control through the device service (%s)", async (state) => {
+      const actions = ["system.info", "exec", "fs.list"];
+      const capabilities = [{ ...windowControl, state }];
+      const nodeDevices = createNodeDevicesService(() => ({
+        getDevicesStatus: async () => ({
+          connection: "online",
+          checkedAt: ONLINE.checkedAt,
+          devices: [{ ...ONLINE.devices[1], status: "connected", actions, capabilities }],
+        }),
+        listDevices: rs.fn(),
+        renameDevice: rs.fn(),
+        removeDevice: rs.fn(),
+        run: rs.fn(),
+        disconnect: rs.fn(),
+      }));
+      deps.devices = nodeDevices;
+      deps.connections = { list: () => [] };
+
+      expect(await callTool(readDevices, deps, {})).toEqual({
+        status: "ok",
+        data: {
+          checkedAt: ONLINE.checkedAt,
+          devices: [
+            {
+              deviceId: "dev-mac",
+              name: "MacBook",
+              platform: "darwin",
+              status: "connected",
+              capabilities: [],
+              nodeActions: actions,
+              nodeCapabilities: capabilities,
+            },
+          ],
+        },
+      });
+    });
+
+    it("preserves explicit empty node actions and capabilities through the device service", async () => {
+      const nodeDevices = createNodeDevicesService(() => ({
+        getDevicesStatus: async () => ({
+          connection: "online",
+          checkedAt: ONLINE.checkedAt,
+          devices: [{ ...ONLINE.devices[1], status: "connected", actions: [], capabilities: [] }],
+        }),
+        listDevices: rs.fn(),
+        renameDevice: rs.fn(),
+        removeDevice: rs.fn(),
+        run: rs.fn(),
+        disconnect: rs.fn(),
+      }));
+      deps.devices = nodeDevices;
+      deps.connections = { list: () => [] };
+
+      expect(await callTool(readDevices, deps, {})).toEqual({
+        status: "ok",
+        data: {
+          checkedAt: ONLINE.checkedAt,
+          devices: [
+            {
+              deviceId: "dev-mac",
+              name: "MacBook",
+              platform: "darwin",
+              status: "connected",
+              capabilities: [],
+              nodeActions: [],
+              nodeCapabilities: [],
+            },
+          ],
+        },
+      });
+    });
+
+    it.each([
+      { name: "omits redundant node fields on iOS", nodeFields: {} },
+      {
+        name: "keeps only extra node actions and capabilities on a hybrid device",
+        nodeFields: { nodeActions: ["exec"], nodeCapabilities: [windowControl] },
+      },
+    ])("$name", async ({ nodeFields }) => {
+      status = {
+        ...ONLINE,
+        devices: [
+          {
+            ...ONLINE.devices[0],
+            actions: ["system.info", "device.status", ...(nodeFields.nodeActions ?? [])],
+            capabilities: [
+              {
+                id: "device",
+                prefix: "device",
+                title: "Device",
+                state: "on",
+                personal: false,
+                actions: ["device.status"],
+              },
+              ...(nodeFields.nodeCapabilities ?? []),
+            ],
+          },
+        ],
+      };
+
+      expect(await callTool(readDevices, deps, {})).toStrictEqual({
+        status: "ok",
+        data: {
+          checkedAt: ONLINE.checkedAt,
+          devices: [
+            {
+              deviceId: "dev-phone",
+              name: "Phone",
+              platform: "ios",
+              status: "connected",
+              capabilities: [
+                expect.objectContaining({ kind: "apple_health" }),
+                expect.objectContaining({
+                  kind: "device",
+                  state: "working",
+                  operations: expect.arrayContaining([STATUS_OPERATION]),
+                }),
+              ],
+              ...nodeFields,
+            },
+          ],
+        },
+      });
+    });
+
     it("marks the device the guardian is asking from", async () => {
       const turn = {
         ...GUARDIAN_TURN,
@@ -155,7 +297,7 @@ describe("the Devices page's tools", () => {
 
       const result = await callTool(readDevices, deps, {});
 
-      const data = (result as { data: Record<string, unknown> }).data;
+      const data = (result as { data: { deviceService: unknown; devices: unknown[] } }).data;
       expect(data.deviceService).toEqual({
         state: "not_running",
         note: expect.stringContaining("Settings › Devices"),
@@ -164,6 +306,8 @@ describe("the Devices page's tools", () => {
       expect(data.devices).toEqual([
         expect.objectContaining({ deviceId: "dev-phone", status: "unknown" }),
       ]);
+      expect(data.devices[0]).not.toHaveProperty("nodeActions");
+      expect(data.devices[0]).not.toHaveProperty("nodeCapabilities");
     });
   });
 
