@@ -7,7 +7,6 @@
 // route's choice (live-route.ts). Concept: docs/domains/connections.md#device-connection.
 
 import { runningTurn } from "../../apps/actions/agent-tool.js";
-import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
 import type { ToolTurn } from "../../apps/actions/agent-tool.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
@@ -164,7 +163,7 @@ export type DeviceRunOutcome =
 /**
  * Runs one operation on one of the guardian's devices for `turn`, as
  * `core:device_run` and `system:run_on_device` both do: the live route picks
- * the device, then the rule for personal data.
+ * the device.
  */
 export async function runOnDevice(
   deps: Pick<DeviceActionDeps, "connections" | "run"> & { now?: () => number },
@@ -200,14 +199,6 @@ async function runOperation(
     };
   }
   const chosen = route.connection;
-  // Today's rule, as for the personal-data actions and the rome-node CLI.
-  if (chosen.personal && audience !== "private") {
-    log.info("personal device operation refused outside a private turn", {
-      capability: chosen.capability,
-      operation,
-    });
-    return { error: PERSONAL_DATA_PRIVATE_ONLY };
-  }
   const access = chosen.operations.find((o) => o.name === operation)?.access;
   if (access !== "read" && access !== "write") {
     return {

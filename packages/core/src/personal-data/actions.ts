@@ -1,6 +1,5 @@
 // `core:personal_data_catalog` and `core:personal_data_query`: how an Agent reads user
-// data. Both are personal-data actions, so they run only in a private turn
-// (docs/domains/participation.md#audience). Contract: docs/personal-data.md#agent-access.
+// data. Contract: docs/personal-data.md#agent-access.
 
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
@@ -55,8 +54,7 @@ export function registerPersonalDataActions(
         "or their phone's calendar: " +
         "each source, the device it comes from, when it last synced, each type with its unit, " +
         "range and how far it is synced, and the device connection that reads the source live, " +
-        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${CURRENT_ONLY} ` +
-        "Runs only in a private chat with the guardian.",
+        `with its state, or not_connected. Call it before ${PERSONAL_DATA_QUERY_ACTION}. ${CURRENT_ONLY}`,
       complexity: "simple",
       speed: "fast",
       reliability: "high",
@@ -100,8 +98,7 @@ export function registerPersonalDataActions(
         "in the window, or overlapping it, comes with its content. Answers such as whether the " +
         "guardian is free come from these entries even while their device is away. The reply's " +
         `freshness says how far each type is synced. ${CONNECTION} ` +
-        `${CURRENT_ONLY} ` +
-        "Runs only in a private chat with the guardian.",
+        `${CURRENT_ONLY}`,
       complexity: "simple",
       speed: "fast",
       reliability: "high",

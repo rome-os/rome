@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../../apps/actions/engine.js";
-import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../../test/db.js";
@@ -260,7 +259,7 @@ describe("device actions", () => {
     expect(error).toContain("Nothing was changed.");
   });
 
-  it("refuses a personal capability in a shared turn and calls no device", async () => {
+  it("runs an operation of a personal capability in any turn", async () => {
     devices.report(report("dev-1", "iPhone", [healthConnection(true)]), NOW);
     for (const audience of ["shared", undefined] as const) {
       const result = await run(
@@ -268,18 +267,9 @@ describe("device actions", () => {
         { operation: "health.stats", args: { type: "stepCount" } },
         { audience },
       );
-      expect(result).toEqual({ status: "error", error: PERSONAL_DATA_PRIVATE_ONLY });
+      expect(result).toMatchObject({ status: "ok" });
     }
-    expect(calls).toEqual([]);
-    const result = await run(
-      DEVICE_RUN_ACTION,
-      { operation: "health.stats", args: { type: "stepCount" } },
-      { audience: "private" },
-    );
-    expect(result).toMatchObject({ status: "ok" });
-    expect(calls).toEqual([
-      { deviceId: "dev-1", action: "health.stats", args: { type: "stepCount" } },
-    ]);
+    expect(calls).toHaveLength(2);
   });
 
   it("answers live_off with the connect card's step for an off connection, and calls no device", async () => {

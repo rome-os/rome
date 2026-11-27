@@ -870,15 +870,6 @@ for action arguments, examples, and result handling. Each command also accepts
 that listed devices are online. `device describe <id>` invokes `system.info`,
 which returns the computer name, platform, and supported actions.
 
-While `ROME_TURN_AUDIENCE` is set to anything but `private`, `device run` refuses
-an action of a personal capability with `personal_data_private_only`. Health is
-personal on every device, and so is any capability whose `system.info` entry in
-`capabilities` says `personal: true`. A computer's own `system.info`, `exec` and
-`fs.list` run without the lookup. Rome sets the variable on every agent session
-from the turn's [audience](domains/participation.md#audience), and a person
-running the CLI leaves it unset. It is a guardrail against a model mistake, not a
-security boundary ([personal-data.md](personal-data.md#what-is-and-is-not-enforced)).
-
 `device rename <id> <name>` and `device remove <id>` change the account's device
 list in Cloud. They do not contact the device, so it can be offline. Cloud trims
 names to 1–80 characters without control characters. Names need not be unique.
@@ -1090,8 +1081,7 @@ Turn on **Rome Computer Use** in each pane. If the app is missing from the list,
 drag it from the guide into System Settings.
 
 `system.info.capabilities` reports Window Control with `id: "computer_use"`,
-`prefix: "computer"`, and `personal: true`. The shared-chat audience guard
-refuses access to its observations, including AX content and screenshots.
+`prefix: "computer"`, and `personal: true`.
 The capability reports `needs_permission` when a helper bundle is present and
 the peer has yet to establish an approved session. It reports `on` while that
 peer has a live approved helper bridge. It reports `off` on other platforms,

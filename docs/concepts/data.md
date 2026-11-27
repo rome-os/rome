@@ -8,7 +8,7 @@ The memory system provides persistent, git-tracked knowledge that survives acros
 
 - The entire memory directory is a git repository: every change (by agents or the [guardian](people.md#guardian)) is tracked with full commit history and can be reverted.
 - Key files load into agent context at session start. Person profiles and journal entries load on demand when relevant.
-- The agent name setting owns the `Agent Name` line in `IDENTITY.md`. When the guardian asks for a rename, the agent updates the setting and identity note together. The dashboard refreshes without a reload.
+- The agent name setting owns the `Agent Name` line in `IDENTITY.md`. When someone asks for a rename, the agent updates the setting and identity note together. The dashboard refreshes without a reload.
 - Privacy boundaries are part of memory itself: topics marked off-limits must not be remembered.
 
 **Not to be confused with:**
@@ -73,14 +73,14 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 
 ## Personal data
 
-Personal data is data about the guardian that only they should see, which their devices push to Rome and Rome stores, such as Apple Health. It lives in the personal-data store and is read only in private turns ([audience](../domains/participation.md#audience)). Agents read it through `core:personal_data_catalog` and `core:personal_data_query`. The contracts for the ingest, the routes and the query are in [personal-data.md](../personal-data.md).
+Personal data is data about the guardian that only they should see, which their devices push to Rome and Rome stores, such as Apple Health. It lives in the personal-data store. Agents read it through `core:personal_data_catalog` and `core:personal_data_query`. The contracts for the ingest, the routes and the query are in [personal-data.md](../personal-data.md).
 
 - **Source**: where personal data comes from, such as `apple_health`. Each source declares its types in core.
 - **Origin**: the device that sent a source's data, such as the guardian's iPhone. A query reads one origin per source.
 - **Type**: one kind of reading or entry inside a source, such as `stepCount` or calendar `events`, with one shape: bucket, sample, record or entry.
 - **Sync**: one run on the device that reads changes and sends them.
 - **Ingest**: one batch as the server received it.
-- **Personal-data action**: an action that reads the store. It runs only in a private turn, and is refused in a shared one.
+- **Personal-data action**: an action that reads the store. Any turn may run it.
 
 **Contracts:**
 

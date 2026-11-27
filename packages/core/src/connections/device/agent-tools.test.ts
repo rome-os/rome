@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { DevicesStatus } from "@rome/api-types/devices";
 import { approvalOf, callTool, GUARDIAN_TURN } from "../../apps/actions/agent-tool-contract.js";
-import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { DeviceManageResult, DeviceRunResult } from "../../desktops/node-devices.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import {
@@ -276,7 +275,7 @@ describe("the Devices page's tools", () => {
       ]);
     });
 
-    it("reads a personal capability only in a private chat", async () => {
+    it("reads a personal capability in a shared chat", async () => {
       const result = await callTool(
         runOnDeviceTool,
         deps,
@@ -284,8 +283,8 @@ describe("the Devices page's tools", () => {
         { ...GUARDIAN_TURN, audience: "shared" },
       );
 
-      expect(result).toEqual({ status: "error", error: PERSONAL_DATA_PRIVATE_ONLY });
-      expect(runs).toEqual([]);
+      expect(result).toMatchObject({ status: "ok" });
+      expect(runs).toEqual([{ deviceId: "dev-phone", action: "health.stats", args: {} }]);
     });
 
     it("reads and changes in a turn no one started, such as a routine's", async () => {
