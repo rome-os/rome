@@ -148,6 +148,33 @@ describe("auto sign-in from Rome Cloud", () => {
   });
 });
 
+describe("use another account", () => {
+  it("asks Rome Cloud to let the person choose an account", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        (async () =>
+          new Response(JSON.stringify({ error: "unavailable" }), { status: 503 })) as typeof fetch,
+      );
+    renderLogin("/login");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use another account" }));
+
+    await screen.findByRole("alert");
+    const starts = fetchSpy.mock.calls.filter(
+      ([input]) => String(input) === "/api/auth/cloud/start",
+    );
+    expect(starts).toHaveLength(1);
+    expect(JSON.parse(String(starts[0][1]?.body))).toEqual({ chooseAccount: true });
+  });
+
+  it("is not offered on a local-first box", () => {
+    renderLogin("/login", "local");
+
+    expect(screen.queryByRole("button", { name: "Use another account" })).toBeNull();
+  });
+});
+
 describe("one sign-in method at a time", () => {
   it("swaps the cloud button and the local password form in place", () => {
     renderLogin("/login");
