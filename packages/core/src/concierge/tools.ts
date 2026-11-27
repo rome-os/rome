@@ -46,6 +46,7 @@ import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
+import { PRIVATE_CHILD_TRIGGER_KIND } from "../webchat/privacy.js";
 import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
 import {
@@ -57,6 +58,14 @@ import {
 
 const log = createLogger("concierge-tools");
 const runTool = romeToolRunner(log);
+
+/** A dashboard chat a list names as a chat, not as a task: neither a task
+ *  chat nor a fork or subagent of a private chat. */
+function isDashboardChat(chat: { triggerKind?: string | null }): boolean {
+  return (
+    chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && chat.triggerKind !== PRIVATE_CHILD_TRIGGER_KIND
+  );
+}
 
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -351,23 +360,66 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // A chat the Concierge may read: a task chat or a Concierge chat.
+  // A chat the Concierge may read: a task chat, a Concierge chat, or any
+  // other dashboard chat, since every member may read every chat (#2722 D12).
   const requireReadableChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
-    if (!chat || (chat.triggerKind !== TASK_CHAT_TRIGGER_KIND && !isConciergeChat(chat))) {
+    const readable =
+      chat !== null &&
+      (chat.triggerKind === TASK_CHAT_TRIGGER_KIND ||
+        isConciergeChat(chat) ||
+        (chat.type === "webchat" && isDashboardChat(chat)));
+    if (!chat || !readable) {
       throw new Error(`No task chat or Concierge chat ${chatId}. Use chat_list to find them.`);
     }
     return chat;
   };
 
-  /** This owner's task chats, as the agent's list reads them. */
+  /** This owner's task chats, as the agent's list reads them; on a
+   *  connection, every member's. */
   const ownRows = async (includeEnded: boolean) => {
     const owner = await ownerHere();
-    const rows = (await tasks.repo.listForAgent(true)).filter((task) => task.owner === owner);
+    const rows = (await tasks.repo.listForAgent(true)).filter(
+      (task) => onConnection || task.owner === owner,
+    );
     const status = await tasks.statusOf(rows.map((task) => task.row));
     return rows
       .map((task) => ({ ...task, status: status.get(task.row.id) }))
       .filter((task) => includeEnded || task.status?.status !== "ended");
+  };
+
+  /** Who `owner` is, as a list names them. */
+  const ownerName = async (owner: string) => {
+    const profile = await service.owners.profileOf(owner);
+    return profile.name ?? profile.email ?? profile.role;
+  };
+
+  /** On a connection, every chat a member may read but the one the turn is
+   *  in: each person's Concierge chats, named by whose they are, then the
+   *  other dashboard chats. Task chats are listed as tasks. */
+  const everyChat = async (here: string) => {
+    const chats = (await webchatRepo.listSessions("active")).filter(
+      (chat) => chat.id !== here && isDashboardChat(chat),
+    );
+    // One lookup per person, however many chats they have.
+    const names = new Map<string, Promise<string>>();
+    const nameOf = (owner: string) => {
+      const known = names.get(owner) ?? ownerName(owner);
+      names.set(owner, known);
+      return known;
+    };
+    const conciergeChats = await Promise.all(
+      chats.filter(isConciergeChat).map(async (chat) => ({
+        chatId: chat.id,
+        title: chat.name,
+        kind: service.isMainChat(chat) ? "main chat" : "topic chat",
+        owner: await nameOf(ownerOf(chat)),
+      })),
+    );
+    const others = chats
+      .filter((chat) => !isConciergeChat(chat))
+      .map((chat) => ({ chatId: chat.id, title: chat.name, kind: "dashboard chat" }));
+    return [...conciergeChats, ...others];
   };
 
   // Said as Concierge's account, so the task event reads who asked off the
@@ -1261,7 +1313,8 @@ export async function buildConciergeTools(
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. `from` names the person who wrote a message. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. `from` names the person who wrote a message. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan." +
+        " It also reads any other dashboard chat by its chatId.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1303,7 +1356,9 @@ export async function buildConciergeTools(
                 ? "task chat"
                 : isMainConciergeChat(chat)
                   ? "main chat"
-                  : "topic chat",
+                  : isConciergeChat(chat)
+                    ? "topic chat"
+                    : "dashboard chat",
             status: statusOf(running, await findListEntry(chatId)),
             ...(plan ? { plan: planForRead(plan) } : {}),
             ...(taskStatus
@@ -1444,7 +1499,10 @@ export async function buildConciergeTools(
     {
       name: "chat_list",
       description:
-        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded, recentlyEnded or a status; an ended one says when (endedAt). Pass here for only the task chats started from the chat you are in. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded, recentlyEnded or a status; an ended one says when (endedAt). Pass here for only the task chats started from the chat you are in. Check it before you start a task, so you do not start one twice. chat_read reads any of them." +
+        (onConnection
+          ? " Here it lists every member's chats: each person's main and topic chats with whose they are (owner), the other dashboard chats (kind dashboard chat), and every task chat."
+          : ""),
       inputSchema: {
         type: "object",
         properties: {
@@ -1507,13 +1565,15 @@ export async function buildConciergeTools(
           const conciergeChats =
             wanted || onlyHere
               ? []
-              : (await service.listChats(owner))
-                  .filter((chat) => chat.id !== here)
-                  .map((chat) => ({
-                    chatId: chat.id,
-                    title: chat.name,
-                    kind: chat.main ? "main chat" : "topic chat",
-                  }));
+              : onConnection
+                ? await everyChat(here)
+                : (await service.listChats(owner))
+                    .filter((chat) => chat.id !== here)
+                    .map((chat) => ({
+                      chatId: chat.id,
+                      title: chat.name,
+                      kind: chat.main ? "main chat" : "topic chat",
+                    }));
           return [...conciergeChats, ...taskChats];
         }),
     },

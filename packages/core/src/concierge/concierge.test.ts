@@ -1030,6 +1030,58 @@ describe("Concierge tools", () => {
       await rs.waitFor(() => expect(reacted).toEqual([["900", "800000000000000002", "✅"]]));
     });
 
+    it("lists and reads every member's chats, the dashboard's other chats and every task (#2722 D12)", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      // A member's topic chat, and a task started from it.
+      s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), ownerKey: "visitor:acct-ann" });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.turnIn(TOPIC_CHAT);
+      const started = await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" });
+      expect(started.isError).toBeFalsy();
+      s.sessions.set("line7", {
+        id: "line7",
+        name: "Line7 seed",
+        type: "webchat",
+        triggerKind: null,
+        agentName: "core:main",
+      });
+      const listed = JSON.parse(
+        (await run(there(s, chatId), s, "chat_list", {})).content[0]!.text,
+      ) as Array<Record<string, unknown>>;
+      expect(listed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ chatId: CONCIERGE_CHAT, kind: "main chat", owner: "guardian" }),
+          expect.objectContaining({ chatId: TOPIC_CHAT, kind: "topic chat", owner: "visitor" }),
+          { chatId: "line7", title: "Line7 seed", kind: "dashboard chat" },
+          expect.objectContaining({ chatId: "task-1", title: "Agenda", kind: "task chat" }),
+        ]),
+      );
+      // The chat the turn is in is not one to read.
+      expect(listed.map((chat) => chat.chatId)).not.toContain(chatId);
+      const read = await run(there(s, chatId), s, "chat_read", { chatId: "line7" });
+      expect(read.isError).toBeFalsy();
+      expect(JSON.parse(read.content[0]!.text)).toMatchObject({
+        chatId: "line7",
+        kind: "dashboard chat",
+      });
+      // A conversation on a connection is no dashboard chat to read.
+      s.sessions.set("channel:telegram:5", {
+        id: "channel:telegram:5",
+        name: "Other",
+        type: "channel",
+        triggerKind: null,
+      });
+      const refused = await run(there(s, chatId), s, "chat_read", { chatId: "channel:telegram:5" });
+      expect(refused.isError).toBe(true);
+      // On the dashboard, the Concierge lists no other dashboard chat.
+      s.turnIn(CONCIERGE_CHAT);
+      const own = JSON.parse((await s.tool("chat_list", {})).content[0].text) as Array<{
+        chatId: string;
+      }>;
+      expect(own.map((chat) => chat.chatId)).not.toContain("line7");
+    });
+
     it("lets any turn there use the task tools", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
@@ -2222,7 +2274,7 @@ describe("Concierge tools", () => {
     expect(await titles({ includeEnded: true })).toEqual(["Calendar", "Flights", "Hotels"]);
   });
 
-  it("chat_read reads another Concierge chat, whoever its owner is, and refuses a chat that is neither kind", async () => {
+  it("chat_read reads another Concierge chat, whoever its owner is, and any dashboard chat, and refuses a row that is no chat", async () => {
     const s = setup();
     s.messages.set(TOPIC_CHAT, [
       {
@@ -2245,8 +2297,16 @@ describe("Concierge tools", () => {
     });
     s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), ownerKey: "visitor:acct-ann" });
     expect((await s.tool("chat_read", { chatId: TOPIC_CHAT })).isError).toBeFalsy();
-    s.sessions.set("plain", { id: "plain", name: "Plain", triggerKind: null });
-    const refused = await s.tool("chat_read", { chatId: "plain" });
+    // Any other dashboard chat reads too (#2722 D12); a row that is no chat does not.
+    s.sessions.set("plain", { id: "plain", name: "Plain", type: "webchat", triggerKind: null });
+    expect((await s.tool("chat_read", { chatId: "plain" })).isError).toBeFalsy();
+    s.sessions.set("routine", {
+      id: "routine",
+      name: "Routine",
+      type: "routine",
+      triggerKind: null,
+    });
+    const refused = await s.tool("chat_read", { chatId: "routine" });
     expect(refused.isError).toBe(true);
     // Sending stays for task chats.
     const send = await s.tool("chat_send", { chatId: TOPIC_CHAT, text: "hi" });
