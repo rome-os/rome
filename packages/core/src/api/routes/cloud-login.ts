@@ -58,9 +58,9 @@ const log = createLogger("api:cloud-login");
 //     returns just the `id_token`.
 //
 // Ownership is enforced *server-side at `/authorize`* — Rome Cloud only ever
-// issues a code to the account that owns this instance — so a verified
-// `id_token`'s `sub` IS the confirmed owner. The native leg still checks it
-// against an existing guardian seat. Visitors never use these endpoints: the
+// issues a code to the account that owns this instance. Both legs still check
+// the verified `sub` against an existing guardian seat: a seat bound to an
+// account signs in only that account. Visitors never use these endpoints: the
 // phone signs them in through the visitor grant. A token that fails verification
 // (bad signature, wrong `iss`/`aud`, nonce mismatch, expiry) fails the
 // sign-in closed; the local password fallback covers a Rome Cloud outage, so
@@ -314,21 +314,11 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         return c.json({ error: "unverified_identity" }, 401);
       }
 
-      // Rome Cloud issues this code only to the owner, but the instance checks
-      // the account itself: an existing seat signs in only the account it is
-      // bound to, and a refusal never rebinds it.
+      if (await seatRefuses(identity.accountId, "native")) {
+        return c.json({ error: "not_owner" }, 403);
+      }
       const guardian = await getGuardianAuthState(deps.db);
       if (guardian.exists) {
-        if (guardian.accountId !== null && guardian.accountId !== identity.accountId) {
-          // The seat's account beside the refused one lets support tell a stale
-          // binding (the owner signs in once from a browser to repair it) from a
-          // real non-owner.
-          log.warn("native cloud login refused: account does not own this instance", {
-            accountId: identity.accountId,
-            recordedAccountId: guardian.accountId,
-          });
-          return c.json({ error: "not_owner" }, 403);
-        }
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
         await reloadDashboardAccess();
       } else {
@@ -390,13 +380,6 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
-      // The login UI has a single "Continue with Rome Cloud" button, so this
-      // callback owns the fork: when a member is invited, re-route the
-      // browser into the visitor attestation flow (they already hold a Rome
-      // Cloud session — one redirect hop, no second credential entry, and the
-      // visitor callback still enforces the allow-list). With no member
-      // invited there is nothing to dispatch to: the seat's email belongs to
-      // the Rome Cloud account that owns this box, which is never refused.
       // The error redirect carries `iss` like every authorize response
       // (RFC 9207); validate it before acting on the error, same as below.
       if (oauthError === "access_denied") {
@@ -409,16 +392,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           });
           return c.redirect(errorRedirect("iss"));
         }
-        if (deps.dashboardAccessState.hasCloudEmailAccess()) {
-          // Ends where the guardian's sign-in does, so the page the member
-          // was sent to sign in from opens next (useCloudLoginReturn).
-          const authorizeUrl = beginDashboardVisitorFlow(successRedirect());
-          if (authorizeUrl) {
-            log.info("cloud login not-owner; dispatching to dashboard admin flow");
-            return c.redirect(authorizeUrl);
-          }
-        }
-        return c.redirect(errorRedirect("not_owner"));
+        return notOwnerRedirect(c);
       }
       return c.redirect(errorRedirect("denied"));
     }
@@ -459,6 +433,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       }
       const { accountId, email: accountEmail, avatarUrl: accountAvatarUrl } = identity;
 
+      // Checked before a vanilla box persists the instance token, so a refused
+      // account never links the box either.
+      if (await seatRefuses(accountId, "browser")) return notOwnerRedirect(c);
+
       // Vanilla: the token leg also minted the durable instance token. Persist it
       // before issuing the session so an enrolled box never lacks its credential.
       if (vanilla) {
@@ -477,10 +455,10 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         log.info("cloud login enrolled instance", { accountId });
       }
 
-      // Ownership was confirmed server-side at /authorize, so `sub` is the owner.
-      // Stamp it as the explicit-login binding (repairing a null/stale recorded
-      // owner); on an existing username/password instance this IS the implicit
-      // link — the accountId lands on the guardian row, the local password stays.
+      // The seat is bound to this account or to none. Stamp it as the
+      // explicit-login binding (repairing a null recorded owner); on an existing
+      // username/password instance this IS the implicit link — the accountId
+      // lands on the guardian row, the local password stays.
       await setGuardianAccount(deps.db, accountId, accountEmail, accountAvatarUrl);
       await reloadDashboardAccess();
       return await finishSignedIn(c, identity);
@@ -492,6 +470,43 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       return c.redirect(errorRedirect("network"));
     }
   });
+
+  // Rome Cloud issues a code only to the owner, but the instance checks the
+  // account itself: an existing seat signs in only the account it is bound to,
+  // and a refusal never rebinds it. A seat with no recorded account takes the
+  // verified one.
+  async function seatRefuses(accountId: string, channel: PendingLogin["channel"]) {
+    const guardian = await getGuardianAuthState(deps.db);
+    if (!guardian.exists || guardian.accountId === null || guardian.accountId === accountId) {
+      return false;
+    }
+    // The seat's account beside the refused one lets support tell a stale
+    // binding from a real non-owner.
+    log.warn("cloud login refused: account does not own this instance", {
+      channel,
+      accountId,
+      recordedAccountId: guardian.accountId,
+    });
+    return true;
+  }
+
+  // A signed-in Rome Cloud account that does not own this box. The login UI has
+  // one "Continue with Rome Cloud" button, so this owns the fork: when a member
+  // is invited, the browser goes on to the visitor attestation flow (it already
+  // holds a Rome Cloud session, and the visitor callback still enforces the
+  // allow-list). With no member invited there is nothing to dispatch to.
+  function notOwnerRedirect(c: Context) {
+    if (deps.dashboardAccessState.hasCloudEmailAccess()) {
+      // Ends where the guardian's sign-in does, so the page the member was
+      // sent to sign in from opens next (useCloudLoginReturn).
+      const authorizeUrl = beginDashboardVisitorFlow(successRedirect());
+      if (authorizeUrl) {
+        log.info("cloud login not-owner; dispatching to dashboard admin flow");
+        return c.redirect(authorizeUrl);
+      }
+    }
+    return c.redirect(errorRedirect("not_owner"));
+  }
 
   interface ExchangeArgs {
     origin: string;
