@@ -256,7 +256,7 @@ describe("setup form option labels and i18n", () => {
               label: "Domain",
               secret: false,
               options: [
-                { value: "feishu", label: "Feishu (China · feishu.com)" },
+                { value: "feishu", label: "Feishu (China · feishu.cn)" },
                 { value: "lark", label: "Lark (Global · larksuite.com)" },
               ],
             },
@@ -301,7 +301,7 @@ describe("setup form option labels and i18n", () => {
               label: "Domain",
               secret: false,
               options: [
-                { value: "feishu", label: "Feishu (China · feishu.com)" },
+                { value: "feishu", label: "Feishu (China · feishu.cn)" },
                 { value: "lark", label: "Lark (Global · larksuite.com)" },
               ],
             },
@@ -322,7 +322,7 @@ describe("setup form option labels and i18n", () => {
     await user.click(screen.getByLabelText("服务区域"));
     await user.click(
       within(await screen.findByRole("listbox")).getByRole("option", {
-        name: "飞书（中国大陆 · feishu.com）",
+        name: "飞书（中国大陆 · feishu.cn）",
       }),
     );
     await user.click(screen.getByRole("button", { name: "继续" }));
@@ -338,12 +338,33 @@ describe("setup form option labels and i18n", () => {
           id: "feishu.connected",
           params: { appId: "cli_123" },
           title: "Feishu connected",
-          body: ["App cli_123 is live."],
+          body: [{ id: "ready", text: "App cli_123 is live." }],
         },
       },
     });
 
     expect(screen.getByText("飞书已连接")).toBeTruthy();
     expect(screen.getByText(/应用 cli_123 已就绪/)).toBeTruthy();
+  });
+
+  it("resolves named view body keys independent of position and formats ISO expiresAt", async () => {
+    await i18n.changeLanguage("zh-CN");
+    const expiresAt = "2026-11-27T18:00:00.000Z";
+    const expectedTime = new Intl.DateTimeFormat("zh-CN", { timeStyle: "short" }).format(
+      new Date(expiresAt),
+    );
+    renderState({
+      status: "presenting",
+      view: {
+        id: "feishu.qr",
+        params: { expiresAt },
+        title: "Scan to create the agent app",
+        // Put `expires` first without `scan` to prove lookup is keyed by `id`, not array index.
+        body: [{ id: "expires", text: `The QR code expires at ${expiresAt}.` }],
+      },
+    });
+
+    expect(screen.getByText(`二维码将于 ${expectedTime} 过期。`)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(expiresAt))).toBeNull();
   });
 });

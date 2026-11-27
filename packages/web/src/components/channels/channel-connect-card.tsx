@@ -4,7 +4,7 @@ import { ArrowUpRight, User } from "lucide-react";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
-import { ConnectionSlotCard, useIsSoleSlot } from "@/components/connection-slot-card";
+import { ConnectionSlotCard, SlotCeremonyFrame } from "@/components/connection-slot-card";
 import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import {
   SetupRenderer,
@@ -204,7 +204,6 @@ export function ChannelConnectCard({
   onConnected,
 }: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
-  const soleSlot = useIsSoleSlot();
   const connected = slot.state !== null;
   // A broken connection is fixed in place: disconnecting would remove the
   // account, and an account that connects again starts with no history.
@@ -377,11 +376,7 @@ export function ChannelConnectCard({
           />
         ) : null
       ) : setupRenderer ? (
-        soleSlot ? (
-          <div className="rounded-12 border border-border bg-surface p-4">{setupRenderer}</div>
-        ) : (
-          setupRenderer
-        )
+        <SlotCeremonyFrame>{setupRenderer}</SlotCeremonyFrame>
       ) : (
         <div
           className={

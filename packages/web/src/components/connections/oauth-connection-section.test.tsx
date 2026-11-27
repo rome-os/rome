@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import * as sonner from "sonner";
 import i18n from "@/i18n";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
+import { SoleSlotScope } from "@/components/connection-slot-card";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
 import { stateOfGrants } from "@/test/connection-state";
@@ -478,5 +479,50 @@ describe("OAuthConnectionSection", () => {
     expect(await screen.findByRole("button", { name: "Cancel" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("frames an active SetupRenderer inside SoleSlotScope without nesting outside it", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            cid: "setup-shop",
+            reattached: false,
+            state: {
+              status: "awaiting-input",
+              form: {
+                instructions: "Enter the store your own Shopify app connects to.",
+                fields: [{ name: "shop", label: "Store address", secret: false }],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const card = shopifyCard("unauthorized");
+    const { unmount } = render(
+      <SoleSlotScope>
+        <OAuthConnectionSection
+          card={card}
+          slot={card.slots[0]}
+          role="primary"
+          onRefresh={() => {}}
+          onFlash={() => {}}
+        />
+      </SoleSlotScope>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use your own Shopify app" }));
+    const soleInput = await screen.findByTestId("setup-input");
+    expect(soleInput.parentElement?.className).toContain("rounded-12");
+    expect(soleInput.parentElement?.className).toContain("border-border");
+    expect(soleInput.parentElement?.className).toContain("bg-surface");
+    unmount();
+
+    renderSection(card);
+    fireEvent.click(screen.getByRole("button", { name: "Use your own Shopify app" }));
+    const multiInput = await screen.findByTestId("setup-input");
+    expect(multiInput.parentElement?.tagName).toBe("SECTION");
+    expect(multiInput.parentElement?.className).toContain("border-dashed");
   });
 });

@@ -379,6 +379,10 @@ describe("ChannelConnectCard — custom components", () => {
 
   it("localizes the Feishu QR alt text and links in zh-CN", async () => {
     await i18n.changeLanguage("zh-CN");
+    const expiresAt = "2026-11-27T18:00:00.000Z";
+    const expectedTime = new Intl.DateTimeFormat("zh-CN", { timeStyle: "short" }).format(
+      new Date(expiresAt),
+    );
     stubFetch((url) =>
       url === "/api/setups/feishu-cid"
         ? new Response(
@@ -387,11 +391,14 @@ describe("ChannelConnectCard — custom components", () => {
                 status: "presenting",
                 view: {
                   id: "feishu.qr",
-                  params: { expiresAt: "2026-11-27T18:00:00.000Z" },
+                  params: { expiresAt },
                   title: "Scan to create the agent app",
                   body: [
-                    "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
-                    "The QR code expires at 2026-11-27T18:00:00.000Z.",
+                    {
+                      id: "scan",
+                      text: "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+                    },
+                    { id: "expires", text: `The QR code expires at ${expiresAt}.` },
                   ],
                   links: [
                     {
@@ -420,6 +427,9 @@ describe("ChannelConnectCard — custom components", () => {
     const img = (await screen.findByAltText("二维码")) as HTMLImageElement;
     expect(img.src).toBe("data:image/png;base64,QQ==");
     expect(screen.getByText("扫码创建应用")).toBeTruthy();
+    expect(screen.getByText(/使用飞书或 Lark 手机客户端扫描此二维码/)).toBeTruthy();
+    expect(screen.getByText(`二维码将于 ${expectedTime} 过期。`)).toBeTruthy();
+    expect(screen.queryByText(new RegExp(expiresAt))).toBeNull();
     expect(screen.getByRole("link", { name: "打开应用创建页面" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
   });

@@ -41,11 +41,13 @@ export interface SetupForm {
   note?: string;
 }
 
+export type SetupViewBodyItem = string | { id: string; text: string };
+
 export interface SetupView {
   id?: string;
   params?: Record<string, string>;
   title?: string;
-  body?: string[];
+  body?: SetupViewBodyItem[];
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL (the raw

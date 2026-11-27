@@ -78,6 +78,9 @@ export interface SetupForm {
  * progress/working flavor (rendered while the coroutine awaits an external
  * event inside `ctx.step`).
  */
+/** A view body paragraph: plain text, or a stable `id` + fallback `text` for localized clients. */
+export type SetupViewBodyItem = string | { id: string; text: string };
+
 export interface SetupView {
   /** Optional stable identifier so localized clients can translate the view copy. */
   id?: string;
@@ -85,7 +88,7 @@ export interface SetupView {
   params?: Record<string, string>;
   title?: string;
   /** Paragraphs of plain structured text. */
-  body?: string[];
+  body?: SetupViewBodyItem[];
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL. First-class

@@ -50,9 +50,13 @@ export function SoleSlotScope({ children }: { children: ReactNode }) {
   return <SoleSlotContext.Provider value={true}>{children}</SoleSlotContext.Provider>;
 }
 
-/** True when rendered inside a `SoleSlotScope` where `ConnectionSlotCard` omits its outer border/surface. */
-export function useIsSoleSlot(): boolean {
-  return useContext(SoleSlotContext);
+/** Frames an active setup ceremony inside a surface card when the parent
+    `ConnectionSlotCard` is bare inside `SoleSlotScope`, and renders children
+    bare when the slot card already provides its own outer frame. */
+export function SlotCeremonyFrame({ children }: { children: ReactNode }) {
+  const soleSlot = useContext(SoleSlotContext);
+  if (!soleSlot) return <>{children}</>;
+  return <div className="rounded-12 border border-border bg-surface p-4">{children}</div>;
 }
 
 /** Whether a slot's credential is held (drives ✓ vs + and the border style). */

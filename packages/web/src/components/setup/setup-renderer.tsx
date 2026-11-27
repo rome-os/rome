@@ -248,20 +248,46 @@ function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): React
   );
 }
 
+/** Format known timestamp params (such as `expiresAt`) in the user's locale
+ *  instead of exposing raw UTC ISO timestamps in localized copy. */
+function formatViewParams(
+  params: Record<string, string> | undefined,
+  language: string,
+): Record<string, string> {
+  if (!params) return {};
+  const out: Record<string, string> = { ...params };
+  if (out.expiresAt) {
+    const parsed = new Date(out.expiresAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        out.expiresAt = new Intl.DateTimeFormat(language, { timeStyle: "short" }).format(parsed);
+      } catch {
+        // Fall back to the raw value if Intl rejects the locale tag.
+      }
+    }
+  }
+  return out;
+}
+
 /** Render a view payload: title, paragraphs, a QR image, links, and a step
  *  checklist. */
 function ViewBody({ view }: { view: SetupView }): ReactElement {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
+  const formattedParams = formatViewParams(view.params, i18n.language);
   const translateViewText = (subkey: string, fallback: string): string =>
     view.id
       ? t(`connections.setup.views.${view.id}.${subkey}`, {
-          ...(view.params ?? {}),
+          ...formattedParams,
           defaultValue: fallback,
         })
       : fallback;
 
   const title = view.title ? translateViewText("title", view.title) : undefined;
-  const body = view.body?.map((paragraph, i) => translateViewText(`body.${i}`, paragraph));
+  const body = view.body?.map((item, i) => {
+    const key = typeof item === "string" ? String(i) : item.id;
+    const fallback = typeof item === "string" ? item : item.text;
+    return { key, text: translateViewText(`body.${key}`, fallback) };
+  });
   const links = view.links?.map((link) =>
     link.id ? { ...link, label: translateViewText(`links.${link.id}`, link.label) } : link,
   );
@@ -269,9 +295,9 @@ function ViewBody({ view }: { view: SetupView }): ReactElement {
   return (
     <div className="space-y-2">
       {title && <p className="text-ui text-foreground">{title}</p>}
-      {body?.map((paragraph, i) => (
-        <p key={i} className="text-aux text-muted-foreground">
-          {paragraph}
+      {body?.map((paragraph) => (
+        <p key={paragraph.key} className="text-aux text-muted-foreground">
+          {paragraph.text}
         </p>
       ))}
       {view.qr && (

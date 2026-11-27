@@ -332,7 +332,7 @@
               "domain": {
                 "label": "服务区域",
                 "options": {
-                  "feishu": "飞书（中国大陆 · feishu.com）",
+                  "feishu": "飞书（中国大陆 · feishu.cn）",
                   "lark": "Lark（国际版 · larksuite.com）"
                 }
               }
@@ -344,14 +344,14 @@
               "domain": {
                 "label": "服务区域",
                 "options": {
-                  "feishu": "飞书（中国大陆 · feishu.com）",
+                  "feishu": "飞书（中国大陆 · feishu.cn）",
                   "lark": "Lark（国际版 · larksuite.com）"
                 }
               }
             }
           },
           "credentials": {
-            "instructions": "粘贴你的飞书 / Lark 自建应用的 App ID 和 App Secret。",
+            "instructions": "粘贴你的飞书或 Lark 自建应用的 App ID 和 App Secret。",
             "fields": {
               "appId": {
                 "label": "App ID"
@@ -368,14 +368,14 @@
           "preparing": {
             "title": "正在创建应用",
             "body": {
-              "0": "正在生成应用创建二维码…"
+              "preparing": "正在生成应用创建二维码…"
             }
           },
           "qr": {
             "title": "扫码创建应用",
             "body": {
-              "0": "请使用飞书或 Lark 手机客户端扫描此二维码，在你的企业中创建 Rome 应用。",
-              "1": "二维码将于 {{expiresAt}} 过期。"
+              "scan": "请使用飞书或 Lark 手机客户端扫描此二维码，在你的企业中创建 Rome 应用。",
+              "expires": "二维码将于 {{expiresAt}} 过期。"
             },
             "links": {
               "openCreatePage": "打开应用创建页面",
@@ -385,13 +385,13 @@
           "finishing": {
             "title": "正在完成配置",
             "body": {
-              "0": "正在读取机器人名称…"
+              "finishing": "正在读取机器人名称…"
             }
           },
           "connected": {
             "title": "飞书已连接",
             "body": {
-              "0": "应用 {{appId}} 已就绪。请向机器人发送一条私聊消息，然后在「设置 → 连接」或「动态」中批准你的账号。"
+              "ready": "应用 {{appId}} 已就绪。请向机器人发送一条私聊消息，然后在「设置 → 连接」或「动态」中批准你的账号。"
             }
           }
         }

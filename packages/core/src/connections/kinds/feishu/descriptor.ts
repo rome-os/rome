@@ -194,8 +194,10 @@ export interface FeishuSetupDeps {
   }) => Promise<FeishuPendingMaterial>;
 }
 
+// English fallback copy on id-bearing Feishu setup forms/views below is mirrored
+// in `packages/web/src/i18n/locales/{en,zh-CN}/settings.json` (checked by setup.test.ts).
 const FEISHU_DOMAIN_OPTIONS: SetupFormFieldOption[] = [
-  { value: "feishu", label: "Feishu (China · feishu.com)" },
+  { value: "feishu", label: "Feishu (China · feishu.cn)" },
   { value: "lark", label: "Lark (Global · larksuite.com)" },
 ];
 
@@ -235,7 +237,7 @@ function agentReadyPreparingView(): SetupView {
   return {
     id: "feishu.preparing",
     title: "Creating the agent app",
-    body: ["Preparing the app-creation QR code…"],
+    body: [{ id: "preparing", text: "Preparing the app-creation QR code…" }],
     progress: true,
   };
 }
@@ -246,8 +248,11 @@ function agentReadyQrView(qr: FeishuAgentReadyQr): SetupView {
     ...(qr.expiresAt ? { params: { expiresAt: qr.expiresAt } } : {}),
     title: "Scan to create the agent app",
     body: [
-      "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
-      ...(qr.expiresAt ? [`The QR code expires at ${qr.expiresAt}.`] : []),
+      {
+        id: "scan",
+        text: "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+      },
+      ...(qr.expiresAt ? [{ id: "expires", text: `The QR code expires at ${qr.expiresAt}.` }] : []),
     ],
     links: [
       { id: "openCreatePage", label: "Open the app-creation page", url: qr.url },
@@ -331,7 +336,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
     interact.show({
       id: "feishu.finishing",
       title: "Finishing setup",
-      body: ["Reading the bot's name…"],
+      body: [{ id: "finishing", text: "Reading the bot's name…" }],
       progress: true,
     });
     try {
@@ -363,7 +368,10 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
         params: { appId: pending.appId },
         title: "Feishu connected",
         body: [
-          `App ${pending.appId} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity.`,
+          {
+            id: "ready",
+            text: `App ${pending.appId} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity.`,
+          },
         ],
       },
     };

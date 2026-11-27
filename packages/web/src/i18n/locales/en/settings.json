@@ -332,7 +332,7 @@
               "domain": {
                 "label": "Domain",
                 "options": {
-                  "feishu": "Feishu (China · feishu.com)",
+                  "feishu": "Feishu (China · feishu.cn)",
                   "lark": "Lark (Global · larksuite.com)"
                 }
               }
@@ -344,7 +344,7 @@
               "domain": {
                 "label": "Domain",
                 "options": {
-                  "feishu": "Feishu (China · feishu.com)",
+                  "feishu": "Feishu (China · feishu.cn)",
                   "lark": "Lark (Global · larksuite.com)"
                 }
               }
@@ -368,14 +368,14 @@
           "preparing": {
             "title": "Creating the agent app",
             "body": {
-              "0": "Preparing the app-creation QR code…"
+              "preparing": "Preparing the app-creation QR code…"
             }
           },
           "qr": {
             "title": "Scan to create the agent app",
             "body": {
-              "0": "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
-              "1": "The QR code expires at {{expiresAt}}."
+              "scan": "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+              "expires": "The QR code expires at {{expiresAt}}."
             },
             "links": {
               "openCreatePage": "Open the app-creation page",
@@ -385,13 +385,13 @@
           "finishing": {
             "title": "Finishing setup",
             "body": {
-              "0": "Reading the bot's name…"
+              "finishing": "Reading the bot's name…"
             }
           },
           "connected": {
             "title": "Feishu connected",
             "body": {
-              "0": "App {{appId}} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity."
+              "ready": "App {{appId}} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity."
             }
           }
         }
