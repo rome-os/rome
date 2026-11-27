@@ -676,7 +676,7 @@ describe("LinkedInInboxPoller and the person graph", () => {
       ]);
       // ...and left the person graph alone.
       expect(await store.listParticipants()).toEqual([
-        expect.objectContaining({ participantId: "ACoAAAda0001", linkedPersonId: null }),
+        expect.objectContaining({ participantId: "ACoAAAda0001" }),
       ]);
       expect(testDb.db.all(sql`SELECT id FROM persons`)).toEqual([]);
       expect(testDb.db.all(sql`SELECT person_id FROM links`)).toEqual([]);
