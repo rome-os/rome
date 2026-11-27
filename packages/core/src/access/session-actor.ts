@@ -144,6 +144,13 @@ export function sessionOwnerKey(actor: SessionActor | undefined): string | null 
   return null;
 }
 
+/** Whether `actor` is a signed-in person: the guardian or a member. */
+export function isPerson(
+  actor: SessionActor | undefined,
+): actor is Exclude<SessionActor, { kind: "anonymous" }> {
+  return actor?.kind === "guardian" || actor?.kind === "visitor";
+}
+
 /** `actor` as Rome's own work for them, which no message of theirs started:
  *  the guardian acts through loopback, not their signed-in session. */
 export function actingInBackground(
