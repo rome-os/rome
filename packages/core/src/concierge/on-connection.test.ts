@@ -59,6 +59,15 @@ describe("the Concierge on a connection", () => {
       "A line marked `not linked` is from someone who is not a member",
     );
     expect(CONNECTION_PROMPT).toContain("say it waits for approval on the dashboard");
+    expect(CONNECTION_PROMPT).toContain(
+      "Any member may read any chat of this Rome and its tasks, including another member's Concierge chat",
+    );
+    // Nothing says whose phone, devices or data they are, so nothing reads as a reason to refuse.
+    expect(CONNECTION_PROMPT).not.toMatch(
+      /(phone|devices?|data) (that .* )?(is|are) the guardian's/,
+    );
+    expect(CONNECTION_PROMPT).not.toContain("is the guardian's");
+    expect(CONNECTION_PROMPT).not.toContain("are the guardian's");
     // No line refuses a member because others can read the chat, or names it the guardian's.
     for (const text of [
       "Others may read this chat",

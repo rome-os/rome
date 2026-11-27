@@ -85,7 +85,7 @@ export function registerDeviceActions(
       // stays for the routines and agent prompts that already call it.
       description:
         "The older name of system:run_on_device, with the same rules: call " +
-        "system:run_on_device instead. It runs one operation on one of the guardian's devices, " +
+        "system:run_on_device instead. It runs one operation on one of Rome's devices, " +
         `with the operation and arguments ${DEVICE_DESCRIBE_ACTION} lists.`,
       complexity: "simple",
       speed: "fast",
@@ -192,7 +192,7 @@ async function runOperation(
         `not_connected: No device connection${where} offers ${operation}. ` +
         (pointer.state === "not_connected" && pointer.kind
           ? connectStep(pointer)
-          : `Call ${READ_DEVICES_TOOL} for what the guardian's devices offer; if none does, ` +
+          : `Call ${READ_DEVICES_TOOL} for what Rome's devices offer; if none does, ` +
             "ask the guardian to connect it in the Rome app on their device."),
     };
   }
