@@ -133,11 +133,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private isTextPrivate?: (agentName: string, channel: string) => boolean,
   ) {}
 
-  /**
-   * Whether the action that asked to resume `session` may: every dashboard
-   * chat the session runs in (its own, its parent's, a fork's or subagent's
-   * row) must exist and be one its caller may open.
-   */
   attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
       registerActionSubprocessHost(rpc, this.actionWorkerCoordinator, child);
