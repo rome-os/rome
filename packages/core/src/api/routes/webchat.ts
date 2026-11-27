@@ -5395,7 +5395,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Who the turn acts for, captured now: its tool calls run as this
       // person however late the model's callback arrives.
       ...(actingActor ? { actor: actingActor } : {}),
-      ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,

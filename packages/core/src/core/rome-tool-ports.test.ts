@@ -45,7 +45,6 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
-    audience: () => "shared",
     reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
@@ -348,35 +347,12 @@ describe("task input actor through the session tool port", () => {
         agentName: "core:concierge",
         actor: () => guardian,
         threadContext: () => thread,
-        audience: () => "private",
         ...overrides,
       }),
       true,
     );
     return { ...built, context };
   }
-
-  for (const [audience, actor] of [
-    ["private", guardian],
-    ["shared", guardian],
-    ["shared", visitor],
-  ] as const) {
-    it(`captures a ${actor.kind}'s ${audience} source audience in the host handoff`, async () => {
-      const { context } = await provided({ audience: () => audience, actor: () => actor });
-      await context.captureTaskInput!()("target", body, async () => {
-        expect(claimTaskInputActor("target", body, speaker)?.source.audience).toBe(audience);
-      });
-    });
-  }
-
-  it("revokes a handoff when the live audience changes", async () => {
-    let audience: "private" | "shared" = "private";
-    const { context } = await provided({ audience: () => audience });
-    await context.captureTaskInput!()("target", body, async () => {
-      audience = "shared";
-      expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
-    });
-  });
 
   it("carries the visitor turn, not the unrelated ambient guardian, into the task action", async () => {
     const built = await provided({ actor: () => visitor });
@@ -465,7 +441,6 @@ it("snapshots the source identity rather than following mutation of its objects"
       agentName: "core:concierge",
       actor: () => actor,
       threadContext: () => thread,
-      audience: () => "private",
     }),
     true,
   );
@@ -506,7 +481,6 @@ describe("task input source capture precedes asynchronous setup", () => {
           agentName: "core:concierge",
           actor: () => actor,
           turnId: () => turnId,
-          audience: () => "private",
           threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
         }),
         true,
@@ -577,7 +551,6 @@ describe("task input source capture precedes asynchronous setup", () => {
         agentName: "core:concierge",
         actor: () => ({ kind: "guardian", userId: "synthetic-seat" }),
         live: undefined,
-        audience: () => "private",
         threadContext: () => ({ channel: "webchat", threadId: "source", threadType: "private" }),
       }),
       true,
