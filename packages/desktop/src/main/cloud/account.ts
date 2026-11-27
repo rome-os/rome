@@ -128,7 +128,11 @@ export class CloudAccount {
     }
   }
 
-  /** Installs a fresh `rome_session` for the instance in the window's cookies. */
+  /**
+   * Installs a fresh session for the instance in the window's cookies: a
+   * `rome_session` on the account's own Rome, a `rome_visitor` on one shared
+   * with it.
+   */
   async openSession(instance: CloudInstance): Promise<void> {
     try {
       await this.sessions.restore(instance);

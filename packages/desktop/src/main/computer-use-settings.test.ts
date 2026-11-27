@@ -1,14 +1,20 @@
 import { existsSync } from "node:fs";
+import { launchPermissionSetup } from "@rome-os/node-core/host";
 import { shell } from "electron";
-import { expect, it, rs } from "@rstest/core";
+import { beforeEach, expect, it, rs } from "@rstest/core";
 import { createComputerUseSettings } from "./computer-use-settings";
 
 rs.mock("node:fs", () => ({ existsSync: rs.fn() }));
+rs.mock("@rome-os/node-core/host", () => ({ launchPermissionSetup: rs.fn() }));
 rs.mock("electron", () => ({
   shell: { openExternal: rs.fn(), showItemInFolder: rs.fn() },
 }));
 
 const helperPath = "/Rome.app/Contents/Resources/native/Rome Computer Use.app";
+
+beforeEach(() => {
+  rs.resetAllMocks();
+});
 
 it("reads the preference and bundle status passively and reveals an installed helper", () => {
   let enabled = false;
@@ -23,20 +29,55 @@ it("reads the preference and bundle status passively and reveals an installed he
   expect(status()).toEqual({ enabled: true, helperPresent: true });
   expect(existsSync).toHaveBeenCalledWith(`${helperPath}/Contents/MacOS/RomeComputerUse`);
   expect(shell.openExternal).not.toHaveBeenCalled();
+  expect(launchPermissionSetup).not.toHaveBeenCalled();
   revealHelper();
   expect(shell.showItemInFolder).toHaveBeenCalledWith(helperPath);
 });
 
-it("opens the selected macOS privacy pane", async () => {
-  const { open } = createComputerUseSettings(helperPath, () => false);
+it("opens the same native guide for full and focused setup", async () => {
+  rs.mocked(existsSync).mockReturnValue(true);
+  const { setup, open } = createComputerUseSettings(helperPath, () => false);
+  await setup();
   await open("accessibility");
   await open("screenRecording");
+  expect(launchPermissionSetup).toHaveBeenNthCalledWith(1, { appPath: helperPath });
+  expect(launchPermissionSetup).toHaveBeenNthCalledWith(2, {
+    appPath: helperPath,
+    pane: "accessibility",
+  });
+  expect(launchPermissionSetup).toHaveBeenNthCalledWith(3, {
+    appPath: helperPath,
+    pane: "screen-recording",
+  });
+  expect(shell.openExternal).not.toHaveBeenCalled();
+});
+
+it("opens the macOS privacy pane when the helper is missing or fails to launch", async () => {
+  const { setup, open } = createComputerUseSettings(helperPath, () => false);
+  rs.mocked(existsSync).mockReturnValue(false);
+  await setup();
+  await open("accessibility");
+  expect(launchPermissionSetup).not.toHaveBeenCalled();
+  rs.mocked(existsSync).mockReturnValue(true);
+  rs.mocked(launchPermissionSetup).mockRejectedValueOnce(new Error("signature failed"));
+  await setup();
+  rs.mocked(launchPermissionSetup).mockRejectedValueOnce(new Error("LaunchServices failed"));
+  await open("screenRecording");
+  expect(launchPermissionSetup).toHaveBeenCalledTimes(2);
   expect(shell.openExternal).toHaveBeenNthCalledWith(
     1,
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   );
   expect(shell.openExternal).toHaveBeenNthCalledWith(
     2,
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  );
+  expect(shell.openExternal).toHaveBeenNthCalledWith(
+    3,
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  );
+  expect(shell.openExternal).toHaveBeenNthCalledWith(
+    4,
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   );
 });

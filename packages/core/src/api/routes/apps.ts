@@ -42,6 +42,7 @@ import { mayEnter } from "../../access/entry.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
 import { getEmbeddedAppHref, getFullAppHref } from "../../apps/app-routes.js";
+import { appShareTargetRoute } from "../app-home-screen.js";
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Unexpected error";
@@ -120,6 +121,8 @@ function toInstalledAppCard(
     hasFrontend,
     href: isActive && hasFrontend ? getEmbeddedAppHref(view.appId) : null,
     fullHref: isActive && hasFrontend ? getFullAppHref(view.appId) : null,
+    acceptsSharedText:
+      hasFrontend && resolved !== null && appShareTargetRoute(view.appId, resolved) !== null,
     capabilities: [
       formatCount(resolved?.artifacts.agent.length ?? 0, "agent"),
       formatCount(resolved?.artifacts.action.length ?? 0, "action"),

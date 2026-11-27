@@ -53,7 +53,7 @@ describe("connectionStatus — status vocabulary", () => {
       connectionStatus(
         card({
           degradation: {
-            reason: "WeChat reported a stale session.",
+            reason: "The platform reported a stale session.",
             retryAt: "2026-07-20T12:00:00.000Z",
           },
           slots: [slot("working")],
@@ -62,7 +62,7 @@ describe("connectionStatus — status vocabulary", () => {
     ).toEqual({
       label: "Working",
       tone: "attention",
-      title: "WeChat reported a stale session. Automatic retry at 2026-07-20T12:00:00.000Z.",
+      title: "The platform reported a stale session. Automatic retry at 2026-07-20T12:00:00.000Z.",
     });
   });
 
