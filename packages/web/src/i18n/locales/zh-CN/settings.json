@@ -1081,8 +1081,8 @@
       },
       "desktopHelp": "使用同一个 Rome Cloud 账户登录 Rome 应用。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
       "desktopDownload": "下载 Rome",
-      "comingSoon": "即将推出",
-      "containerHelp": "使用 Docker Compose 在容器中运行 Rome Node。",
+      "containerHelp": "在服务器、电脑或 NAS 上通过 Docker 运行带内置 Web UI 的 Rome Node 容器，并使用同一个 Rome Cloud 账户完成授权。查看 Docker 部署说明，获取 Compose 配置、初始密码与局域网访问步骤。",
+      "containerInstructions": "Docker 部署说明",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

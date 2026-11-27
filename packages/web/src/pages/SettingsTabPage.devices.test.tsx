@@ -149,7 +149,7 @@ it("drops the device list when the service stops and does not start it on its ow
   ).toBe(true);
 });
 
-it("shows device guides and the container placeholder in the empty list", async () => {
+it("shows device guides including the container docs link in the empty list", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
@@ -160,14 +160,19 @@ it("shows device guides and the container placeholder in the empty list", async 
   expect(setup.getByRole("link", { name: "Download Rome" })).toBeTruthy();
   expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
   expect(setup.getByText("rome-node connect")).toBeTruthy();
-  const containerHeading = setup.getByRole("heading", { name: "Rome Node container" });
-  expect(within(containerHeading.parentElement!).getByText("Coming soon")).toBeTruthy();
+  expect(setup.getByRole("heading", { name: "Rome Node container" })).toBeTruthy();
+  expect(setup.queryByText("Coming soon")).toBeNull();
+  const docsLink = setup.getByRole("link", { name: "Docker deployment guide" });
+  expect(docsLink.getAttribute("href")).toBe(
+    "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker",
+  );
+  expect(docsLink.getAttribute("target")).toBe("_blank");
   expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
-it("opens each setup guide and the container placeholder from Link device", async () => {
+it("opens each setup guide from Link device and returns focus on Escape", async () => {
   renderDevices(() => ({
     connection: "online",
     checkedAt: new Date().toISOString(),
@@ -180,7 +185,7 @@ it("opens each setup guide and the container placeholder from Link device", asyn
   const choices = [
     ["App", "Download Rome"],
     ["Rome Node CLI", "rome-node connect"],
-    ["Rome Node container", "Coming soon"],
+    ["Rome Node container", "Docker deployment guide"],
   ] as const;
   for (const [name, text] of choices) {
     await user.click(trigger);
@@ -188,8 +193,12 @@ it("opens each setup guide and the container placeholder from Link device", asyn
     const dialog = await screen.findByRole("dialog", { name });
     expect(within(dialog).getByText(text)).toBeTruthy();
     if (name === "Rome Node container") {
-      const heading = within(dialog).getByRole("heading", { name });
-      expect(within(heading.parentElement!).getByText("Coming soon")).toBeTruthy();
+      expect(within(dialog).queryByText("Coming soon")).toBeNull();
+      expect(
+        within(dialog).getByRole("link", { name: "Docker deployment guide" }).getAttribute("href"),
+      ).toBe(
+        "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker",
+      );
     }
     await user.keyboard("{Escape}");
     await waitFor(() => expect(document.activeElement).toBe(trigger));
@@ -272,8 +281,9 @@ it("localizes the service recovery and device setup in Chinese", async () => {
     expect(setup.getByRole("link", { name: "下载 Rome" })).toBeTruthy();
     expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
     expect(setup.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
-    const containerHeading = setup.getByRole("heading", { name: "Rome Node 容器" });
-    expect(within(containerHeading.parentElement!).getByText("即将推出")).toBeTruthy();
+    expect(setup.getByRole("heading", { name: "Rome Node 容器" })).toBeTruthy();
+    expect(setup.queryByText("即将推出")).toBeNull();
+    expect(setup.getByRole("link", { name: "Docker 部署说明" })).toBeTruthy();
   } finally {
     cleanup();
     await i18n.changeLanguage("en");

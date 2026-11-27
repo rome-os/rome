@@ -2,7 +2,6 @@ import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "@/components/settings-group";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +14,9 @@ import {
 
 const setupMethods = ["desktop", "cli", "container"] as const;
 type SetupMethod = (typeof setupMethods)[number];
+
+const CONTAINER_DOCS_URL =
+  "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker";
 
 function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
@@ -32,7 +34,16 @@ function DeviceConnectionContent({ method }: { method: SetupMethod }) {
   }
 
   if (method === "container") {
-    return <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>;
+    return (
+      <>
+        <p className="text-ui text-muted-foreground">{t("containerHelp")}</p>
+        <Button variant="outline" size="sm" asChild>
+          <a href={CONTAINER_DOCS_URL} target="_blank" rel="noopener noreferrer">
+            {t("containerInstructions")}
+          </a>
+        </Button>
+      </>
+    );
   }
 
   return (
@@ -63,10 +74,7 @@ export function DeviceConnectionCards() {
         {setupMethods.map((method) => (
           <Card key={method}>
             <CardHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle>{t(`methods.${method}`)}</CardTitle>
-                {method === "container" && <Badge variant="muted">{t("comingSoon")}</Badge>}
-              </div>
+              <CardTitle>{t(`methods.${method}`)}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <DeviceConnectionContent method={method} />
@@ -127,12 +135,7 @@ export function LinkDeviceMenu() {
         }}
       >
         <DialogHeader onClose={close} closeLabel={t("common.close")}>
-          <div className="flex flex-wrap items-center gap-2">
-            <DialogTitle>{method && t(`devices.setup.methods.${method}`)}</DialogTitle>
-            {method === "container" && (
-              <Badge variant="muted">{t("devices.setup.comingSoon")}</Badge>
-            )}
-          </div>
+          <DialogTitle>{method && t(`devices.setup.methods.${method}`)}</DialogTitle>
         </DialogHeader>
         <DialogBody className="min-h-0 space-y-4">
           {method && <DeviceConnectionContent method={method} />}

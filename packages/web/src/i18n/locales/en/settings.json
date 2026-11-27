@@ -1081,8 +1081,8 @@
       },
       "desktopHelp": "Sign in to the Rome app with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
       "desktopDownload": "Download Rome",
-      "comingSoon": "Coming soon",
-      "containerHelp": "Runs Rome Node in a Docker container using Docker Compose.",
+      "containerHelp": "Run Rome Node in Docker on a server, computer, or NAS with its built-in Web UI, then authorize it with the same Rome Cloud account. See the Docker deployment guide for Compose setup, initial password, and LAN access.",
+      "containerInstructions": "Docker deployment guide",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"
