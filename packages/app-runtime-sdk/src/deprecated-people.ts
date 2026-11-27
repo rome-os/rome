@@ -41,8 +41,8 @@ export interface PersonRecord {
 /**
  * `deps.people`.
  *
- * @deprecated People was removed, so `guardian()` answers no accounts; ask
- * `ctx.access.guardianAccounts()` for the guardian's accounts.
+ * @deprecated People was removed; `guardian()` still answers the guardian's
+ * accounts, the same as `ctx.access.guardianAccounts()`, which replaces it.
  */
 export interface PeopleService {
   guardian(): Promise<{ accounts: Account[] }>;

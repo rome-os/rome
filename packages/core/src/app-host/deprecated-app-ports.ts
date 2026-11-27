@@ -1,13 +1,14 @@
 // What @rome-os/app-runtime 0.11 handed apps for People, answered with no
 // People code, so an app built against that release still runs. Each port
-// answers nobody, or refuses a write as it did before; the two that never
-// needed People keep working. Types: packages/app-runtime-sdk/src/deprecated-people.ts.
+// answers nobody, or refuses a write as it did before; the guardian's
+// accounts and the ports that never needed People keep working. Types: packages/app-runtime-sdk/src/deprecated-people.ts.
 // A later breaking release deletes this file with that one.
 //
 // Each use is reported as a log record, so a symbol is deleted once no app
 // uses it: docs/observability/schema.md#deprecated-app-sdk-symbols.
 
 import type {
+  Access,
   AppRuntimeRepositories,
   ChatStopHandler,
   GuardianProfileRepository,
@@ -70,12 +71,16 @@ const reportDeprecatedUse = deprecatedUseReporter();
 /** The person id 0.11 handed apps for a sender linked to nobody. */
 const STRANGER_PERSON_ID = "__STRANGER__";
 
-/** `deps.people`: the guardian has no accounts here. */
-function deprecatedPeople(used: (symbol: string) => void): PeopleService {
+/** `deps.people`: the guardian's accounts, as the app's `ctx.access` answers
+ *  them, or none without it. */
+function deprecatedPeople(
+  used: (symbol: string) => void,
+  access: Access | undefined,
+): PeopleService {
   return {
     async guardian() {
       used("people.guardian");
-      return { accounts: [] };
+      return { accounts: (await access?.guardianAccounts()) ?? [] };
     },
   };
 }
@@ -155,8 +160,8 @@ const bondLevelInRun = (args: unknown[]) => {
 
 /**
  * `deps`, the action deps of app `appId`, with what 0.11 handed every app
- * action beside them: `people`, `personMappingRepo` and `strangerPersonId`
- * added, and the shared `policyEngine`, `approvalsRepo` and `agentRunner`
+ * action beside them: `people` (answered from `deps.appContext.access`),
+ * `personMappingRepo` and `strangerPersonId` added, and the shared `policyEngine`, `approvalsRepo` and `agentRunner`
  * reporting their deprecated uses. Call it on the finished object, since
  * `strangerPersonId` reports from a getter.
  */
@@ -167,7 +172,10 @@ export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
 ): T {
   const used = (symbol: string) => report(appId, symbol);
   const target = deps as Record<string, unknown>;
-  target.people ??= deprecatedPeople(used);
+  target.people ??= deprecatedPeople(
+    used,
+    (target.appContext as { access?: Access } | undefined)?.access,
+  );
   target.personMappingRepo ??= deprecatedPersonMapping(used);
   if (!("strangerPersonId" in target)) {
     Object.defineProperty(target, "strangerPersonId", {

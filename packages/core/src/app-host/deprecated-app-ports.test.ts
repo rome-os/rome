@@ -102,11 +102,16 @@ function recordedUses() {
 }
 
 function depsOf(appId: string, report: (appId: string, symbol: string) => void): AppDeps {
-  return withDeprecatedActionDeps(appId, { policyEngine }, report) as unknown as AppDeps;
+  const access = { guardianAccounts: async () => [{ platform: "telegram", id: "guardian-1" }] };
+  return withDeprecatedActionDeps(
+    appId,
+    { policyEngine, appContext: { access } },
+    report,
+  ) as unknown as AppDeps;
 }
 
 describe("the app SDK surface People's removal deprecated", () => {
-  it("compiles an app built against 0.11, and each restored port answers nobody", async () => {
+  it("compiles an app built against 0.11, and each restored port answers as before", async () => {
     const { uses, report } = recordedUses();
     const repositories = deprecatedRepositoriesFor(
       {
@@ -129,7 +134,8 @@ describe("the app SDK surface People's removal deprecated", () => {
       receipt: "You can only stop a response that you started.",
       // A blank name with none stored writes nothing, as before.
       profile: { ok: false },
-      guardian: { accounts: [] },
+      // As the app's `ctx.access` answers them.
+      guardian: { accounts: [{ platform: "telegram", id: "guardian-1" }] },
       stranger: "__STRANGER__",
       byName: [],
       fuzzy: null,
