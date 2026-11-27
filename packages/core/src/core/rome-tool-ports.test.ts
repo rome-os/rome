@@ -64,7 +64,6 @@ function ports(
     actionRegistry: registry,
     actionEngine: engine,
     webchatRepo: { getSession } as never,
-    placeAudience: async (context) => (context?.threadId === "shared-chat" ? "shared" : "private"),
     ...(taskOwner ? { taskOwner } : {}),
     sessionTools,
     ...(deviceKinds ? { deviceKinds } : {}),
@@ -310,53 +309,6 @@ describe("romeToolPorts sessionTools", () => {
       "share_location",
       "show_card",
     ]);
-  });
-});
-
-describe("romeToolPorts actions carry the turn's audience", () => {
-  const audienceOfRun = (run: ReturnType<typeof ports>["run"]) =>
-    (run.mock.calls.at(-1) as unknown as [string, unknown, { audience?: string }])[2].audience;
-
-  it("hands a private turn in a private chat on as private", async () => {
-    const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "private" }), "system:send_message", {});
-    expect(audienceOfRun(run)).toBe("private");
-  });
-
-  it("reads the chat again on each call, so a chat that became shared narrows the turn", async () => {
-    const { actions, run } = ports();
-    await actions.run(
-      turn({
-        audience: () => "private",
-        threadContext: () => ({ channel: "webchat", threadId: "shared-chat" }),
-      }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-
-  it("hands a turn with no chat of its own on with the audience it took from its starter", async () => {
-    const { actions, run } = ports();
-    // A summoned agent: its turn's audience is the summoning turn's.
-    await actions.run(
-      turn({ audience: () => "private", threadContext: () => undefined }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("private");
-    await actions.run(
-      turn({ audience: () => "shared", threadContext: () => undefined }),
-      "system:send_message",
-      {},
-    );
-    expect(audienceOfRun(run)).toBe("shared");
-  });
-
-  it("never widens a shared turn", async () => {
-    const { actions, run } = ports();
-    await actions.run(turn({ audience: () => "shared" }), "system:send_message", {});
-    expect(audienceOfRun(run)).toBe("shared");
   });
 });
 

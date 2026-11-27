@@ -4,12 +4,9 @@
 // Vocabulary: docs/domains/agents.md#rome-tools.
 
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type { PlaceAudience } from "./place-audience.js";
 import {
   type AgentAction,
   type AgentActions,
-  type Audience,
-  narrowerAudience,
   type DeferTool,
   type RomeTool,
   type SessionTools,
@@ -44,8 +41,6 @@ export interface RomeToolPortsDeps {
   eventSources?: EventSources;
   /** Whose a dashboard chat is, for a wake scheduled in one. */
   webchatRepo?: Pick<WebChatRepository, "getSession">;
-  /** Who can read a chat. Absent, every chat is shared. */
-  placeAudience?: PlaceAudience;
   /** The tools Rome adds for an agent. When absent, a session carries none. */
   sessionTools?: SessionToolsProvider;
   /**
@@ -122,7 +117,6 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
           return actionEngine.run(action.config.name, input as Record<string, unknown>, {
             initiator: `agent:${turn.agentName}`,
             ...(actor ? { actor } : {}),
-            audience: await callAudience(turn, deps.placeAudience),
             channelContext: turn.threadContext(),
             sharedContext: turn.sharedContext(),
             sessionId: turn.sessionId,
@@ -340,18 +334,4 @@ async function dashboardChatOwner(
   if (thread?.channel !== "webchat" || !thread.threadId || !webchatRepo) return undefined;
   const chat = await webchatRepo.getSession(thread.threadId);
   return chat ? (chat.ownerKey ?? "guardian") : undefined;
-}
-
-/** The audience an agent's action call runs with: the turn's, read again
- *  against its chat on each call so a chat that opens to visitors after the
- *  turn started reads no personal data. A turn with no chat of its own, such
- *  as a summoned agent's, has only the audience of the turn that started it,
- *  which its own already holds. Domain: docs/domains/participation.md#audience. */
-async function callAudience(
-  turn: Pick<TurnFacts, "audience" | "threadContext">,
-  placeAudience: PlaceAudience | undefined,
-): Promise<Audience> {
-  const place = turn.threadContext();
-  if (!place) return turn.audience();
-  return narrowerAudience(turn.audience(), (await placeAudience?.(place)) ?? "shared");
 }
