@@ -23,7 +23,6 @@ export const BASELINE: Readonly<Record<string, number>> = {
   "packages/core/src/core/renewal-handoffs.ts": 2,
   "packages/core/src/core/rome-tool-ports.ts": 9,
   "packages/core/src/core/session-opening.ts": 4,
-  "packages/core/src/core/share-location-tool.ts": 1,
   "packages/core/src/core/subagent-call-ports.ts": 1,
   "packages/core/src/db/repositories/routines.ts": 15,
   "packages/core/src/index.ts": 5,

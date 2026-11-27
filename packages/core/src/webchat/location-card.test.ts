@@ -62,17 +62,12 @@ describe("the share-location answer", () => {
 });
 
 describe("the card a stored share-location card draws", () => {
-  it("marks it to share by itself only with a token core's own tool issued", () => {
-    const issued = shareLocationToolOutput("r", "guardian") as { render: { props: unknown } };
-    expect(mayAutoShare(locationCardUiFromProps(issued.render.props) ?? undefined)).toBe(true);
-    // Another tool named `*__share_location` can return any props, but not a token core issued.
+  it("never marks it to share by itself", () => {
+    const issued = shareLocationToolOutput("r") as { render: { props: unknown } };
+    expect(mayAutoShare(locationCardUiFromProps(issued.render.props) ?? undefined)).toBe(false);
+    // A card stored when it could share by itself waits for Share too.
     expect(
-      mayAutoShare(locationCardUiFromProps({ reason: "r", autoShare: true }) ?? undefined),
+      mayAutoShare(locationCardUiFromProps({ reason: "r", autoShareToken: "t" }) ?? undefined),
     ).toBe(false);
-    expect(
-      mayAutoShare(locationCardUiFromProps({ reason: "r", autoShareToken: "guess" }) ?? undefined),
-    ).toBe(false);
-    // An older card, or one a turn the guardian did not start showed, waits for Share.
-    expect(mayAutoShare(locationCardUiFromProps({ reason: "r" }) ?? undefined)).toBe(false);
   });
 });

@@ -41,7 +41,7 @@ describe("share_location", () => {
     });
   });
 
-  it("lets the card share by itself only for the person whose own message started the turn", async () => {
+  it("shows a card that waits for a press, whoever started the turn", async () => {
     const props = async (turn: TurnFacts) => {
       const { result } = await call({ turn });
       return JSON.parse(result.content[0]!.text).render.props;
@@ -49,20 +49,9 @@ describe("share_location", () => {
     const reason = "To find coffee near you";
     expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "cookie" }))).toEqual({
       reason,
-      autoShareToken: expect.any(String),
-      autoShareFor: "guardian",
     });
-    expect(await props(turnStartedBy({ kind: "visitor", accountId: "a1" }))).toEqual({
-      reason,
-      autoShareToken: expect.any(String),
-      autoShareFor: "visitor:a1",
-    });
-    // A followed event, a routine or a task's result acts for the guardian by loopback.
-    expect(await props(turnStartedBy({ kind: "guardian", userId: "g", via: "loopback" }))).toEqual({
-      reason,
-    });
+    expect(await props(turnStartedBy({ kind: "visitor", accountId: "a1" }))).toEqual({ reason });
     expect(await props(turnStartedBy())).toEqual({ reason });
-    expect(await props(turnStartedBy({ kind: "anonymous" }))).toEqual({ reason });
   });
 
   it("reads a request for places that names none as near the guardian, with no questions first", async () => {

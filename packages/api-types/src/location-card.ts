@@ -49,10 +49,8 @@ export type LocationAnswer =
  * The card described as data, built as the device connect card is: the
  * map-pin and "Share your location?", the agent's reason under it, then Not
  * now and Share, its fixed words Rome strings each reader shows in the
- * guardian's language. `autoShare` marks a card a client may answer by itself
- * where the device already allows the position; core sets it only for a turn
- * the guardian's own message started, and a card without it always waits for
- * Share.
+ * guardian's language. Core never sets `autoShare`, so every card waits for a
+ * press; clients built when a card could answer by itself still read it.
  */
 export function locationCardUi(reason: string, autoShare = false): WidgetUi {
   return promptCardUi({

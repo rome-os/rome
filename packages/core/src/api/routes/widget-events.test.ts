@@ -953,53 +953,31 @@ describe("an event on the share-location card core owns", () => {
     expect(forwarded).toEqual([]);
   });
 
-  it("marks a share the client sent by itself only on a card core marked for it", async () => {
-    const marked = {
+  it("records only a press, as the location of whoever pressed", async () => {
+    // A card from when it could share by itself still carries its token.
+    const old = {
       ...locationCard,
       render: { ...locationCard.render, props: { reason: "r", autoShareToken: "t" } },
     };
-    const auto = setup({ m: { chatId: "c1", content: [marked] } });
-    await auto.fire("m", { name: "share-location", context: { ...position, auto: true } });
-    expect(
-      (auto.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
-        ?.output,
-    ).toMatchObject({ status: "shared", auto: true });
-    // An unmarked card's share says nothing of how it was sent, whatever the client claims.
-    const plain = setup({ m: { chatId: "c1", content: [locationCard] } });
-    await plain.fire("m", { name: "share-location", context: { ...position, auto: true } });
-    expect(
-      (plain.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]
-        ?.output,
-    ).not.toHaveProperty("auto");
-  });
-
-  it("shares by itself only on the client of who asked, and records a member's share as theirs", async () => {
-    const marked = {
-      ...locationCard,
-      render: {
-        ...locationCard.render,
-        props: { reason: "r", autoShareToken: "t", autoShareFor: "guardian" },
-      },
-    };
     const output = (s: ReturnType<typeof setup>) =>
       (s.forwarded[0]?.body as { parts: { output: Record<string, unknown> }[] }).parts[0]?.output;
-    // Another viewer's client answering by itself starts nothing.
-    const other = setup({ m: { chatId: "c1", content: [marked] } }, "visitor:v");
-    const res = await other.fire("m", {
+    // A client that answers by itself starts nothing, the guardian's included.
+    const guardian = setup({ m: { chatId: "c1", content: [old] } });
+    const res = await guardian.fire("m", {
       name: "share-location",
       context: { ...position, auto: true },
     });
     expect(res.status).toBe(409);
-    expect(other.forwarded).toEqual([]);
-    // Their press is their own location.
-    await other.fire("m", { name: "share-location", context: position });
-    expect(output(other)).toMatchObject({ status: "shared", sharedBy: "member@example.test" });
-    expect(output(other)).not.toHaveProperty("auto");
-    // The asker's client still shares by itself.
-    const asker = setup({ m: { chatId: "c1", content: [marked] } });
-    await asker.fire("m", { name: "share-location", context: { ...position, auto: true } });
-    expect(output(asker)).toMatchObject({ status: "shared", auto: true });
-    expect(output(asker)).not.toHaveProperty("sharedBy");
+    expect(guardian.forwarded).toEqual([]);
+    // A press then still answers it.
+    await guardian.fire("m", { name: "share-location", context: position });
+    expect(output(guardian)).toMatchObject({ status: "shared" });
+    expect(output(guardian)).not.toHaveProperty("auto");
+    expect(output(guardian)).not.toHaveProperty("sharedBy");
+    // A member's press is their own location.
+    const member = setup({ m: { chatId: "c1", content: [locationCard] } }, "visitor:v");
+    await member.fire("m", { name: "share-location", context: position });
+    expect(output(member)).toMatchObject({ status: "shared", sharedBy: "member@example.test" });
   });
 
   it("lets the first of two clients answer, and refuses the other", async () => {

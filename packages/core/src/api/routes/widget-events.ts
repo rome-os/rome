@@ -36,8 +36,8 @@ interface CoreIo {
   /** Whether the event came from this instance's own pages, which the setup
    *  route asks of a request too. */
   sameOrigin: boolean;
-  /** Who sent the event: the owner key of their chats, and a member's email. */
-  caller: () => Promise<{ owner: string | null; email?: string }>;
+  /** The email of a member who sent the event; none for the guardian. */
+  memberEmail: () => Promise<string | undefined>;
 }
 
 /** What a setup start names: as `POST /api/connections/:idOrKind/grants/:grant/setup` takes it. */
@@ -198,22 +198,15 @@ const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
     [SHARE_LOCATION_EVENT]: async (context, io) => {
       const shared = sharedLocationAnswer(context);
       if (!shared) return Response.json({ error: "No location was sent." }, { status: 400 });
-      // A share the client sent by itself is marked so only on a card core
-      // marked for it; a client cannot mark any other.
-      const auto = context.auto === true && typeof io.props.autoShareToken === "string";
-      const caller = await io.caller();
-      // Only the client of the person whose message raised the card answers
-      // it by itself; a card from before the asker was kept is the guardian's.
-      const asker = typeof io.props.autoShareFor === "string" ? io.props.autoShareFor : "guardian";
-      if (auto && caller.owner !== asker) {
-        return Response.json(
-          { error: "This card shares by itself only for who asked." },
-          { status: 409 },
-        );
+      // Only a press shares. A client built when cards could share by
+      // themselves may still send one; it records nothing, and the client
+      // shows Share and Not now.
+      if (context.auto === true) {
+        return Response.json({ error: "Only a press shares a location." }, { status: 409 });
       }
       // A share is the location of whoever pressed it.
-      const sharedBy = caller.email ? { sharedBy: caller.email } : {};
-      return { answer: { ...shared, ...(auto ? { auto: true as const } : {}), ...sharedBy } };
+      const email = await io.memberEmail();
+      return { answer: { ...shared, ...(email ? { sharedBy: email } : {}) } };
     },
     [DECLINE_LOCATION_EVENT]: async () => ({ answer: DECLINED_LOCATION }),
   },
@@ -371,10 +364,7 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
             ? deps.startSetup(request)
             : { status: "refused", code: 409, error: "Connect it in Settings › Connections." },
         sameOrigin: isSameOriginMutationRequest(c.req.raw),
-        caller: async () => {
-          const email = await callerEmail();
-          return { owner: await callerOwner(), ...(email ? { email } : {}) };
-        },
+        memberEmail: callerEmail,
         connections: async () => {
           const res = await deps.forward(
             new Request(new URL("/api/connections", c.req.url), { headers }),

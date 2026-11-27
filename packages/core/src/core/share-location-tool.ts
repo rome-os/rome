@@ -1,20 +1,5 @@
-import { type SessionActor, sessionOwnerKey } from "../access/session-actor.js";
 import type { RomeTool, TurnFacts, WidgetDrawing } from "../agent/index.js";
 import { parseShareLocationInput, shareLocationToolOutput } from "../webchat/location-card.js";
-
-/**
- * Whose own message started the running turn, as the owner key of their
- * chats: the guardian proven by their signed-in session, or a member. A turn
- * something else started (a followed event, a routine, a task's result,
- * another agent) acts for the guardian only by loopback, so it has none and
- * its card never shares by itself.
- */
-export function askerOf(turn: TurnFacts): string | null {
-  // The actor is a SessionActor, which says how guardianship was proven.
-  const actor = turn.actor() as SessionActor | undefined;
-  const ownSession = actor?.kind !== "guardian" || actor.via === "cookie";
-  return ownSession ? sessionOwnerKey(actor) : null;
-}
 
 /**
  * `share_location`, served with the session's own tools. Where cards show, the
@@ -59,7 +44,7 @@ export function shareLocationTools(input: {
           content: [
             {
               type: "text",
-              text: JSON.stringify(shareLocationToolOutput(parsed.reason, askerOf(input.turn))),
+              text: JSON.stringify(shareLocationToolOutput(parsed.reason)),
             },
           ],
         };
