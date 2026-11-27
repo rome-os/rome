@@ -35,7 +35,7 @@ const deviceId = z.string().describe("The device's id, from system:read_devices.
 export const readDevices = agentTool({
   name: READ_DEVICES_TOOL,
   description:
-    "See Rome's devices, such as a phone and computers, whether each is online, and what each lets Rome read or do, such as Apple Health or the phone's status, with the operations system:run_on_device runs. Use it when someone asks which devices there are, whether a device is online, or what Rome can reach on a device, and before reading or doing something on a device. Turn on something a device offers with connect_service",
+    "See Rome's devices, such as a phone and computers, whether each is online, and each device's reported device connections (capabilities), such as Apple Health or the phone's status, with the operations system:run_on_device runs. Use it when someone asks which devices there are, whether a device is online, or what device connections Rome can reach, and before calling system:run_on_device. Turn on a device connection with connect_service. capabilities only covers device connections reported by the Rome app, not direct computer access exposed through rome-node (such as running commands, reading files, or controlling windows); an empty capabilities list on an online computer does not mean it has no rome-node capabilities — check or use those through a task chat with rome-node",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps, turn }) => {
