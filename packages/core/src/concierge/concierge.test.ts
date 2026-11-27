@@ -23,6 +23,7 @@ import { agentCardIn } from "../chats/agent-card.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../instance/notify-client.js";
 import type { ConciergeFollowing } from "./following.js";
@@ -827,6 +828,32 @@ describe("Concierge tools", () => {
       expect(await s.service.deliveryChat(chatId, "guardian")).toBe(chatId);
     });
 
+    it("records a task as the member's whose message started the turn, and the guardian's when no person did", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const as = (actor: SessionActor | undefined): SessionToolContext => ({
+        ...there(s, chatId),
+        getTurnActor: () => actor,
+      });
+      await run(
+        as({ kind: "visitor", accountId: "acct-ann", email: "ann@example.com" }),
+        s,
+        "chat_start",
+        {
+          title: "Flights",
+          brief: "Find flights",
+        },
+      );
+      expect(s.chats.startChat).toHaveBeenLastCalledWith(expect.anything(), "visitor:acct-ann");
+      await run(as({ kind: "guardian", userId: "seat-1", via: "account" }), s, "chat_start", {
+        title: "Hotels",
+        brief: "Find hotels",
+      });
+      expect(s.chats.startChat).toHaveBeenLastCalledWith(expect.anything(), "guardian");
+      await run(as(undefined), s, "chat_start", { title: "Trains", brief: "Find trains" });
+      expect(s.chats.startChat).toHaveBeenLastCalledWith(expect.anything(), "guardian");
+    });
+
     it("names the task by its title alone where the dashboard has no public address", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
@@ -1126,10 +1153,13 @@ describe("Concierge tools", () => {
         threadId: "901",
       });
       expect(await s.service.deliveryChat(id, "guardian")).toBe(id);
+      // A task a member started there reports there too.
+      expect(await s.service.deliveryChat(id, "visitor:acct-ann")).toBe(id);
       // An account main answers is no Concierge chat: its tasks report to the main chat.
       answering = "core:main";
       expect(await s.service.connectionChat(id)).toBeNull();
       expect(await s.service.deliveryChat(id, "guardian")).not.toBe(id);
+      expect(await s.service.deliveryChat(id, "visitor:acct-ann")).not.toBe(id);
     });
 
     it("sends a task's report to the main chat once that chat is gone", async () => {
