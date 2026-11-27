@@ -50,6 +50,7 @@ import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/in
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
+import { deprecatedPolicyEngine } from "./deprecated-app-ports.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -218,6 +219,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       capabilityDiscovery,
       sentinelLogRepo,
       approvalsRepo,
+      policyEngine: deprecatedPolicyEngine({
+        policies: () => policiesRepo.findAll(),
+        connectionKindOf: connectionKindOfChannel,
+      }),
       wakeGateFor,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>

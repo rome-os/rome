@@ -34,6 +34,7 @@ import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 import { AppActionSchemaCache } from "../apps/actions/app-action-schema-cache.js";
+import { deprecatedActionDeps } from "./deprecated-app-ports.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -127,6 +128,7 @@ function createAppActionRuntimeDeps(
 
   return withRemovedMembers(
     {
+      ...deprecatedActionDeps(),
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
         ? { hostExecution: services.hostExecution }
