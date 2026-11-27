@@ -906,6 +906,25 @@ final class SelfTest {
             try expect(dockPermissionPanel(size: panel, settings: rect, visible: visible) == point,
                        "docks or clamps within the visible screen")
         }
+        func os(_ major: Int, _ minor: Int = 0) -> OperatingSystemVersion {
+            OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: 0)
+        }
+        try expect(PermissionStep.accessibility.title(macOS: os(15)) == .setupAccessibility,
+                   "macOS 15 uses Accessibility label")
+        try expect(PermissionStep.accessibility.title(macOS: os(26, 4)) == .setupAccessibility,
+                   "macOS 26 uses Accessibility label")
+        try expect(PermissionStep.accessibility.title(macOS: os(27, 0)) == .setupDeviceControl,
+                   "macOS 27.0 uses Device Control and Data Access label")
+        try expect(PermissionStep.accessibility.title(macOS: os(27, 2)) == .setupDeviceControl,
+                   "macOS 27.2 uses Device Control and Data Access label")
+        try expect(PermissionStep.accessibility.title(macOS: os(27, 3)) == .setupSystemProtectionOverride,
+                   "macOS 27.3+ uses System & App Protection Override label")
+        try expect(PermissionStep.accessibility.title(macOS: os(28, 0)) == .setupSystemProtectionOverride,
+                   "macOS 28+ uses System & App Protection Override label")
+        try expect(PermissionStep.screenRecording.title(macOS: os(13, 6)) == .setupScreenRecording,
+                   "pre-Sonoma uses Screen Recording label")
+        try expect(PermissionStep.screenRecording.title(macOS: os(14, 0)) == .setupScreenAndAudioRecording,
+                   "macOS 14+ uses Screen & System Audio Recording label")
     }
 
     private func authorizationOptions() throws {

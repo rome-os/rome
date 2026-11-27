@@ -160,6 +160,10 @@ async function main(): Promise<void> {
             throw new Error(
               "This Rome Computer Use.app does not support guided permission setup. Install the latest Rome Node or Rome Desktop.",
             );
+          case "startup_timeout":
+            throw new Error(
+              "Rome Computer Use did not finish opening in time. If the guide appeared, continue there; otherwise run setup again from a signed-in macOS desktop session.",
+            );
           default:
             throw new Error(
               "Could not open the permission guide. Run setup from a signed-in macOS desktop session.",

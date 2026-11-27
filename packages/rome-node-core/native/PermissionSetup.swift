@@ -6,9 +6,21 @@ enum PermissionStep: String, CaseIterable {
     case screenRecording = "screen-recording"
 
     var title: HelperLocale.Text {
+        title(macOS: ProcessInfo.processInfo.operatingSystemVersion)
+    }
+
+    func title(macOS version: OperatingSystemVersion) -> HelperLocale.Text {
         switch self {
-        case .accessibility: return .setupAccessibility
-        case .screenRecording: return .setupScreenRecording
+        case .accessibility:
+            // macOS 27.0–27.2 renamed Accessibility to "Device Control and Data Access";
+            // macOS 27.3 beta 2 splits it into "System & App Protection Override" and "Accessibility".
+            // Re-verify non-English localized strings against SecurityPrivacyExtension once 27.3 ships GA.
+            if version.majorVersion > 27 || (version.majorVersion == 27 && version.minorVersion >= 3) {
+                return .setupSystemProtectionOverride
+            }
+            return version.majorVersion == 27 ? .setupDeviceControl : .setupAccessibility
+        case .screenRecording:
+            return version.majorVersion >= 14 ? .setupScreenAndAudioRecording : .setupScreenRecording
         }
     }
 

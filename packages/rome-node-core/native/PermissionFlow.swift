@@ -39,8 +39,8 @@ func runPermissionSetup(_ request: PermissionSetupRequest) throws {
         MainActor.assumeIsolated { flow?.focus(step) }
     }
     defer { notifications.removeObserver(observer) }
-    flow.show(request.step)
     try? FileHandle.standardOutput.write(contentsOf: Data("ready\n".utf8))
+    flow.show(request.step)
     withExtendedLifetime(flow) { app.run() }
 }
 
@@ -152,6 +152,7 @@ private final class PermissionDragCard: NSBox, NSDraggingSource {
 @MainActor
 private final class PermissionFlow: NSObject {
     private let locale: HelperLocale
+    private let appIcon: NSImage
     private let panel: PermissionPanel
     private let card: PermissionDragCard
     private let stack = NSStackView()
@@ -163,44 +164,70 @@ private final class PermissionFlow: NSObject {
     private var stepButtons: [NSButton] = []
     private var badges: [(NSBox, NSTextField)] = []
     private var state: PermissionSetupState
-    private var timer: Timer?
+    private var pollTimer: Timer?
+    private var dockTimer: Timer?
+    private var dockInterval: TimeInterval = 0
+    private var lastSettingsFrame: CGRect?
+    private var settingsWindow: (id: CGWindowID, pid: pid_t)?
+    private var fastDockUntil: TimeInterval = 0
     private var nextProbe: TimeInterval = 0
     private var probing = false
-    private var freshScreenGrant = false
+    private var probedScreenGrant: Bool?
     private var closing = false
-    private static let width: CGFloat = 376
+    private static let width: CGFloat = 424
     private static let inset: CGFloat = 20
+    private static let activeDockInterval: TimeInterval = 0.04
+    private static let frontDockInterval: TimeInterval = 0.12
+    private static let idleDockInterval: TimeInterval = 0.25
+    private static let pendingScreenProbeInterval: TimeInterval = 2.5
+    private static let grantedScreenProbeInterval: TimeInterval = 5.0
 
     init(_ request: PermissionSetupRequest, app: NSApplication) {
         locale = request.locale
-        card = PermissionDragCard(icon: app.applicationIconImage, locale: request.locale)
+        appIcon = app.applicationIconImage
+        card = PermissionDragCard(icon: appIcon, locale: request.locale)
         panel = PermissionPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 300),
-                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        state = PermissionSetupState(step: request.step, granted: Self.grants(freshScreenGrant: false))
+                                styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+                                backing: .buffered, defer: false)
+        let initialGrants = Self.grants(probedScreenGrant: nil)
+        state = PermissionSetupState(step: request.step, granted: initialGrants)
+        if initialGrants.contains(.screenRecording) {
+            nextProbe = ProcessInfo.processInfo.systemUptime + Self.grantedScreenProbeInterval
+        }
         super.init()
         configurePanel()
     }
 
     func show(_ requested: PermissionStep?) {
         focus(requested)
-        let timer = Timer(timeInterval: 0.9, repeats: true) { [weak self] _ in
+        let pollTimer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        pollTimer.tolerance = 0.15
+        self.pollTimer = pollTimer
+        RunLoop.main.add(pollTimer, forMode: .common)
+        scheduleDock(interval: Self.activeDockInterval)
     }
 
     func focus(_ requested: PermissionStep?) {
         guard !closing else { return }
         if let requested { state.enter(requested) }
+        fastDockUntil = ProcessInfo.processInfo.systemUptime + 1.0
         render()
-        dock()
+        _ = dock()
         panel.orderFrontRegardless()
         showStep(focus: requested)
+        if dockTimer != nil { scheduleDock(interval: Self.activeDockInterval) }
     }
 
     private func configurePanel() {
         panel.title = locale[.setupTitle]
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovable = false
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
@@ -213,12 +240,24 @@ private final class PermissionFlow: NSObject {
         effect.material = .popover
         effect.blendingMode = .behindWindow
         effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = 16
-        effect.layer?.masksToBounds = true
         panel.contentView = effect
 
-        heading.font = .systemFont(ofSize: 18, weight: .semibold)
+        let headerIcon = NSImageView(image: appIcon)
+        headerIcon.imageScaling = .scaleProportionallyDown
+        headerIcon.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        headerIcon.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        heading.font = .systemFont(ofSize: 17, weight: .semibold)
+        let brand = NSTextField(labelWithString: "Rome Computer Use")
+        brand.font = .systemFont(ofSize: 11, weight: .medium)
+        brand.textColor = .secondaryLabelColor
+        let titleStack = NSStackView(views: [heading, brand])
+        titleStack.orientation = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 1
+        let header = NSStackView(views: [headerIcon, titleStack])
+        header.alignment = .centerY
+        header.spacing = 10
+
         instructions.font = .systemFont(ofSize: 13)
         instructions.textColor = .secondaryLabelColor
         instructions.preferredMaxLayoutWidth = Self.width - Self.inset * 2
@@ -226,7 +265,7 @@ private final class PermissionFlow: NSObject {
         stack.alignment = .leading
         stack.distribution = .fill
         stack.spacing = 12
-        stack.addArrangedSubview(heading)
+        stack.addArrangedSubview(header)
 
         let steps = NSStackView()
         steps.orientation = .vertical
@@ -309,9 +348,19 @@ private final class PermissionFlow: NSObject {
 
     private func render() {
         let complete = state.step == nil
+        let needsScreenReopen = !CGPreflightScreenCaptureAccess() && probedScreenGrant == true
         heading.stringValue = locale[complete ? .setupComplete : .setupTitle]
-        instructions.stringValue = locale[complete ? .setupCompleteDetail :
-            (state.step.map(state.granted.contains) == true ? .setupGrantedDetail : .setupInstructions)]
+        let detail: HelperLocale.Text
+        if complete {
+            detail = needsScreenReopen ? .setupCompleteReopenDetail : .setupCompleteDetail
+        } else if state.step.map(state.granted.contains) == true {
+            detail = .setupGrantedDetail
+        } else if state.step == .screenRecording {
+            detail = .setupScreenInstructions
+        } else {
+            detail = .setupInstructions
+        }
+        instructions.stringValue = locale[detail]
         card.isHidden = complete || state.step.map(state.granted.contains) == true
         settings.isHidden = complete
         finder.isHidden = complete
@@ -328,6 +377,7 @@ private final class PermissionFlow: NSObject {
         }
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.setContentSize(NSSize(width: Self.width, height: ceil(stack.fittingSize.height) + 2 * Self.inset))
+        panel.invalidateShadow()
     }
 
     private func showStep(focus requested: PermissionStep? = nil) {
@@ -358,33 +408,35 @@ private final class PermissionFlow: NSObject {
 
     @objc private func close() {
         closing = true
-        timer?.invalidate()
+        pollTimer?.invalidate()
+        dockTimer?.invalidate()
         panel.orderOut(nil)
         if !probing { NSApp.terminate(nil) }
     }
 
-    private static func grants(freshScreenGrant: Bool) -> Set<PermissionStep> {
+    private static func grants(probedScreenGrant: Bool?) -> Set<PermissionStep> {
         var grants: Set<PermissionStep> = []
         if AXIsProcessTrusted() { grants.insert(.accessibility) }
-        if CGPreflightScreenCaptureAccess() || freshScreenGrant { grants.insert(.screenRecording) }
+        if probedScreenGrant ?? CGPreflightScreenCaptureAccess() { grants.insert(.screenRecording) }
         return grants
     }
 
     private func poll() {
         let previous = state.step
-        let grants = Self.grants(freshScreenGrant: freshScreenGrant)
+        let grants = Self.grants(probedScreenGrant: probedScreenGrant)
         if grants != state.granted {
             state.update(grants)
             render()
+            _ = dock()
             if state.step != previous { showStep() }
         }
-        dock()
         let now = ProcessInfo.processInfo.systemUptime
-        guard state.step != nil,
-              state.step == .screenRecording || grants.contains(.accessibility),
-              !CGPreflightScreenCaptureAccess(), !freshScreenGrant, !probing, now >= nextProbe else { return }
+        let screenGranted = grants.contains(.screenRecording)
+        let shouldProbe = (screenGranted && lastSettingsFrame != nil)
+            || (!screenGranted && (state.step == .screenRecording || grants.contains(.accessibility)))
+        guard shouldProbe, !probing, now >= nextProbe else { return }
         probing = true
-        nextProbe = now + 2.5
+        nextProbe = now + (screenGranted ? Self.grantedScreenProbeInterval : Self.pendingScreenProbeInterval)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let granted = ScreenRecordingProbe.read()
             DispatchQueue.main.async { [weak self] in
@@ -394,15 +446,43 @@ private final class PermissionFlow: NSObject {
                     NSApp.terminate(nil)
                     return
                 }
-                if let granted { self.freshScreenGrant = granted }
+                if let granted { self.probedScreenGrant = granted }
                 self.poll()
             }
         }
     }
 
-    private func dock() {
-        guard !panel.ignoresMouseEvents, let primary = NSScreen.screens.first else { return }
+    private func scheduleDock(interval: TimeInterval) {
+        guard !closing, interval != dockInterval else { return }
+        dockTimer?.invalidate()
+        dockInterval = interval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.trackDock() }
+        }
+        timer.tolerance = interval <= Self.activeDockInterval ? 0 : interval * 0.2
+        dockTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func trackDock() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if dock() { fastDockUntil = now + 0.6 }
+        let desired: TimeInterval
+        if NSEvent.pressedMouseButtons != 0 || now < fastDockUntil {
+            desired = Self.activeDockInterval
+        } else if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.systempreferences" {
+            desired = Self.frontDockInterval
+        } else {
+            desired = Self.idleDockInterval
+        }
+        scheduleDock(interval: desired)
+    }
+
+    private func dock() -> Bool {
+        guard !panel.ignoresMouseEvents, let primary = NSScreen.screens.first else { return false }
         let settings = settingsFrame(primaryTop: primary.frame.maxY)
+        let changed = settings != lastSettingsFrame
+        lastSettingsFrame = settings
         let screen = settings.flatMap { frame in
             NSScreen.screens.max { lhs, rhs in
                 func area(_ screen: NSScreen) -> CGFloat {
@@ -413,10 +493,31 @@ private final class PermissionFlow: NSObject {
             }
         } ?? NSScreen.main ?? primary
         let point = dockPermissionPanel(size: panel.frame.size, settings: settings, visible: screen.visibleFrame)
-        if point != panel.frame.origin { panel.setFrameOrigin(point) }
+        if point != panel.frame.origin {
+            panel.setFrameOrigin(point)
+            return true
+        }
+        return changed
+    }
+
+    private static func extractSettingsFrame(from row: [String: Any], primaryTop: CGFloat) -> CGRect? {
+        guard row[kCGWindowLayer as String] as? Int == 0,
+              let bounds = row[kCGWindowBounds as String] as? [String: Any],
+              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              frame.width > 200, frame.height > 200 else { return nil }
+        return CGRect(x: frame.minX, y: primaryTop - frame.maxY, width: frame.width, height: frame.height)
     }
 
     private func settingsFrame(primaryTop: CGFloat) -> CGRect? {
+        if let cached = settingsWindow,
+           let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], cached.id) as? [[String: Any]],
+           let row = rows.first,
+           row[kCGWindowOwnerPID as String] as? pid_t == cached.pid,
+           row[kCGWindowIsOnscreen as String] as? Bool == true,
+           let frame = Self.extractSettingsFrame(from: row, primaryTop: primaryTop) {
+            return frame
+        }
+        settingsWindow = nil
         let pids = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences")
             .map(\.processIdentifier)
         guard !pids.isEmpty,
@@ -424,11 +525,11 @@ private final class PermissionFlow: NSObject {
                                                     kCGNullWindowID) as? [[String: Any]] else { return nil }
         for row in rows {
             guard let pid = row[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
-                  row[kCGWindowLayer as String] as? Int == 0,
-                  let bounds = row[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  frame.width > 200, frame.height > 200 else { continue }
-            return CGRect(x: frame.minX, y: primaryTop - frame.maxY, width: frame.width, height: frame.height)
+                  let frame = Self.extractSettingsFrame(from: row, primaryTop: primaryTop) else { continue }
+            if let wid = row[kCGWindowNumber as String] as? CGWindowID {
+                settingsWindow = (wid, pid)
+            }
+            return frame
         }
         return nil
     }
