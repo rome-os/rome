@@ -6,7 +6,6 @@
 
 import type { AgentTool } from "../apps/actions/agent-tool.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
-import { whoMayAsk } from "../apps/actions/who-may-ask.js";
 import { connectionTools } from "../connections/agent-tools.js";
 import { routineTools } from "../routines/agent-tools.js";
 import { deviceTools } from "../connections/device/agent-tools.js";
@@ -37,6 +36,6 @@ export function registerAgentTools(
 ): void {
   for (const page of Object.keys(PAGES) as Page[]) {
     const tools = PAGES[page] as ReadonlyArray<AgentTool<AgentToolDeps[Page]>>;
-    for (const tool of tools) actions.register(tool.action(deps[page], whoMayAsk));
+    for (const tool of tools) actions.register(tool.action(deps[page]));
   }
 }

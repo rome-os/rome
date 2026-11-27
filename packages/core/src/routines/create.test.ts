@@ -1656,27 +1656,11 @@ describe("create_routine — naming the action", () => {
     expect((await repo.findById(id))?.actionName).toBe("coding:coding_task");
   });
 
-  it("refuses the bare name of an action only the guardian's own message can call", async () => {
-    const result = await createRoutine(nightly("pause_routine"), {
-      routinesRepo: repo,
-      actionRegistry: {
-        ...allActions,
-        getCanonicalName: (name: string) => `system:${name}`,
-      },
-      routineEngine: makeFakeEngine(),
-      resolveOneOffDate,
-    });
-
-    expect(result.status).toBe("error");
-    expect(await repo.findAll()).toHaveLength(0);
-  });
-
   it.each([
     "system:pause_routine",
     "system:resume_routine",
-    "system:run_routine",
     "system:stop_routine",
-  ])("refuses %s, which only the guardian's own message can call", async (actionName) => {
+  ])("saves a routine that runs %s", async (actionName) => {
     const result = await createRoutine(nightly(actionName), {
       routinesRepo: repo,
       actionRegistry: allActions,
@@ -1684,8 +1668,19 @@ describe("create_routine — naming the action", () => {
       resolveOneOffDate,
     });
 
-    if (result.status !== "error") throw new Error("expected an error");
-    expect(result.error).toContain("guardian's own message");
+    expect(result.status).toBe("ok");
+    expect(await repo.findAll()).toHaveLength(1);
+  });
+
+  it("saves no routine that runs system:run_routine, since its every fire would fail", async () => {
+    const result = await createRoutine(nightly("system:run_routine"), {
+      routinesRepo: repo,
+      actionRegistry: allActions,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
+
+    expect(result.status).not.toBe("ok");
     expect(await repo.findAll()).toHaveLength(0);
   });
 
