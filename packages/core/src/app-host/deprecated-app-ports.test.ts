@@ -231,18 +231,25 @@ describe("the app SDK surface People's removal deprecated", () => {
 });
 
 describe("strangerPersonId", () => {
-  it("reports a direct read, and nothing for copying, listing or serializing deps", () => {
-    const { uses, report } = recordedUses();
+  it("carries the id into a copy of deps, as 0.11 did", () => {
+    const { report } = recordedUses();
     const deps = depsOf("old-app", report) as unknown as Record<string, unknown>;
 
-    const copy = { ...deps };
-    expect(Object.keys(deps)).not.toContain("strangerPersonId");
-    expect(JSON.parse(JSON.stringify(deps))).not.toHaveProperty("strangerPersonId");
-    expect(copy).not.toHaveProperty("strangerPersonId");
-    expect(uses).toEqual([]);
+    expect({ ...deps }.strangerPersonId).toBe("__STRANGER__");
+    expect(Object.assign({}, deps).strangerPersonId).toBe("__STRANGER__");
+    expect(JSON.parse(JSON.stringify(deps)).strangerPersonId).toBe("__STRANGER__");
+  });
 
+  it("reports a direct read, and a copy of deps as a read", () => {
+    const direct = recordedUses();
+    const deps = depsOf("old-app", direct.report) as unknown as Record<string, unknown>;
     expect(deps.strangerPersonId).toBe("__STRANGER__");
-    expect(uses).toEqual([["old-app", "strangerPersonId"]]);
+    expect(direct.uses).toEqual([["old-app", "strangerPersonId"]]);
+
+    const copied = recordedUses();
+    const copiedDeps = depsOf("old-app", copied.report) as unknown as Record<string, unknown>;
+    void { ...copiedDeps };
+    expect(copied.uses).toEqual([["old-app", "strangerPersonId"]]);
   });
 });
 

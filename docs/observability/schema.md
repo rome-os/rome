@@ -329,7 +329,7 @@ The host counts a use that reaches it at run time:
 |---|---|
 | `people.guardian` | calls `deps.people.guardian()` in an action |
 | `personMappingRepo.<method>` | calls any method of `deps.personMappingRepo` in an action, one symbol per method |
-| `strangerPersonId` | reads `deps.strangerPersonId` in an action |
+| `strangerPersonId` | reads `deps.strangerPersonId` in an action, or copies `deps`, such as `{ ...deps }`, which reads it too |
 | `policyEngine.evaluate` | calls `deps.policyEngine.evaluate()` in an action |
 | `APPROVAL_TYPES.person_mapping` | creates an approval of type `person_mapping` in an action |
 | `ThreadContext.senderBondLevel` | passes it to `agentRunner.run()` or `agentRunner.runForked()`, in an action, a turn hook or an `app-started` hook |
@@ -342,7 +342,6 @@ It cannot count a use that never reaches it:
 - Reads of fields the host leaves unset: `SaidInboundEvent.sender`, and `senderBondLevel` read from a thread context the host gives.
 - `ChatStopStatus` `"forbidden"` and `chatStopReceipt("forbidden")`, which the host never answers and the app computes alone.
 - The web SDK's `people` page, which runs in the browser.
-- `strangerPersonId` read from a copy of `deps`, such as `{ ...deps }`. The copy has no such field, and copying `deps` counts nothing.
 
 Hours used per symbol, app and instance over the last 30 days:
 

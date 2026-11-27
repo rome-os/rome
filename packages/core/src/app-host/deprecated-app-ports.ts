@@ -164,10 +164,9 @@ const bondLevelInRun = (args: unknown[]) => {
  * action beside them: `people` (answered from `deps.appContext.access`),
  * `personMappingRepo` and `strangerPersonId` added, and the shared `policyEngine`, `approvalsRepo` and `agentRunner`
  * reporting their deprecated uses. Call it on the finished object, since
- * `strangerPersonId` reports from a getter. The getter is not enumerable, so
- * copying, listing or serializing `deps` reports nothing, and a copy such as
- * `{ ...deps }` has no `strangerPersonId`. No app in this repository read it
- * from a copy at 0.11: the Inbox read it from `deps` itself.
+ * `strangerPersonId` reports from a getter. The getter is enumerable, as the
+ * 0.11 field was, so a copy such as `{ ...deps }` still carries the id, and
+ * copying or serializing `deps` counts as a use.
  */
 export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
   appId: string,
@@ -184,7 +183,7 @@ export function withDeprecatedActionDeps<T extends Record<string, unknown>>(
   if (!("strangerPersonId" in target)) {
     Object.defineProperty(target, "strangerPersonId", {
       configurable: true,
-      enumerable: false,
+      enumerable: true,
       get() {
         used("strangerPersonId");
         return STRANGER_PERSON_ID;

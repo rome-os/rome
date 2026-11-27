@@ -618,7 +618,7 @@ export function createAction(
     },
 ): Action {
   return createSendMessageAction(config, deps.channelsService, {
-    ...deps,
+    agentNames: deps.agentNames,
     access: deps.appContext?.access,
     chats:
       deps.chats ??
