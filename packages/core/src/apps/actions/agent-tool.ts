@@ -13,8 +13,8 @@ import type { z } from "zod";
 import { type ActionExecutionStore, actionExecutionContext } from "./context.js";
 import { withApprovalPerCall } from "./types.js";
 
-/** The turn a tool runs for: who it acts for, who can read it, and where. */
-export type ToolTurn = Pick<ActionExecutionStore, "actor" | "audience" | "channelContext">;
+/** The turn a tool runs for: who it acts for, and where. */
+export type ToolTurn = Pick<ActionExecutionStore, "actor" | "channelContext">;
 
 /** What `run` and `approval` get besides their input: the deps their page
  * was handed, and the turn the tool runs for. */
@@ -130,7 +130,6 @@ export function runningTurn(): ToolTurn {
   const store = actionExecutionContext.getStore();
   return {
     ...(store?.actor ? { actor: store.actor } : {}),
-    ...(store?.audience ? { audience: store.audience } : {}),
     ...(store?.channelContext ? { channelContext: store.channelContext } : {}),
   };
 }
