@@ -307,8 +307,9 @@ export async function grantConnectionAccessOperations(
         constraints: [],
         grantEpoch: resolved.grantEpoch,
         expiresAt: null,
-        // Chat approvals never disclose or overwrite existing resource allowlists.
+        // Chat approvals never disclose/overwrite existing resource allowlists or loosen per-call approval.
         preserveExistingConstraints: true,
+        preserveExistingApproval: true,
       };
     }),
     () => {

@@ -325,7 +325,7 @@ describe("core:request_connection_access", () => {
         identity: "app",
         operation: "feishu.document.read",
         sideEffects: "read-only",
-        approval: "not_required",
+        approval: "required",
         constraints: [{ inputPointer: "/documentId", allowedValues: ["docA"] }],
         grantEpoch: "epoch-1",
         expiresAt: null,
@@ -348,19 +348,21 @@ describe("core:request_connection_access", () => {
 
       const docPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.document.read");
       expect(docPolicy?.grantEpoch).toBe("epoch-2");
+      expect(docPolicy?.approval).toBe("required");
       expect(docPolicy?.constraints).toEqual([
         { inputPointer: "/documentId", allowedValues: ["docA"] },
       ]);
 
       const wikiPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.wiki.spaces");
       expect(wikiPolicy?.grantEpoch).toBe("epoch-2");
+      expect(wikiPolicy?.approval).toBe("not_required");
       expect(wikiPolicy?.constraints).toEqual([]);
     } finally {
       f1.close();
     }
   });
 
-  it("does not resurrect constraints from an expired policy when granting via chat approval", async () => {
+  it("does not resurrect constraints or approval mode from an expired policy when granting via chat approval", async () => {
     const f1 = makeFixture();
     try {
       await f1.access.put({
@@ -369,7 +371,7 @@ describe("core:request_connection_access", () => {
         identity: "app",
         operation: "feishu.document.read",
         sideEffects: "read-only",
-        approval: "not_required",
+        approval: "required",
         constraints: [{ inputPointer: "/documentId", allowedValues: ["expiredDoc"] }],
         grantEpoch: "epoch-1",
         expiresAt: new Date(Date.now() - 60_000),
@@ -388,6 +390,7 @@ describe("core:request_connection_access", () => {
 
       const docPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.document.read");
       expect(docPolicy?.expiresAt).toBeNull();
+      expect(docPolicy?.approval).toBe("not_required");
       expect(docPolicy?.constraints).toEqual([]);
     } finally {
       f1.close();

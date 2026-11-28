@@ -276,6 +276,7 @@ export class AppConnectionAccessRepository {
     inputs: ReadonlyArray<
       Omit<Parameters<AppConnectionAccessRepository["put"]>[0], "appId"> & {
         preserveExistingConstraints?: boolean;
+        preserveExistingApproval?: boolean;
       }
     >,
     isAppActive: () => boolean,
@@ -285,10 +286,10 @@ export class AppConnectionAccessRepository {
         if (!isAppActive()) return null;
         const now = new Date();
         const written: AppConnectionAccessRecord[] = [];
-        for (const { preserveExistingConstraints, ...entry } of inputs) {
+        for (const { preserveExistingConstraints, preserveExistingApproval, ...entry } of inputs) {
           const input = { appId, ...entry };
           let nextInput = input;
-          if (preserveExistingConstraints) {
+          if (preserveExistingConstraints || preserveExistingApproval) {
             const active = tx
               .select()
               .from(appConnectionAccess)
@@ -301,9 +302,13 @@ export class AppConnectionAccessRepository {
               )
               .get();
             if (active) {
+              const existing = toAccessRecord(active);
               nextInput = {
                 ...input,
-                constraints: toAccessRecord(active).constraints,
+                ...(preserveExistingConstraints && { constraints: existing.constraints }),
+                ...(preserveExistingApproval &&
+                  existing.sideEffects === input.sideEffects &&
+                  existing.approval === "required" && { approval: "required" as const }),
               };
             }
           }
