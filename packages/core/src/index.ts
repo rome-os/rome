@@ -317,6 +317,7 @@ import {
 import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
+import { computerConsentCatalogEntry, ComputerConsentWatcher } from "./events/computer-consent.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -1242,14 +1243,17 @@ async function main() {
   );
   routineEngine.registerProvider("schedule", scheduleTriggerProvider);
 
-  // Registry of event types producer apps can emit; empty until a producer
-  // registers, read by routine creation.
+  // Core can watch a consent request before any Mac has emitted its first change.
   const eventCatalog = new EventCatalog();
+  eventCatalog.register(computerConsentCatalogEntry);
 
   // In-memory event bus (data plane): apps publish into it via the
   // `events.publish` RPC; the event-bus trigger provider reads from it.
   const eventBus = new EventBus();
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus, routinesRepo));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(eventBus, routinesRepo, new ComputerConsentWatcher(nodeDevices)),
+  );
 
   // Manual triggers never fire on their own — they only run via runNow(). The
   // provider exists so the trigger type has a registered home (passes the API's
@@ -3235,6 +3239,8 @@ async function main() {
     shuttingDown = true;
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
+    routineEngine.stop();
+    shutdownLog.info("routine engine stopped");
     nodeDevices.close();
 
     if (internalApi) {
@@ -3300,9 +3306,6 @@ async function main() {
 
     favorDispatchRunner.stop();
     shutdownLog.info("favor dispatch runner stopped");
-
-    routineEngine.stop();
-    shutdownLog.info("routine engine stopped");
 
     const delegatedCancelled = actionWorkerCoordinator.cancelAll();
     shutdownLog.info("delegated action workers cancellation requested", {

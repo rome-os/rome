@@ -219,6 +219,12 @@ Computer actions:
   exec         Run a program on the target computer.
   fs.list      List one folder. Read-only. Older targets return unsupported_action.
 
+On a Mac with Window Control:
+  computer.request_access  Request local approval or reopen the approved permission guide.
+  computer.status          Read the current state. Pass {requestId} to follow one request.
+  computer.windows         List windows after the request reaches authorized.
+  computer.bind            Bind a window by its numeric ID after authorization.
+
 exec arguments:
   command      Required nonempty executable name or path.
   args         Optional array of string arguments (default: []).

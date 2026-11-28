@@ -42,7 +42,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
     let signals = [SIGUSR1, SIGTERM, SIGINT].map { name in
         let source = DispatchSource.makeSignalSource(signal: name, queue: DispatchQueue.global(qos: .userInitiated))
         source.setEventHandler { @Sendable in
-            if name == SIGUSR1 { _ = admission.stop() }
+            if name == SIGUSR1 { admission.terminate("local_stop") }
             else { admission.terminate() }
         }
         source.resume()
@@ -55,9 +55,10 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
     if let app {
         try requireAccessoryPolicy(current: app.activationPolicy, set: app.setActivationPolicy)
         let ui = DesktopSession(admission: admission, store: store)
+        app.delegate = ui
         session = ui
         consent = { prompt, canContinue in
-            DispatchQueue.main.sync { ui.confirm(prompt, canContinue: canContinue) }
+            try DispatchQueue.main.sync { try ui.confirm(prompt, canContinue: canContinue) }
         }
     } else {
         session = nil
@@ -80,7 +81,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
         else { exit(code) }
     }
 
-    if let app { app.run() }
+    if let app { withExtendedLifetime(session) { app.run() } }
     dispatchMain()
 }
 
@@ -103,6 +104,11 @@ do {
     #if SELF_TEST_BUILD
     if arguments == ["--self-test"] {
         try SelfTest.run()
+        exit(0)
+    }
+    if arguments.count == 2, arguments[0] == "--self-test-handoff" {
+        try SelfTest().cachedScreenHandoff(arguments[1])
+        print("handoff cleanup complete")
         exit(0)
     }
     if arguments.count == 3, arguments[0] == "--self-test-server" {
@@ -135,6 +141,9 @@ do {
         ])
         try FileHandle.standardOutput.write(contentsOf: output)
         exit(0)
+    }
+    if arguments.count == 3, arguments[0] == "--execute-approved", let parent = pid_t(arguments[2]), parent > 0 {
+        try MainActor.assumeIsolated { try runApprovedExecution(path: arguments[1], parent: parent) }
     }
     let store = KeychainTrustedKeyStore()
     if arguments.count == 2, arguments[0] == "--serve" {

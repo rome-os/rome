@@ -178,7 +178,10 @@ export function normalizeRoutineDraftForCard(
   if (!triggerResult.ok) return triggerResult;
   // The card's "Turn it on" creates the routine, so the draft meets the same
   // rules a new routine does.
-  const triggerError = newTriggerError(triggerResult.trigger as CreateRoutineInput["trigger"]);
+  const triggerError = newTriggerError(
+    triggerResult.trigger as CreateRoutineInput["trigger"],
+    o.args as Record<string, unknown>,
+  );
   if (triggerError) return { ok: false, error: `propose_routine: ${triggerError}` };
 
   return {

@@ -281,6 +281,11 @@ describe("defer", () => {
       .properties.event as { required: string[]; properties: Record<string, unknown> };
     expect(event.required).toEqual(["eventName"]);
     expect(event.properties).not.toHaveProperty("deadline");
+    expect(event.properties).toMatchObject({
+      afterRevision: { type: "integer", minimum: 0 },
+      expiresInMs: { type: "integer", minimum: 0 },
+      filter: { items: { required: ["field", "equals"] } },
+    });
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",

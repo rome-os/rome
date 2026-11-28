@@ -405,6 +405,26 @@ describe("Computer Use Unix socket bridge", () => {
     expect(helper.received.find(({ method }) => method === "cancel")).not.toHaveProperty("params");
   });
 
+  it("delivers local revocation before the terminal notice on a busy connection", async () => {
+    const helper = mockHelper();
+    const bridge = await helper.start();
+    const started = helper.next("act");
+    const input = expect(bridge.act(action)).rejects.toMatchObject({
+      code: "action_outcome_unknown",
+    });
+    await started;
+    const stopping = new Promise<void>((resolve) => bridge.onCancelRequested(resolve));
+    const stopped = new Promise((resolve) => bridge.onDisconnect(resolve));
+    const notice = (code: string) =>
+      helper.write(encodeFrame({ v: 1, id: null, ok: false, error: { code } }));
+    notice("cancel_requested");
+    await stopping;
+    expect(bridge.closed).toBe(false);
+    notice("session_stopped");
+    expect(await stopped).toMatchObject({ code: "session_stopped" });
+    await input;
+  });
+
   it("correlates reverse-order replies for different methods and returns a raw screenshot", async () => {
     const helper = mockHelper();
     const bridge = await helper.start();
@@ -633,6 +653,7 @@ it.skipIf(!canBuildNative)(
       const bridge = await ComputerUseBridge.launch({
         appPath,
         controller,
+        includeAccess: true,
         locale: "ja-JP",
         verifyBundle: () => {},
         launcher: (launch) => {
@@ -656,6 +677,9 @@ it.skipIf(!canBuildNative)(
       });
       cleanups.push(() => bridge.close());
       expect(bridge.helperPid).toBeGreaterThan(0);
+      expect(bridge.initialAccess).toEqual({ status: "authorized", revision: 1 });
+      expect(await bridge.accessStatus()).toEqual(bridge.initialAccess);
+      expect(await bridge.openPermissionGuide()).toEqual({ status: "authorized", revision: 1 });
       expect(existsSync(join(stateDir, "bootstrap.json"))).toBe(false);
       expect(await bridge.status()).toEqual({ instance: bridge.instanceId, stop: "running" });
       await expect(bridge.windows()).rejects.toMatchObject({

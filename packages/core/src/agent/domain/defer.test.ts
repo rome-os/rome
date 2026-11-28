@@ -74,6 +74,76 @@ describe("parseDeferInput", () => {
 });
 
 describe("parseDeferInput with an event", () => {
+  const filter = [
+    { field: "deviceId", equals: "mac" },
+    { field: "requestId", equals: "a" },
+  ];
+  const consentWait = (overrides: Record<string, unknown> = {}, taskChecks = false) =>
+    parseDeferInput(
+      {
+        name: "Mac access",
+        note: "Open Notes",
+        event: {
+          eventName: "computer.consent.changed",
+          filter,
+          afterRevision: 2,
+          expiresInMs: 30_000,
+          ...overrides,
+        },
+      },
+      NOW,
+      { taskChecks },
+    );
+
+  it("derives a task check consent deadline from the remaining time", () => {
+    const waitingFor = "Mac access";
+    expect(consentWait({ waitingFor }, true)).toMatchObject({
+      ok: true,
+      wakeUp: { waitingFor, deadlineMs: NOW + 35_000 },
+    });
+    expect(consentWait({}, true)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("waitingFor is required"),
+    });
+    expect(consentWait({ waitingFor, expiresInMs: undefined }, true)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("deadline is required"),
+    });
+  });
+
+  it("bounds a computer consent wait for an ordinary chat and keeps the cursor outside its filter", () => {
+    expect(consentWait()).toMatchObject({
+      ok: true,
+      wakeUp: {
+        event: { filter, sourcePattern: "rome-node", afterRevision: 2 },
+        deadlineMs: NOW + 35_000,
+      },
+    });
+    expect(consentWait({ expiresInMs: 0 })).toMatchObject({
+      ok: true,
+      wakeUp: { deadlineMs: NOW + 5_000 },
+    });
+    expect(consentWait({ deadline: new Date(NOW + 600_000).toISOString() }).ok).toBe(true);
+  });
+
+  it.each([
+    { filter: [] },
+    { filter: [filter[0], filter[0]] },
+    { filter: [...filter, { field: "status", equals: "authorized" }] },
+    { filter: [...filter, { field: "afterRevision", equals: "2" }] },
+    { sourcePattern: "another-producer" },
+    { afterRevision: -1 },
+    { expiresInMs: -1 },
+    { expiresInMs: undefined },
+    { deadline: "2001-01-01T00:00:00Z" },
+    { deadline: new Date(NOW).toISOString() },
+    { deadline: new Date(NOW + 600_001).toISOString() },
+    { expiresInMs: 600_000 },
+    { eventName: "ci.done" },
+  ])("rejects an invalid consent wait %j", (overrides) => {
+    expect(consentWait(overrides).ok).toBe(false);
+  });
+
   it("trims the event's match strings", () => {
     const r = parseDeferInput(
       {

@@ -354,8 +354,85 @@ func revokeTrustedKeys(admission: Admission, persistent: Bool, remove: () throws
     if persistent { admission.terminate("key_revoked") }
 }
 
+enum TerminationPolicy {
+    private static let systemSettingsPaths: Set<String> = Set([
+        "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension",
+        "/System/Applications/System Settings.app/Contents/MacOS/System Settings",
+    ].compactMap(canonicalPath))
+    private static let systemQuitReasons: Set<OSType> = [
+        OSType(kAELogOut),
+        OSType(kAEReallyLogOut),
+        OSType(kAERestart),
+        OSType(kAEShutDown),
+        OSType(kAEShowRestartDialog),
+        OSType(kAEShowShutdownDialog),
+    ]
+
+    static func senderPID(for event: NSAppleEventDescriptor) -> pid_t? {
+        if let tokenData = event.attributeDescriptor(forKeyword: AEKeyword(keySenderAuditTokenAttr))?.data,
+           tokenData.count == MemoryLayout<audit_token_t>.size {
+            let token = tokenData.withUnsafeBytes { $0.load(as: audit_token_t.self) }
+            let pid = pid_t(bitPattern: token.val.5)
+            if pid > 0 { return pid }
+        }
+        if let pid = event.attributeDescriptor(forKeyword: AEKeyword(keySenderPIDAttr))?.int32Value, pid > 0 {
+            return pid
+        }
+        return nil
+    }
+
+    static func isSystemSettingsQuit(_ event: NSAppleEventDescriptor?,
+                                     senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
+                                     executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
+        // System Settings "Quit & Reopen" sends kAEQuitApplication (often with kAEQuitReason = kAEReallyLogOut)
+        // from SecurityPrivacyExtension or System Settings. Ignore only confirmed System Settings quits so real
+        // logout, restart, shutdown, and ordinary user quits (Activity Monitor, osascript) are never blocked.
+        guard let event,
+              let sender = senderPID(event),
+              let path = executablePath(sender),
+              let resolved = canonicalPath(path) else {
+            return false
+        }
+        return systemSettingsPaths.contains(resolved)
+    }
+
+    static func quitReason(for event: NSAppleEventDescriptor?) -> String {
+        if let reason = event?.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue,
+           systemQuitReasons.contains(reason) {
+            return "console_unavailable"
+        }
+        return "local_stop"
+    }
+
+    static func reply(for event: NSAppleEventDescriptor?, terminateNow: Bool = false,
+                      senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
+                      executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath,
+                      checkScreenRecording: @escaping @Sendable () -> Bool = { ScreenRecordingProbe.read()?.screenRecording == true },
+                      schedule: (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
+                      replyTerminate: @escaping @Sendable (Bool) -> Void = { shouldTerminate in
+                          DispatchQueue.main.async { NSApplication.shared.reply(toApplicationShouldTerminate: shouldTerminate) }
+                      },
+                      onQuit: @escaping @Sendable (String) -> Void) -> NSApplication.TerminateReply {
+        guard isSystemSettingsQuit(event, senderPID: senderPID, executablePath: executablePath) else {
+            onQuit(quitReason(for: event))
+            return terminateNow ? .terminateNow : .terminateLater
+        }
+        // Only cancel a System Settings Quit when a fresh TCC probe confirms Screen Recording is currently granted.
+        // If the guardian turned Screen Recording off (or the probe fails), terminate the session cleanly.
+        schedule {
+            if checkScreenRecording() {
+                replyTerminate(false)
+            } else {
+                onQuit("local_stop")
+                if terminateNow { replyTerminate(true) }
+            }
+        }
+        return .terminateLater
+    }
+}
+
 @MainActor
-final class DesktopSession: NSObject, NSMenuDelegate {
+final class DesktopSession: NSObject, NSMenuDelegate, NSApplicationDelegate {
     private let admission: Admission
     private let store: any TrustedKeyStore
     private let consentQueue = DispatchQueue(label: "com.rome.computer-use.consent-visibility", qos: .userInteractive)
@@ -376,9 +453,13 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         self.store = store
         super.init()
         let unavailable: @Sendable (Notification) -> Void = { _ in
-            _ = admission.stop("console_unavailable")
+            admission.terminate("console_unavailable")
         }
         let workspace = NSWorkspace.shared.notificationCenter
+        // Do not observe NSWorkspace.willPowerOffNotification here: AppKit posts it on kAEReallyLogOut
+        // even when SecurityPrivacyExtension sends Quit & Reopen. Genuine logout, restart, shutdown,
+        // and ordinary user quits are handled via applicationShouldTerminate after filtering out
+        // System Settings Quit & Reopen.
         workspaceObservers = [
             NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification,
             NSWorkspace.screensDidSleepNotification,
@@ -387,13 +468,23 @@ final class DesktopSession: NSObject, NSMenuDelegate {
             forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: nil, using: unavailable)
     }
 
-    func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) -> ConsentDecision {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // System Settings "Quit & Reopen" sends a Quit AppleEvent to all instances of the helper bundle.
+        // Active sessions cancel only confirmed System Settings quits when a fresh probe verifies Screen Recording is still granted.
+        let admission = self.admission
+        return TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent,
+                                       terminateNow: presentingRevocationError) { reason in
+            admission.terminate(reason)
+        }
+    }
+
+    func confirm(_ prompt: ConsentPrompt, canContinue: @escaping @Sendable () -> Bool) throws -> ConsentDecision {
         let eligible: @Sendable () -> Bool = {
             canContinue() && DesktopAccess.consoleSessionAvailable()
         }
-        guard eligible() else { return .deny }
+        guard eligible() else { throw prompt.interruption }
         var remaining = ConsentCountdown.seconds(until: prompt.deadline)
-        guard remaining > 0 else { return .deny }
+        guard remaining > 0 else { throw Failure("consent_expired") }
         let locale = prompt.locale
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -508,7 +599,7 @@ final class DesktopSession: NSObject, NSMenuDelegate {
                 }
             }
             return event
-        }) else { return .deny }
+        }) else { throw Failure("cancelled") }
         defer { NSEvent.removeMonitor(inputMonitor) }
 
         let raise: @MainActor @Sendable () -> Void = {
@@ -593,18 +684,19 @@ final class DesktopSession: NSObject, NSMenuDelegate {
         window.center()
         focus()
         // Keep the alert ordered on screen until the acceptance checks finish.
-        return withExtendedLifetime(alert) {
+        return try withExtendedLifetime(alert) {
             defer {
                 timer.invalidate()
                 window.orderOut(nil)
             }
             while true {
                 let response = app.runModal(for: window)
+                guard eligible() else { throw prompt.interruption }
                 guard let decision = ConsentDecision(rawValue: response.rawValue), decision != .deny,
                       let button = protected.first(where: { $0.tag == decision.rawValue }) else { return .deny }
                 if revalidate(), button.isEnabled { return decision }
                 reset()
-                if !eligible() { return .deny }
+                if !eligible() { throw prompt.interruption }
             }
         }
     }

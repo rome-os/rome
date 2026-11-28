@@ -577,20 +577,20 @@ final class SelfTest {
                        "\(mode.rawValue) maps each decision to a response button with Deny first")
         }
         let start = DispatchTime(uptimeNanoseconds: 1_000_000_000)
-        let deadline = start + .seconds(60)
-        try expect(ConsentCountdown.seconds(until: deadline, now: start) == 60, "show the full consent period at presentation")
-        try expect(ConsentCountdown.seconds(until: deadline, now: start + .milliseconds(999)) == 60,
+        let deadline = start + .seconds(180)
+        try expect(ConsentCountdown.seconds(until: deadline, now: start) == 180, "show the full consent period at presentation")
+        try expect(ConsentCountdown.seconds(until: deadline, now: start + .milliseconds(999)) == 180,
                    "a fraction of a second rounds up so zero is never shown before expiration")
-        try expect(ConsentCountdown.seconds(until: deadline, now: start + .seconds(1)) == 59,
+        try expect(ConsentCountdown.seconds(until: deadline, now: start + .seconds(1)) == 179,
                    "the countdown changes only across a whole-second boundary")
         try expect(ConsentCountdown.seconds(until: deadline, now: deadline - .milliseconds(1)) == 1,
                    "one remains visible until the actual deadline")
         try expect(ConsentCountdown.seconds(until: deadline, now: deadline) == 0 &&
                    ConsentCountdown.seconds(until: deadline, now: deadline + .seconds(1)) == 0,
                    "consent expires at the server deadline without negative time")
-        for (locale, title) in [(HelperLocale.en, "Deny (59s)"), (.zhHans, "拒绝 (59s)"),
-                                (.zhHant, "拒絕 (59s)"), (.ja, "拒否 (59s)")] {
-            try expect(ConsentCountdown.title(locale, seconds: 59) == title, "localize Deny with the remaining time")
+        for (locale, title) in [(HelperLocale.en, "Deny (179s)"), (.zhHans, "拒绝 (179s)"),
+                                (.zhHant, "拒絕 (179s)"), (.ja, "拒否 (179s)")] {
+            try expect(ConsentCountdown.title(locale, seconds: 179) == title, "localize Deny with the remaining time")
         }
 
         var poll = ConsentPoll()
@@ -1207,6 +1207,11 @@ final class SelfTest {
         try expect(ended.drain() == ["cleanup"] && idle.terminating, "stop and terminate schedule one cleanup")
         idle.updateBindings(false)
         try expect(idle.status()["stop"] as? String == "stop_confirmed", "stop confirms once bindings clear")
+        let handedOff = Admission()
+        handedOff.setExecutionHelperRunning(true)
+        try expect(handedOff.stop()["stop"] as? String == "cancel_requested", "stop waits for the execution helper")
+        handedOff.setExecutionHelperRunning(false)
+        try expect(handedOff.status()["stop"] as? String == "stop_confirmed", "execution exit confirms stop")
         let early = Admission()
         _ = early.stop()
         early.whenStopped { ended.record("late observer") }
@@ -1230,6 +1235,16 @@ final class SelfTest {
         try rejects("unsafe_state_directory") { _ = try StateDirectory(link + "/..") }
 
         try bootstrap(path)
+        let handoff = Process()
+        handoff.executableURL = Bundle.main.executableURL
+        handoff.arguments = ["--self-test-handoff", path + "/execution"]
+        let completion = Pipe()
+        handoff.standardOutput = completion
+        try handoff.run()
+        let evidence = completion.fileHandleForReading.readDataToEndOfFile()
+        handoff.waitUntilExit()
+        try expect(handoff.terminationStatus == 0 && evidence == Data("handoff cleanup complete\n".utf8),
+                   "the disconnected handoff process exits only after its drag cleanup")
 
         var pair: [Int32] = [-1, -1]
         try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0, "socket pair")
@@ -1250,12 +1265,254 @@ final class SelfTest {
         try runServer(path, socket: socket, mode: .replaceSocket)
         try runServer(path, socket: socket, mode: .disconnect)
         try runServer(path, socket: socket, mode: .terminate)
+        try runServer(path, socket: socket, mode: .consentExpired)
         try runServer(path, socket: socket, mode: .consentDenied)
         try runServer(path, socket: socket, mode: .consentDisconnect)
         try runServer(path, socket: socket, mode: .consentTerminate)
         try runServer(path, socket: socket, mode: .consentStop)
         try execConnection(path, executable: me.executable)
         try controllerTransport(path)
+    }
+
+    func cachedScreenHandoff(_ path: String) throws {
+        try expect(mkdir(path, 0o700) == 0, "create a private handoff directory")
+        let listener = try Listener(state: StateDirectory(path))
+        var pair: [Int32] = [-1, -1]
+        try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0, "connect the execution fixture")
+        let client = pair[1]
+        defer { close(client) }
+        let peer = try Peer.authenticate(pair[0], expecting: ProcessIdentity.read(getpid()), signed: false)
+        try rejects("authentication_failed") { try peer.requireSameHelper() }
+        let admission = Admission()
+        let channel = try Connection(fd: pair[0], listener: listener, peer: peer, admission: admission)
+        func greet(trusted: Bool, recording: Bool) throws {
+            try sendBytes(client, ExecutionHandoff.greeting)
+            try ExecutionHandoff.acceptGreeting(on: channel) {
+                try ExecutionHandoff.checkAccess(DesktopAccess(), trusted: trusted, recording: recording, console: true)
+            }
+        }
+        try rejects("accessibility_permission_required") { try greet(trusted: false, recording: true) }
+        try rejects("screen_recording_permission_required") { try greet(trusted: true, recording: false) }
+        var ready = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+        try expect(poll(&ready, 1, 0) == 0, "the execution helper waits for both grants before signalling ready")
+        try greet(trusted: true, recording: true)
+        try expect(try readBytes(client, count: 1) == Data([1]), "the execution helper acknowledged both grants")
+        let execution = ExecutionHandoff(channel: channel, listener: listener, onExit: {})
+        let starts = EndedBindings()
+        let checks = PermissionChecks(missing: { ["screen_recording"] },
+                                      freshGrants: { PermissionGrants(accessibility: true, screenRecording: true) },
+                                      openGuide: { _ in true })
+        let permissions = SessionPermissions(checks: checks, locale: .en, mayOpenGuide: true, live: { try admission.check() },
+            handoff: { starts.record("handoff"); return execution }, end: { admission.terminate($0) })
+        defer { permissions.close() }
+        try expect(try permissions.start()["status"] as? String == "needs_system_permission", "cached false blocks execution")
+        try rejects("needs_system_permission") { _ = try permissions.executor() }
+        permissions.monitor()
+        let deadline = DispatchTime.now() + .seconds(3)
+        while (try? permissions.executor()) == nil, DispatchTime.now() < deadline { usleep(10_000) }
+        try expect(try permissions.executor() === execution && starts.drain() == ["handoff"],
+                   "a fresh grant with cached false selects the new executor once")
+
+        let request = try Wire.frame(["v": 1, "id": "test", "method": "windows"])
+        let response = try Wire.reply("test", result: ["windows": []])
+        try sendBytes(client, Data(count: 4) + response)
+        let (forwarded, count) = try execution.execute(Data(request.dropFirst(8)))
+        try expect(try readBytes(client, count: request.count) == request && forwarded == response && count == 0,
+                   "the private socket forwards the approved request and its framed response")
+        admission.whenStopped { [weak permissions] in permissions?.stopExecution() }
+        do {
+            let child = Admission()
+            let revoked = DispatchSemaphore(value: 0)
+            child.whenStopped { revoked.signal() }
+            let childPeer = try Peer.authenticate(client, expecting: ProcessIdentity.read(getpid()), signed: false)
+            let childChannel = try Connection(fd: dup(client), peer: childPeer, admission: child, intact: { true })
+            let finished = DispatchGroup()
+            finished.enter()
+            let watchdog = ExecutionHandoff.watchParent(childChannel, until: finished)
+            defer { watchdog.cancel(); finished.leave() }
+            let dragRequest = try Wire.frame(["v": 1, "id": "drag", "method": "act",
+                "params": ["action": "drag", "x": 1, "y": 1, "toX": 2, "toY": 2]])
+            let drag = try require(WindowInput(action: "drag", args: Wire.request(Data(dragRequest.dropFirst(8))).params!), "drag fixture")
+            let target = WindowRow(id: 1, pid: getpid(), bounds: CGRect(x: 0, y: 0, width: 10, height: 10))
+            try rejects("connection_closed") {
+                try drag.execute(window: target, locate: { $0 }, lookupKey: { _, _ in nil }, send: { _, events in
+                    try child.check()
+                    if events.first?.type == .leftMouseDown {
+                        starts.record("down")
+                        _ = admission.stop()
+                        try expect(revoked.wait(timeout: .now() + .seconds(1)) == .success, "parent watchdog seals input")
+                    }
+                }, release: { if $0.type == .leftMouseUp { starts.record("up") } })
+            }
+            try expect(starts.drain() == ["down", "up"], "handoff disconnect releases the drag before process exit")
+            var event = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+            var byte: UInt8 = 0
+            try expect(poll(&event, 1, 250) > 0 && recv(client, &byte, 1, MSG_DONTWAIT) == 0,
+                       "stopping the original admission immediately closes the execution channel")
+            try rejects("cancelled") { _ = try permissions.executor() }
+        }
+
+        let loginWindow = "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"
+        let privacyExtension = "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension"
+        let systemSettings = "/System/Applications/System Settings.app/Contents/MacOS/System Settings"
+        let osascript = "/usr/bin/osascript"
+        let plainQuit = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+                                               eventID: AEEventID(kAEQuitApplication),
+                                               targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                                               transactionID: AETransactionID(kAnyTransactionID))
+        let quitReasons = EndedBindings()
+        let terminateReplies = EndedBindings()
+        let runImmediate: (@escaping @Sendable () -> Void) -> Void = { $0() }
+        try expect(TerminationPolicy.reply(for: nil, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                   "nil termination events fail open to graceful local stop")
+        try expect(TerminationPolicy.reply(for: plainQuit, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                   "ordinary Quit AppleEvents without a sender fail open to graceful local stop")
+        try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                           executablePath: { _ in osascript }, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                   "ordinary osascript Quit AppleEvents terminate the session cleanly")
+        for settingsSender in [privacyExtension, systemSettings] {
+            try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { true }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain().isEmpty && terminateReplies.drain() == ["false"],
+                       "plain Quit & Reopen from \(settingsSender) cancels when fresh Screen Recording is granted")
+            try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { false }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                       "plain Quit from \(settingsSender) terminates when fresh Screen Recording is revoked")
+            try expect(TerminationPolicy.reply(for: plainQuit, terminateNow: true, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { false }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["local_stop"] && terminateReplies.drain() == ["true"],
+                       "modal error state replies true when System Settings Quit arrives with Screen Recording revoked")
+        }
+        for reason in [OSType(kAELogOut), OSType(kAEReallyLogOut), OSType(kAERestart),
+                       OSType(kAEShutDown), OSType(kAEShowRestartDialog), OSType(kAEShowShutdownDialog)] {
+            let quitEvent = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+                                                   eventID: AEEventID(kAEQuitApplication),
+                                                   targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                                                   transactionID: AETransactionID(kAnyTransactionID))
+            quitEvent.setAttribute(NSAppleEventDescriptor(enumCode: reason),
+                                   forKeyword: AEKeyword(kAEQuitReason))
+            for settingsSender in [privacyExtension, systemSettings] {
+                try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                                   executablePath: { _ in settingsSender },
+                                                   checkScreenRecording: { true }, schedule: runImmediate,
+                                                   replyTerminate: { terminateReplies.record("\($0)") },
+                                                   onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                           quitReasons.drain().isEmpty && terminateReplies.drain() == ["false"],
+                           "System Settings Quit & Reopen from \(settingsSender) cancels when fresh Screen Recording is granted")
+                try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                                   executablePath: { _ in settingsSender },
+                                                   checkScreenRecording: { false }, schedule: runImmediate,
+                                                   replyTerminate: { terminateReplies.record("\($0)") },
+                                                   onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                           quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                           "System Settings Quit from \(settingsSender) terminates when fresh Screen Recording is missing")
+            }
+            try expect(TerminationPolicy.reply(for: quitEvent, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
+                       "system shutdown Quit with unresolvable sender fails open and never blocks logout")
+            try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
+                       "loginwindow shutdown/logout Quit AppleEvents trigger graceful exit")
+            try expect(TerminationPolicy.reply(for: quitEvent, terminateNow: true, senderPID: { _ in 4242 },
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateNow &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
+                       "modal error state allows immediate exit on loginwindow shutdown")
+        }
+
+        let cleanupPath = path + "-close-cleanup"
+        defer { try? FileManager.default.removeItem(atPath: cleanupPath) }
+        try expect(mkdir(cleanupPath, 0o700) == 0, "create execution cleanup directory")
+        var cleanupPair: [Int32] = [-1, -1]
+        try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &cleanupPair) == 0, "connect cleanup fixture")
+        let cleanupFD = cleanupPair[0]
+        defer { close(cleanupPair[1]) }
+        let cleanupAdmission = Admission()
+        let cleanupChecks = PermissionChecks(missing: { ["screen_recording"] },
+                                             freshGrants: { PermissionGrants(accessibility: true, screenRecording: true) },
+                                             openGuide: { _ in true })
+        let cleanupPermissions = SessionPermissions(checks: cleanupChecks, locale: .en, mayOpenGuide: false,
+            live: { try cleanupAdmission.check() }, handoff: {
+                let cleanupListener = try Listener(state: StateDirectory(cleanupPath))
+                let cleanupPeer = try Peer.authenticate(cleanupFD, expecting: ProcessIdentity.read(getpid()), signed: false)
+                let cleanupChannel = try Connection(fd: cleanupFD, listener: cleanupListener,
+                                                    peer: cleanupPeer, admission: cleanupAdmission)
+                return ExecutionHandoff(channel: cleanupChannel, listener: cleanupListener, onExit: {})
+            }, end: { cleanupAdmission.terminate($0) })
+        _ = try cleanupPermissions.start()
+        cleanupPermissions.monitor()
+        let cleanupDeadline = DispatchTime.now() + .seconds(3)
+        while (try? cleanupPermissions.executor()) == nil, DispatchTime.now() < cleanupDeadline { usleep(10_000) }
+        try expect(FileManager.default.fileExists(atPath: cleanupPath + "/helper.sock"),
+                   "handoff socket exists before close")
+        cleanupPermissions.close()
+        try expect(!FileManager.default.fileExists(atPath: cleanupPath),
+                   "SessionPermissions.close synchronously removes the private execution socket directory")
+
+        // Verify that a stop racing handoff() stops and waits for the child so executionHelperRunning clears.
+        let racePath = path + "-handoff-race"
+        defer { try? FileManager.default.removeItem(atPath: racePath) }
+        try expect(mkdir(racePath, 0o700) == 0, "create handoff race directory")
+        var racePair: [Int32] = [-1, -1]
+        try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &racePair) == 0, "connect handoff race fixture")
+        let raceFD = racePair[0]
+        defer { close(racePair[1]) }
+        let sleeper = Process()
+        sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        sleeper.arguments = ["10"]
+        try sleeper.run()
+        defer { if sleeper.isRunning { kill(sleeper.processIdentifier, SIGKILL); sleeper.waitUntilExit() } }
+        let raceAdmission = Admission()
+        let raceEnded = DispatchSemaphore(value: 0)
+        let racePermissions = SessionPermissions(checks: cleanupChecks, locale: .en, mayOpenGuide: false,
+            live: { try raceAdmission.check() }, handoff: {
+                let raceListener = try Listener(state: StateDirectory(racePath))
+                let racePeer = try Peer.authenticate(raceFD, expecting: ProcessIdentity.read(getpid()), signed: false)
+                let raceChannel = try Connection(fd: raceFD, listener: raceListener,
+                                                 peer: racePeer, admission: raceAdmission)
+                let childIdentity = try ProcessIdentity.read(sleeper.processIdentifier)
+                raceAdmission.setExecutionHelperRunning(true)
+                let handoff = ExecutionHandoff(channel: raceChannel, listener: raceListener, childIdentity: childIdentity) {
+                    raceAdmission.setExecutionHelperRunning(false)
+                }
+                // Simulate a stop arriving right after handoff() succeeds and before child is stored.
+                _ = raceAdmission.stop("local_stop")
+                return handoff
+            }, end: { _ in raceEnded.signal() })
+        defer { racePermissions.close() }
+        _ = try racePermissions.start()
+        racePermissions.monitor()
+        try expect(raceEnded.wait(timeout: .now() + .seconds(5)) == .success,
+                   "handoff race terminates permissions monitoring")
+        try expect(raceAdmission.status()["stop"] as? String == "stop_confirmed",
+                   "handoff race stops and waits for the child so stop_confirmed is reached")
+        try expect(!FileManager.default.fileExists(atPath: racePath),
+                   "handoff race removes the temporary execution socket directory")
     }
 
     private func localStopDuringResponse(_ path: String, server: Int32, client: Int32, peer: Peer) throws {
@@ -1275,13 +1532,7 @@ final class SelfTest {
         let (length, _) = try Wire.lengths(header, request: false)
         admission.terminate("local_stop")
         connection.end()
-        let notified = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            connection.notifyLocalStop()
-            notified.signal()
-        }
-        try expect(notified.wait(timeout: .now() + .milliseconds(10)) == .timedOut,
-                   "local stop gives the blocked response writer time to drain")
+        connection.notifyLocalStop()
         try expect(try header + readBytes(client, count: length) == response, "the in-flight response remains intact")
         let stopHeader = try readBytes(client, count: 8)
         let (stopLength, stopBinaryLength) = try Wire.lengths(stopHeader, request: false)
@@ -1289,7 +1540,7 @@ final class SelfTest {
         let expected: [String: Any] = ["v": 1, "id": NSNull(), "ok": false, "error": ["code": "session_stopped"]]
         try expect(stopBinaryLength == 0 && stop?.isEqual(to: expected) == true,
                    "the terminal stop notice follows the response")
-        try expect(notified.wait(timeout: .now() + .seconds(2)) == .success, "the local stop notification finishes")
+        connection.flush()
     }
 
     private final class ConsentProbe: @unchecked Sendable {
@@ -1307,6 +1558,8 @@ final class SelfTest {
     }
 
     private func withControllerSocket(_ path: String, store: KeychainTrustedKeyStore, consent: @escaping ConsentProvider,
+                                      permissions: PermissionChecks? = nil,
+                                      worker: DispatchQueue = DispatchQueue(label: "self-test.window"),
                                       _ test: (Int32, Admission, SymmetricKey) throws -> Void) throws {
         let listener = try Listener(state: StateDirectory(path))
         defer { listener.removeSocket() }
@@ -1333,7 +1586,8 @@ final class SelfTest {
             defer { done.leave() }
             do {
                 try serve(listener: listener, host: host, handshake: Handshake(key: key, host: host.pid),
-                          admission: admission, desktop: nil, store: store, consent: consent)
+                          admission: admission, desktop: nil, store: store, consent: consent, permissionChecks: permissions,
+                          worker: worker)
             } catch {
                 _ = admission.stop((error as? Failure)?.code ?? "internal_error")
             }
@@ -1372,10 +1626,18 @@ final class SelfTest {
                        "controller RPC fails with \(code)")
         }
 
-        func closed(_ fd: Int32) throws {
+        func closed(_ fd: Int32, line: UInt = #line) throws {
             var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             var byte: UInt8 = 0
-            try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0, "controller socket closes")
+            try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0, "controller socket closes at line \(line)")
+        }
+
+        func notice(_ fd: Int32, _ code: String) throws {
+            let header = try readBytes(fd, count: 8)
+            let (length, _) = try Wire.lengths(header, request: false)
+            let (reply, _) = try decode(header + readBytes(fd, count: length))
+            try expect(reply["id"] is NSNull, "local revocation is unsolicited")
+            try failed(reply, code)
         }
 
         func hello(_ fd: Int32, _ key: SymmetricKey, _ options: [String: Any], method: String = "hello") throws -> [String: Any] {
@@ -1398,8 +1660,9 @@ final class SelfTest {
         }
 
         func challenge(_ fd: Int32, _ key: SymmetricKey, _ consentMode: ConsentMode = .sessionOrPersistent,
-                       claim: [String: String]? = nil) throws -> [String: Any] {
-            let reply = try result(hello(fd, key, ["controller": claim ?? controller, "consentMode": consentMode.rawValue, "locale": "zh-CN"]))
+                       claim: [String: String]? = nil, includeAccess: Bool = false) throws -> [String: Any] {
+            let reply = try result(hello(fd, key, ["controller": claim ?? controller, "consentMode": consentMode.rawValue,
+                                                   "locale": "zh-CN", "includeAccess": includeAccess]))
             let encoded = try require(reply["challenge"] as? String, "challenge")
             try expect(reply["status"] as? String == "challenge_required" && reply["locale"] as? String == "zh-Hans",
                        "hello requests proof of possession in the resolved locale")
@@ -1431,6 +1694,79 @@ final class SelfTest {
                        "controller grant records its source, scope and locale")
         }
 
+        final class Grants: @unchecked Sendable {
+            let lock = NSLock()
+            var missing = ["accessibility", "screen_recording"]
+            var opens = 0
+            var checks = 0
+        }
+        let grants = Grants()
+        let permissions = PermissionChecks(missing: {
+            grants.lock.withLock { grants.checks += 1; return grants.missing }
+        }, freshGrants: { nil }, openGuide: { _ in
+            grants.lock.withLock { grants.opens += 1; return grants.opens > 1 }
+        })
+        try withControllerSocket(path, store: store, consent: { _, _ in .deny }, permissions: permissions) { fd, _, key in
+            try failed(hello(fd, key, [:]), "consent_denied")
+        }
+        try expect(grants.lock.withLock { grants.opens == 0 && grants.checks == 0 }, "denial never probes TCC or opens the guide")
+        try withControllerSocket(path, store: store, consent: { _, _ in .allowSession }, permissions: permissions) { fd, _, key in
+            let grant = try result(hello(fd, key, ["includeAccess": true]))
+            let first = try require(grant["access"] as? [String: Any], "initial permission snapshot")
+            try expect(first["status"] as? String == "needs_system_permission" && first["revision"] as? Int == 1 &&
+                       first["missing"] as? [String] == ["accessibility", "screen_recording"] &&
+                       first["guideOpened"] as? Bool == false, "both missing grants survive an unsuccessful guide launch")
+            for method in ["windows", "bind", "observe", "act", "unbind"] {
+                try failed(rpc(fd, method), "needs_system_permission")
+            }
+            let second = try result(rpc(fd, "open_permission_guide"))
+            try expect(second["revision"] as? Int == 2 && second["guideOpened"] as? Bool == true,
+                       "the approved connection can reopen the guide")
+            grants.lock.withLock { grants.missing = [] }
+            let ready = try result(rpc(fd, "access_status", ["afterRevision": 2]))
+            try expect(ready["status"] as? String == "authorized" && ready["revision"] as? Int == 3,
+                       "the pending watch receives authorization when both process-local grants are present")
+            _ = try result(rpc(fd, "open_permission_guide"))
+            try expect(grants.lock.withLock { grants.opens == 2 }, "ready sessions never reopen the guide")
+            try failed(rpc(fd, "windows"), "desktop_disabled")
+        }
+        grants.lock.withLock { grants.missing = ["accessibility"] }
+        let opensBeforeLegacy = grants.lock.withLock { grants.opens }
+        try withControllerSocket(path, store: store, consent: { _, _ in .allowSession }, permissions: permissions) { fd, _, key in
+            let grant = try result(hello(fd, key, [:]))
+            try expect(grant["access"] == nil, "legacy consent keeps its original reply")
+            try failed(rpc(fd, "open_permission_guide"), "method_unavailable")
+            try failed(rpc(fd, "windows"), "desktop_disabled")
+            try expect(grants.lock.withLock { grants.opens == opensBeforeLegacy }, "legacy approval never opens the guide")
+        }
+        try withControllerSocket(path, store: store, consent: { _, _ in .allowSession }, permissions: permissions) { fd, _, key in
+            let grant = try result(hello(fd, key, ["includeAccess": true]))
+            let first = try require(grant["access"] as? [String: Any], "initial permission snapshot")
+            try expect(first["status"] as? String == "needs_system_permission" && first["guideOpened"] as? Bool == true,
+                       "the handshake reports a successful first guide launch")
+        }
+        try withControllerSocket(path, store: store, consent: { _, _ in .allowSession }) { fd, admission, key in
+            let grant = try result(hello(fd, key, ["includeAccess": true]))
+            try expect((grant["access"] as? [String: Any])?["status"] as? String == "authorized", "host receives authorization")
+            admission.terminate("console_unavailable")
+            try notice(fd, "cancel_requested")
+            try notice(fd, "session_stopped")
+            try closed(fd)
+        }
+        let worker = DispatchQueue(label: "self-test.busy-window")
+        try withControllerSocket(path, store: store, consent: { _, _ in .allowSession }, worker: worker) { fd, admission, key in
+            _ = try result(hello(fd, key, ["includeAccess": true]))
+            try admission.begin()
+            let release = DispatchSemaphore(value: 0)
+            worker.async { release.wait(); admission.finish(hasBinding: false) }
+            defer { release.signal() }
+            admission.terminate("local_stop")
+            try notice(fd, "cancel_requested")
+            try expect(admission.status()["stop"] as? String == "cancel_requested", "host sees revocation while cleanup is blocked")
+            release.signal()
+            try notice(fd, "session_stopped")
+            try closed(fd)
+        }
         let legacy = ConsentProbe()
         try withControllerSocket(path, store: store, consent: legacy.provider(.allowSession)) { fd, admission, key in
             let grant = try result(hello(fd, key, ["locale": "ja-JP"]))
@@ -1490,7 +1826,7 @@ final class SelfTest {
                 default:
                     signature = try sign(pending)
                     signature[0] ^= 1
-                    for method in ["windows", "bind", "unbind", "observe", "act", "input", "status", "cancel", "hello"] {
+                    for method in ["windows", "bind", "unbind", "observe", "act", "input", "status", "access_status", "open_permission_guide", "cancel", "hello"] {
                         try failed(rpc(fd, method), "auth_required")
                     }
                     try expect(denied.prompts.isEmpty, "preauthorization calls never prompt")
@@ -1542,9 +1878,12 @@ final class SelfTest {
                    "a provider cannot return a choice missing from the dialog")
 
         let enrollment = ConsentProbe()
-        try withControllerSocket(path, store: store, consent: enrollment.provider(.allowPersistent)) { fd, _, key in
-            let pending = try challenge(fd, key, .persistentOnly)
-            try granted(answer(fd, sign(pending, mode: .persistentOnly)), auth: "persistent", enrolled: true)
+        try withControllerSocket(path, store: store, consent: enrollment.provider(.allowPersistent), permissions: permissions) { fd, _, key in
+            let pending = try challenge(fd, key, .persistentOnly, includeAccess: true)
+            let reply = try answer(fd, sign(pending, mode: .persistentOnly))
+            try granted(reply, auth: "persistent", enrolled: true)
+            let access = try require(result(reply)["access"] as? [String: Any], "newly enrolled access")
+            try expect(access["guideOpened"] as? Bool == true, "interactive enrollment opens the guide")
         }
         let enrolled = try require(store.lookup(publicKey: publicKey), "saved record")
         try expect(enrollment.prompts.count == 1 && enrolled.label == "Desk Controller" && enrolled.scope == .remote,
@@ -1557,10 +1896,18 @@ final class SelfTest {
         try rejects("invalid_request") { _ = try manageKeys(["--enroll-key", publicKey], store: store) }
 
         let silent = ConsentProbe()
-        try withControllerSocket(path, store: store, consent: silent.provider(.deny)) { fd, admission, key in
+        let opensBeforeReuse = grants.lock.withLock { grants.opens }
+        try withControllerSocket(path, store: store, consent: silent.provider(.deny), permissions: permissions) { fd, admission, key in
             let renamed = controller.merging(["label": "Supplied display name"]) { _, new in new }
-            let pending = try challenge(fd, key, .sessionOnly, claim: renamed)
-            try granted(answer(fd, sign(pending, mode: .sessionOnly)), auth: "persistent", enrolled: false)
+            let pending = try challenge(fd, key, .sessionOnly, claim: renamed, includeAccess: true)
+            let reply = try answer(fd, sign(pending, mode: .sessionOnly))
+            try granted(reply, auth: "persistent", enrolled: false)
+            let access = try require(result(reply)["access"] as? [String: Any], "silent grant access")
+            try expect(access["status"] as? String == "needs_system_permission" && access["missing"] as? [String] == ["accessibility"]
+                       && access["guideOpened"] as? Bool == false, "silent Keychain reuse reports missing permissions")
+            let reopened = try result(rpc(fd, "open_permission_guide"))
+            try expect(reopened["guideOpened"] as? Bool == false && grants.lock.withLock { grants.opens == opensBeforeReuse },
+                       "the silent connection cannot launch or refocus the guide")
             try expect(silent.prompts.isEmpty, "matching key and scope bypass the consent provider")
             try expect(try store.list() == [enrolled], "using a matching key preserves its original label and timestamp")
             _ = try manageKeys(["--revoke-key", fingerprint], store: store)
@@ -1745,13 +2092,13 @@ final class SelfTest {
 
     private enum Mode {
         case wrongProof, localStop, replaceSocket, disconnect, terminate
-        case consentDenied, consentDisconnect, consentTerminate, consentStop
+        case consentDenied, consentExpired, consentDisconnect, consentTerminate, consentStop
 
         var provider: String {
             switch self {
             case .wrongProof: "unexpected"
             case .consentDenied: "deny"
-            case .consentDisconnect, .consentTerminate, .consentStop: "wait"
+            case .consentExpired, .consentDisconnect, .consentTerminate, .consentStop: "wait"
             default: "allow"
             }
         }
@@ -1838,7 +2185,7 @@ final class SelfTest {
         let nonceText = nonce.base64EncodedString()
         let proof = mode == .wrongProof ? Data(count: 32) : mac(["host", String(host.pid), nonceText])
         try sendBytes(fd, Wire.frame(["v": 1, "id": "hello", "method": "hello", "params": [
-            "nonce": nonceText, "proof": proof.base64EncodedString(),
+            "nonce": nonceText, "proof": proof.base64EncodedString(), "consentTimeoutMs": mode == .consentExpired ? 300 : 180_000,
         ]]))
         if mode.provider == "wait" {
             let marker = path + "/consent-waiting"
@@ -1849,7 +2196,7 @@ final class SelfTest {
                 var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
                 try expect(poll(&event, 1, 5_100) == 0, "consent can outlast the five-second handshake deadline")
                 try expect(shutdown(fd, SHUT_WR) == 0, "disconnect while retaining the receive side")
-            } else {
+            } else if mode != .consentExpired {
                 try expect(kill(pid, mode == .consentStop ? SIGUSR1 : SIGTERM) == 0, "signal during consent")
             }
         }
@@ -1857,8 +2204,9 @@ final class SelfTest {
         if mode == .wrongProof {
             try expect((reply["error"] as? [String: String])?["code"] == "authentication_failed", "refuse invalid proof")
         } else if mode.provider != "allow" {
+            let expected = mode == .consentExpired ? "consent_expired" : mode == .consentDenied ? "consent_denied" : "cancelled"
             try expect(reply["v"] as? Int == 1 && reply["ok"] as? Bool == false &&
-                       (reply["error"] as? [String: String])?["code"] == "consent_denied", "reject session after \(mode)")
+                       (reply["error"] as? [String: String])?["code"] == expected, "reject session after \(mode)")
             var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             var byte: UInt8 = 0
             try expect(poll(&event, 1, 2_000) > 0 && recv(fd, &byte, 1, MSG_DONTWAIT) == 0,
@@ -1878,18 +2226,11 @@ final class SelfTest {
             }
             if mode == .localStop {
                 try expect(kill(pid, SIGUSR1) == 0, "send local stop signal")
-                var stopped = false
-                let stopDeadline = DispatchTime.now() + .seconds(2)
-                while DispatchTime.now() < stopDeadline {
-                    let status = try rpc("status")["result"] as? [String: Any]
-                    if status?["stop"] as? String == "stop_confirmed" { stopped = true; break }
-                    usleep(10_000)
-                }
-                try expect(stopped, "local stop closes admission")
-                for method in ["cancel", "stop"] {
-                    let stop = try rpc(method)["result"] as? [String: Any]
-                    try expect(stop?["stop"] as? String == "stop_confirmed", "\(method) is idempotent")
-                }
+                let header = try readBytes(fd, count: 8)
+                let (length, _) = try Wire.lengths(header, request: false)
+                let (notice, _) = try decode(header + readBytes(fd, count: length))
+                try expect(notice["id"] is NSNull && (notice["error"] as? [String: String])?["code"] == "session_stopped",
+                           "local stop signals the host without a status request")
             } else if mode == .terminate {
                 try expect(kill(pid, SIGTERM) == 0, "send terminate signal")
                 var event = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)

@@ -55,6 +55,8 @@ const params: RequestParams = {
     controller,
   },
   authorize: { signature: Buffer.alloc(64).toString("base64") },
+  access_status: { afterRevision: 1 },
+  open_permission_guide: undefined,
   status: undefined,
   windows: { application: "Notes" },
   bind: { window: 7 },
@@ -74,6 +76,13 @@ const results = {
     label: controller.label,
     scope: "remote",
     locale: "ja",
+  },
+  access_status: { revision: 2, status: "authorized" },
+  open_permission_guide: {
+    revision: 1,
+    status: "needs_system_permission",
+    missing: ["screen_recording"],
+    guideOpened: true,
   },
   status: { instance, stop: "running" },
   windows: { windows: [window] },
@@ -96,6 +105,8 @@ const invalidParams = {
     { nonce: mac.slice(0, -1), proof: mac },
     { nonce: mac, proof: mac, source: "Unverified" },
     { nonce: mac, proof: mac, locale: 123 },
+    { nonce: mac, proof: mac, consentTimeoutMs: 180_001 },
+    { nonce: mac, proof: mac, includeAccess: "true" },
     { nonce: mac, proof: mac, consentMode: "persistent_only" },
     { ...params.hello, consentMode: "always" },
     { ...params.hello, controller: { ...controller, scope: "other" } },
@@ -107,6 +118,8 @@ const invalidParams = {
     },
   ],
   authorize: [{ signature: mac }, { signature: null }, {}],
+  access_status: [{}, { afterRevision: 0 }],
+  open_permission_guide: [{}, null],
   status: [{}, null],
   windows: [{ application: 1 }, { other: "Notes" }],
   bind: [{ window: 0 }, { window: 2 ** 32 }, { window: 1.5 }],
@@ -127,6 +140,7 @@ const invalidParams = {
 const invalidResults = {
   hello: [
     { ...results.hello, helperPid: -1 },
+    { ...results.hello, access: { status: "authorized" } },
     { ...results.hello, instance: 123 },
     { ...results.hello, helperProof: "short" },
     { ...results.hello, auth: "persistent" },
@@ -138,6 +152,14 @@ const invalidResults = {
     { ...results.authorize, auth: "session", enrolled: true },
     { ...results.authorize, enrolled: null },
     { ...results.authorize, fingerprint: fingerprint.toLowerCase() },
+  ],
+  access_status: [
+    { revision: 0, status: "authorized" },
+    { ...results.open_permission_guide, missing: [] },
+  ],
+  open_permission_guide: [
+    { ...results.open_permission_guide, missing: ["unknown"] },
+    { ...results.open_permission_guide, guideOpened: 1 },
   ],
   status: [
     { instance, stop: "paused" },

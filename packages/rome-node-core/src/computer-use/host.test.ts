@@ -9,6 +9,7 @@ import { createExecutor, type HostAudit } from "../executor.js";
 import { decodeMeta, encodeMeta, FRAME_TYPE, type Frame } from "../frame.js";
 import type { OutboundEnvelope } from "../protocol.js";
 import type { ComputerUseBridge } from "./bridge.js";
+import * as bridge from "./bridge.js" with { rstest: "importActual" };
 import { discoverHelper } from "./discovery.js";
 import * as discovery from "./discovery.js" with { rstest: "importActual" };
 import { ComputerUseHost, type EnsureComputerUseHelper } from "./host.js";
@@ -59,7 +60,9 @@ function fakeHelper() {
   let disconnect: Disconnect | undefined;
   const helper = {
     instanceId: randomUUID(),
+    helperPid: process.pid,
     closed: false,
+    onCancelRequested: rs.fn<ComputerUseBridge["onCancelRequested"]>(),
     onDisconnect: (listener: Disconnect) => {
       disconnect = listener;
       return () => {
@@ -71,6 +74,16 @@ function fakeHelper() {
       helper.closed = true;
       disconnect?.(reason);
     }),
+    initialAccess: { status: "authorized", revision: 1 } as Results["access_status"],
+    accessStatus: rs.fn(
+      (_afterRevision?: number): Promise<Results["access_status"]> => new Promise(() => {}),
+    ),
+    openPermissionGuide: rs.fn(
+      async (): Promise<Results["open_permission_guide"]> => ({
+        status: "authorized",
+        revision: 1,
+      }),
+    ),
     windows: rs.fn(async () => ({ windows: [{ ...window, bounds: [...window.bounds] }] })),
     bind: rs.fn(async (id: number) => ({
       binding: nativeId,
@@ -133,7 +146,12 @@ function executor(audit: HostAudit = noAudit, computerUseHelperPath?: string) {
   const json = async (action: string, args: unknown = {}, from = peer) => {
     const id = randomUUID();
     await exec.receive({ id, from, payload: { type: "request", action, args } });
-    return replies.get(id)?.payload as { result: { binding: string }; ok: boolean } | undefined;
+    return replies.get(id)?.payload as
+      | {
+          result: { binding: string; status: string; requestId: string; revision: number };
+          ok: boolean;
+        }
+      | undefined;
   };
   const binary = async (action: string, args: unknown, body = new Uint8Array()) => {
     const id = randomUUID();
@@ -147,9 +165,38 @@ function executor(audit: HostAudit = noAudit, computerUseHelperPath?: string) {
     const frame = frames.get(id)!;
     return { response: decodeMeta(frame.meta), body: Buffer.from(frame.body) };
   };
-  const bind = async (from = peer, windowId = 1) =>
-    (await json("computer.bind", { window: windowId }, from))!.result.binding;
-  return { exec, json, binary, bind };
+  const authorize = async (from = peer) => {
+    await json("computer.request_access", {}, from);
+    await expect
+      .poll(async () => (await json("computer.status", {}, from))?.result.status)
+      .toBe("authorized");
+  };
+  const bind = async (from = peer, windowId = 1) => {
+    await authorize(from);
+    return (await json("computer.bind", { window: windowId }, from))!.result.binding;
+  };
+  return { exec, json, binary, bind, authorize };
+}
+
+async function runHost(
+  host: ComputerUseHost,
+  action: string,
+  args: unknown = {},
+  from: string = peer,
+) {
+  const operation = host.prepare(action, from, args)!;
+  try {
+    return (await operation.run()).response;
+  } finally {
+    operation.release();
+  }
+}
+
+async function authorizeHost(host: ComputerUseHost, from: string = peer) {
+  await runHost(host, "computer.request_access", {}, from);
+  await expect
+    .poll(() => runHost(host, "computer.status", {}, from), { interval: 1 })
+    .toMatchObject({ result: { status: "authorized" } });
 }
 
 function input(binding: string) {
@@ -279,7 +326,7 @@ it.each(["probe", "launch"])("repairs a deleted helper once before a %s", async 
     expect(results.map((info) => info.capability.state)).toEqual(["on", "on"]);
     expect(probePermissions).toHaveBeenCalledTimes(2);
   } else {
-    const request = host.prepare("computer.windows", peer, {})!;
+    const request = host.prepare("computer.request_access", peer, {})!;
     expect((await request.run()).response.ok).toBe(true);
     request.release();
     expect(mock.launch).toHaveBeenCalledWith(expect.objectContaining({ appPath: bundledAppPath }));
@@ -343,14 +390,21 @@ it("refuses an unready helper even on a live bridge and probes again after recov
   mock.launch.mockResolvedValue(bridge);
   const host = new ComputerUseHost({ ensureHelper, probePermissions });
   cleanups.push(() => host.disconnect());
-  const windows = async () => {
-    const request = host.prepare("computer.windows", peer, {})!;
+  const call = async (action: string, targetPeer = peer) => {
+    const request = host.prepare(action, targetPeer, {})!;
     try {
       return (await request.run()).response;
     } finally {
       request.release();
     }
   };
+  const windows = () => call("computer.windows");
+  expect((await call("computer.request_access")).ok).toBe(true);
+  for (let i = 0; i < 20; i++) {
+    const status = await call("computer.status");
+    if (status.ok && (status.result as { status?: string }).status === "authorized") break;
+    await delay(1);
+  }
   expect((await windows()).ok).toBe(true);
   expect((await host.info(peer)).capability.state).toBe("on");
   expect(probePermissions).toHaveBeenCalledTimes(1);
@@ -363,9 +417,9 @@ it("refuses an unready helper even on a live bridge and probes again after recov
   expect(ensureHelper).toHaveBeenCalledTimes(1);
   expect(mock.discover).not.toHaveBeenCalled();
   expect(bridge.windows).toHaveBeenCalledTimes(1);
-  const cold = host.prepare("computer.windows", other, {})!;
-  expect((await cold.run()).response).toMatchObject(error("computer_use_helper_missing"));
-  cold.release();
+  expect(await call("computer.request_access", other)).toMatchObject(
+    error("computer_use_helper_missing"),
+  );
   expect(mock.launch).toHaveBeenCalledTimes(1);
   ensureHelper.mockResolvedValue(true);
   expect((await host.info(peer)).capability.state).toBe("on");
@@ -378,7 +432,7 @@ it.each([
   "computer_use_unsupported_platform",
   "computer_use_helper_missing",
   "invalid_helper_bundle",
-] as const)("advertises off and returns %s without launching", async (code) => {
+] as const)("advertises off for %s and requires consent without launching", async (code) => {
   mock.discover.mockRejectedValue(new ComputerUseError(code));
   const f = executor();
   const info = await f.json("system.info");
@@ -399,19 +453,27 @@ it.each([
   expect(info?.result).not.toHaveProperty("computerUse");
   expect(info?.result).not.toHaveProperty("computerUseStatus");
   expect(info?.result).not.toHaveProperty("usage");
-  expect(await f.json("computer.windows")).toMatchObject(error(code));
-  expect((await f.binary("computer.bind", { window: 1 })).response).toMatchObject(error(code));
+  mock.discover.mockClear();
+  expect(await f.json("computer.windows")).toMatchObject(error("consent_required"));
+  expect((await f.binary("computer.bind", { window: 1 })).response).toMatchObject(
+    error("consent_required"),
+  );
+  expect(mock.discover).not.toHaveBeenCalled();
+  expect(await f.json("computer.request_access")).toMatchObject(error(code));
+  expect(await f.json("computer.status")).toMatchObject({ result: { status: "idle" } });
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
-  expect(await f.json("computer.windows")).toMatchObject(error(code));
+  expect(await f.json("computer.windows")).toMatchObject(error("consent_required"));
   expect(mock.launch).not.toHaveBeenCalled();
 });
 
 it("refuses helper launch while the host cannot record the request", async () => {
   const f = executor({ ...noAudit, start: async () => null });
+  expect(await f.json("computer.status")).toMatchObject({ result: { status: "idle" } });
   expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("audit_unavailable"));
+  expect(await f.json("computer.request_access")).toMatchObject(error("audit_unavailable"));
   expect(mock.launch).not.toHaveBeenCalled();
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
-  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("audit_unavailable"));
 });
 
 it("shares and caches permission probes by helper path until the TTL expires", async () => {
@@ -446,6 +508,7 @@ it("refreshes permissions before a session and across helper restarts", async ()
   expect(probePermissions).toHaveBeenCalledTimes(1);
   expect(mock.launch).not.toHaveBeenCalled();
 
+  await authorizeHost(host);
   const list = host.prepare("computer.windows", peer, {})!;
   expect((await list.run()).response).toMatchObject({ ok: true });
   list.release();
@@ -486,6 +549,7 @@ it("does not reuse a probe that was in flight when the helper started", async ()
 
   const info = host.info(peer);
   await started;
+  await authorizeHost(host);
   const list = host.prepare("computer.windows", peer, {})!;
   expect((await list.run()).response).toMatchObject({ ok: true });
   list.release();
@@ -504,6 +568,7 @@ it.each([
   const probePermissions = rs.fn(async () => true);
   const host = new ComputerUseHost({ probePermissions });
   cleanups.push(() => host.disconnect());
+  await authorizeHost(host);
   const list = async () => {
     const op = host.prepare("computer.windows", peer, {})!;
     const result = await op.run();
@@ -530,8 +595,39 @@ it("keeps a peer off after a confirmed local emergency stop", async () => {
   });
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(await f.json("computer.act", input(binding))).toMatchObject(error("session_stopped"));
-  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("consent_required"));
   expect(mock.launch).toHaveBeenCalledTimes(1);
+});
+
+it("revokes status during an unfinished input and holds its window until native cleanup confirms", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValueOnce(fakeHelper());
+  let finish!: (result: Results["act"]) => void;
+  helper.act.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const f = executor();
+  const binding = await f.bind();
+  const { requestId } = (await f.json("computer.status"))!.result;
+  await f.authorize(other);
+  const inputReply = f.json("computer.act", input(binding));
+  await expect.poll(() => helper.act.mock.calls.length).toBe(1);
+  helper.onCancelRequested.mock.calls[0][0]();
+  expect(await f.json("computer.status", { requestId })).toMatchObject({
+    result: { status: "cancelled" },
+  });
+  expect(await f.json("computer.cancel")).toMatchObject({ result: canceled });
+  expect(await f.json("computer.bind", { window: 1 }, other)).toMatchObject(
+    error("window_already_bound"),
+  );
+  finish({ binding: nativeId, dispatched: true });
+  expect(await inputReply).toMatchObject(error("session_stopped"));
+  helper.close(new ComputerUseError("session_stopped"));
+  expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await f.json("computer.bind", { window: 1 }, other)).toMatchObject({ ok: true });
 });
 
 it("offers focus and Accessibility alternatives when keyboard dispatch is unavailable", async () => {
@@ -562,6 +658,8 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
   expect(info).toMatchObject({
     result: {
       actions: expect.arrayContaining([
+        "computer.request_access",
+        "computer.status",
         "computer.windows",
         "computer.bind",
         "computer.unbind",
@@ -607,6 +705,7 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
     });
   }
   expect(mock.launch).not.toHaveBeenCalled();
+  await f.authorize();
   expect(await f.json("computer.windows", { application: shellToken })).toMatchObject({
     result: { windows: [{ title }] },
   });
@@ -615,6 +714,7 @@ it("routes JSON and PNG by peer and writes only metadata to the host audit", asy
     result: { capabilities: [{ state: "on" }] },
   });
   expect(binding).not.toBe(nativeId);
+  await f.authorize(other);
   expect(await f.json("computer.bind", { window: 1 }, other)).toMatchObject(
     error("window_already_bound"),
   );
@@ -739,14 +839,14 @@ it("confirms cancel without waiting for discovery", async () => {
         missing = () => reject(new ComputerUseError("computer_use_helper_missing"));
       }),
   );
-  const opening = f.json("computer.windows");
+  const opening = f.json("computer.request_access");
   await expect.poll(() => missing).toBeTypeOf("function");
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect((await f.binary("computer.cancel", {})).response).toMatchObject({ result: confirmed });
   expect(mock.discover).toHaveBeenCalledTimes(1);
   missing();
   await opening;
-  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 })).toMatchObject(error("consent_required"));
   expect(mock.launch).not.toHaveBeenCalled();
 });
 
@@ -764,14 +864,25 @@ it("aborts consent before confirming that no input was admitted", async () => {
     );
   });
   const f = executor();
-  const opening = f.json("computer.windows");
+  const opening = f.json("computer.request_access");
   const signal = await launching;
   expect(await f.json("computer.cancel")).toMatchObject({ result: confirmed });
   expect(signal.aborted).toBe(true);
-  expect(await opening).toMatchObject(error("request_aborted"));
+  const request = (await opening)!.result;
+  expect(request.status).toBe("pending_consent");
+  expect(await f.json("computer.status", { requestId: request.requestId })).toMatchObject({
+    result: { status: "cancelled", revision: 2 },
+  });
   expect(await f.json("system.info")).toMatchObject({
     result: {
-      actions: ["system.info", "exec", "fs.list", "computer.cancel"],
+      actions: [
+        "system.info",
+        "exec",
+        "fs.list",
+        "computer.request_access",
+        "computer.status",
+        "computer.cancel",
+      ],
       capabilities: [{ state: "off" }],
       usage: { "computer.cancel": expect.stringContaining("No arguments") },
     },
@@ -791,6 +902,189 @@ it("closes an unconfirmed helper and retains the terminal cancel result", async 
   expect(helper.cancel).toHaveBeenCalledTimes(1);
 });
 
+it("preserves an unconfirmed stop and its window across refused and audited access requests", async () => {
+  const helper = fakeHelper();
+  helper.status.mockResolvedValue({ instance: helper.instanceId, ...canceled });
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValueOnce(fakeHelper());
+  let refuse = false;
+  const f = executor({
+    ...noAudit,
+    start: async (action) => (refuse && action === "computer.request_access" ? null : 1),
+  });
+  await f.bind();
+  await f.authorize(other);
+  expect(await f.json("computer.cancel")).toMatchObject({ result: canceled });
+  await expect.poll(() => helper.closed, { timeout: 3000 }).toBe(true);
+  expect(helper.status).toHaveBeenCalled();
+  refuse = true;
+  expect(await f.json("computer.request_access")).toMatchObject(error("audit_unavailable"));
+  expect(await f.json("computer.cancel")).toMatchObject({ result: canceled });
+  refuse = false;
+  expect(await f.json("computer.request_access")).toMatchObject(error("session_stopped"));
+  expect(await f.json("computer.bind", { window: 1 }, other)).toMatchObject(
+    error("window_already_bound"),
+  );
+  expect(mock.launch).toHaveBeenCalledTimes(2);
+});
+
+it("coalesces audited replacements and honors the active peer limit", async () => {
+  const host = new ComputerUseHost({ launch: async () => new Promise(() => {}) });
+  cleanups.push(() => host.disconnect());
+  await runHost(host, "computer.cancel");
+  const auditing = host.prepare("computer.request_access", peer, {})!;
+  await runHost(host, "computer.cancel");
+  expect((await auditing.run()).response).toMatchObject(error("session_stopped"));
+  auditing.release();
+  const others = Array.from({ length: 8 }, () => randomUUID());
+  for (const id of others) await runHost(host, "computer.request_access", {}, id);
+  expect(await runHost(host, "computer.request_access")).toMatchObject(error("busy"));
+  expect(await runHost(host, "computer.cancel")).toMatchObject({ result: confirmed });
+  await runHost(host, "computer.cancel", {}, others[0]);
+  const requests = Array.from(
+    { length: 2 },
+    () => host.prepare("computer.request_access", peer, {})!,
+  );
+  try {
+    const [first, second] = await Promise.all(requests.map((r) => r.run()));
+    expect(first.response).toMatchObject({
+      result: { status: "pending_consent", requestId: expect.any(String) },
+    });
+    expect(second.response).toMatchObject({
+      result: { requestId: (first.response as { result: { requestId: string } }).result.requestId },
+    });
+  } finally {
+    for (const request of requests) request.release();
+  }
+});
+
+it.each(["cancel", "disconnect"])("does not revive discovery after %s", async (stop) => {
+  let found!: (path: string) => void;
+  mock.discover.mockImplementation(
+    () =>
+      new Promise<string>((resolve) => {
+        found = resolve;
+      }),
+  );
+  const host = new ComputerUseHost();
+  cleanups.push(() => host.disconnect());
+  const requests = [
+    runHost(host, "computer.request_access"),
+    runHost(host, "computer.request_access"),
+  ];
+  expect(mock.discover).toHaveBeenCalledTimes(1);
+  expect(await runHost(host, "computer.status")).toMatchObject({ result: { status: "idle" } });
+  if (stop === "cancel") await runHost(host, "computer.cancel");
+  else host.disconnect();
+  found("/fake/helper.app");
+  for (const response of await Promise.all(requests))
+    expect(response).toMatchObject(
+      error(stop === "cancel" ? "session_stopped" : "connection_closed"),
+    );
+  expect(await runHost(host, "computer.status")).toMatchObject({ result: { status: "idle" } });
+  expect(mock.launch).not.toHaveBeenCalled();
+});
+
+it("retains method_unavailable from a helper missing initial access", async () => {
+  mock.launch.mockRejectedValueOnce(new ComputerUseError("method_unavailable"));
+  const f = executor();
+  const { requestId } = (await f.json("computer.request_access"))!.result;
+  expect(await f.json("computer.status", { requestId })).toMatchObject({
+    result: { status: "cancelled", reason: "method_unavailable", requestId, revision: 2 },
+  });
+});
+
+it("retains the launch validation error for an existing but incomplete helper app", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rome-cu-invalid-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const app = join(root, "Rome Computer Use.app");
+  await mkdir(app);
+  const host = new ComputerUseHost({
+    discover: () => discovery.discoverHelper({ platform: "darwin", envPath: app }),
+    launch: (options) =>
+      bridge.ComputerUseBridge.launch({
+        ...options,
+        launcher: () => {
+          throw new Error("unexpected launch");
+        },
+      }),
+  });
+  cleanups.push(() => host.disconnect());
+  const request = await runHost(host, "computer.request_access");
+  if (!request.ok) throw new Error("Expected a request ID");
+  const { requestId } = request.result as { requestId: string };
+  await expect
+    .poll(() => runHost(host, "computer.status", { requestId }))
+    .toMatchObject({
+      result: { status: "cancelled", reason: "invalid_helper_bundle", requestId },
+    });
+});
+
+it.each([
+  "access_status",
+  "disconnect",
+])("reports local revocation via %s to an idle authorized peer", async (via) => {
+  const helper = fakeHelper();
+  let revoke!: (cause: ComputerUseError) => void;
+  helper.accessStatus.mockImplementation(
+    () =>
+      new Promise((_, reject) => {
+        revoke = reject;
+      }),
+  );
+  mock.launch.mockResolvedValue(helper);
+  const f = executor();
+  await f.authorize();
+  const { requestId, revision } = (await f.json("computer.status"))!.result;
+  expect(helper.accessStatus).toHaveBeenCalledWith(1, expect.any(Object));
+  if (via === "access_status") revoke(new ComputerUseError("session_stopped"));
+  else helper.close();
+  await Promise.resolve();
+  expect(await f.json("computer.status", { requestId })).toMatchObject({
+    result: { status: "cancelled", revision: revision + 1 },
+  });
+  expect(helper.closed).toBe(true);
+});
+
+it("keeps authorization when an earlier guide refocus times out", async () => {
+  const helper = fakeHelper();
+  helper.initialAccess = {
+    status: "needs_system_permission",
+    missing: ["accessibility"],
+    guideOpened: true,
+    revision: 1,
+  };
+  let grant!: (access: Results["access_status"]) => void;
+  let rejectGuide!: (error: ComputerUseError) => void;
+  helper.accessStatus.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        grant = resolve;
+      }),
+  );
+  helper.openPermissionGuide.mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        rejectGuide = reject;
+      }),
+  );
+  mock.launch.mockResolvedValue(helper);
+  const f = executor();
+  const { requestId } = (await f.json("computer.request_access"))!.result;
+  expect(await f.json("computer.request_access")).toMatchObject({
+    result: { status: "needs_system_permission" },
+  });
+  grant({ status: "authorized", revision: 2 });
+  await expect
+    .poll(() => f.json("computer.status", { requestId }))
+    .toMatchObject({ result: { status: "authorized" } });
+  rejectGuide(new ComputerUseError("request_timeout"));
+  await Promise.resolve();
+  expect(await f.json("computer.status", { requestId })).toMatchObject({
+    result: { status: "authorized", revision: 3 },
+  });
+  expect(helper.closed).toBe(false);
+});
+
 it("aborts launch and closes active bridges immediately on disconnect", async () => {
   const f = executor();
   let started!: (signal: AbortSignal) => void;
@@ -805,11 +1099,13 @@ it("aborts launch and closes active bridges immediately on disconnect", async ()
       }),
     );
   });
-  const pending = f.json("computer.windows");
+  const pending = await f.json("computer.request_access");
   const signal = await launching;
   f.exec.disconnect();
   expect(signal.aborted).toBe(true);
-  expect(await pending).toBeUndefined();
+  expect(await f.json("computer.status", { requestId: pending!.result.requestId })).toMatchObject({
+    result: { status: "cancelled" },
+  });
 
   const first = fakeHelper();
   const replacement = fakeHelper();
@@ -828,6 +1124,7 @@ it("expires a binding and closes its helper within a bounded session lease", asy
   mock.launch.mockResolvedValue(helper);
   const host = new ComputerUseHost({ discover: discoverHelper, sessionTtlMs: 20 });
   cleanups.push(() => host.disconnect());
+  await authorizeHost(host);
   const bind = host.prepare("computer.bind", peer, { window: 1 })!;
   const bound = await bind.run();
   bind.release();
@@ -838,4 +1135,313 @@ it("expires a binding and closes its helper within a bounded session lease", asy
   const act = host.prepare("computer.act", peer, input(binding))!;
   expect((await act.run()).response).toMatchObject(error("binding_not_found"));
   act.release();
+});
+
+it("keeps holding windows on unconfirmed local revocation even after sessionTtlMs elapses", async () => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValueOnce(fakeHelper());
+  const host = new ComputerUseHost({ discover: discoverHelper, sessionTtlMs: 30 });
+  cleanups.push(() => host.disconnect());
+  await authorizeHost(host);
+  const run = async (action: string, args: unknown, from = peer) => {
+    const op = host.prepare(action, from, args)!;
+    try {
+      return (await op.run()).response;
+    } finally {
+      op.release();
+    }
+  };
+  expect(await run("computer.bind", { window: 1 })).toMatchObject({ ok: true });
+  helper.onCancelRequested.mock.calls[0][0]();
+  await delay(50);
+  await authorizeHost(host, other);
+  expect(await run("computer.cancel", undefined)).toMatchObject({ result: canceled });
+  expect(await run("computer.bind", { window: 1 }, other)).toMatchObject(
+    error("window_already_bound"),
+  );
+  helper.close(new ComputerUseError("session_stopped"));
+  expect(await run("computer.cancel", undefined)).toMatchObject({ result: confirmed });
+  expect(await run("computer.bind", { window: 1 }, other)).toMatchObject({ ok: true });
+});
+
+it.each([
+  "local",
+  "remote",
+])("releases windows after an unconfirmed %s stop when the helper exits", async (stop) => {
+  const helper = fakeHelper();
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValue(fakeHelper());
+  const isProcessAlive = rs.fn(() => true);
+  const host = new ComputerUseHost({ isProcessAlive, stopPollMs: 5 });
+  cleanups.push(() => host.disconnect());
+  await authorizeHost(host);
+  await authorizeHost(host, other);
+  expect(await runHost(host, "computer.bind", { window: 1 })).toMatchObject({ ok: true });
+
+  if (stop === "local") {
+    helper.onCancelRequested.mock.calls[0][0]();
+    helper.close();
+  } else {
+    helper.status.mockResolvedValue({ instance: helper.instanceId, ...canceled });
+    expect(await runHost(host, "computer.cancel")).toMatchObject({ result: canceled });
+  }
+  await expect.poll(() => helper.closed, { timeout: 3_000 }).toBe(true);
+  await expect.poll(() => isProcessAlive.mock.calls.length).toBeGreaterThan(0);
+  expect(isProcessAlive).toHaveBeenCalledWith(helper.helperPid);
+  expect(await runHost(host, "computer.cancel")).toMatchObject({ result: canceled });
+  expect(await runHost(host, "computer.bind", { window: 1 }, other)).toMatchObject(
+    error("window_already_bound"),
+  );
+  expect(await runHost(host, "computer.request_access")).toMatchObject(error("session_stopped"));
+
+  isProcessAlive.mockReturnValue(false);
+  await expect.poll(() => runHost(host, "computer.cancel")).toMatchObject({ result: confirmed });
+  expect(await runHost(host, "computer.bind", { window: 1 }, other)).toMatchObject({ ok: true });
+  expect(await runHost(host, "computer.request_access")).toMatchObject({ ok: true });
+});
+
+it("coalesces requests, keeps status private and read-only, and starts the lease only when ready", async () => {
+  let now = 0;
+  const helper = fakeHelper();
+  let consent!: (bridge: typeof helper) => void;
+  mock.launch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        consent = resolve;
+      }),
+  );
+  const missing = ["screen_recording"] as const;
+  const waiting: Results["access_status"] = {
+    status: "needs_system_permission",
+    revision: 1,
+    missing: [...missing],
+    guideOpened: false,
+  };
+  let grant!: (access: Results["access_status"]) => void;
+  helper.initialAccess = waiting;
+  helper.accessStatus.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        grant = resolve;
+      }),
+  );
+  helper.openPermissionGuide.mockResolvedValue({ ...waiting, revision: 2, guideOpened: true });
+  const host = new ComputerUseHost({ now: () => now });
+  cleanups.push(() => host.disconnect());
+  const call = (action: string, args?: unknown, from?: string) => runHost(host, action, args, from);
+  expect(await call("computer.status")).toMatchObject({ result: { status: "idle" } });
+  expect(await call("computer.windows")).toMatchObject(error("consent_required"));
+  expect(await call("computer.bind", { window: 1 })).toMatchObject(error("consent_required"));
+  expect(mock.discover).not.toHaveBeenCalled();
+  const [first, second] = await Promise.all([
+    call("computer.request_access"),
+    call("computer.request_access"),
+  ]);
+  expect(first).toEqual(second);
+  if (!first.ok) throw new Error("Expected a request ID");
+  const { requestId } = first.result as { requestId: string };
+  const details = { requestId, revision: 1, expiresInMs: 180_000 };
+  expect(first.result).toEqual({ ...details, status: "pending_consent" });
+  for (const action of ["computer.windows", "computer.bind"]) {
+    expect(await call(action, action.endsWith("bind") ? { window: 1 } : {})).toMatchObject({
+      error: { code: "pending_consent", details },
+    });
+  }
+  expect(await call("computer.status", { requestId }, other)).toMatchObject({
+    result: { status: "not_found", requestId },
+  });
+  await expect.poll(() => consent).toBeTypeOf("function");
+  now = 170_000;
+  consent(helper);
+  await expect
+    .poll(() => call("computer.status", { requestId }))
+    .toMatchObject({ result: { status: "needs_system_permission" } });
+  const permissions = { requestId, revision: 2, expiresInMs: 300_000, missing, guideOpened: false };
+  for (const action of ["computer.windows", "computer.bind"]) {
+    expect(await call(action, action.endsWith("bind") ? { window: 1 } : {})).toMatchObject({
+      error: { code: "needs_system_permission", details: permissions },
+    });
+  }
+  expect(helper.openPermissionGuide).not.toHaveBeenCalled();
+  expect(helper.bind).not.toHaveBeenCalled();
+  expect(helper.windows).not.toHaveBeenCalled();
+  now += 299_000;
+  expect(await call("computer.request_access")).toMatchObject({
+    result: { ...permissions, expiresInMs: 1000 },
+  });
+  expect(helper.openPermissionGuide).toHaveBeenCalledTimes(1);
+  expect(await call("computer.status")).toMatchObject({
+    result: { revision: 3, guideOpened: true, expiresInMs: 1000 },
+  });
+  grant({ status: "authorized", revision: 3 });
+  await expect
+    .poll(() => call("computer.status"))
+    .toMatchObject({
+      result: { status: "authorized", requestId, revision: 4, expiresInMs: 300_000 },
+    });
+  expect(await call("computer.request_access")).toEqual(await call("computer.status"));
+  expect(await call("computer.bind", { window: 1 })).toMatchObject({ ok: true });
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  "consent_denied",
+  "consent_expired",
+] as const)("retains %s by request ID after a new request", async (code) => {
+  mock.launch.mockRejectedValueOnce(new ComputerUseError(code)).mockResolvedValueOnce(fakeHelper());
+  const f = executor();
+  const { requestId } = (await f.json("computer.request_access"))!.result;
+  await expect
+    .poll(() => f.json("computer.status", { requestId }))
+    .toMatchObject({ result: { status: code, requestId, revision: 2 } });
+  expect(await f.json("computer.status")).toMatchObject({ result: { status: "idle" } });
+  await f.authorize();
+  expect(await f.json("computer.status", { requestId })).toMatchObject({
+    result: { status: code, revision: 2 },
+  });
+  expect(await f.json("computer.status", { requestId }, other)).toMatchObject({
+    result: { status: "not_found" },
+  });
+});
+
+it.each([
+  "cancel",
+  "disconnect",
+  "helper_exit",
+  "local_stop",
+  "permissions_expired",
+] as const)("ignores a late permission grant after %s", async (stop) => {
+  const helper = fakeHelper();
+  const missing = ["accessibility", "screen_recording"] as const;
+  let grant!: (access: Results["access_status"]) => void;
+  helper.initialAccess = {
+    status: "needs_system_permission",
+    revision: 1,
+    missing: [...missing],
+    guideOpened: true,
+  };
+  helper.accessStatus.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        grant = resolve;
+      }),
+  );
+  mock.launch.mockResolvedValueOnce(helper).mockResolvedValueOnce(fakeHelper());
+  const host = new ComputerUseHost({
+    permissionTtlMs: stop === "permissions_expired" ? 35 : 300_000,
+  });
+  cleanups.push(() => host.disconnect());
+  const request = await runHost(host, "computer.request_access");
+  if (!request.ok) throw new Error("Expected a request ID");
+  const { requestId } = request.result as { requestId: string };
+  await expect.poll(() => grant, { interval: 1 }).toBeTypeOf("function");
+  if (stop === "cancel") await runHost(host, "computer.cancel");
+  if (stop === "disconnect") host.disconnect();
+  if (stop === "helper_exit") helper.close();
+  if (stop === "local_stop") helper.close(new ComputerUseError("session_stopped"));
+  const outcome =
+    stop === "permissions_expired" ? { status: stop, missing } : { status: "cancelled" };
+  await expect
+    .poll(() => runHost(host, "computer.status", { requestId }))
+    .toMatchObject({ result: { ...outcome, requestId, revision: 3 } });
+  expect(helper.closed).toBe(true);
+  await authorizeHost(host);
+  grant({ status: "authorized", revision: 2 });
+  expect(await runHost(host, "computer.status", { requestId })).toMatchObject({
+    result: { ...outcome, requestId, revision: 3 },
+  });
+  expect(await runHost(host, "computer.status")).toMatchObject({
+    result: { status: "authorized", revision: 2, requestId: expect.not.stringMatching(requestId) },
+  });
+});
+
+it("expires outstanding consent, closes a late helper and forgets the terminal ID after retention", async () => {
+  rs.useFakeTimers();
+  cleanups.push(() => rs.useRealTimers());
+  let consent!: (bridge: ReturnType<typeof fakeHelper>) => void;
+  mock.launch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        consent = resolve;
+      }),
+  );
+  const host = new ComputerUseHost({ consentTtlMs: 30, terminalTtlMs: 150, now: Date.now });
+  cleanups.push(() => host.disconnect());
+  const request = await runHost(host, "computer.request_access");
+  if (!request.ok) throw new Error("Expected a request ID");
+  const { requestId } = request.result as { requestId: string };
+  const status = () => runHost(host, "computer.status", { requestId });
+  await rs.advanceTimersByTimeAsync(30);
+  expect(await status()).toMatchObject({ result: { status: "pending_consent", expiresInMs: 0 } });
+  await rs.advanceTimersByTimeAsync(10_000);
+  expect(await status()).toMatchObject({ result: { status: "consent_expired", revision: 2 } });
+  const late = fakeHelper();
+  consent(late);
+  await Promise.resolve();
+  expect(late.closed).toBe(true);
+  expect(late.accessStatus).not.toHaveBeenCalled();
+  await rs.advanceTimersByTimeAsync(150);
+  expect(await status()).toMatchObject({ result: { status: "not_found", requestId } });
+});
+
+it("accepts the permission guide reply after the displayed consent deadline", async () => {
+  rs.useFakeTimers();
+  cleanups.push(() => rs.useRealTimers());
+  const helper = fakeHelper();
+  helper.initialAccess = {
+    status: "needs_system_permission",
+    revision: 1,
+    missing: ["accessibility"],
+    guideOpened: true,
+  };
+  let allow!: (result: typeof helper) => void;
+  mock.launch.mockReturnValue(
+    new Promise<typeof helper>((resolve) => {
+      allow = resolve;
+    }),
+  );
+  const host = new ComputerUseHost({ now: Date.now });
+  cleanups.push(() => host.disconnect());
+  const request = await runHost(host, "computer.request_access");
+  if (!request.ok) throw new Error("Expected a request ID");
+  const { requestId } = request.result as { requestId: string };
+  expect(request.result).toMatchObject({ status: "pending_consent", expiresInMs: 180_000 });
+  expect(mock.launch).toHaveBeenCalledWith(
+    expect.objectContaining({ consentDialogTimeoutMs: 180_000 }),
+  );
+  await rs.advanceTimersByTimeAsync(181_000);
+  for (const action of ["computer.status", "computer.request_access"]) {
+    expect(await runHost(host, action)).toMatchObject({
+      result: { requestId, status: "pending_consent", expiresInMs: 0 },
+    });
+  }
+  allow(helper);
+  await Promise.resolve();
+  expect(await runHost(host, "computer.status", { requestId })).toMatchObject({
+    result: {
+      status: "needs_system_permission",
+      guideOpened: true,
+      revision: 2,
+      expiresInMs: 300_000,
+    },
+  });
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+});
+
+it("bounds terminal records without evicting another watcher's unexpired result", async () => {
+  const host = new ComputerUseHost({ launch: async () => new Promise(() => {}) });
+  cleanups.push(() => host.disconnect());
+  let oldest = "";
+  for (let index = 0; index < 64; index++) {
+    const response = await runHost(host, "computer.request_access");
+    if (!response.ok) throw new Error("Expected a request ID");
+    oldest ||= (response.result as { requestId: string }).requestId;
+    await runHost(host, "computer.cancel");
+  }
+  expect(await runHost(host, "computer.request_access")).toMatchObject(error("busy"));
+  expect(await runHost(host, "computer.status", { requestId: oldest })).toMatchObject({
+    result: { status: "cancelled", requestId: oldest, revision: 2 },
+  });
+  expect(await runHost(host, "computer.request_access", {}, other)).toMatchObject({
+    result: { status: "pending_consent", revision: 1 },
+  });
 });

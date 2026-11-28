@@ -44,8 +44,8 @@ func runPermissionSetup(_ request: PermissionSetupRequest) throws {
     withExtendedLifetime(flow) { app.run() }
 }
 
-private enum ScreenRecordingProbe {
-    static func read() -> Bool? {
+enum ScreenRecordingProbe {
+    static func read() -> PermissionGrants? {
         let files = FileManager.default
         let temp = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do {
@@ -68,9 +68,8 @@ private enum ScreenRecordingProbe {
             process.waitUntilExit()
         }
         // LaunchServices can lose the wait race against an app that exits after writing its result.
-        guard let data = try? Data(contentsOf: output),
-              let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Bool] else { return nil }
-        return result["screenRecording"]
+        guard let data = try? Data(contentsOf: output) else { return nil }
+        return try? JSONDecoder().decode(PermissionGrants.self, from: data)
     }
 }
 
@@ -211,7 +210,7 @@ private final class PermissionFlow: NSObject {
 
     func focus(_ requested: PermissionStep?) {
         guard !closing else { return }
-        if let requested { state.enter(requested) }
+        state.enter(requested ?? PermissionStep.allCases.first { !state.granted.contains($0) })
         fastDockUntil = ProcessInfo.processInfo.systemUptime + 1.0
         render()
         _ = dock()
@@ -438,7 +437,7 @@ private final class PermissionFlow: NSObject {
         probing = true
         nextProbe = now + (screenGranted ? Self.grantedScreenProbeInterval : Self.pendingScreenProbeInterval)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let granted = ScreenRecordingProbe.read()
+            let granted = ScreenRecordingProbe.read()?.screenRecording
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.probing = false

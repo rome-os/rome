@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { EventCatalog } from "../event-catalog.js";
 import { EventBus } from "./event-bus.js";
+import { computerConsentCatalogEntry } from "./computer-consent.js";
 import { EventService } from "./event-service.js";
 import { EventSources, type RunEnsureAction } from "./event-sources.js";
 
@@ -25,6 +26,29 @@ function setup(run: RunEnsureAction = rs.fn<RunEnsureAction>()) {
 }
 
 describe("EventService.search", () => {
+  it("lists Computer Use before the first poll and keeps its wait local when an app declares a wildcard", async () => {
+    const catalog = new EventCatalog();
+    catalog.register(computerConsentCatalogEntry);
+    const run = rs.fn<RunEnsureAction>();
+    const sources = new EventSources({
+      listSources: () => [
+        {
+          appId: "app",
+          events: "computer.*",
+          keys: [],
+          types: ["consent.changed"],
+          ensureAction: "subscribe",
+        },
+      ],
+      isKnownEventType: (name) => catalog.get(name) !== undefined,
+    });
+    const service = new EventService(new EventBus(), catalog, { run, sources });
+    const name = "computer.consent.changed";
+    expect((await service.search(name, 1)).entries).toEqual([computerConsentCatalogEntry]);
+    await expect(sources.prepareWait(name, [], run)).resolves.toEqual({ ok: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("lists declared types before they are emitted, without calling a provider", async () => {
     const { service, run } = setup();
     const { entries, total } = await service.search("github", 10);

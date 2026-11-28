@@ -26,6 +26,7 @@ struct Request: Decodable {
     }
 
     struct Parameters: Decodable {
+        let afterRevision: Int?
         let nonce: String?
         let proof: String?
         let signature: String?
@@ -95,6 +96,8 @@ struct ControllerClaim: Sendable {
 struct Hello {
     let locale: HelperLocale
     let mode: ConsentMode
+    let consentTimeoutMs: Int
+    let includeAccess: Bool
     let controller: ControllerClaim?
 
     private struct Envelope: Decodable {
@@ -110,16 +113,21 @@ struct Hello {
 
         let locale: String?
         let mode: ConsentMode
+        let consentTimeoutMs: Int
+        let includeAccess: Bool
         let controller: Controller?
 
         private enum CodingKeys: String, CodingKey {
-            case locale, consentMode, controller
+            case locale, consentMode, controller, consentTimeoutMs, includeAccess
         }
 
         init(from decoder: Decoder) throws {
             let fields = try decoder.container(keyedBy: CodingKeys.self)
             locale = try fields.decodeIfPresent(String.self, forKey: .locale)
             mode = try fields.contains(.consentMode) ? fields.decode(ConsentMode.self, forKey: .consentMode) : .sessionOnly
+            includeAccess = try fields.decodeIfPresent(Bool.self, forKey: .includeAccess) ?? false
+            consentTimeoutMs = try fields.decodeIfPresent(Int.self, forKey: .consentTimeoutMs) ?? 180_000
+            guard (1...180_000).contains(consentTimeoutMs) else { throw Failure("invalid_request") }
             controller = try fields.contains(.controller) ? fields.decode(Controller.self, forKey: .controller) : nil
         }
     }
@@ -129,6 +137,8 @@ struct Hello {
             throw Failure("invalid_request")
         }
         locale = resolveLocale(requested: options.locale, preferred: preferred)
+        includeAccess = options.includeAccess
+        consentTimeoutMs = options.consentTimeoutMs
         mode = options.mode
         if let claim = options.controller, let label = sanitizeLabel(claim.label) {
             controller = try ControllerClaim(key: ControllerKey(claim.publicKey), label: label, scope: claim.scope)

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { createLogger } from "../logger.js";
+import { validateConsentWatch } from "../agent/index.js";
 import type { RoutineEngine } from "./engine.js";
 import { parseDateAndLocalTime } from "./schedule-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";
@@ -221,14 +222,19 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
 /** Why a trigger cannot start a new routine, or null when it can. A routine's
  * draft card checks it before it shows the draft, so "Turn it on" cannot fail on
  * a rule the agent could still have fixed. */
-export function newTriggerError(trigger: CreateRoutineInput["trigger"]): string | null {
-  return validateTrigger(canonicalizeTrigger(trigger));
+export function newTriggerError(
+  trigger: CreateRoutineInput["trigger"],
+  args: Record<string, unknown>,
+): string | null {
+  return validateTrigger(canonicalizeTrigger(trigger), args);
 }
 
 /** Validate trigger fields per type. Returns an error string (for the agent to
  * relay) or null. Fails closed so a malformed trigger never becomes an enabled
  * routine that silently never fires. */
-function validateTrigger(trigger: Trigger): string | null {
+function validateTrigger(trigger: Trigger, args: Record<string, unknown>): string | null {
+  const consent = validateConsentWatch(trigger, args);
+  if ("error" in consent) return consent.error;
   if (trigger.type === "schedule") {
     if (!LOCAL_TIME_RE.test(trigger.localTime)) {
       return `trigger.localTime "${trigger.localTime}" must be HH:mm (24-hour), e.g. 09:30`;
@@ -443,7 +449,7 @@ export async function createRoutine(
     }
   }
 
-  const checkedTrigger = await checkRoutineTrigger(deps, input.trigger);
+  const checkedTrigger = await checkRoutineTrigger(deps, input.trigger, args);
   if (!checkedTrigger.ok) return { status: "error", error: checkedTrigger.error };
   const trigger = checkedTrigger.value;
   const callerAppId = creator.kind === "action" ? creator.callerAppId : undefined;
@@ -562,6 +568,7 @@ export function checkRoutineName(rawName: string): Checked<string> {
 export async function checkRoutineTrigger(
   deps: Pick<CreateRoutineDeps, "resolveOneOffDate" | "hasTriggerType">,
   rawTrigger: CreateRoutineInput["trigger"],
+  args: Record<string, unknown>,
 ): Promise<Checked<Trigger>> {
   if (deps.hasTriggerType && !deps.hasTriggerType(rawTrigger.type)) {
     return {
@@ -570,7 +577,7 @@ export async function checkRoutineTrigger(
     };
   }
   const canonical = canonicalizeTrigger(rawTrigger);
-  const triggerError = validateTrigger(canonical);
+  const triggerError = validateTrigger(canonical, args);
   if (triggerError) return { ok: false, error: triggerError };
   return { ok: true, value: await deps.resolveOneOffDate(canonical) };
 }

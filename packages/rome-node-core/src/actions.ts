@@ -6,7 +6,11 @@ export interface ActionRequest {
 
 export type ActionResponse =
   | { type: "response"; ok: true; result: unknown }
-  | { type: "response"; ok: false; error: { code: string; message: string } };
+  | {
+      type: "response";
+      ok: false;
+      error: { code: string; message: string; details?: Record<string, unknown> };
+    };
 
 /** Response of a binary request. The body holds output bytes and is empty for every failure. */
 export interface BinaryActionResult {
@@ -14,8 +18,12 @@ export interface BinaryActionResult {
   body: Uint8Array;
 }
 
-export function actionError(code: string, message: string): ActionResponse {
-  return { type: "response", ok: false, error: { code, message } };
+export function actionError(
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+): ActionResponse {
+  return { type: "response", ok: false, error: { code, message, ...(details && { details }) } };
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -32,6 +40,10 @@ export function parseResponse(value: unknown): ActionResponse | null {
     typeof value.error.code === "string" &&
     typeof value.error.message === "string"
   )
-    return actionError(value.error.code, value.error.message);
+    return actionError(
+      value.error.code,
+      value.error.message,
+      isRecord(value.error.details) ? value.error.details : undefined,
+    );
   return null;
 }

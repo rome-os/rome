@@ -137,7 +137,7 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
   }
 
   if (parsed.kind === "event") {
-    const { eventName, sourcePattern, filter } = parsed.event;
+    const { eventName, sourcePattern, filter, afterRevision } = parsed.event;
     // Subscribe first: a routine on an event nothing delivers would wait forever.
     const prepared = deps.prepareEventWait
       ? await deps.prepareEventWait(eventName, filter ?? [])
@@ -159,10 +159,10 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
         {
           text: wakePrompt(`📨 Event arrived: ${headlineName(parsed.name)}`, parsed, deps.context),
           attachEvent: true,
+          ...(afterRevision !== undefined ? { afterRevision } : {}),
           // What the chat shows while it waits, and when the wait ends without
           // the event: the trigger wakes the session then with a payload that
-          // says so (event-bus-trigger-provider.ts). Only an agent whose
-          // policy asks for them gives them.
+          // says so (event-bus-trigger-provider.ts).
           ...(parsed.waitingFor ? { waitingFor: parsed.waitingFor } : {}),
           ...(parsed.deadlineMs !== undefined
             ? { deadline: new Date(parsed.deadlineMs).toISOString() }

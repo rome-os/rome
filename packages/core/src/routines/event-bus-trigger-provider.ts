@@ -4,6 +4,8 @@ import type { TriggerProvider } from "./trigger-provider.js";
 import type { EventBusTrigger, EventFilterCondition, Routine } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { BusEvent, EventBus } from "../events/event-bus.js";
+import { COMPUTER_CONSENT_EVENT, validateConsentWatch } from "../agent/index.js";
+import type { ComputerConsentWatcher, ConsentWatch } from "../events/computer-consent.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("event-bus-trigger");
@@ -13,6 +15,7 @@ interface Registration {
   fire: (payload: Record<string, unknown>) => Promise<void>;
   /** Ends a `once` wait with a deadline when no event came by then. */
   deadline?: Cron;
+  consent?: ConsentWatch;
 }
 
 /** The deadline a `once` wait from `defer` carries in its args, and what it waits for. */
@@ -47,14 +50,21 @@ export class EventBusTriggerProvider implements TriggerProvider {
   constructor(
     private bus: EventBus,
     private routinesRepo: Pick<RoutinesRepository, "update">,
+    private consentWatcher?: ComputerConsentWatcher,
   ) {}
 
   async activate(
     routine: Routine,
     fire: (payload: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
-    this.ensureSubscribed();
+    this.deactivate(routine.id);
     const trigger = routine.trigger as EventBusTrigger;
+    const validated = validateConsentWatch(trigger, routine.args, { allowExpired: true });
+    if ("error" in validated) {
+      log.warn("invalid consent watch", { routineId: routine.id, error: validated.error });
+      return;
+    }
+    this.ensureSubscribed();
     const registration: Registration = { routine, fire };
     this.registrations.set(routine.id, registration);
     const deadline = trigger.once ? deadlineOf(routine) : null;
@@ -66,15 +76,21 @@ export class EventBusTriggerProvider implements TriggerProvider {
       };
       if (deadline.at.getTime() <= Date.now()) {
         this.fireOnce(routine.id, payload);
-      } else {
-        // Like a schedule's timer, the deadline's fire acts for no session.
-        registration.deadline = withoutSessionActor(
-          () =>
-            new Cron(deadline.at, { maxRuns: 1 }, () => {
-              this.fireOnce(routine.id, payload);
-            }),
-        );
+        return;
       }
+      // Like a schedule's timer, the deadline's fire acts for no session.
+      registration.deadline = withoutSessionActor(
+        () =>
+          new Cron(deadline.at, { maxRuns: 1 }, () => {
+            this.fireOnce(routine.id, payload);
+          }),
+      );
+    }
+    const { watch } = validated;
+    if (watch) {
+      registration.consent = withoutSessionActor(() =>
+        this.consentWatcher?.watch(watch, (payload) => this.fireOnce(routine.id, payload)),
+      );
     }
     log.info("event-bus trigger activated", {
       routineId: routine.id,
@@ -85,7 +101,9 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   deactivate(routineId: string): void {
-    this.registrations.get(routineId)?.deadline?.stop();
+    const registration = this.registrations.get(routineId);
+    registration?.deadline?.stop();
+    registration?.consent?.stop();
     this.registrations.delete(routineId);
   }
 
@@ -94,8 +112,7 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   stop(): void {
-    for (const registration of this.registrations.values()) registration.deadline?.stop();
-    this.registrations.clear();
+    for (const id of this.registrations.keys()) this.deactivate(id);
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
@@ -106,9 +123,10 @@ export class EventBusTriggerProvider implements TriggerProvider {
   }
 
   private onEvent(event: BusEvent): void {
-    for (const { routine, fire } of this.registrations.values()) {
+    if (event.name === COMPUTER_CONSENT_EVENT) return;
+    for (const { routine, fire, consent } of this.registrations.values()) {
       const trigger = routine.trigger as EventBusTrigger;
-      if (trigger.eventName !== event.name) continue;
+      if (consent || trigger.eventName !== event.name) continue;
       if (trigger.sourcePattern && !matchesSource(trigger.sourcePattern, event.source)) {
         continue;
       }

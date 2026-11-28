@@ -71,7 +71,8 @@ function actionStart(
   args: unknown,
   mode: "json" | "binary",
   stdinBytes = 0,
-): ActionStart {
+): ActionStart | null {
+  if (action === "computer.status" || (action === "system.info" && mode === "json")) return null;
   const exec = action === "exec" && isRecord(args) && typeof args.command === "string";
   let text: string | null = null;
   if (action.startsWith("computer.")) {
@@ -447,7 +448,7 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
               const { deviceId, action } = params;
               const args = params.args ?? {};
               result = await observed(
-                action === "system.info" ? null : actionStart(deviceId, action, args, "json"),
+                actionStart(deviceId, action, args, "json"),
                 () => connector.run(deviceId, action, args),
                 (response) => actionEnd(response),
               );

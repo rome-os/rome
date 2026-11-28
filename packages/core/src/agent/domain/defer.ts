@@ -1,6 +1,11 @@
 // What `defer` takes: a name for what the agent watches and when it wakes.
 // Session model: docs/concepts/sessions.md.
 
+import {
+  COMPUTER_CONSENT_EVENT,
+  COMPUTER_CONSENT_SOURCE,
+  validateConsentWatch,
+} from "./consent-watch.js";
 import { z } from "zod";
 
 const MINUTE_MS = 60_000;
@@ -16,10 +21,10 @@ export type WakeUp =
       name: string;
       note: string;
       /** The event to wait for. */
-      event: Omit<DeferEvent, "deadline" | "waitingFor">;
-      /** What the wait is for, and when it ends without the event (epoch
-       *  milliseconds), for an agent whose policy asks for them. */
+      event: Omit<DeferEvent, "deadline" | "waitingFor" | "expiresInMs">;
+      /** What the chat shows while it waits. */
       waitingFor?: string;
+      /** When to wake without an event, in epoch milliseconds. */
       deadlineMs?: number;
       chatId?: string;
     };
@@ -58,6 +63,8 @@ const deferEventSchema = z.strictObject({
     .transform((value) => value.trim())
     .optional(),
   deadline: z.string().optional(),
+  afterRevision: z.number().optional(),
+  expiresInMs: z.number().int().nonnegative().optional(),
 });
 
 const WAITING_FOR_REQUIRED =
@@ -134,22 +141,47 @@ export function parseDeferInput(
   const task = chatId ? { chatId } : {};
 
   if (event) {
-    const { deadline, waitingFor, ...match } = event;
-    // An agent whose policy asks for them (the Concierge) labels every wait
-    // and gives it a deadline; any other agent's wait takes neither.
-    if (!options.taskChecks) {
-      return { ok: true, wakeUp: { kind: "event", name, note, event: match, ...task } };
-    }
-    if (!waitingFor) return { ok: false, error: WAITING_FOR_REQUIRED };
-    if (deadline === undefined) return { ok: false, error: DEADLINE_REQUIRED };
-    const deadlineMs = Date.parse(deadline);
-    if (Number.isNaN(deadlineMs)) {
+    const { deadline, waitingFor, expiresInMs, ...match } = event;
+    const consent = match.eventName === COMPUTER_CONSENT_EVENT;
+    if (consent) {
+      match.sourcePattern ??= COMPUTER_CONSENT_SOURCE;
+    } else if (match.afterRevision !== undefined || expiresInMs !== undefined) {
       return {
         ok: false,
-        error: `defer.event.deadline "${deadline}" is not a valid ISO 8601 instant`,
+        error: "afterRevision and expiresInMs apply only to computer.consent.changed",
       };
     }
-    if (deadlineMs <= now) {
+    if (!options.taskChecks && !consent) {
+      return { ok: true, wakeUp: { kind: "event", name, note, event: match, ...task } };
+    }
+    if (options.taskChecks && !waitingFor) return { ok: false, error: WAITING_FOR_REQUIRED };
+    let deadlineMs: number;
+    if (deadline !== undefined) {
+      deadlineMs = Date.parse(deadline);
+      if (Number.isNaN(deadlineMs)) {
+        return {
+          ok: false,
+          error: `defer.event.deadline "${deadline}" is not a valid ISO 8601 instant`,
+        };
+      }
+    } else {
+      if (!consent || expiresInMs === undefined) {
+        if (options.taskChecks) return { ok: false, error: DEADLINE_REQUIRED };
+        return { ok: false, error: "copy expiresInMs from the Computer Use request" };
+      }
+      // Give the last status read time to report the host's expiry.
+      deadlineMs = new Date(now + expiresInMs + 5_000).getTime();
+      if (Number.isNaN(deadlineMs))
+        return { ok: false, error: "defer.event.expiresInMs exceeds the date range" };
+    }
+    if (consent) {
+      const validated = validateConsentWatch(
+        { type: "event-bus", once: true, ...match },
+        { afterRevision: match.afterRevision, deadline: new Date(deadlineMs).toISOString() },
+        { now },
+      );
+      if ("error" in validated) return { ok: false, error: validated.error };
+    } else if (deadlineMs <= now) {
       return { ok: false, error: "defer.event.deadline is in the past — pick a later time" };
     }
     return {

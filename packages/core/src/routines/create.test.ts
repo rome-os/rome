@@ -11,6 +11,7 @@ import type { Routine, Trigger } from "./types.js";
 import { resolveOneOffDate as resolveInZone } from "./schedule-trigger-provider.js";
 import { guardianAuth } from "../db/schema.js";
 import { createRoutine } from "./create.js";
+import { updateRoutine } from "./update.js";
 
 /** Run `fn` as if invoked by app `callerAppId` via its app-context runAction —
  * the runtime signal create_routine reads to attribute a routine's `managedBy`. */
@@ -62,6 +63,78 @@ afterEach(() => {
 });
 
 describe("create_routine — engine activation", () => {
+  it("rejects a past consent deadline on create and update before writing or activating", async () => {
+    const engine = makeFakeEngine();
+    const deps = {
+      routinesRepo: repo,
+      actionRegistry: allActions,
+      routineEngine: engine,
+      resolveOneOffDate,
+    };
+    const trigger: Trigger = {
+      type: "event-bus",
+      once: true,
+      eventName: "computer.consent.changed",
+      sourcePattern: "rome-node",
+      filter: [
+        { field: "deviceId", equals: "mac" },
+        { field: "requestId", equals: "a" },
+      ],
+    };
+    const input = { name: "consent", actionName: "check", trigger };
+    const past = { deadline: "2001-01-01T00:00:00Z" };
+    expect(await createRoutine({ ...input, args: past }, deps)).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("future deadline"),
+    });
+    expect(await repo.findEnabled()).toEqual([]);
+    const args = { deadline: new Date(Date.now() + 60_000).toISOString() };
+    expect(await createRoutine({ ...input, args }, deps)).toMatchObject({ status: "ok" });
+    const [routine] = engine.activated;
+    expect(
+      await updateRoutine({ routines: repo, engine }, routine.id, { args: past }),
+    ).toMatchObject({
+      status: "refused",
+      error: expect.stringContaining("future deadline"),
+    });
+    expect((await repo.findById(routine.id))?.args).toEqual(args);
+    expect(engine.activated).toHaveLength(1);
+  });
+
+  it("rejects unfiltered or unbounded consent watches before persistence", async () => {
+    const engine = makeFakeEngine();
+    const trigger = {
+      type: "event-bus",
+      once: true,
+      eventName: "computer.consent.changed",
+      sourcePattern: "rome-node",
+    };
+    const filter = [
+      { field: "deviceId", equals: "mac" },
+      { field: "requestId", equals: "a" },
+    ];
+    for (const input of [
+      { trigger, args: { deadline: new Date(Date.now() + 60_000).toISOString() } },
+      { trigger: { ...trigger, filter }, args: {} },
+    ]) {
+      expect(
+        await createRoutine(
+          { name: "consent", actionName: "check", ...input },
+          {
+            routinesRepo: repo,
+            actionRegistry: allActions,
+            routineEngine: engine,
+            resolveOneOffDate,
+          },
+        ),
+      ).toMatchObject({
+        status: "error",
+        error: expect.stringContaining("computer.consent.changed"),
+      });
+    }
+    expect(await repo.findEnabled()).toEqual([]);
+    expect(engine.activated).toEqual([]);
+  });
   it("persists an enabled recurring routine and activates it", async () => {
     const engine = makeFakeEngine();
 

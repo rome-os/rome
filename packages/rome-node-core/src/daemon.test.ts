@@ -443,7 +443,7 @@ describe("caller daemon observation", () => {
     return raw;
   }
 
-  it("records sent actions and skips system.info", async () => {
+  it("records sent actions and skips system.info and JSON and binary computer.status polls", async () => {
     const f = await fixture();
     const raw = await observer(f);
     expect(
@@ -466,6 +466,25 @@ describe("caller daemon observation", () => {
       result: { subscribed: true },
     });
     expect((await f.client.describe(device)).ok).toBe(true);
+    for (let index = 0; index < 2; index++) {
+      const args = { requestId: "pending" };
+      const json = await f.client.run(device, "computer.status", args);
+      const binary = await f.client.runBinary(device, "computer.status", args, new Uint8Array());
+      expect(json).toMatchObject({ ok: true, result: { status: "not_found" } });
+      expect(binary.response).toEqual(json);
+    }
+    // Events and the query reply share an ordered socket. An action broadcast would arrive first.
+    let message = await raw.call({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "log.query",
+      params: { kind: "actions" },
+    });
+    while (message.method === "events.node") {
+      expect(message.params.type).toBe("connection");
+      message = JSON.parse((await raw.next()).data.toString());
+    }
+    expect(message).toMatchObject({ id: 10, result: { rows: [] } });
     const response = await f.client.run(device, "exec", {
       command: process.execPath,
       args: ["-e", `process.stdout.write("hello ${f.token}")`],

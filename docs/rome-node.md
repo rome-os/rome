@@ -1047,17 +1047,30 @@ card cannot set up Window Control on a Mac connected through Rome Node.
 
 1. Run `rome-node device` to find the Mac, then `rome-node device describe <id>`
    to check that it answers and read the advertised `computer.*` actions and usage.
-2. Run `computer.windows` to find the target and `computer.bind` with its window
-   ID. Ask the guardian to grant permission or approve the local consent prompt
-   if the Mac requires it.
-3. Run `computer.observe` with the binding to read its Accessibility tree. For a
+2. Run `rome-node device run <id> computer.request_access`. On `pending_consent`,
+   tell the guardian to respond to the approval prompt on the Mac.
+   On `needs_system_permission`, name the permissions in `missing`.
+   If `guideOpened` is true, the Mac opened the permission guide.
+   Otherwise, run `rome-node computer-use setup` on that Mac.
+3. Once the request returns `authorized`, run `computer.windows` to find the
+   target and `computer.bind` with its window ID. Both reuse the same grant.
+4. Run `computer.observe` with the binding to read its Accessibility tree. For a
    screenshot, pass `screenshot: true` in the arguments and add `--output <path>`
    to `rome-node device run`.
-4. In `computer.act`, prefer an observed `element` with `press`, `set_value`,
+5. In `computer.act`, prefer an observed `element` with `press`, `set_value`,
    `increment` or `decrement` when the element offers that action. Use keyboard
    or pointer input when the tree has no suitable action.
-5. Run `computer.unbind` when finished. On current hosts, `computer.cancel`
+6. Run `computer.unbind` when finished. On current hosts, `computer.cancel`
    stops input for your session in an emergency.
+
+While approval or system permissions are pending, the agent calls `defer` on
+`computer.consent.changed` from `rome-node`. The filter matches `deviceId` and
+`requestId`. The watch needs a deadline within ten minutes. The agent passes
+the revision it saw as `event.afterRevision`.
+Rome checks the request immediately and wakes the chat on a higher revision,
+an unknown request (`not_found`), or the wait's deadline.
+The agent reports `consent_denied`, `consent_expired`, `permissions_expired`,
+`cancelled`, or `not_found` and stops.
 
 Rome Desktop bundles `Rome Computer Use.app` in its macOS arm64 build. On
 macOS arm64, npm installs the helper through `@rome-os/node-core-darwin-arm64`,
@@ -1107,15 +1120,18 @@ ends.
 
 | Action | Arguments and result |
 | --- | --- |
+| `computer.request_access` | `{}` starts or reuses this peer's request and returns its current status immediately. |
+| `computer.status` | `{requestId?}` reads a request without opening a prompt. An unknown ID returns `not_found`. Omit the ID to read the active request, or `idle` if none exists. |
 | `computer.windows` | `{application?}` lists windows, optionally filtered by application. |
 | `computer.bind` | `{window}` returns a binding ID and `bindingTTLms`. |
 | `computer.observe` | `{binding, element?}` returns the Accessibility tree as JSON. Set `screenshot: true` on a binary request to receive raw PNG bytes, up to 8 MiB. |
 | `computer.act` | `{binding, actionId, action, ...}` sends an input to the bound window. Use a UUID for `actionId` and the same ID when checking a timed-out action. |
 | `computer.unbind` | `{binding}` releases the window. |
-| `computer.cancel` | Closes input admission for the calling peer's session and returns the stop status. |
+| `computer.cancel` | Stops input and pending waits for this peer. The request records `cancelled`. |
 
-Each peer needs its own helper approval. Bindings expire when the helper's
-five-minute session ends and on host disconnect. The host remembers each action
+Each peer needs its own helper approval. The five-minute session starts when
+the request reaches `authorized`. Bindings expire with the session or on host
+disconnect. The host remembers each action
 ID for its binding's lifetime. A duplicate returns the recorded dispatch outcome
 without sending input again. After an uncertain outcome, use a fresh observation
 before deciding whether to send a different action.
@@ -1126,10 +1142,11 @@ means input admission is closed and the helper has yet to confirm stopping. When
 the helper reports `cancel_requested`, the host checks for confirmation for up to
 one more second and then closes the bridge. If the helper cannot confirm,
 `cancel_requested` remains the final
-result for that session. A stopped peer receives `session_stopped` on other
-window control actions for the rest of its five-minute session lease, or for up
-to five minutes after a cancel before approval. A host disconnect ends the lock.
-The peer needs local approval for any new helper session.
+result for that session. After stop, `computer.windows` and `computer.bind`
+return `consent_required`. The peer must call `computer.request_access`
+and get fresh local approval. While the host retains the stop, `computer.observe`,
+`computer.act`, and `computer.unbind` return `session_stopped`. A new access
+request also returns `session_stopped` if the stop is still unconfirmed.
 
 With remote execution on, `exec` can also run local system tools. For example,
 `{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}` saves a
