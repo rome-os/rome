@@ -18,6 +18,7 @@ import {
   kindsThatFit,
   kindsThatStillFit,
   OutputsPanel,
+  outputTitle,
   pageHrefOf,
   outputTypeOf,
   fileKindOf,
@@ -210,8 +211,8 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("heading", { name: /Outputs/ })).toBeNull();
     const rows = within(today).getAllByRole("listitem");
     expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual([
-      "trip-notes.md",
-      "trip_budget.csv",
+      "Trip notes.md",
+      "Trip budget.csv",
     ]);
     expect(rows[0].textContent).toContain("Document·Written");
     const chip = within(rows[1]).getByRole("link", { name: "from Draft the report" });
@@ -282,7 +283,7 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "Spreadsheets" }));
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("sheet.xlsx"),
+      expect.stringContaining("Sheet.xlsx"),
     ]);
     await user.click(screen.getByRole("radio", { name: "All" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(4);
@@ -317,7 +318,7 @@ describe("OutputsPanel", () => {
     const more = screen.getByRole("button", { name: "More: Audio" });
     expect(more.textContent).toBe("Audio");
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("voice.wav"),
+      expect.stringContaining("Voice.wav"),
     ]);
     expect(
       screen.getAllByRole("radio").some((chip) => chip.getAttribute("aria-checked") === "true"),
@@ -495,17 +496,17 @@ describe("OutputsPanel", () => {
     ];
     files[outputs[0].contentUrl!] = "line one\nline two";
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "run.log" }));
+    await user.click(await screen.findByRole("button", { name: "Run.log" }));
     expect(await screen.findByText(/line one/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
-    await user.click(screen.getByRole("button", { name: "pic.png" }));
+    await user.click(screen.getByRole("button", { name: "Pic.png" }));
     expect(screen.getByRole("img", { name: "pic.png" }).getAttribute("src")).toBe(
       outputs[1].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
-    await user.click(screen.getByRole("button", { name: "bundle.zip" }));
+    await user.click(screen.getByRole("button", { name: "Bundle.zip" }));
     expect(screen.getByText("This file has no preview.")).toBeTruthy();
     const download = screen.getByRole("link", { name: "Download" });
     expect(download.getAttribute("href")).toBe(outputs[2].contentUrl);
@@ -531,7 +532,7 @@ describe("OutputsPanel", () => {
     files[outputs[0].contentUrl!] = "<h1>Trip</h1><script>alert(1)</script>";
     files[outputs[1].contentUrl!] = "<p>Copy</p>";
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "trip-map.html" }));
+    await user.click(await screen.findByRole("button", { name: "Trip map.html" }));
     const frame = await screen.findByTitle("trip-map.html");
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.getAttribute("srcdoc")).toBe("<h1>Trip</h1><script>alert(1)</script>");
@@ -543,7 +544,7 @@ describe("OutputsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
     // A copy of a file outside both folders only downloads, so it has nowhere to open.
-    await user.click(screen.getByRole("button", { name: "copy.html" }));
+    await user.click(screen.getByRole("button", { name: "Copy.html" }));
     expect((await screen.findByTitle("copy.html")).getAttribute("sandbox")).toBe("");
     expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
   });
@@ -558,20 +559,20 @@ describe("OutputsPanel", () => {
       output("logo", { name: "logo.svg", mimeType: "image/svg+xml" }),
     ];
     const { container } = renderPanel();
-    await user.click(await screen.findByRole("button", { name: "clip.mp4" }));
+    await user.click(await screen.findByRole("button", { name: "Clip.mp4" }));
     expect(container.querySelector("video source")?.getAttribute("src")).toBe(
       outputs[0].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "song.mp3" }));
+    await user.click(screen.getByRole("button", { name: "Song.mp3" }));
     expect(container.querySelector("audio source")?.getAttribute("src")).toBe(
       outputs[1].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "paper.pdf" }));
+    await user.click(screen.getByRole("button", { name: "Paper.pdf" }));
     expect(container.querySelector("object")?.getAttribute("data")).toBe(outputs[2].contentUrl);
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "logo.svg" }));
+    await user.click(screen.getByRole("button", { name: "Logo.svg" }));
     expect(screen.getByRole("img", { name: "logo.svg" }).getAttribute("src")).toBe(
       outputs[3].contentUrl,
     );
@@ -598,7 +599,7 @@ describe("OutputsPanel", () => {
       event: TASK_LIST_CHANGED_EVENT,
       data: { chatId: "chat-1" },
     });
-    expect(await screen.findByRole("button", { name: "report.md" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Report.md" })).toBeTruthy();
   });
 
   it("says so when the chat has no outputs", async () => {
@@ -614,10 +615,10 @@ describe("OutputsPanel", () => {
     ];
     files[outputs[1].contentUrl!] = "# Plan";
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "sunset.mp4" }));
+    await user.click(await screen.findByRole("button", { name: "Sunset.mp4" }));
     // The list gives way to the file; its header names it with its extension.
     expect(screen.queryByRole("list", { name: "Today" })).toBeNull();
-    expect(screen.getByText("sunset.mp4")).toBeTruthy();
+    expect(screen.getByText("Sunset.mp4")).toBeTruthy();
     expect(screen.getByText("Video")).toBeTruthy();
     expect(screen.getByText("Shown")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
@@ -654,7 +655,7 @@ describe("OutputsPanel", () => {
       list.scrollTop = 240;
       fireEvent.scroll(list);
 
-      await user.click(screen.getByRole("button", { name: "plan.md" }));
+      await user.click(screen.getByRole("button", { name: "Plan.md" }));
       await user.click(await screen.findByRole("button", { name: "Back to outputs" }));
 
       const back = screen.getByTestId("chat-outputs");
@@ -662,12 +663,12 @@ describe("OutputsPanel", () => {
       expect(screen.getByRole("radio", { name: "Documents" }).getAttribute("aria-checked")).toBe(
         "true",
       );
-      expect(screen.queryByRole("button", { name: "pic.png" })).toBeNull();
-      const row = screen.getByRole("button", { name: "plan.md" });
+      expect(screen.queryByRole("button", { name: "Pic.png" })).toBeNull();
+      const row = screen.getByRole("button", { name: "Plan.md" });
       expect(document.activeElement).toBe(row);
       expect(row.closest("li")?.className).toContain("bg-surface-muted");
       expect(
-        screen.getByRole("button", { name: "notes.md" }).closest("li")?.className,
+        screen.getByRole("button", { name: "Notes.md" }).closest("li")?.className,
       ).not.toContain("bg-surface-muted");
     } finally {
       if (descriptor) Object.defineProperty(Element.prototype, "scrollTop", descriptor);
@@ -898,8 +899,8 @@ describe("projectPathOf", () => {
   });
 });
 
-describe("outputTypeOf", () => {
-  it("sorts files into the filters' kinds", () => {
+describe("outputTypeOf and outputTitle", () => {
+  it("sorts files into the filters' kinds and names them with their extension", () => {
     expect(outputTypeOf({ name: "a.pdf", path: "a.pdf", mimeType: "application/pdf" })).toBe(
       "document",
     );
@@ -914,6 +915,11 @@ describe("outputTypeOf", () => {
     expect(outputTypeOf({ name: "a.zip", path: "a.zip", mimeType: "application/zip" })).toBe(
       "file",
     );
+    expect(outputTitle("weekly-news_digest.md")).toBe("Weekly news digest.md");
+    expect(outputTitle("sample.mp4")).toBe("Sample.mp4");
+    expect(outputTitle("Rome 发布摘要.md")).toBe("Rome 发布摘要.md");
+    expect(outputTitle("README")).toBe("README");
+    expect(outputTitle(".env")).toBe(".env");
   });
 });
 

@@ -193,6 +193,21 @@ export function kindsOf(
   );
 }
 
+/**
+ * A file name as a title: words for dashes and underscores and a capital
+ * first, with the file's own extension kept, so "trip-plan.md" reads
+ * "Trip plan.md". Keep in step with the iOS app's `ChatOutput.title`.
+ */
+export function outputTitle(name: string): string {
+  const extension = /\.[a-z0-9]{1,8}$/i.exec(name)?.[0] ?? "";
+  const words = name
+    .slice(0, name.length - extension.length)
+    .replace(/[-_]+/g, " ")
+    .trim();
+  if (!words) return name;
+  return words.charAt(0).toLocaleUpperCase() + words.slice(1) + extension;
+}
+
 type Filter = "all" | OutputType;
 
 const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
@@ -693,7 +708,7 @@ function OutputRow({
             output.missing ? "text-muted-foreground" : "text-foreground",
           )}
         >
-          {output.name}
+          {outputTitle(output.name)}
         </button>
         <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
           <span className="shrink-0">{t(`outputs.types.${type}`)}</span>
@@ -803,7 +818,7 @@ function OutputPreview({
       <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-ui text-foreground" title={output.path}>
-          {output.name}
+          {outputTitle(output.name)}
         </div>
         <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
           <span className="shrink-0">{t(`outputs.types.${outputTypeOf(output)}`)}</span>
