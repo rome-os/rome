@@ -76,23 +76,27 @@ function darwinPublish(source: string, destination: string, replace: boolean): v
 }
 
 export function createStagedComputerUseHelper(options: StagingOptions & { stagedPath: string }) {
-  let stagedReady = false;
+  let state: "pending" | "ready" | "failed" = "pending";
+  const hasTemplate = () =>
+    existsSync(join(options.templatePath, executable)) &&
+    existsSync(join(options.templatePath, "Contents/Info.plist"));
   const helperReady = () =>
-    stagedReady &&
+    state === "ready" &&
     hasStagedHelperDirectory(options.stagedPath) &&
     existsSync(join(options.stagedPath, executable)) &&
     existsSync(join(options.stagedPath, "Contents/Info.plist"));
+  const helperAvailable = () => (state === "pending" ? hasTemplate() : helperReady());
   const ensureHelper: EnsureComputerUseHelper = async (callOptions) => {
-    const wasReady = helperReady();
-    if (!callOptions?.force && wasReady) return true;
+    const wasAvailable = helperAvailable();
+    if (!callOptions?.force && helperReady()) return true;
     // A copied executable can appear before its permissions and registration are ready.
-    stagedReady = false;
+    if (state === "ready") state = "failed";
     const next = await stageComputerUseHelper(options);
-    stagedReady = next;
-    if (next !== wasReady) options.onReadyChange?.();
+    state = next ? "ready" : "failed";
+    if (helperAvailable() !== wasAvailable) options.onReadyChange?.();
     return next;
   };
-  return { ensureHelper, helperReady };
+  return { ensureHelper, helperReady, helperAvailable };
 }
 
 // Concurrent calls in the same process share one staging run.

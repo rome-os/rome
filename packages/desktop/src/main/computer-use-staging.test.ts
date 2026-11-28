@@ -350,19 +350,52 @@ it("leaves fresh in-flight staging directories alone during stale cleanup", asyn
   ]);
 });
 
-it("notifies onReadyChange and repairs missing Info.plist or damaged signatures via Settings", async () => {
+it("reports the bundled helper as present while Computer Use is off and stages lazily on setup or reveal", async () => {
+  const options = fixture();
   const onReadyChange = rs.fn();
-  const helper = createStagedComputerUseHelper({ ...fixture(), stagedPath, onReadyChange });
-  const settings = createComputerUseSettings(stagedPath, () => true, helper);
+  const helper = createStagedComputerUseHelper({ ...options, stagedPath, onReadyChange });
+  const settings = createComputerUseSettings(stagedPath, () => false, helper);
+
+  // Before staging runs, the bundled template makes the helper available in the tray.
   expect(helper.helperReady()).toBe(false);
-  expect(await helper.ensureHelper()).toBe(true);
+  expect(settings.status()).toEqual({ enabled: false, helperPresent: true });
+  expect(options.execFile).not.toHaveBeenCalled();
+
+  // Clicking setup or reveal stages into ~/.rome-computer-use on demand.
+  await settings.setup();
+  expect(launchPermissionSetup).toHaveBeenLastCalledWith({ appPath: stagedPath });
+  expect(helper.helperReady()).toBe(true);
+  expect(settings.status()).toEqual({ enabled: false, helperPresent: true });
+  expect(onReadyChange).not.toHaveBeenCalled();
+
+  await settings.revealHelper();
+  expect(shell.showItemInFolder).toHaveBeenLastCalledWith(stagedPath);
+});
+
+it("notifies onReadyChange on staging failure/recovery and repairs missing Info.plist or damaged signatures", async () => {
+  const options = fixture();
+  const onReadyChange = rs.fn();
+  const helper = createStagedComputerUseHelper({ ...options, stagedPath, onReadyChange });
+  const settings = createComputerUseSettings(stagedPath, () => true, helper);
+
+  // If initial staging fails, availability flips to false and notifies the tray.
+  await fs.writeFile(join(templatePath, binary), "unsigned");
+  expect(settings.status().helperPresent).toBe(true);
+  expect(await helper.ensureHelper()).toBe(false);
+  expect(settings.status().helperPresent).toBe(false);
   expect(onReadyChange).toHaveBeenCalledTimes(1);
+
+  // Once the template is valid, retry flips availability back to true.
+  await fs.writeFile(join(templatePath, binary), hash);
+  expect(await helper.ensureHelper()).toBe(true);
+  expect(settings.status().helperPresent).toBe(true);
+  expect(onReadyChange).toHaveBeenCalledTimes(2);
 
   await fs.unlink(join(stagedPath, plist));
   expect(helper.helperReady()).toBe(false);
   expect(settings.status().helperPresent).toBe(false);
   expect(await helper.ensureHelper()).toBe(true);
-  expect(onReadyChange).toHaveBeenCalledTimes(2);
+  expect(onReadyChange).toHaveBeenCalledTimes(3);
   expect(JSON.parse(await fs.readFile(join(stagedPath, plist), "utf8"))).toEqual(version);
   expect(settings.status().helperPresent).toBe(true);
 

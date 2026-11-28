@@ -18,7 +18,11 @@ export type ComputerUsePane = keyof typeof panes;
 export function createComputerUseSettings(
   helperPath: string | (() => string),
   enabled: () => boolean,
-  options: { ensureHelper?: EnsureComputerUseHelper; helperReady?: () => boolean } = {},
+  options: {
+    ensureHelper?: EnsureComputerUseHelper;
+    helperReady?: () => boolean;
+    helperAvailable?: () => boolean;
+  } = {},
 ) {
   // macOS permissions belong to the helper's identity. Reading them for Electron would
   // report Desktop's grants instead, so the status only reports helper availability.
@@ -32,7 +36,10 @@ export function createComputerUseSettings(
       // Discovery can fail when an explicit development override is missing.
     }
   }
-  const status = () => ({ enabled: enabled(), helperPresent: Boolean(presentPath()) });
+  const status = () => ({
+    enabled: enabled(),
+    helperPresent: Boolean(presentPath() || options.helperAvailable?.()),
+  });
   async function ensureReady(force = false) {
     try {
       ready = force ? await options.ensureHelper!({ force: true }) : await options.ensureHelper!();
