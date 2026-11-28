@@ -47,6 +47,8 @@ final class TopicChatsStore {
     private(set) var heldCurrent: String?
     /// The chat `heldCurrent` was decided for.
     @ObservationIgnored private var heldFor: String?
+    /// The drawer's open chat, decided or still waiting for the list.
+    @ObservationIgnored private var openId: String?
     @ObservationIgnored private let fold: TopicChatsFold?
 
     /// Without a `fold`, the folded state lasts only as long as the store.
@@ -74,12 +76,18 @@ final class TopicChatsStore {
     }
 
     /// The drawer's open chat, or none. Its group is decided once, when it
-    /// is first found in the list: a chat outside Older then stays outside
+    /// is first found in the list, here or when a list arrives later (a
+    /// link or a push at launch): a chat outside Older then stays outside
     /// while it is open, so reading it never drops it into Older under the
     /// guardian's finger. An older chat stays in Older.
     func noteOpen(_ id: String?, now: Date = .now) {
-        guard id != heldFor else { return }
-        guard let id, let chat = chat(id) else {
+        openId = id
+        decideOpen(now: now)
+    }
+
+    private func decideOpen(now: Date = .now) {
+        guard openId != heldFor else { return }
+        guard let id = openId, let chat = chat(id) else {
             heldFor = nil
             if heldCurrent != nil { heldCurrent = nil }
             return
@@ -337,6 +345,8 @@ final class TopicChatsStore {
         let list = Self.resorted(list, lastActive: lastActive, pinnedAt: pinnedAt)
         if list != chats { chats = list }
         loaded = true
+        // An open chat the list did not hold yet is decided before it is read.
+        decideOpen()
         let ids = Self.liveIDs(list)
         for (id, token) in chatTokens where !ids.contains(id) {
             backend.events.unsubscribe(token)

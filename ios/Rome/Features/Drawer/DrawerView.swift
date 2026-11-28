@@ -201,9 +201,12 @@ struct DrawerView: View {
             )
             let olderShown = TopicChatsStore.shownCount(groups.older.count, limit: olderLimit, openIndex: groups.older.firstIndex { $0.id == openId })
             let archivedShown = TopicChatsStore.shownCount(archived.count, limit: archivedLimit, openIndex: archived.firstIndex { $0.id == openId })
-            // Where the open chat is, so its group opens to show it.
+            // Where the open chat is, so its group opens to show it. One in
+            // neither list yet is unlisted, so the key changes once it is.
             let openPlace: OpenPlace = openId.map { id in
-                groups.older.contains { $0.id == id } ? .older : archived.contains { $0.id == id } ? .archived : .current
+                if groups.older.contains(where: { $0.id == id }) { return .older }
+                if archived.contains(where: { $0.id == id }) { return .archived }
+                return chats.contains { $0.id == id } ? .current : .unlisted
             } ?? .none
             List {
                 ForEach(rows) { chat in topicRow(chat) }
@@ -325,7 +328,7 @@ struct DrawerView: View {
 
 /// Which group of the drawer's list holds the open chat.
 private enum OpenPlace: Hashable {
-    case none, current, older, archived
+    case none, unlisted, current, older, archived
 }
 
 private struct OpenKey: Hashable {

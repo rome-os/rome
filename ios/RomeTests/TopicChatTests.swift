@@ -357,18 +357,24 @@ import Testing
         #expect(store.heldCurrent == nil)
     }
 
-    /// A chat not in the list yet, such as an archived one, holds nothing,
-    /// and is decided once it is listed.
-    @Test func anOpenChatIsDecidedOnceListed() async {
+    /// A chat opened before the list arrives, as from a link or a push at
+    /// launch, holds nothing until it is listed, and is decided when the
+    /// list lands, with no second call: reading it then keeps it outside Older.
+    @Test func anOpenChatIsDecidedWhenTheListArrives() async {
         let backend = FakeBackend()
-        backend.topicChats = [ConciergeChat(id: "new", name: "New", main: false, unread: 0)]
+        let now = Date.now
+        backend.topicChats = [ConciergeChat(id: "quiet", name: "Quiet", main: false, unread: 1)]
+        backend.sessionRows = [ChatSession(id: "quiet", name: "Quiet", activityAt: RomeDate.string(now.addingTimeInterval(-9 * 86400)))]
         let store = TopicChatsStore(backend: backend)
-        store.noteOpen("new")
+        store.noteOpen("quiet")
         #expect(store.heldCurrent == nil)
         store.start()
         await settle()
-        store.noteOpen("new")
-        #expect(store.heldCurrent == "new")
+        #expect(store.heldCurrent == "quiet")
+        store.markRead("quiet")
+        let groups = TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, held: store.heldCurrent)
+        #expect(groups.current.map(\.id) == ["quiet"])
+        #expect(groups.older.isEmpty)
     }
 
     @Test func archivedStartsCollapsedAndRemembersItsOwnStatePerInstance() {

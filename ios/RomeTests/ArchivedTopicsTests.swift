@@ -36,10 +36,8 @@ import Testing
             archived("tie", "Holiday", archivedDaysAgo: 2),
         ]
         let store = ArchivedTopicsStore(backend: backend)
-        #expect(!store.loaded)
         store.refresh()
         await settle()
-        #expect(store.loaded)
         #expect(store.chats.map(\.id) == ["new", "tie", "old"])
         #expect(store.chat("new")?.name == "Car")
     }
@@ -123,7 +121,6 @@ import Testing
         }
         store.refresh()
         await settle()
-        #expect(store.loaded)
         #expect(store.count == 0)
     }
 

@@ -10,7 +10,6 @@ import Observation
 final class ArchivedTopicsStore {
     private let backend: RomeBackend
     private(set) var chats: [ConciergeChat] = []
-    private(set) var loaded = false
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
     /// Chats restored or deleted here, and when: a list asked for before
@@ -41,7 +40,6 @@ final class ArchivedTopicsStore {
                     gone = Self.pending(gone, askedAt: asked)
                     let listed = Self.ordered(sessions).filter { gone[$0.id] == nil }
                     if listed != chats { chats = listed }
-                    loaded = true
                 }
             } while refreshAgain
             refreshWork = nil
