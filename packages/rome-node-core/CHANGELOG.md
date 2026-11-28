@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.10](https://github.com/rome-os/rome/compare/node-core-v0.1.9...node-core-v0.1.10) (2026-11-28)
+
+
+### Features
+
+* **computer-use:** support async consent auto-resume and post-approval PermissionFlow ([#2874](https://github.com/rome-os/rome/issues/2874)) ([b27400a](https://github.com/rome-os/rome/commit/b27400ae529446655860e525926a6e2699df0972))
+
+
+### Bug Fixes
+
+* **computer-use:** polish native permission guide chrome, docking, and macOS 27 UX ([#2851](https://github.com/rome-os/rome/issues/2851)) ([c5d814f](https://github.com/rome-os/rome/commit/c5d814f71742bff63c08085d4f83d67819ec592f))
+* **computer-use:** stage Rome Computer Use.app outside Rome.app to prevent macOS TCC split ([#2875](https://github.com/rome-os/rome/issues/2875)) ([c02b70d](https://github.com/rome-os/rome/commit/c02b70dc5ad5ae26c98aac326d7866afbcd38783))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * optionalDependencies
+    * @rome-os/node-core-darwin-arm64 bumped to 0.1.10
+
 ## [0.1.9](https://github.com/rome-os/rome/compare/node-core-v0.1.8...node-core-v0.1.9) (2026-11-27)
 
 

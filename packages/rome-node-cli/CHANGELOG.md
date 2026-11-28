@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.13](https://github.com/rome-os/rome/compare/node-v0.1.12...node-v0.1.13) (2026-11-28)
+
+
+### Features
+
+* **computer-use:** support async consent auto-resume and post-approval PermissionFlow ([#2874](https://github.com/rome-os/rome/issues/2874)) ([b27400a](https://github.com/rome-os/rome/commit/b27400ae529446655860e525926a6e2699df0972))
+* **rome-node:** replace Docker log setup token with timed browser first-run password setup ([#2869](https://github.com/rome-os/rome/issues/2869)) ([4e24729](https://github.com/rome-os/rome/commit/4e247298ed52fe5f969fe14940d8ed06ca096733))
+
+
+### Bug Fixes
+
+* **computer-use:** polish native permission guide chrome, docking, and macOS 27 UX ([#2851](https://github.com/rome-os/rome/issues/2851)) ([c5d814f](https://github.com/rome-os/rome/commit/c5d814f71742bff63c08085d4f83d67819ec592f))
+* **computer-use:** stage Rome Computer Use.app outside Rome.app to prevent macOS TCC split ([#2875](https://github.com/rome-os/rome/issues/2875)) ([c02b70d](https://github.com/rome-os/rome/commit/c02b70dc5ad5ae26c98aac326d7866afbcd38783))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.10
+
 ## [0.1.12](https://github.com/rome-os/rome/compare/node-v0.1.11...node-v0.1.12) (2026-11-27)
 
 

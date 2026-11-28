@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/rome-os/rome/compare/node-core-darwin-arm64-v0.1.9...node-core-darwin-arm64-v0.1.10) (2026-11-28)
+
+
+### Miscellaneous Chores
+
+* **node-core-darwin-arm64:** Synchronize node-core versions
+
 ## 0.1.9 (2026-11-27)
 
 

@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.11.8](https://github.com/rome-os/rome/compare/app-runtime-v0.11.7...app-runtime-v0.11.8) (2026-11-28)
+
+
+### Features
+
+* **connections:** expand Feishu app operations and connection access UI ([#2793](https://github.com/rome-os/rome/issues/2793)) ([57d64c2](https://github.com/rome-os/rome/commit/57d64c20f15792cb644fc327c4e201a0880ffa6c))
+
 ## [0.11.7](https://github.com/rome-os/rome/compare/app-runtime-v0.11.6...app-runtime-v0.11.7) (2026-11-27)
 
 
