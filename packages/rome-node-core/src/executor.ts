@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { actionError, isRecord, type ActionResponse, type BinaryActionResult } from "./actions.js";
 import { AUDIT_PUSH_BYTES, type AuditOutcome, type AuditStore } from "./audit.js";
 import { computerUseAuditFields } from "./computer-use/audit-fields.js";
-import { ComputerUseHost } from "./computer-use/host.js";
+import { ComputerUseHost, type HelperOptions } from "./computer-use/host.js";
 import {
   decodeMeta,
   encodeMeta,
@@ -157,8 +157,9 @@ export function createExecutor(
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
   computerUseHelperPath?: string,
+  helperOptions?: HelperOptions,
 ) {
-  const computer = new ComputerUseHost({ bundledAppPath: computerUseHelperPath });
+  const computer = new ComputerUseHost({ bundledAppPath: computerUseHelperPath, ...helperOptions });
   const children = new Set<ChildProcess>();
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;

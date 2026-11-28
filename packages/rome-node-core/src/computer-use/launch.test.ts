@@ -1,8 +1,8 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, rs } from "@rstest/core";
-import { launchPermissionSetup } from "../host.js";
+import { launchPermissionSetup, stagedHelperPath } from "../host.js";
 
 let root: string;
 let appPath: string;
@@ -140,4 +140,20 @@ it("rejects an unsigned helper by default", async () => {
     code: "invalid_helper_bundle",
   });
   expect(launcher).not.toHaveBeenCalled();
+});
+
+it("rejects a staged path redirected after discovery, even to a valid helper", async () => {
+  rs.stubEnv(process.platform === "win32" ? "USERPROFILE" : "HOME", root);
+  try {
+    const staged = stagedHelperPath(root);
+    await mkdir(dirname(staged), { recursive: true });
+    await symlink(appPath, staged, "junction");
+    const launcher = rs.fn();
+    await expect(
+      launchPermissionSetup({ appPath: staged, verifyBundle: () => {}, launcher }),
+    ).rejects.toMatchObject({ code: "invalid_helper_bundle" });
+    expect(launcher).not.toHaveBeenCalled();
+  } finally {
+    rs.unstubAllEnvs();
+  }
 });

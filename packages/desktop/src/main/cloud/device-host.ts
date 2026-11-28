@@ -48,6 +48,8 @@ export interface DeviceHostOptions {
   /** Every remote request is recorded here before it runs. */
   audit: HostOptions["audit"];
   computerUseHelperPath?: HostOptions["computerUseHelperPath"];
+  ensureComputerUseHelper?: HostOptions["ensureComputerUseHelper"];
+  strictBundledAppPath?: boolean;
   connect?: (options: HostOptions) => Promise<void>;
   /** The connection used while Computer use is off. It answers and runs nothing. */
   connectLimited?: (options: LimitedHostOptions) => Promise<void>;
@@ -200,6 +202,8 @@ export class DeviceHost {
         await (this.options.connect ?? connectHost)({
           ...shared,
           computerUseHelperPath: this.options.computerUseHelperPath,
+          ensureComputerUseHelper: this.options.ensureComputerUseHelper,
+          strictBundledAppPath: this.options.strictBundledAppPath,
         });
       else await (this.options.connectLimited ?? connectLimitedHost)(shared);
     } catch (err) {

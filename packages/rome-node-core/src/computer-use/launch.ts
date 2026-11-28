@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -33,6 +33,10 @@ const STATE_PREFIX = "rome-cu-";
 const SOCKET_PATH_LIMIT = 103;
 const POLL_INTERVAL_MS = 25;
 const run = promisify(execFile);
+
+export function stagedHelperPath(home = homedir()): string {
+  return join(home, ".rome-computer-use", APP_NAME);
+}
 
 interface LaunchContext {
   appPath?: string;
@@ -177,7 +181,7 @@ async function verifySignedBundle(appPath: string, signal: AbortSignal): Promise
   );
 }
 
-async function verifyHelperBundle(
+export async function verifyHelperBundle(
   path: string,
   signal: AbortSignal,
   verify: NonNullable<LaunchOptions["verifyBundle"]> = verifySignedBundle,
@@ -186,6 +190,8 @@ async function verifyHelperBundle(
     const appPath = realpathSync(path);
     const executable = join(appPath, EXECUTABLE);
     if (
+      // The staged path must not redirect LaunchServices back inside Rome.app.
+      (path === stagedHelperPath() && appPath !== stagedHelperPath(realpathSync(homedir()))) ||
       basename(appPath) !== APP_NAME ||
       !stat(appPath)?.isDirectory() ||
       !stat(executable)?.isFile() ||

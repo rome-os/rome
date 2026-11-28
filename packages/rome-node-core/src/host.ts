@@ -6,12 +6,20 @@ export {
   type HostOptions,
 } from "./connect.js";
 export { connectLimitedHost, type LimitedHostOptions } from "./limited-host.js";
+export type { EnsureComputerUseHelper } from "./computer-use/host.js";
 export { loginDevice, type DeviceSession } from "./login.js";
 export { type GatewayNotification } from "./protocol.js";
 export { loginDeviceCode, type DeviceAuthorizationPrompt } from "./device-authorization.js";
 export { createFileCredentialStore, type CredentialStore } from "./storage.js";
-export { discoverHelper } from "./computer-use/discovery.js";
 export {
+  discoverHelper,
+  findInstalledHelper,
+  hasStagedHelperDirectory,
+  stagedHelperPath,
+} from "./computer-use/discovery.js";
+export {
+  APP_NAME,
+  RELEASE_SIGNING_REQUIREMENT,
   launchPermissionSetup,
   type PermissionSetupOptions,
   type PermissionSetupPane,
