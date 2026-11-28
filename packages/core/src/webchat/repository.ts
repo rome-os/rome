@@ -2732,7 +2732,12 @@ export class WebChatRepository {
       .orderBy(asc(romeAgentMessages.createdAt), sql`rowid`);
   }
 
-  async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {
+  /** The sender id of each user message in a session, or of each of `ids`, for messages that
+   * recorded one. */
+  async getUserMessageSources(
+    sessionId: string,
+    ids?: readonly string[],
+  ): Promise<Map<string, string>> {
     const rows = await this.db
       .select({ id: romeAgentMessages.id, senderId: romeAgentMessages.senderId })
       .from(romeAgentMessages)
@@ -2741,6 +2746,7 @@ export class WebChatRepository {
           eq(romeAgentMessages.sessionId, sessionId),
           eq(romeAgentMessages.role, "user"),
           isNotNull(romeAgentMessages.senderId),
+          ids ? inArray(romeAgentMessages.id, [...ids]) : undefined,
         ),
       );
     return new Map(rows.flatMap((row) => (row.senderId ? [[row.id, row.senderId] as const] : [])));

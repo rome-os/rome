@@ -137,6 +137,9 @@ struct LiveResync {
     mutating func confirmed(_ topic: String) -> Bool {
         owed.remove(topic) != nil
     }
+
+    /// Whether `topic` still waits for its refetch on this connection.
+    func owes(_ topic: String) -> Bool { owed.contains(topic) }
 }
 
 /// One WebSocket carries every topic. It reconnects with backoff, subscribes
@@ -204,22 +207,38 @@ final class LiveEventsSocket: LiveEventSource {
         }
     }
 
-    /// The app is back in front. Listeners refetch right away, before the
-    /// socket is back: a socket that is slow, refused or dead must not keep
-    /// the screen on what it showed before. The socket starts over even if it
-    /// was never paused, since one that sat through a suspension can look open
-    /// and deliver nothing. Listeners refetch again as the server confirms
-    /// each topic, which covers what was sent in between.
+    /// The app is back in front. The chat on screen refetches right away,
+    /// before the socket is back: a socket that is slow, refused or dead must
+    /// not keep it on what it showed before. Every listener, that chat's too,
+    /// refetches as the server confirms its topic, which covers what was sent
+    /// in between. The rest wait for that, so on a slow link the chat on
+    /// screen is not queued behind lists nobody is looking at. The socket
+    /// starts over even if it was never paused, since one that sat through a
+    /// suspension can look open and deliver nothing.
     func resume() {
         paused = false
         guard !subscriptions.isEmpty else { return }
         resync.dropped()
-        for subscription in Array(subscriptions.values) { subscription.handler(.reconnected) }
+        if let chatId = watching.chatId {
+            let topic = LiveTopic.chat(chatId)
+            for subscription in Array(subscriptions.values) where subscription.topic == topic {
+                subscription.handler(.reconnected)
+            }
+        }
         connect()
     }
 
     func watch(_ chatId: String?) {
         let frames = watching.move(to: chatId)
+        // A chat that comes on screen before the server confirms its topic
+        // refetches now, as the chat on screen at the return did: a socket
+        // that never comes back must not leave it stale. The confirmation
+        // still refetches it too.
+        if let chatId, !frames.isEmpty, resync.owes(LiveTopic.chat(chatId)) {
+            for subscription in Array(subscriptions.values) where subscription.topic == LiveTopic.chat(chatId) {
+                subscription.handler(.reconnected)
+            }
+        }
         // Paused or not connected: the next connection holds the new watch.
         guard !paused, task != nil else { return }
         for frame in frames { sendFrame(type: frame.type, topic: frame.topic) }

@@ -1003,9 +1003,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
     );
   }
 
-  override async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {
+  override async getUserMessageSources(
+    sessionId: string,
+    ids?: readonly string[],
+  ): Promise<Map<string, string>> {
+    const among = ids
+      ? sql`AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+      : sql``;
     const rows = this.db.all<LineRow>(
-      sql`SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user'`,
+      sql`SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user' ${among}`,
     );
     return new Map(
       rows.flatMap((row) =>
@@ -1403,7 +1409,9 @@ export function sessionLines(sessionIds: readonly string[]) {
       AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
-    SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
+    -- The plus on r.role keeps a filter on role off the role index, which
+    -- would read that role's rows of every session instead of these sessions' own.
+    SELECT r.id, r.session_id, r.turn_id, r.input_state, +r.role,
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
       r.created_at,
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
