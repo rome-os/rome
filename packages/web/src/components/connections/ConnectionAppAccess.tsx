@@ -1115,9 +1115,10 @@ function OperationRow({
   const permissionIds = primaryPermissionIds(operation);
   const extraIds = extraPermissionIds(operation);
   const accessMode = policyAccessMode(policy);
+  const isStale = Boolean(policy && policy.grantStatus !== "current");
 
   const handleModeChange = (nextMode: OperationAccessMode) => {
-    if (nextMode === accessMode) return;
+    if (nextMode === accessMode && !isStale) return;
     if (nextMode === "disabled") {
       if (policy) onRevoke();
       return;
@@ -1143,24 +1144,37 @@ function OperationRow({
         ) : undefined
       }
       trailing={
-        <Select
-          value={accessMode}
-          onValueChange={(value) => handleModeChange(value as OperationAccessMode)}
-          disabled={busy || (!policy && !canGrant)}
-        >
-          <SelectTrigger aria-label={title} className="h-8 w-auto min-w-[6.75rem] bg-surface">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectItem value="disabled">{t("accessMode.disabled")}</SelectItem>
-            <SelectItem value="allow" disabled={!canGrant}>
-              {t("accessMode.allow")}
-            </SelectItem>
-            <SelectItem value="ask" disabled={!canGrant}>
-              {t("accessMode.ask")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex shrink-0 items-center gap-2">
+          {policy && policy.grantStatus === "replaced" && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy || !canGrant}
+              onClick={() => onSave({ approvalMode: policy.approvalMode })}
+            >
+              {t("renew")}
+            </Button>
+          )}
+          <Select
+            value={accessMode}
+            onValueChange={(value) => handleModeChange(value as OperationAccessMode)}
+            disabled={busy || (!policy && !canGrant)}
+          >
+            <SelectTrigger aria-label={title} className="h-8 w-auto min-w-[6.75rem] bg-surface">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="disabled">{t("accessMode.disabled")}</SelectItem>
+              <SelectItem value="allow" disabled={!canGrant}>
+                {t("accessMode.allow")}
+              </SelectItem>
+              <SelectItem value="ask" disabled={!canGrant}>
+                {t("accessMode.ask")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       }
     />
   );

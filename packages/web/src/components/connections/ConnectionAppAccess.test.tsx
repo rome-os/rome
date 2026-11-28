@@ -524,6 +524,47 @@ describe("ConnectionAppAccess", () => {
     ]);
   });
 
+  it("renews individual replaced permissions directly after reconnect", async () => {
+    const replacedRead: AppConnectionAccessPolicyDto = {
+      ...currentPolicy(read),
+      grantStatus: "replaced",
+    };
+    const replacedWrite: AppConnectionAccessPolicyDto = {
+      ...currentPolicy(write),
+      sideEffect: "write",
+      approvalMode: "required",
+      grantStatus: "replaced",
+    };
+    const { puts } = setup({
+      data: { ...detail, policies: [replacedRead, replacedWrite] },
+    });
+    await openAuthorizedApp("App A");
+
+    const renewRead = opRow(read).getByRole("button", { name: "Renew" });
+    await userEvent.click(renewRead);
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({
+      appId: "@a/app-a",
+      identity: "app",
+      operation: read,
+      expectedRevision: 1,
+      approvalMode: "not_required",
+    });
+    await waitFor(() => expect(opRow(read).queryByRole("button", { name: "Renew" })).toBeNull());
+
+    const renewWrite = opRow(write).getByRole("button", { name: "Renew" });
+    await userEvent.click(renewWrite);
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1]).toEqual({
+      appId: "@a/app-a",
+      identity: "app",
+      operation: write,
+      expectedRevision: 1,
+      approvalMode: "required",
+    });
+    await waitFor(() => expect(opRow(write).queryByRole("button", { name: "Renew" })).toBeNull());
+  });
+
   it("omits constraints when changing access mode so the server preserves stored constraints", async () => {
     const extra = { inputPointer: "/workspace", allowedValues: [4, true] };
     const constraints = [{ inputPointer: "/documentId", allowedValues: ["A", "B"] }, extra];
