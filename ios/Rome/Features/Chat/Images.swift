@@ -405,7 +405,10 @@ struct PhotoViewer: View {
             .opacity(dragY == 0 ? 1 : 0)
         }
         .statusBarHidden()
-        .preferredColorScheme(.dark)
+        // Dark inside the viewer only: `preferredColorScheme` reached the
+        // chat behind the cover as it opened, and the bubbles drawn then
+        // stayed dark after it closed.
+        .environment(\.colorScheme, .dark)
         .accessibilityAction(.escape) { dismiss() }
         .sheet(item: $sharing) { shared in
             ActivitySheet(items: [shared.url])
