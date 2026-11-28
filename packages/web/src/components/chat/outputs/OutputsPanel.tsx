@@ -776,11 +776,16 @@ function OutputPreview({
     enabled: textual && Boolean(url) && !editing,
   });
 
+  // An icon, like Edit beside it.
   const download = !url ? null : (
-    <Button asChild variant="outline" size="sm">
-      <a href={url} download={output.name}>
-        <Download data-icon="inline-start" />
-        {t("outputs.download")}
+    <Button asChild variant="ghost" size="icon-sm">
+      <a
+        href={url}
+        download={output.name}
+        aria-label={t("outputs.download")}
+        title={t("outputs.download")}
+      >
+        <Download />
       </a>
     </Button>
   );
