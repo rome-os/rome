@@ -17,9 +17,7 @@ import {
   type FilterRowSize,
   kindsThatFit,
   kindsThatStillFit,
-  OutputFile,
   OutputsPanel,
-  outputTitle,
   pageHrefOf,
   outputTypeOf,
   fileKindOf,
@@ -174,7 +172,6 @@ function renderPanel(
     taskChats?: boolean;
     onOpenTaskChat?: (id: string) => void;
     onNavigate?: () => void;
-    onOpenOutput?: (output: ChatOutputDto) => void;
   } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -213,8 +210,8 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("heading", { name: /Outputs/ })).toBeNull();
     const rows = within(today).getAllByRole("listitem");
     expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual([
-      "Trip notes",
-      "Trip budget",
+      "trip-notes.md",
+      "trip_budget.csv",
     ]);
     expect(rows[0].textContent).toContain("Document·Written");
     const chip = within(rows[1]).getByRole("link", { name: "from Draft the report" });
@@ -285,7 +282,7 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "Spreadsheets" }));
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Sheet"),
+      expect.stringContaining("sheet.xlsx"),
     ]);
     await user.click(screen.getByRole("radio", { name: "All" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(4);
@@ -320,7 +317,7 @@ describe("OutputsPanel", () => {
     const more = screen.getByRole("button", { name: "More: Audio" });
     expect(more.textContent).toBe("Audio");
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Voice"),
+      expect.stringContaining("voice.wav"),
     ]);
     expect(
       screen.getAllByRole("radio").some((chip) => chip.getAttribute("aria-checked") === "true"),
@@ -498,17 +495,17 @@ describe("OutputsPanel", () => {
     ];
     files[outputs[0].contentUrl!] = "line one\nline two";
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Run" }));
+    await user.click(await screen.findByRole("button", { name: "run.log" }));
     expect(await screen.findByText(/line one/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
-    await user.click(screen.getByRole("button", { name: "Pic" }));
+    await user.click(screen.getByRole("button", { name: "pic.png" }));
     expect(screen.getByRole("img", { name: "pic.png" }).getAttribute("src")).toBe(
       outputs[1].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
-    await user.click(screen.getByRole("button", { name: "Bundle" }));
+    await user.click(screen.getByRole("button", { name: "bundle.zip" }));
     expect(screen.getByText("This file has no preview.")).toBeTruthy();
     const download = screen.getByRole("link", { name: "Download" });
     expect(download.getAttribute("href")).toBe(outputs[2].contentUrl);
@@ -534,7 +531,7 @@ describe("OutputsPanel", () => {
     files[outputs[0].contentUrl!] = "<h1>Trip</h1><script>alert(1)</script>";
     files[outputs[1].contentUrl!] = "<p>Copy</p>";
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Trip map" }));
+    await user.click(await screen.findByRole("button", { name: "trip-map.html" }));
     const frame = await screen.findByTitle("trip-map.html");
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.getAttribute("srcdoc")).toBe("<h1>Trip</h1><script>alert(1)</script>");
@@ -546,7 +543,7 @@ describe("OutputsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
 
     // A copy of a file outside both folders only downloads, so it has nowhere to open.
-    await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: "copy.html" }));
     expect((await screen.findByTitle("copy.html")).getAttribute("sandbox")).toBe("");
     expect(screen.queryByRole("link", { name: "Open in new tab" })).toBeNull();
   });
@@ -561,20 +558,20 @@ describe("OutputsPanel", () => {
       output("logo", { name: "logo.svg", mimeType: "image/svg+xml" }),
     ];
     const { container } = renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Clip" }));
+    await user.click(await screen.findByRole("button", { name: "clip.mp4" }));
     expect(container.querySelector("video source")?.getAttribute("src")).toBe(
       outputs[0].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "Song" }));
+    await user.click(screen.getByRole("button", { name: "song.mp3" }));
     expect(container.querySelector("audio source")?.getAttribute("src")).toBe(
       outputs[1].contentUrl,
     );
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "Paper" }));
+    await user.click(screen.getByRole("button", { name: "paper.pdf" }));
     expect(container.querySelector("object")?.getAttribute("data")).toBe(outputs[2].contentUrl);
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
-    await user.click(screen.getByRole("button", { name: "Logo" }));
+    await user.click(screen.getByRole("button", { name: "logo.svg" }));
     expect(screen.getByRole("img", { name: "logo.svg" }).getAttribute("src")).toBe(
       outputs[3].contentUrl,
     );
@@ -601,12 +598,80 @@ describe("OutputsPanel", () => {
       event: TASK_LIST_CHANGED_EVENT,
       data: { chatId: "chat-1" },
     });
-    expect(await screen.findByRole("button", { name: "Report" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "report.md" })).toBeTruthy();
   });
 
   it("says so when the chat has no outputs", async () => {
     renderPanel();
     expect(await screen.findByText("No outputs yet")).toBeTruthy();
+  });
+
+  it("opens a file in the list's place under a header row: back, its full name and kind, Download", async () => {
+    const user = userEvent.setup();
+    outputs = [
+      output("clip", { name: "sunset.mp4", mimeType: "video/mp4", kind: "shown" }),
+      output("plan", { name: "Trip plan.md", mimeType: "text/markdown" }),
+    ];
+    files[outputs[1].contentUrl!] = "# Plan";
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "sunset.mp4" }));
+    // The list gives way to the file; its header names it with its extension.
+    expect(screen.queryByRole("list", { name: "Today" })).toBeNull();
+    expect(screen.getByText("sunset.mp4")).toBeTruthy();
+    expect(screen.getByText("Video")).toBeTruthy();
+    expect(screen.getByText("Shown")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+      outputs[0].contentUrl,
+    );
+    expect(screen.getByRole("button", { name: "Back to outputs" })).toBeTruthy();
+  });
+
+  it("comes back from a file to the list as it was: its filter, its scroll and the file marked", async () => {
+    const user = userEvent.setup();
+    // jsdom lays nothing out, so each element keeps the scroll it is given.
+    const scrolls = new WeakMap<Element, number>();
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get() {
+        return scrolls.get(this) ?? 0;
+      },
+      set(value: number) {
+        scrolls.set(this, value);
+      },
+    });
+    try {
+      outputs = [
+        output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+        output("plan", { name: "plan.md", mimeType: "text/markdown" }),
+        output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      ];
+      files[outputs[1].contentUrl!] = "# Plan";
+      renderPanel();
+      await screen.findByRole("list", { name: "Today" });
+      await user.click(screen.getByRole("radio", { name: "Documents" }));
+      const list = screen.getByTestId("chat-outputs");
+      list.scrollTop = 240;
+      fireEvent.scroll(list);
+
+      await user.click(screen.getByRole("button", { name: "plan.md" }));
+      await user.click(await screen.findByRole("button", { name: "Back to outputs" }));
+
+      const back = screen.getByTestId("chat-outputs");
+      expect(back.scrollTop).toBe(240);
+      expect(screen.getByRole("radio", { name: "Documents" }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect(screen.queryByRole("button", { name: "pic.png" })).toBeNull();
+      const row = screen.getByRole("button", { name: "plan.md" });
+      expect(document.activeElement).toBe(row);
+      expect(row.closest("li")?.className).toContain("bg-surface-muted");
+      expect(
+        screen.getByRole("button", { name: "notes.md" }).closest("li")?.className,
+      ).not.toContain("bg-surface-muted");
+    } finally {
+      if (descriptor) Object.defineProperty(Element.prototype, "scrollTop", descriptor);
+    }
   });
 });
 
@@ -833,8 +898,8 @@ describe("projectPathOf", () => {
   });
 });
 
-describe("outputTypeOf and outputTitle", () => {
-  it("sorts files into the filters' kinds and names them without the extension", () => {
+describe("outputTypeOf", () => {
+  it("sorts files into the filters' kinds", () => {
     expect(outputTypeOf({ name: "a.pdf", path: "a.pdf", mimeType: "application/pdf" })).toBe(
       "document",
     );
@@ -849,8 +914,6 @@ describe("outputTypeOf and outputTitle", () => {
     expect(outputTypeOf({ name: "a.zip", path: "a.zip", mimeType: "application/zip" })).toBe(
       "file",
     );
-    expect(outputTitle("weekly-news_digest.md")).toBe("Weekly news digest");
-    expect(outputTitle("Rome 发布摘要.md")).toBe("Rome 发布摘要");
   });
 });
 
@@ -995,100 +1058,5 @@ describe("readPrefix", () => {
     expect(prefix).toEqual({ text: "x".repeat(2500), cut: true });
     expect(pulled).toBeLessThan(10);
     expect(cancel).toHaveBeenCalled();
-  });
-});
-
-describe("OutputsPanel in the side pane", () => {
-  it("hands a chosen output to the pane and keeps the list in place", async () => {
-    const user = userEvent.setup();
-    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
-    const onOpenOutput = rs.fn();
-    renderPanel({ onOpenOutput });
-    await user.click(await screen.findByRole("button", { name: "Notes" }));
-    expect(onOpenOutput).toHaveBeenCalledWith(expect.objectContaining({ id: "notes" }));
-    expect(screen.getByRole("list", { name: "Today" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
-  });
-});
-
-describe("OutputFile", () => {
-  function renderFile(opened: { id: string; link: string | null }, withActions = true) {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const actions = document.createElement("div");
-    document.body.append(actions);
-    const guard = { current: null as (() => Promise<boolean>) | null };
-    const view = render(
-      <QueryClientProvider client={client}>
-        <ThemeProvider>
-          <MemoryRouter>
-            <OutputFile
-              chatId="chat-1"
-              opened={opened}
-              actions={withActions ? actions : null}
-              leaveGuard={guard}
-            />
-          </MemoryRouter>
-        </ThemeProvider>
-      </QueryClientProvider>,
-    );
-    return Object.assign(view, { actions, guard });
-  }
-
-  it("shows the file alone, with its buttons in the pane's tab row", async () => {
-    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
-    files[outputs[0].contentUrl!] = "# Plan";
-    const { actions } = renderFile({ id: "notes", link: outputs[0].link });
-    const markdown = await screen.findByTestId("output-preview");
-    await waitFor(() =>
-      expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
-    );
-    // No header: no way back, and the name and kind are the tab's.
-    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
-    expect(screen.queryByText("notes.md")).toBeNull();
-    expect(within(actions).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
-      outputs[0].contentUrl,
-    );
-    actions.remove();
-  });
-
-  it("draws no buttons while its tab is not the one showing", async () => {
-    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
-    files[outputs[0].contentUrl!] = "# Plan";
-    renderFile({ id: "notes", link: outputs[0].link }, false);
-    await screen.findByTestId("output-preview");
-    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
-  });
-
-  it("follows the file to its new record, and says when it is gone", async () => {
-    outputs = [output("notes-2", { name: "notes.txt" })];
-    files[outputs[0].contentUrl!] = "second take";
-    renderFile({ id: "notes-1", link: outputs[0].link });
-    expect(await screen.findByText("second take")).toBeTruthy();
-    cleanup();
-
-    outputs = [];
-    renderFile({ id: "notes-1", link: "/projects/demo/notes.txt" });
-    expect(await screen.findByText("Moved or deleted")).toBeTruthy();
-  });
-
-  it("edits a written text file in place, and Done in the tab row returns to the preview", async () => {
-    const user = userEvent.setup();
-    outputs = [output("one", { name: "notes.txt" })];
-    files[outputs[0].contentUrl!] = "hello";
-    resolved["projects/demo/notes.txt"] = {};
-    outputs[0] = {
-      ...outputs[0],
-      path: "/projects/demo/notes.txt",
-      link: "/projects/demo/notes.txt",
-    };
-    const { actions, guard } = renderFile({ id: "one", link: outputs[0].link });
-    await user.click(await within(actions).findByRole("button", { name: "Edit" }));
-    expect(await screen.findByTestId("project-browser")).toBeTruthy();
-    // The pane's close of the tab asks the editor first.
-    expect(guard.current).not.toBeNull();
-    await user.click(within(actions).getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(screen.queryByTestId("project-browser")).toBeNull());
-    expect(await screen.findByText("hello")).toBeTruthy();
-    actions.remove();
   });
 });

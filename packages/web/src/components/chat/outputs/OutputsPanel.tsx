@@ -24,7 +24,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { describeFile, type FileKind, fileKindOfMimeType } from "@rome/api-types/file-kinds";
@@ -194,16 +193,6 @@ export function kindsOf(
   );
 }
 
-/** A file name as a title: no extension, words for dashes and underscores, a capital first. */
-export function outputTitle(name: string): string {
-  const words = name
-    .replace(/\.[a-z0-9]{1,8}$/i, "")
-    .replace(/[-_]+/g, " ")
-    .trim();
-  if (!words) return name;
-  return words.charAt(0).toLocaleUpperCase() + words.slice(1);
-}
-
 type Filter = "all" | OutputType;
 
 const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
@@ -262,11 +251,6 @@ interface OutputsPanelProps {
   onNavigate?: () => void;
   /** Opens a task chat beside the chat instead of as its page, as the side pane does. */
   onOpenTaskChat?: (taskChatId: string, name: string) => void;
-  /**
-   * Opens a chosen output somewhere else, as the side pane opens it in a tab of
-   * its own. Without it the output's preview takes the list's place.
-   */
-  onOpenOutput?: (output: ChatOutput) => void;
   /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
   taskChats?: boolean;
   /**
@@ -287,7 +271,6 @@ export function OutputsPanel({
   selectionSeq = 0,
   onNavigate,
   onOpenTaskChat,
-  onOpenOutput,
   taskChats = false,
   leaveGuard,
 }: OutputsPanelProps) {
@@ -306,6 +289,12 @@ export function OutputsPanel({
   useTaskChatOutputs(chatId, taskChats);
   const [chosen, setChosen] = useState<string | null>(selectedId);
   const [filter, setFilter] = useState<Filter>("all");
+  // Back from a file, the list comes back where it was scrolled to, with the
+  // file just viewed marked and focused.
+  const listScroll = useRef(0);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [lastViewed, setLastViewed] = useState<string | null>(null);
+  const restoring = useRef(false);
   const ownGuard: LeaveGuard = useRef(null);
   const guard = leaveGuard ?? ownGuard;
   // The file being edited, as it was when Edit was chosen. The edit lives on
@@ -348,6 +337,18 @@ export function OutputsPanel({
     </p>
   ) : null;
   const current = list.find((output) => output.id === chosen) ?? null;
+  const showingList = !editing && !current;
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!showingList || !restoring.current || !scroller) return;
+    restoring.current = false;
+    scroller.scrollTop = listScroll.current;
+    const row = [...scroller.querySelectorAll<HTMLButtonElement>("[data-output-id]")].find(
+      (button) => button.dataset.outputId === lastViewed,
+    );
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView?.({ block: "nearest" });
+  });
 
   const preview = (output: ChatOutput) => (
     <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
@@ -358,7 +359,13 @@ export function OutputsPanel({
         editingPath={editing?.path ?? null}
         onEdit={(path) => setEditing({ path, output })}
         onDone={() => leaveEditing((latest) => latest && setChosen(latest.id))}
-        onBack={() => leaveEditing(() => setChosen(null))}
+        onBack={() =>
+          leaveEditing((latest) => {
+            setLastViewed(latest?.id ?? output.id);
+            restoring.current = true;
+            setChosen(null);
+          })
+        }
         onNavigate={follow}
       />
     </div>
@@ -417,7 +424,8 @@ export function OutputsPanel({
               key={output.id}
               output={output}
               when={whenLabel(new Date(output.at), now, i18n.language)}
-              onOpen={() => (onOpenOutput ? onOpenOutput(output) : setChosen(output.id))}
+              viewed={output.id === lastViewed}
+              onOpen={() => setChosen(output.id)}
               onNavigate={follow}
             />
           ))}
@@ -426,7 +434,14 @@ export function OutputsPanel({
     );
 
   return (
-    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
+    <div
+      ref={scrollerRef}
+      onScroll={(event) => {
+        listScroll.current = event.currentTarget.scrollTop;
+      }}
+      className="h-full overflow-y-auto pb-safe"
+      data-testid="chat-outputs"
+    >
       <div className="flex flex-col gap-4 p-4 max-md:px-3">
         {kinds.length > 0 && <KindFilters kinds={kinds} value={active} onValueChange={setFilter} />}
         {indexingNote}
@@ -645,31 +660,40 @@ function SourceText({
 function OutputRow({
   output,
   when,
+  viewed,
   onOpen,
   onNavigate,
 }: {
   output: ChatOutput;
   when: string;
+  /** The file just viewed, marked when the list comes back. */
+  viewed: boolean;
   onOpen: () => void;
   onNavigate?: FollowTaskChat;
 }) {
   const { t } = useTranslation("chat");
   const type = outputTypeOf(output);
   return (
-    <li className="relative flex min-w-0 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover">
+    <li
+      className={cn(
+        "relative flex min-w-0 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover",
+        viewed && "bg-surface-muted",
+      )}
+    >
       <TypeIcon type={type} />
       <div className="min-w-0 flex-1">
         {/* The whole row opens the output; the task chat's link sits above it. */}
         <button
           type="button"
           onClick={onOpen}
+          data-output-id={output.id}
           title={output.name}
           className={cn(
             "block w-full cursor-pointer truncate text-left text-ui outline-none after:absolute after:inset-0 after:rounded-[inherit] after:outline-1 after:-outline-offset-1 after:outline-transparent focus-visible:after:outline-solid focus-visible:after:outline-ring/50",
             output.missing ? "text-muted-foreground" : "text-foreground",
           )}
         >
-          {outputTitle(output.name)}
+          {output.name}
         </button>
         <div className="flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
           <span className="shrink-0">{t(`outputs.types.${type}`)}</span>
@@ -704,58 +728,6 @@ export async function readPrefix(
   return { text: text.slice(0, chars), cut: true };
 }
 
-/**
- * Output `opened` of chat `chatId` in a file tab of the side pane: the file
- * alone, with its Edit, Done and Download buttons in the pane's tab row. It
- * follows the file when the agent writes it again under a new record, and says
- * so when the file is gone.
- */
-export function OutputFile({
-  chatId,
-  opened,
-  actions,
-  leaveGuard,
-}: {
-  chatId: string;
-  opened: { id: string; link: string | null };
-  /** Where the file's buttons go, or null while its tab is not the one showing. */
-  actions: HTMLElement | null;
-  /** Filled with the check the pane runs before it closes the tab. */
-  leaveGuard: LeaveGuard;
-}) {
-  const { t } = useTranslation("chat");
-  const outputs = useChatOutputs(chatId);
-  const list = outputs.data?.outputs ?? [];
-  const found =
-    list.find((output) => output.id === opened.id) ??
-    list.find((output) => opened.link !== null && output.link === opened.link) ??
-    null;
-  // The edit holds on to the record it began with, as the panel's does.
-  const [editing, setEditing] = useState<{ path: string; output: ChatOutput } | null>(null);
-  const output = editing?.output ?? found;
-  if (!output) {
-    if (outputs.isPending) return <Skeleton className="m-4 h-24" />;
-    return (
-      <p className="p-4 text-ui text-muted-foreground">
-        {outputs.isError ? t("outputs.loadFailed") : t("outputs.missing")}
-      </p>
-    );
-  }
-  return (
-    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-output-file">
-      <OutputPreview
-        key={output.id}
-        output={output}
-        leaveGuard={leaveGuard}
-        editingPath={editing?.path ?? null}
-        onEdit={(path) => setEditing({ path, output })}
-        onDone={() => leaveEditor(leaveGuard, () => setEditing(null))}
-        actions={actions}
-      />
-    </div>
-  );
-}
-
 function OutputPreview({
   output,
   leaveGuard,
@@ -764,7 +736,6 @@ function OutputPreview({
   onDone,
   onBack,
   onNavigate,
-  actions,
 }: {
   output: ChatOutput;
   leaveGuard: LeaveGuard;
@@ -772,14 +743,8 @@ function OutputPreview({
   editingPath: string | null;
   onEdit: (path: string) => void;
   onDone: () => void;
-  onBack?: () => void;
+  onBack: () => void;
   onNavigate?: FollowTaskChat;
-  /**
-   * A file tab's buttons go here, and the preview draws no header, since its
-   * tab names it. Undefined in a list's place, where it draws its own header
-   * with a way back.
-   */
-  actions?: HTMLElement | null;
 }) {
   const { t } = useTranslation("chat");
   const kind = fileKindOf(output);
@@ -787,7 +752,6 @@ function OutputPreview({
   const textual = kind === "text";
   const page = pageHrefOf(output);
   const editing = editingPath !== null;
-  const inTab = actions !== undefined;
   // A text file the agent wrote into the projects folder can be edited in
   // place. Once it is being edited the folder's answer is not asked again.
   const editablePath = useEditablePath(output, textual && output.kind === "written" && !editing);
@@ -797,19 +761,7 @@ function OutputPreview({
     enabled: textual && Boolean(url) && !editing,
   });
 
-  // In a tab's row, beside the pane's own buttons, Download is an icon too.
-  const download = !url ? null : inTab ? (
-    <Button asChild variant="ghost" size="icon-sm">
-      <a
-        href={url}
-        download={output.name}
-        aria-label={t("outputs.download")}
-        title={t("outputs.download")}
-      >
-        <Download />
-      </a>
-    </Button>
-  ) : (
+  const download = !url ? null : (
     <Button asChild variant="outline" size="sm">
       <a href={url} download={output.name}>
         <Download data-icon="inline-start" />
@@ -845,18 +797,8 @@ function OutputPreview({
         onClick={() => onEdit(editablePath)}
       />
     ) : null;
-  const header = inTab ? (
-    actions ? (
-      createPortal(
-        <>
-          {editToggle}
-          {openPage}
-          {download}
-        </>,
-        actions,
-      )
-    ) : null
-  ) : (
+  // The file's header row, in the side pane's Outputs tab and a sheet alike.
+  const header = (
     <div className="flex items-center gap-2 pt-2 pr-4 pl-2">
       <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
       <div className="min-w-0 flex-1">
@@ -874,12 +816,11 @@ function OutputPreview({
       {download}
     </div>
   );
-  // With no header above it, the file starts a step below the tab row.
-  const frame = cn("flex flex-col gap-3", inTab && "pt-4");
+  const frame = "flex flex-col gap-3";
 
   if (editingPath !== null) {
     return (
-      <div className={cn(frame, "h-full", inTab && "pt-0")}>
+      <div className={cn(frame, "h-full")}>
         {header}
         <div className="min-h-0 flex-1">
           <OutputEditor path={editingPath} textUrl={url} leaveGuard={leaveGuard} />
