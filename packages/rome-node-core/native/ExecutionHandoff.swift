@@ -286,9 +286,9 @@ final class ExecutionHandoff: Sendable {
 
 @MainActor
 private final class ExecutionAppDelegate: NSObject, NSApplicationDelegate {
-    private let onQuit: (String) -> Void
+    private let onQuit: @Sendable (String) -> Void
 
-    init(onQuit: @escaping (String) -> Void) { self.onQuit = onQuit }
+    init(onQuit: @escaping @Sendable (String) -> Void) { self.onQuit = onQuit }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent, onQuit: onQuit)

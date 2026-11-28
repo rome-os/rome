@@ -1360,26 +1360,47 @@ final class SelfTest {
                                                eventID: AEEventID(kAEQuitApplication),
                                                targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
                                                transactionID: AETransactionID(kAnyTransactionID))
-        var quitReasons: [String] = []
-        try expect(TerminationPolicy.reply(for: nil) { quitReasons.append($0) } == .terminateLater &&
-                   quitReasons == ["local_stop"],
+        let quitReasons = EndedBindings()
+        let terminateReplies = EndedBindings()
+        let runImmediate: (@escaping @Sendable () -> Void) -> Void = { $0() }
+        try expect(TerminationPolicy.reply(for: nil, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
                    "nil termination events fail open to graceful local stop")
-        quitReasons.removeAll()
-        try expect(TerminationPolicy.reply(for: plainQuit) { quitReasons.append($0) } == .terminateLater &&
-                   quitReasons == ["local_stop"],
+        try expect(TerminationPolicy.reply(for: plainQuit, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
                    "ordinary Quit AppleEvents without a sender fail open to graceful local stop")
-        quitReasons.removeAll()
         try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
-                                           executablePath: { _ in osascript }) { quitReasons.append($0) } == .terminateLater &&
-                   quitReasons == ["local_stop"],
+                                           executablePath: { _ in osascript }, schedule: runImmediate,
+                                           replyTerminate: { terminateReplies.record("\($0)") },
+                                           onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                   quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
                    "ordinary osascript Quit AppleEvents terminate the session cleanly")
-        quitReasons.removeAll()
         for settingsSender in [privacyExtension, systemSettings] {
             try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
-                                               executablePath: { _ in settingsSender }) {
-                quitReasons.append($0)
-            } == .terminateCancel && quitReasons.isEmpty,
-                       "plain Quit & Reopen from \(settingsSender) does not kill an active session")
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { true }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain().isEmpty && terminateReplies.drain() == ["false"],
+                       "plain Quit & Reopen from \(settingsSender) cancels when fresh Screen Recording is granted")
+            try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { false }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                       "plain Quit from \(settingsSender) terminates when fresh Screen Recording is revoked")
+            try expect(TerminationPolicy.reply(for: plainQuit, terminateNow: true, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender },
+                                               checkScreenRecording: { false }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["local_stop"] && terminateReplies.drain() == ["true"],
+                       "modal error state replies true when System Settings Quit arrives with Screen Recording revoked")
         }
         for reason in [OSType(kAELogOut), OSType(kAEReallyLogOut), OSType(kAERestart),
                        OSType(kAEShutDown), OSType(kAEShowRestartDialog), OSType(kAEShowShutdownDialog)] {
@@ -1391,27 +1412,37 @@ final class SelfTest {
                                    forKeyword: AEKeyword(kAEQuitReason))
             for settingsSender in [privacyExtension, systemSettings] {
                 try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
-                                                   executablePath: { _ in settingsSender }) {
-                    quitReasons.append($0)
-                } == .terminateCancel && quitReasons.isEmpty,
-                           "System Settings Quit & Reopen from \(settingsSender) does not kill an active session")
+                                                   executablePath: { _ in settingsSender },
+                                                   checkScreenRecording: { true }, schedule: runImmediate,
+                                                   replyTerminate: { terminateReplies.record("\($0)") },
+                                                   onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                           quitReasons.drain().isEmpty && terminateReplies.drain() == ["false"],
+                           "System Settings Quit & Reopen from \(settingsSender) cancels when fresh Screen Recording is granted")
+                try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                                   executablePath: { _ in settingsSender },
+                                                   checkScreenRecording: { false }, schedule: runImmediate,
+                                                   replyTerminate: { terminateReplies.record("\($0)") },
+                                                   onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                           quitReasons.drain() == ["local_stop"] && terminateReplies.drain().isEmpty,
+                           "System Settings Quit from \(settingsSender) terminates when fresh Screen Recording is missing")
             }
-            try expect(TerminationPolicy.reply(for: quitEvent) { quitReasons.append($0) } == .terminateLater &&
-                       quitReasons == ["console_unavailable"],
+            try expect(TerminationPolicy.reply(for: quitEvent, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
                        "system shutdown Quit with unresolvable sender fails open and never blocks logout")
-            quitReasons.removeAll()
             try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
-                                               executablePath: { $0 == 4242 ? loginWindow : nil }) {
-                quitReasons.append($0)
-            } == .terminateLater && quitReasons == ["console_unavailable"],
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateLater &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
                        "loginwindow shutdown/logout Quit AppleEvents trigger graceful exit")
-            quitReasons.removeAll()
             try expect(TerminationPolicy.reply(for: quitEvent, terminateNow: true, senderPID: { _ in 4242 },
-                                               executablePath: { $0 == 4242 ? loginWindow : nil }) {
-                quitReasons.append($0)
-            } == .terminateNow && quitReasons == ["console_unavailable"],
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }, schedule: runImmediate,
+                                               replyTerminate: { terminateReplies.record("\($0)") },
+                                               onQuit: { quitReasons.record($0) }) == .terminateNow &&
+                       quitReasons.drain() == ["console_unavailable"] && terminateReplies.drain().isEmpty,
                        "modal error state allows immediate exit on loginwindow shutdown")
-            quitReasons.removeAll()
         }
 
         let cleanupPath = path + "-close-cleanup"

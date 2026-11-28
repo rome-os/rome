@@ -407,12 +407,27 @@ enum TerminationPolicy {
     static func reply(for event: NSAppleEventDescriptor?, terminateNow: Bool = false,
                       senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
                       executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath,
-                      onQuit: (String) -> Void) -> NSApplication.TerminateReply {
-        guard !isSystemSettingsQuit(event, senderPID: senderPID, executablePath: executablePath) else {
-            return .terminateCancel
+                      checkScreenRecording: @escaping @Sendable () -> Bool = { ScreenRecordingProbe.read()?.screenRecording == true },
+                      schedule: (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
+                      replyTerminate: @escaping @Sendable (Bool) -> Void = { shouldTerminate in
+                          DispatchQueue.main.async { NSApplication.shared.reply(toApplicationShouldTerminate: shouldTerminate) }
+                      },
+                      onQuit: @escaping @Sendable (String) -> Void) -> NSApplication.TerminateReply {
+        guard isSystemSettingsQuit(event, senderPID: senderPID, executablePath: executablePath) else {
+            onQuit(quitReason(for: event))
+            return terminateNow ? .terminateNow : .terminateLater
         }
-        onQuit(quitReason(for: event))
-        return terminateNow ? .terminateNow : .terminateLater
+        // Only cancel a System Settings Quit when a fresh TCC probe confirms Screen Recording is currently granted.
+        // If the guardian turned Screen Recording off (or the probe fails), terminate the session cleanly.
+        schedule {
+            if checkScreenRecording() {
+                replyTerminate(false)
+            } else {
+                onQuit("local_stop")
+                if terminateNow { replyTerminate(true) }
+            }
+        }
+        return .terminateLater
     }
 }
 
@@ -455,9 +470,10 @@ final class DesktopSession: NSObject, NSMenuDelegate, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // System Settings "Quit & Reopen" sends a Quit AppleEvent to all instances of the helper bundle.
-        // Active sessions ignore only those System Settings quits and survive via ExecutionHandoff.
-        TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent,
-                                terminateNow: presentingRevocationError) { reason in
+        // Active sessions cancel only confirmed System Settings quits when a fresh probe verifies Screen Recording is still granted.
+        let admission = self.admission
+        return TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent,
+                                       terminateNow: presentingRevocationError) { reason in
             admission.terminate(reason)
         }
     }
