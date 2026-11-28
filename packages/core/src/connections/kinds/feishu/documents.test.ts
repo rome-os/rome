@@ -60,6 +60,10 @@ describe("Feishu document reads", () => {
       sideEffects: "read-only",
       requiredScopes: ["docx:document:readonly"],
       requiredScopeGroups: [["docx:document:readonly", "docx:document"]],
+      approvalPreview: {
+        summary: "Read Feishu document",
+        fields: [{ label: "Document ID", inputPointer: "/documentId" }],
+      },
     });
   });
   it("uses the selected bot and returns only bounded plain text", async () => {

@@ -24,6 +24,12 @@ export const scopesList = operation(
       checkedAt: new Date().toISOString(),
     };
   },
+  {
+    approvalPreview: {
+      summary: "List Feishu app scopes",
+      fields: [],
+    },
+  },
 );
 
 const wiki = "/open-apis/wiki/v2/spaces";
@@ -149,6 +155,15 @@ export const dataOperations = [
         url: m.url,
       };
     },
+    {
+      approvalPreview: {
+        summary: "Inspect Feishu Drive item",
+        fields: [
+          { label: "Token", inputPointer: "/token" },
+          { label: "Type", inputPointer: "/type" },
+        ],
+      },
+    },
   ),
   operation(
     "wiki.spaces",
@@ -156,6 +171,12 @@ export const dataOperations = [
     z.strictObject(pagination(50)),
     (input, request) =>
       request({ method: "GET", url: wiki, params: pageParams(input) }, pageOf(space)),
+    {
+      approvalPreview: {
+        summary: "List Feishu Wiki spaces",
+        fields: [],
+      },
+    },
   ),
   operation(
     "wiki.node.get",
@@ -167,6 +188,12 @@ export const dataOperations = [
         z.object({ node: wikiNode.extend({ node_type: text }) }),
       );
       return { ...nodeInfo(node), nodeType: node.node_type };
+    },
+    {
+      approvalPreview: {
+        summary: "Read Feishu Wiki node",
+        fields: [{ label: "Node token", inputPointer: "/nodeToken" }],
+      },
     },
   ),
   operation(
@@ -182,6 +209,15 @@ export const dataOperations = [
         },
         pageOf(wikiNode.transform(nodeInfo)),
       ),
+    {
+      approvalPreview: {
+        summary: "List Feishu Wiki nodes",
+        fields: [
+          { label: "Space ID", inputPointer: "/spaceId" },
+          { label: "Parent node", inputPointer: "/parentNodeToken" },
+        ],
+      },
+    },
   ),
   operation(
     "base.get",
@@ -201,6 +237,12 @@ export const dataOperations = [
         timeZone: app.time_zone,
       };
     },
+    {
+      approvalPreview: {
+        summary: "Read Feishu Base metadata",
+        fields: [{ label: "Base token", inputPointer: "/appToken" }],
+      },
+    },
   ),
   operation(
     "base.tables.list",
@@ -211,6 +253,12 @@ export const dataOperations = [
         { method: "GET", url: `${bases}/${input.appToken}/tables`, params: pageParams(input) },
         pageOf(table),
       ),
+    {
+      approvalPreview: {
+        summary: "List Feishu Base tables",
+        fields: [{ label: "Base token", inputPointer: "/appToken" }],
+      },
+    },
   ),
   operation(
     "base.fields.list",
@@ -225,6 +273,15 @@ export const dataOperations = [
         },
         pageOf(field),
       ),
+    {
+      approvalPreview: {
+        summary: "List Feishu Base fields",
+        fields: [
+          { label: "Base token", inputPointer: "/appToken" },
+          { label: "Table ID", inputPointer: "/tableId" },
+        ],
+      },
+    },
   ),
   operation(
     "base.records.list",
@@ -256,6 +313,16 @@ export const dataOperations = [
         pageToken: page.page_token,
       };
     },
+    {
+      approvalPreview: {
+        summary: "List Feishu Base records",
+        fields: [
+          { label: "Base token", inputPointer: "/appToken" },
+          { label: "Table ID", inputPointer: "/tableId" },
+          { label: "View ID", inputPointer: "/viewId" },
+        ],
+      },
+    },
   ),
   operation(
     "sheets.info",
@@ -284,6 +351,12 @@ export const dataOperations = [
           columnCount: s.grid_properties?.column_count,
         })),
       };
+    },
+    {
+      approvalPreview: {
+        summary: "Read Feishu spreadsheet metadata",
+        fields: [{ label: "Spreadsheet token", inputPointer: "/spreadsheetToken" }],
+      },
     },
   ),
   operation(
@@ -318,6 +391,16 @@ export const dataOperations = [
         revision: result.revision ?? result.valueRange.revision,
         values: result.valueRange.values,
       };
+    },
+    {
+      approvalPreview: {
+        summary: "Read Feishu spreadsheet cells",
+        fields: [
+          { label: "Spreadsheet token", inputPointer: "/spreadsheetToken" },
+          { label: "Sheet ID", inputPointer: "/sheetId" },
+          { label: "Range", inputPointer: "/range" },
+        ],
+      },
     },
   ),
 ];

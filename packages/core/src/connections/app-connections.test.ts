@@ -33,7 +33,16 @@ const operations: readonly OperationDescriptor[] = [
       required: ["workspaceId", "documentId"],
       additionalProperties: false,
     },
-    appAccess: { sideEffects: "read-only" },
+    appAccess: {
+      sideEffects: "read-only",
+      approvalPreview: {
+        summary: "Read a document.",
+        fields: [
+          { label: "Workspace", inputPointer: "/workspaceId" },
+          { label: "Document ID", inputPointer: "/documentId" },
+        ],
+      },
+    },
   },
   {
     name: "documents.create",
@@ -293,6 +302,76 @@ describe("App connection broker", () => {
           { label: "Attendees", value: attendeeOpenIds.join(", ").slice(0, 499) + "…" },
         ]),
       });
+    } finally {
+      h.close();
+    }
+  });
+  it("shows target resource fields when Feishu read operations require per-call approval", async () => {
+    const h = harness({ operations: FEISHU_OPERATIONS });
+    try {
+      const { id: connectionId } = await connect(h, "feishu-bot");
+      const appId = "app-a";
+      const facade = h.broker.forApp(appId);
+      const cases = [
+        {
+          operation: "feishu.document.read",
+          input: { documentId: "doccn123" },
+          summary: "Read Feishu document",
+          expectedFields: [{ label: "Document ID", value: "doccn123" }],
+        },
+        {
+          operation: "feishu.im.messages.list",
+          input: { chatId: "oc_chat_1", startTime: "100", endTime: "200" },
+          summary: "List Feishu chat messages",
+          expectedFields: [
+            { label: "Chat ID", value: "oc_chat_1" },
+            { label: "Start", value: "100" },
+            { label: "End", value: "200" },
+          ],
+        },
+        {
+          operation: "feishu.sheets.cells.read",
+          input: { spreadsheetToken: "sht_1", sheetId: "sheet_a", range: "A1:C5" },
+          summary: "Read Feishu spreadsheet cells",
+          expectedFields: [
+            { label: "Spreadsheet token", value: "sht_1" },
+            { label: "Sheet ID", value: "sheet_a" },
+            { label: "Range", value: "A1:C5" },
+          ],
+        },
+        {
+          operation: "feishu.calendar.events.search",
+          input: { calendarId: "primary", query: "roadmap" },
+          summary: "Search Feishu calendar events",
+          expectedFields: [
+            { label: "Calendar", value: "primary" },
+            { label: "Query", value: "roadmap" },
+          ],
+        },
+      ] as const;
+
+      for (const [index, testCase] of cases.entries()) {
+        await grant(h, {
+          appId,
+          connectionId,
+          operation: testCase.operation,
+          approval: "required",
+        });
+        const result = await facade.invoke({
+          connectionId,
+          identity: "account",
+          operation: testCase.operation,
+          input: testCase.input,
+        });
+        expect(result.status).toBe("pending_approval");
+        expect(h.approvalRequests[index]).toMatchObject({
+          actionName: "core:app_connection_read_with_approval",
+          preview: {
+            summary: testCase.summary,
+            fields: expect.arrayContaining([...testCase.expectedFields]),
+          },
+        });
+      }
     } finally {
       h.close();
     }
@@ -1211,6 +1290,17 @@ describe("App connection broker", () => {
       expect(h.invocations).toEqual([]);
       expect(h.approvalRequests[0]).toMatchObject({
         actionName: "core:app_connection_read_with_approval",
+        preview: {
+          summary: "Read a document.",
+          fields: [
+            { label: "App", value: "app-a" },
+            { label: "Connection", value: "docs" },
+            { label: "Identity", value: "account" },
+            { label: "Operation", value: "documents.get" },
+            { label: "Workspace", value: "one" },
+            { label: "Document ID", value: "doc-1" },
+          ],
+        },
       });
 
       // Unapproved read action cannot bypass a pending read_with_approval invocation

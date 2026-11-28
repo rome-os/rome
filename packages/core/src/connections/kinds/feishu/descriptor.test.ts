@@ -194,6 +194,18 @@ describe("feishu descriptor shape", () => {
       label: "Content",
       inputPointer: "/content",
     });
+    for (const op of actor.operations ?? []) {
+      expect(op.appAccess?.approvalPreview?.summary).toBeTruthy();
+      const properties = Object.keys(
+        (op.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
+      ).filter((key) => key !== "pageSize" && key !== "pageToken" && key !== "sortOrder");
+      const pointers = new Set(
+        (op.appAccess?.approvalPreview?.fields ?? []).map((field) => field.inputPointer),
+      );
+      for (const key of properties) {
+        expect(pointers.has(`/${key}`)).toBe(true);
+      }
+    }
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 

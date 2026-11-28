@@ -100,6 +100,12 @@ export const documentOperations = [
         throw new ProviderOperationError("provider_response_too_large");
       return { documentId, content, format: "plain_text", complete: true };
     },
+    {
+      approvalPreview: {
+        summary: "Read Feishu document",
+        fields: [{ label: "Document ID", inputPointer: "/documentId" }],
+      },
+    },
   ),
   operation(
     "document.create",

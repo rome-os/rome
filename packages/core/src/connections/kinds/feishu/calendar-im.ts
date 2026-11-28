@@ -97,6 +97,17 @@ export const calendarOperations = [
       );
       return { calendarId: input.calendarId, ...page };
     },
+    {
+      approvalPreview: {
+        summary: "List Feishu calendar events",
+        fields: [
+          { label: "Calendar", inputPointer: "/calendarId" },
+          { label: "Start", inputPointer: "/startTime" },
+          { label: "End", inputPointer: "/endTime" },
+          { label: "Anchor", inputPointer: "/anchorTime" },
+        ],
+      },
+    },
   ),
   operation(
     "calendar.event.get",
@@ -113,6 +124,15 @@ export const calendarOperations = [
         location: event.location?.name ?? event.location?.address,
         url: event.app_link,
       };
+    },
+    {
+      approvalPreview: {
+        summary: "Read Feishu calendar event",
+        fields: [
+          { label: "Calendar", inputPointer: "/calendarId" },
+          { label: "Event ID", inputPointer: "/eventId" },
+        ],
+      },
     },
   ),
   operation(
@@ -144,6 +164,17 @@ export const calendarOperations = [
         hasMore: page.has_more ?? Boolean(page.page_token),
         pageToken: page.page_token,
       };
+    },
+    {
+      approvalPreview: {
+        summary: "Search Feishu calendar events",
+        fields: [
+          { label: "Calendar", inputPointer: "/calendarId" },
+          { label: "Query", inputPointer: "/query" },
+          { label: "Start", inputPointer: "/startTime" },
+          { label: "End", inputPointer: "/endTime" },
+        ],
+      },
     },
   ),
   operation(
@@ -275,5 +306,15 @@ export const messagesList = operation(
       pageOf(message),
     );
     return { chatId: input.chatId, ...page };
+  },
+  {
+    approvalPreview: {
+      summary: "List Feishu chat messages",
+      fields: [
+        { label: "Chat ID", inputPointer: "/chatId" },
+        { label: "Start", inputPointer: "/startTime" },
+        { label: "End", inputPointer: "/endTime" },
+      ],
+    },
   },
 );
