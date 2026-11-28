@@ -7,6 +7,7 @@ import { hashArtifact, packArtifact } from "./packaging/index.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema } from "./lockfile.js";
 import type { AppManager, InstallResult } from "./manager.js";
+import { isResolvedApp } from "./state.js";
 
 describe("shouldReinstallFirstPartyAppAtBoot", () => {
   let artifactDir: string;
@@ -238,6 +239,22 @@ describe("installFirstPartyAppsAtBoot", () => {
     expect((await readLockfileEntry("alpha"))?.state).toBe("installed");
   });
 
+  it("reports a broken app whose cached bundle still fails to resolve as failed", async () => {
+    const artifactDir = await packFirstParty("alpha", "0.1.0");
+    const hash = await hashArtifact(artifactDir);
+    await bootInstall();
+    // Corrupt the cached bundle that the reinstall's prepare() will reuse.
+    await writeFile(join(harness.installedRoot, "alpha", hash, "app.yaml"), "id: [", "utf-8");
+    await harness.catalog.refresh("alpha");
+    expect(harness.catalog.get("alpha")?.state).toBe("broken");
+
+    const result = await bootInstall();
+
+    expect(result.reinstalled).toEqual([]);
+    expect(result.failed.map((failure) => failure.appId)).toEqual(["alpha"]);
+    expect((await readLockfileEntry("alpha"))?.state).toBe("broken");
+  });
+
   it("fails loudly when no packed artifacts exist at all", async () => {
     await expect(bootInstall()).rejects.toThrow(/pnpm build:apps/);
   });
@@ -324,6 +341,59 @@ describe("installFirstPartyAppsAtBoot", () => {
       const entry = await readLockfileEntry("alpha");
       expect(entry?.state).toBe("failed");
       expect(entry?.lastError?.message).toContain("[ERR_PNPM_JSON_PARSE]");
+    });
+
+    /**
+     * Boot image A, then image B whose dependency install fails, leaving the
+     * entry `failed` with A's hash. Returns A's hash after re-packing A.
+     */
+    async function failUpgradeThenRollBack(opts: { disable?: boolean } = {}): Promise<string> {
+      const artifactDir = await packFirstParty("alpha", "0.1.0");
+      const hashA = await hashArtifact(artifactDir);
+      expect((await bootInstall()).installed).toEqual(["alpha"]);
+      if (opts.disable) await harness.appManager.setEnabled("alpha", false);
+
+      const upgradeDir = await packFirstParty("alpha", "0.2.0");
+      await writeFile(
+        join(upgradeDir, "package.json"),
+        JSON.stringify({ name: "alpha", private: true, dependencies: { react: "^19.1.0" } }),
+      );
+      expect((await bootInstall()).failed.map((failure) => failure.appId)).toEqual(["alpha"]);
+      const failedEntry = await readLockfileEntry("alpha");
+      expect(failedEntry?.state).toBe("failed");
+      expect(failedEntry?.installedHash).toBe(hashA);
+
+      const rolledBackDir = await packFirstParty("alpha", "0.1.0");
+      expect(await hashArtifact(rolledBackDir)).toBe(hashA);
+      return hashA;
+    }
+
+    it("recovers a failed app when boot rolls back to its last good artifact", async () => {
+      const hashA = await failUpgradeThenRollBack();
+
+      const result = await bootInstall();
+
+      expect(result.skipped).toEqual([]);
+      expect(result.reinstalled).toEqual(["alpha"]);
+      expect(result.failed).toEqual([]);
+      const entry = await readLockfileEntry("alpha");
+      expect(entry?.state).toBe("installed");
+      expect(entry?.installedHash).toBe(hashA);
+      expect(entry?.lastError).toBeNull();
+      expect(isResolvedApp(harness.catalog.get("alpha"))).toBe(true);
+
+      expect((await bootInstall()).skipped).toEqual(["alpha"]);
+    });
+
+    it("keeps a user-disabled app disabled when recovering it", async () => {
+      await failUpgradeThenRollBack({ disable: true });
+
+      const result = await bootInstall();
+
+      expect(result.reinstalled).toEqual(["alpha"]);
+      const entry = await readLockfileEntry("alpha");
+      expect(entry?.state).toBe("installed");
+      expect(entry?.enabled).toBe(false);
     });
   });
 });

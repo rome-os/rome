@@ -98,8 +98,9 @@ export interface FirstPartyBootResult {
   reinstalled: readonly string[];
   skipped: readonly string[];
   /**
-   * First-party apps whose install failed twice. Boot continues without them,
-   * and the lockfile records them as `failed`.
+   * First-party apps whose install failed twice (the lockfile records them as
+   * `failed`), or whose installed bundle does not resolve (`broken`). Boot
+   * continues without them.
    */
   failed: readonly FirstPartyBootFailure[];
   /** First-party apps removed because their packed artifact no longer exists. */
@@ -115,6 +116,8 @@ export interface FirstPartyBootResult {
  *     (the "update" path; see `shouldReinstallFirstPartyAppAtBoot`).
  *   - Entry not yet flagged `firstParty` → reinstall once so the flag is
  *     recorded durably (converges lockfiles written before the flag existed).
+ *   - Entry not `installed` (a failed or broken install that kept its last
+ *     good hash) → reinstall, so rolling back to that artifact recovers it.
  *   - Otherwise → no-op.
  *
  * A failed install is retried once after `retryDelayMs`, which absorbs a
@@ -165,7 +168,10 @@ export async function installFirstPartyAppsAtBoot(
         installedHash: installed.installedHash,
         artifactDir: artifactPath,
       });
-      if (!reinstall && installed.firstParty) {
+      // A failed or broken entry keeps the hash of its last good install, so a
+      // matching hash alone does not mean the app is loaded. Rolling back to
+      // that artifact must reinstall it, or the app stays unavailable.
+      if (!reinstall && installed.firstParty && installed.state === "installed") {
         return { appId, artifactPath, action: "skip" as const, from: null, to: null };
       }
       return {
@@ -174,6 +180,7 @@ export async function installFirstPartyAppsAtBoot(
         action: "reinstall" as const,
         from: installed.installedHash,
         to: artifactHash,
+        state: installed.state,
       };
     }),
   );
@@ -192,6 +199,7 @@ export async function installFirstPartyAppsAtBoot(
         appId: entry.appId,
         from: entry.from,
         to: entry.to,
+        state: entry.state,
       });
     }
     // The lockfile key is the manifest-derived id, so install() would key the
@@ -234,6 +242,23 @@ export async function installFirstPartyAppsAtBoot(
       };
       failed.push(failure);
       log.error("first-party app install failed at boot", { ...failure });
+      continue;
+    }
+    // The install can succeed while the catalog fails to resolve the bundle
+    // (a corrupt cached bundle). Report it as a failure, or a broken app would
+    // be reinstalled on every boot and logged as a success each time.
+    const view = appCatalog.get(entry.appId);
+    if (view?.state === "broken") {
+      const failure: FirstPartyBootFailure = {
+        appId: entry.appId,
+        error: view.lastError?.message ?? "bundle failed to resolve",
+        priorHash: view.installedHash,
+      };
+      failed.push(failure);
+      log.error("first-party app still broken after install at boot", {
+        ...failure,
+        priorState: entry.action === "reinstall" ? entry.state : null,
+      });
       continue;
     }
     (entry.action === "reinstall" ? reinstalled : installed).push(entry.appId);
