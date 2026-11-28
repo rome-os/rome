@@ -43,7 +43,7 @@ import {
 import type { FeishuDocumentRequest, FeishuRequest } from "./transport.js";
 import { CredentialRejected, Disconnected } from "../../errors.js";
 import { credentialsPaste } from "../../schemes.js";
-import type { SetupFn, SetupView } from "../../setup/types.js";
+import type { SetupFn, SetupForm, SetupFormFieldOption, SetupView } from "../../setup/types.js";
 import type { ChannelActivity } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../../types.js";
 import type {
@@ -197,25 +197,38 @@ export interface FeishuSetupDeps {
   }) => Promise<FeishuPendingMaterial>;
 }
 
-const FEISHU_RENEW_FORM = {
+// English fallback copy on id-bearing Feishu setup forms/views below is mirrored
+// in `packages/web/src/i18n/locales/{en,zh-CN}/settings.json` (checked by setup.test.ts).
+const FEISHU_DOMAIN_OPTIONS: SetupFormFieldOption[] = [
+  { value: "feishu", label: "Feishu (China · feishu.cn)" },
+  { value: "lark", label: "Lark (Global · larksuite.com)" },
+];
+
+const FEISHU_MODE_OPTIONS: SetupFormFieldOption[] = [
+  { value: "agent-ready", label: "Agent-ready (scan QR code)" },
+  { value: "manual", label: "Manual (App ID & App Secret)" },
+];
+
+const FEISHU_RENEW_FORM: SetupForm = {
+  id: "feishu.renew",
   instructions:
-    "Paste this app's App ID and App Secret again on the next step. " +
-    "Domain: feishu = open.feishu.cn (China), lark = open.larksuite.com (International).",
-  fields: [{ name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] }],
+    "Select your domain and paste this app's App ID and App Secret again on the next step.",
+  fields: [{ name: "domain", label: "Domain", secret: false, options: FEISHU_DOMAIN_OPTIONS }],
 };
 
-const FEISHU_MODE_FORM = {
+const FEISHU_MODE_FORM: SetupForm = {
+  id: "feishu.mode",
   instructions:
     "Choose how to connect: agent-ready scans a QR code to create Rome's app in your " +
-    "tenant automatically; manual pastes an existing custom app's credentials. " +
-    "Domain: feishu = open.feishu.cn (China), lark = open.larksuite.com (International).",
+    "tenant automatically; manual pastes an existing custom app's credentials.",
   fields: [
-    { name: "mode", label: "Setup method", secret: false, options: ["agent-ready", "manual"] },
-    { name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] },
+    { name: "mode", label: "Setup method", secret: false, options: FEISHU_MODE_OPTIONS },
+    { name: "domain", label: "Domain", secret: false, options: FEISHU_DOMAIN_OPTIONS },
   ],
 };
 
-const FEISHU_CREDENTIALS_FORM = {
+const FEISHU_CREDENTIALS_FORM: SetupForm = {
+  id: "feishu.credentials",
   instructions: "Paste your Feishu/Lark custom-app App ID and App Secret.",
   fields: [
     { name: "appId", label: "App ID", secret: false },
@@ -225,24 +238,30 @@ const FEISHU_CREDENTIALS_FORM = {
 
 function agentReadyPreparingView(): SetupView {
   return {
+    id: "feishu.preparing",
     title: "Creating the agent app",
-    body: ["Preparing the app-creation QR code…"],
+    body: [{ id: "preparing", text: "Preparing the app-creation QR code…" }],
     progress: true,
   };
 }
 
 function agentReadyQrView(qr: FeishuAgentReadyQr): SetupView {
   return {
+    id: "feishu.qr",
+    ...(qr.expiresAt ? { params: { expiresAt: qr.expiresAt } } : {}),
     title: "Scan to create the agent app",
     body: [
-      "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
-      ...(qr.expiresAt ? [`The QR code expires at ${qr.expiresAt}.`] : []),
+      {
+        id: "scan",
+        text: "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+      },
+      ...(qr.expiresAt ? [{ id: "expires", text: `The QR code expires at ${qr.expiresAt}.` }] : []),
     ],
     links: [
-      { label: "Open the app-creation page", url: qr.url },
+      { id: "openCreatePage", label: "Open the app-creation page", url: qr.url },
       // A data-url link renders as the QR image; the https link above keeps the
       // payload complete for any renderer that shows links as links.
-      ...(qr.qrDataUrl ? [{ label: "QR code", url: qr.qrDataUrl }] : []),
+      ...(qr.qrDataUrl ? [{ id: "qrCode", label: "QR code", url: qr.qrDataUrl }] : []),
     ],
     progress: true,
   };
@@ -317,7 +336,12 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       appType,
     };
     let botName: string | undefined;
-    interact.show({ title: "Finishing setup", body: ["Reading the bot's name…"], progress: true });
+    interact.show({
+      id: "feishu.finishing",
+      title: "Finishing setup",
+      body: [{ id: "finishing", text: "Reading the bot's name…" }],
+      progress: true,
+    });
     try {
       botName =
         (await ctx.step("bot-name", (signal) => {
@@ -343,9 +367,14 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       credential: { material, expiresAt: "never" },
       profile,
       summary: {
+        id: "feishu.connected",
+        params: { appId: pending.appId },
         title: "Feishu connected",
         body: [
-          `App ${pending.appId} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity.`,
+          {
+            id: "ready",
+            text: `App ${pending.appId} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity.`,
+          },
         ],
       },
     };
@@ -497,7 +526,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     fields: [
       { name: "appId", label: "App ID", secret: false },
       { name: "appSecret", label: "App secret", secret: true },
-      { name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] },
+      { name: "domain", label: "Domain", secret: false, options: FEISHU_DOMAIN_OPTIONS },
     ],
     // A transient connect mints the tenant-access-token; a bad appId/appSecret
     // rejects here so grant refuses invalid credentials.

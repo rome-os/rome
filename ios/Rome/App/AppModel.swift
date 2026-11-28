@@ -117,7 +117,7 @@ final class Workspace {
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
-    /// The archived topic chats, for the drawer's Archived button and its sheet.
+    /// The archived topic chats, for the drawer's Archived group.
     let archivedTopics: ArchivedTopicsStore
     /// Every share link of the signed-in person, for Settings' Shared links.
     let sharedLinks: SharedLinksStore
@@ -373,10 +373,9 @@ final class Workspace {
     @discardableResult
     func archiveTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
         let chat = topics.chat(chatId)
-        let lastActive = topics.lastActive[chatId]
         guard (try? await backend.archiveChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
-        archivedTopics.add(chat ?? ConciergeChat(id: chatId, name: "", main: false), lastActive: lastActive)
+        archivedTopics.add(chat ?? ConciergeChat(id: chatId, name: "", main: false))
         return true
     }
 

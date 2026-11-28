@@ -190,13 +190,11 @@ const ALLOWED: Readonly<Record<string, Allowed>> = {
       'case "visitor":',
       'actor?.kind === "guardian" &&',
       'actor.via === "loopback" &&',
-      'actorKind === "visitor" ||',
-      '(actorKind === "guardian" && ownerOf(session) !== GUARDIAN_OWNER);',
       'actor?.kind === "guardian" && !saidBy',
       'return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;',
       'return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");',
     ],
-    why: "logs who acted, labels an automated sender, labels whether an automated send was its owner's request, names whom a turn acts for and whose phone it pushes to or asks",
+    why: "logs who acted, labels an automated sender, names whom a turn acts for and whose phone it pushes to or asks",
   },
   "packages/core/src/routines/engine.ts": {
     lines: [

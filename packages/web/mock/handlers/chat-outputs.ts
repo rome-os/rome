@@ -16,6 +16,8 @@ export const outputProjectFolder = dir("projects/default", [
   file("projects/default/trip-plan.md", NOTES),
   file("projects/default/packing-list.txt", "Passport\nCharger\nRain jacket\n"),
   file("projects/default/空白笔记.txt", ""),
+  file("projects/default/day-two.md", "# Day two\n\n- Ferry at 9:40\n- Lunch on the island\n"),
+  file("projects/default/ferry-times.csv", "Leaves,Arrives\n09:40,10:25\n13:10,13:55\n"),
   file("projects/default/trip-budget.csv", "Item,Cost\nFlights,420\nHotel,380\nFood,160\n"),
   file(
     "projects/default/fetch-fares.py",
@@ -51,8 +53,8 @@ function output(
 }
 
 /**
- * The main chat lists files of several kinds, of its own and from a task
- * chat, so the tab offers a filter for each kind it holds; every other chat none.
+ * The main chat lists more than ten files of several kinds, of its own and
+ * from a task chat, so the tab shows its filters; every other chat none.
  */
 function outputsOf(chatId: string): ChatOutputDto[] {
   if (chatId !== CONCIERGE_CHAT_ID) return [];
@@ -97,6 +99,27 @@ function outputsOf(chatId: string): ChatOutputDto[] {
       link: "/api/assets/6b2d8e4f1a3c5e7b9d0f2a4c6e8b1d3f.jpg",
       contentUrl: `${DEMO_FILES}/hotel-photos.jpg`,
       at: new Date(Date.now() - 5 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-day-two", {
+      name: "day-two.md",
+      kind: "written",
+      mimeType: "text/markdown",
+      at: new Date(Date.now() - 6 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-ferry", {
+      name: "ferry-times.csv",
+      kind: "written",
+      mimeType: "text/csv",
+      at: new Date(Date.now() - 7 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-lake", {
+      name: "lake-view.png",
+      kind: "shown",
+      mimeType: "image/png",
+      path: "/api/assets/3c5e7a9b1d2f4a6c8e0b2d4f6a8c1e3b.png",
+      link: "/api/assets/3c5e7a9b1d2f4a6c8e0b2d4f6a8c1e3b.png",
+      contentUrl: `${DEMO_FILES}/beach-map.png`,
+      at: new Date(Date.now() - 8 * HOUR).toISOString(),
     }),
     output(chatId, "out-voice", {
       name: "voice-note.wav",

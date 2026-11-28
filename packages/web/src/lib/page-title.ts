@@ -97,8 +97,8 @@ function fileBrowserDetail(pathname: string): string | null {
  * and the auth screens keep the bare site name.
  *
  * The longest matching href wins, so a nested href beats its parent whatever
- * order the registry is written in. Matching is on segment boundaries, so /peopled
- * never resolves to /people.
+ * order the registry is written in. Matching is on segment boundaries, so /memoryd
+ * never resolves to /memory.
  */
 export function routeTitle(
   pathname: string,

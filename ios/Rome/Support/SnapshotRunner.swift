@@ -28,8 +28,6 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
     /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
     case connectSheet(String?)
-    /// The drawer's Archived sheet, in a stand-in frame, or closed.
-    case archivedSheet(Bool)
     /// An AI account's login sheet at its code step, in a stand-in frame; nil closes it.
     case aiLoginSheet(AIAccount?)
 }
@@ -271,10 +269,11 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.4))
             }
-            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05g2-drawer-older-folded", "05h-drawer-older-open"]) {
+            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05g2-drawer-older-folded", "05h-drawer-older-open", "05h-drawer-archived", "05i-drawer-archived-open"]) {
                 model.openDemo(.olderTopics)
                 try? await Task.sleep(for: .seconds(2))
                 model.workspace?.topics.setFolded(false)
+                model.workspace?.topics.setArchivedExpanded(false)
                 await capture("05f-drawer-older-collapsed", style: styleName, in: directory) {
                     model.workspace?.topics.setOlderExpanded(false)
                     model.debugCommand = .drawer(true)
@@ -282,16 +281,38 @@ enum SnapshotRunner {
                 await capture("05g-drawer-older-expanded", style: styleName, in: directory) {
                     model.workspace?.topics.setOlderExpanded(true)
                 }
-                // Topic chats folded: the Archived button stays in the header.
+                // Topic chats folded: Older and Archived fold away with them.
                 await capture("05g2-drawer-older-folded", style: styleName, in: directory) {
                     model.workspace?.topics.setFolded(true)
                 }
                 model.workspace?.topics.setFolded(false)
                 model.workspace?.topics.setOlderExpanded(false)
+                model.debugCommand = .drawer(false)
+                // An older chat opened while Older is collapsed: Older opens,
+                // and the chat keeps its place there, selected.
                 model.debugCommand = .section(.topic("topic-meals"))
                 try? await Task.sleep(for: .seconds(1))
                 await capture("05h-drawer-older-open", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
                 model.debugCommand = .drawer(false)
+                model.workspace?.topics.setOlderExpanded(false)
+                model.debugCommand = .section(.chat)
+                try? await Task.sleep(for: .seconds(0.6))
+                // Archived opened in place, under Older: the latest archived first.
+                await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) {
+                    model.workspace?.topics.setArchivedExpanded(true)
+                    model.debugCommand = .drawer(true)
+                }
+                model.debugCommand = .drawer(false)
+                model.workspace?.topics.setArchivedExpanded(false)
+                // An archived chat opened while Archived is collapsed, as from
+                // search: Archived opens, with the chat selected.
+                model.debugCommand = .section(.topic("topic-archived-car"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05i-drawer-archived-open", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.workspace?.topics.setArchivedExpanded(false)
+                model.debugCommand = .section(.chat)
+                try? await Task.sleep(for: .seconds(0.4))
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(1))
             }
@@ -314,26 +335,8 @@ enum SnapshotRunner {
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(2))
             }
-            // Archived topic chats: the drawer's header button, its
-            // sheet, and an archived chat, read only with its Restore banner.
-            let archivedShots = ["05h-drawer-archived", "05i-archived-sheet", "24b-topic-archived"]
-            if only.isEmpty || !only.isDisjoint(with: archivedShots), let workspace = model.workspace {
-                // Ten more archived.
-                let moved = workspace.topics.chats.suffix(10).map(\.id)
-                for id in moved { await workspace.archiveTopic(id) }
-                workspace.archivedTopics.refresh()
-                try? await Task.sleep(for: .seconds(0.6))
-                await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
-                // The demo's own archived chats only, so the sheet shows its
-                // groups rather than ten chats of today.
-                for id in moved { await workspace.restoreTopic(id) }
-                workspace.archivedTopics.refresh()
-                try? await Task.sleep(for: .seconds(0.6))
-                await capture("05i-archived-sheet", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .archivedSheet(true) }
-                model.debugCommand = .archivedSheet(false)
-                try? await Task.sleep(for: .seconds(0.3))
-                model.debugCommand = .drawer(false)
-                try? await Task.sleep(for: .seconds(0.4))
+            // An archived chat, read only with its Restore banner.
+            if only.isEmpty || only.contains("24b-topic-archived") {
                 await capture("24b-topic-archived", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-archived-car")) }
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.6))

@@ -39,18 +39,6 @@ export const memoryTree: MockFsNode[] = [
   ]),
   dir("memory/relationship", [
     file(
-      "memory/relationship/BONDS.md",
-      "# Relationship Bonds\n\n" +
-        "Tier definitions live in the seeded template; this copy carries the roster.\n\n" +
-        "## Inner Circle\n\n" +
-        "- [ray-oster](ray-oster.md) — climbing partner, ten years\n" +
-        "- [nadia-petrova](nadia-petrova.md) — sister-in-law\n\n" +
-        "## Acquaintance\n\n" +
-        "- [mira-chen](mira-chen.md) — neighbour, runs the building's group chat\n\n" +
-        "## Other\n\n" +
-        "<!-- Nobody yet. -->\n",
-    ),
-    file(
       "memory/relationship/GUARDIAN.md",
       "# Guardian Profile\n\n" +
         "**Name:** Mock Guardian\n\n" +
@@ -69,11 +57,10 @@ export const memoryTree: MockFsNode[] = [
         "|-----------------|----------------------------------------|\n" +
         "| **Name**        | Mira Chen                              |\n" +
         "| **Known Since** | 2025-11                                |\n" +
-        "| **Bond Level**  | Acquaintance                           |\n" +
         "| **Relation**    | Neighbour, two floors up               |\n\n" +
-        "## Channel Mappings\n\n" +
-        "| Channel  | ID / Handle    |\n" +
-        "|----------|----------------|\n" +
+        "## Accounts\n\n" +
+        "| Platform | Account         |\n" +
+        "|----------|-----------------|\n" +
         "| WhatsApp | +1 415 555 0188 |\n\n" +
         "## Notes\n\n" +
         "Runs the building's group chat. Messages in bursts and expects a same-day reply.\n\n" +
@@ -89,9 +76,8 @@ export const memoryTree: MockFsNode[] = [
         "|-----------------|------------------------------|\n" +
         "| **Name**        | Nadia Petrova                |\n" +
         "| **Known Since** | 2019                         |\n" +
-        "| **Bond Level**  | Inner Circle                 |\n" +
         "| **Relation**    | Sister-in-law                |\n\n" +
-        "## Channel Mappings\n\n" +
+        "## Accounts\n\n" +
         "None. Everything with Nadia happens off Rome, so nothing here is\n" +
         "reachable — the profile is the only record.\n\n" +
         "## Important Dates\n\n" +
@@ -107,10 +93,9 @@ export const memoryTree: MockFsNode[] = [
         "|-----------------|--------------------------------|\n" +
         "| **Name**        | Ray Oster                      |\n" +
         "| **Known Since** | 2016                           |\n" +
-        "| **Bond Level**  | Inner Circle                   |\n" +
         "| **Relation**    | Climbing partner, ten years    |\n\n" +
-        "## Channel Mappings\n\n" +
-        "| Channel  | ID / Handle     |\n" +
+        "## Accounts\n\n" +
+        "| Platform | Account         |\n" +
         "|----------|-----------------|\n" +
         "| Telegram | 418820113       |\n" +
         "| WhatsApp | +1 415 555 0142 |\n\n" +

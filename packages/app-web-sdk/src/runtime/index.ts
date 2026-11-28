@@ -633,7 +633,9 @@ export type NavigateRomePayload =
   | { readonly path: "apps"; readonly appId: string; readonly subPath?: string }
   | { readonly path: "projects" }
   | { readonly path: "routines" }
-  | { readonly path: "desktop" };
+  | { readonly path: "desktop" }
+  /** @deprecated People was removed, so this opens the home page; nothing replaces it. */
+  | { readonly path: "people" };
 
 /**
  * Send the host to a Rome-owned route. Implemented as a CustomEvent on the
@@ -710,6 +712,8 @@ function resolveHostNavigatePath(payload: NavigateRomePayload): string {
       return "/routines";
     case "desktop":
       return "/desktop";
+    case "people":
+      return "/";
     default: {
       // Exhaustiveness check — adding a new variant above without a case
       // here is a TypeScript error at this assignment, not a runtime

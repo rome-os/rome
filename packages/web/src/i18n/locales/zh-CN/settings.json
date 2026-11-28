@@ -306,6 +306,96 @@
     "sections": {
       "connected": "已连接 · {{count}}",
       "add": "添加连接"
+    },
+    "setup": {
+      "actions": {
+        "submit": "继续",
+        "cancel": "取消",
+        "retry": "重试",
+        "continue": "继续",
+        "connected": "已连接",
+        "failed": "出错了",
+        "cancelled": "已取消"
+      },
+      "forms": {
+        "feishu": {
+          "mode": {
+            "instructions": "选择连接方式：自动创建会通过扫码在你的飞书 / Lark 企业内自动创建 Rome 应用；手动配置则填写已有自建应用的凭证。",
+            "fields": {
+              "mode": {
+                "label": "连接方式",
+                "options": {
+                  "agent-ready": "自动创建（扫码创建应用）",
+                  "manual": "手动配置（填写 App ID 和 App Secret）"
+                }
+              },
+              "domain": {
+                "label": "服务区域",
+                "options": {
+                  "feishu": "飞书（中国大陆 · feishu.cn）",
+                  "lark": "Lark（国际版 · larksuite.com）"
+                }
+              }
+            }
+          },
+          "renew": {
+            "instructions": "选择服务区域，并在下一步重新粘贴该应用的 App ID 和 App Secret。",
+            "fields": {
+              "domain": {
+                "label": "服务区域",
+                "options": {
+                  "feishu": "飞书（中国大陆 · feishu.cn）",
+                  "lark": "Lark（国际版 · larksuite.com）"
+                }
+              }
+            }
+          },
+          "credentials": {
+            "instructions": "粘贴你的飞书或 Lark 自建应用的 App ID 和 App Secret。",
+            "fields": {
+              "appId": {
+                "label": "App ID"
+              },
+              "appSecret": {
+                "label": "App Secret"
+              }
+            }
+          }
+        }
+      },
+      "views": {
+        "feishu": {
+          "preparing": {
+            "title": "正在创建应用",
+            "body": {
+              "preparing": "正在生成应用创建二维码…"
+            }
+          },
+          "qr": {
+            "title": "扫码创建应用",
+            "body": {
+              "scan": "请使用飞书或 Lark 手机客户端扫描此二维码，在你的企业中创建 Rome 应用。",
+              "expires": "二维码将于 {{expiresAt}} 过期。"
+            },
+            "links": {
+              "openCreatePage": "打开应用创建页面",
+              "qrCode": "二维码"
+            }
+          },
+          "finishing": {
+            "title": "正在完成配置",
+            "body": {
+              "finishing": "正在读取机器人名称…"
+            }
+          },
+          "connected": {
+            "title": "飞书已连接",
+            "body": {
+              "ready": "应用 {{appId}} 已就绪。请向机器人发送一条私聊消息，然后在「设置 → 连接」或「动态」中批准你的账号。"
+            }
+          }
+        }
+      }
     }
   },
   "appKeys": {
@@ -1081,8 +1171,11 @@
       },
       "desktopHelp": "使用同一个 Rome Cloud 账户登录 Rome 应用。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
       "desktopDownload": "下载 Rome",
-      "comingSoon": "即将推出",
-      "containerHelp": "使用 Docker Compose 在容器中运行 Rome Node。",
+      "containerHelp": "使用下方 Docker Compose 配置运行 Rome Node 容器，然后打开内置 Web UI 并用同一个 Rome Cloud 账户完成授权。初始密码与局域网访问说明请查看部署文档。",
+      "copyCompose": "复制 Compose",
+      "copiedCompose": "已复制",
+      "copyComposeRefused": "无法复制，请直接选中配置",
+      "containerInstructions": "Docker 部署说明",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

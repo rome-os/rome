@@ -139,7 +139,6 @@ const STATUS_STYLE: Record<string, StatusStyle> = {
 const FALLBACK_STYLE: StatusStyle = TONE_STYLE.neutral;
 
 const TYPE_TINTS: Record<string, string> = {
-  person_mapping: "text-brand",
   outgoing_message: "text-info-fg",
   workflow_creation: "text-warning-fg",
   skill_creation: "text-success-fg",

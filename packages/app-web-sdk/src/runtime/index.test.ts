@@ -187,6 +187,7 @@ describe("navigateRome", () => {
     ["routines", "/routines"],
     ["desktop", "/desktop"],
     ["apps", "/apps"],
+    ["people", "/"],
   ] as const)("resolves the %s route to %s", (path, expected) => {
     const { dispatchEvent } = stubNavHost();
     navigateRome({ path });

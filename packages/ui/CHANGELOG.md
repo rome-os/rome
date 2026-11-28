@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.14](https://github.com/rome-os/rome/compare/ui-v0.3.13...ui-v0.3.14) (2026-11-27)
+
+
+### Features
+
+* **ui:** add compact sizing for inline card buttons ([#2398](https://github.com/rome-os/rome/issues/2398)) ([c55e597](https://github.com/rome-os/rome/commit/c55e597069aac10962f471e2b0161a07dcd8f371))
+
+
+### Bug Fixes
+
+* **briefing:** use the shared Select for delivery and scout intervals ([#2393](https://github.com/rome-os/rome/issues/2393)) ([0fc4804](https://github.com/rome-os/rome/commit/0fc4804fb14e7b359833bc42327d673528d8536c))
+* **ui:** put chat action icons and agent names on the bubble edge ([#2526](https://github.com/rome-os/rome/issues/2526)) ([1648861](https://github.com/rome-os/rome/commit/1648861a8a13ecae6060591f5fab7a0cc359fa40))
+
 ## [0.3.13](https://github.com/rome-os/rome/compare/ui-v0.3.12...ui-v0.3.13) (2026-11-19)
 
 

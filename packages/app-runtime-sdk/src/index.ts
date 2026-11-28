@@ -4,11 +4,13 @@ import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
 import type { ChatReads, MessageRef, Place } from "./chats.js";
 import type { WidgetUi } from "./widget-ui.js";
+import type { GuardianProfileRepository, SaidSender } from "./deprecated-people.js";
 
 export { z };
 export type { JSONSchema };
 export * from "./chat-settings.js";
 export * from "./widget-ui.js";
+export * from "./deprecated-people.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
@@ -1262,6 +1264,8 @@ export interface ThreadContext {
     platform: string | null;
     path: string;
   };
+  /** @deprecated People was removed, so the host leaves this unset; nothing replaces it. */
+  senderBondLevel?: string;
 }
 
 export interface RunParams {
@@ -2009,7 +2013,11 @@ export function isStopCommand(text: string): boolean {
   return text.trim().toLowerCase() === "/stop";
 }
 
-export type ChatStopStatus = "stop_requested" | "idle";
+export type ChatStopStatus =
+  | "stop_requested"
+  | "idle"
+  /** @deprecated People was removed, so the host never answers this; anyone in the chat may stop a response. */
+  | "forbidden";
 
 export interface ChatStopResult {
   status: ChatStopStatus;
@@ -2022,11 +2030,17 @@ export function chatStopReceipt(status: ChatStopStatus): string {
       return "Stopped.";
     case "idle":
       return "There is no active response to stop.";
+    case "forbidden":
+      return "You can only stop a response that you started.";
   }
 }
 
 export interface ChatStopInput {
   ref: ChatRef;
+  /** @deprecated People was removed, so the host ignores this; pass `ref` alone. */
+  service?: string;
+  /** @deprecated People was removed, so the host ignores this; pass `ref` alone. */
+  senderId?: string;
 }
 
 /** Stops the active agent turn for a provider conversation. */
@@ -2236,6 +2250,8 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
+  /** @deprecated People was removed, so the host leaves this unset; nothing replaces it. */
+  readonly sender?: SaidSender;
 }
 
 /**
@@ -2528,6 +2544,8 @@ export interface AppRuntimeRepositories {
   chats?: ChatRepository;
   /** @deprecated Use `chats`, which is the same repository. */
   conversations?: ChatRepository;
+  /** @deprecated See {@link GuardianProfileRepository}. */
+  guardianProfile?: GuardianProfileRepository;
 }
 
 export interface AppSettingsRepository {
@@ -3018,7 +3036,12 @@ export function upgradeWebSocket(
  * resolve, so the host rejects it at write time. Describe the subject in
  * `payload` and `description` instead.
  */
-export const APPROVAL_TYPES = ["action_execution", "outgoing_message"] as const;
+export const APPROVAL_TYPES = [
+  "action_execution",
+  "outgoing_message",
+  // Deprecated: People was removed, so the host stores this type and nothing resolves it.
+  "person_mapping",
+] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 export const APPROVAL_STATUSES = ["pending", "approved", "rejected", "auto_approved"] as const;

@@ -218,6 +218,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
             getTurnReportedTask: turn.reportedTask,
+            getTurnActor: () => turn.actor() as SessionActor | undefined,
             captureTaskInput: () => {
               if (turn.live?.() === false) throw new Error("Task input source is not live");
               const thread = turn.threadContext();

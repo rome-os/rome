@@ -1,3 +1,4 @@
+import type { SessionActor } from "../access/session-actor.js";
 import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import type { ThreadContext } from "./types.js";
@@ -22,6 +23,8 @@ export interface SessionToolContext {
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   getTurnReportedTask(): string | undefined;
+  /** Who the running turn acts for, or undefined for a turn no person started. */
+  getTurnActor?(): SessionActor | undefined;
   /** Capture at tool-handler entry, before async setup. The sender refuses a changed source. */
   captureTaskInput?(): TaskInputSender;
 }

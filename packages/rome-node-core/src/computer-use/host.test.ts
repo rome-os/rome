@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -11,7 +11,7 @@ import type { OutboundEnvelope } from "../protocol.js";
 import type { ComputerUseBridge } from "./bridge.js";
 import { discoverHelper } from "./discovery.js";
 import * as discovery from "./discovery.js" with { rstest: "importActual" };
-import { ComputerUseHost } from "./host.js";
+import { ComputerUseHost, type EnsureComputerUseHelper } from "./host.js";
 import { ComputerUseError, PNG_LIMIT, type Results } from "./protocol.js";
 
 const mock = rs.hoisted(() => ({ launch: rs.fn(), discover: rs.fn() }));
@@ -168,6 +168,7 @@ it("discovers paths without signature verification and stops at an invalid expli
     applications: [join(root, "preferred"), root],
     envPath: app,
     bundledAppPath: preferred,
+    stagedAppPath: null,
   };
   await expect(discovery.discoverHelper({ ...env, platform: "linux" })).rejects.toMatchObject({
     code: "computer_use_unsupported_platform",
@@ -184,10 +185,193 @@ it("discovers paths without signature verification and stops at an invalid expli
   await expect(discovery.discoverHelper({ ...env, envPath: undefined })).resolves.toBe(preferred);
 });
 
+it("prefers the override, caller, platform package, staged helper, then Applications", async () => {
+  const home = await mkdtemp(join(tmpdir(), "rome-cu-discovery-"));
+  cleanups.push(() => rm(home, { recursive: true, force: true }));
+  const app = "Rome Computer Use.app";
+  const stagedAppPath = discovery.stagedHelperPath(home);
+  expect(stagedAppPath).toBe(join(home, ".rome-computer-use", app));
+  const paths = ["env", "bundled", "platform", "Applications"].map((dir) => join(home, dir, app));
+  const [envPath, bundledAppPath, platformPath, application] = paths;
+  for (const path of [...paths, stagedAppPath]) await mkdir(path, { recursive: true });
+  const stagedBinary = join(stagedAppPath, "Contents", "MacOS", "RomeComputerUse");
+  await mkdir(join(stagedAppPath, "Contents", "MacOS"), { recursive: true });
+  await writeFile(stagedBinary, "binary");
+  await chmod(stagedBinary, 0o755);
+  await writeFile(join(stagedAppPath, "Contents", "Info.plist"), "plist");
+  const options = {
+    platform: "darwin" as const,
+    stagedAppPath,
+    platformApp: () => platformPath,
+    applications: [join(home, "Applications")],
+  };
+  await expect(discovery.discoverHelper({ ...options, envPath, bundledAppPath })).resolves.toBe(
+    envPath,
+  );
+  await expect(discovery.discoverHelper({ ...options, bundledAppPath })).resolves.toBe(
+    bundledAppPath,
+  );
+  await expect(discovery.discoverHelper(options)).resolves.toBe(platformPath);
+  await rm(platformPath, { recursive: true });
+  await expect(discovery.discoverHelper(options)).resolves.toBe(stagedAppPath);
+  await expect(discovery.discoverHelper({ ...options, stagedAppPath: null })).resolves.toBe(
+    application,
+  );
+  await rm(stagedBinary);
+  await expect(discovery.discoverHelper(options)).resolves.toBe(application);
+  await rm(stagedAppPath, { recursive: true });
+  await expect(discovery.discoverHelper(options)).resolves.toBe(application);
+  const pinned = { ...options, bundledAppPath: stagedAppPath, strictBundledAppPath: true };
+  await expect(discovery.discoverHelper(pinned)).rejects.toMatchObject({
+    code: "computer_use_helper_missing",
+  });
+  await symlink(application, stagedAppPath, "junction");
+  await expect(discovery.discoverHelper(pinned)).rejects.toMatchObject({
+    code: "computer_use_helper_missing",
+  });
+  await expect(discovery.discoverHelper(options)).resolves.toBe(application);
+  await rm(stagedAppPath);
+  await mkdir(stagedAppPath);
+  await expect(discovery.discoverHelper(pinned)).rejects.toMatchObject({
+    code: "computer_use_helper_missing",
+  });
+});
+
 it("passes the host's bundled app to discovery", async () => {
   const bundledAppPath = "/resources/native/Rome Computer Use.app";
   await executor(noAudit, bundledAppPath).json("system.info");
   expect(mock.discover).toHaveBeenCalledWith({ bundledAppPath });
+});
+
+it.each(["probe", "launch"])("repairs a deleted helper once before a %s", async (operation) => {
+  const root = await mkdtemp(join(tmpdir(), "rome-cu-repair-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const bundledAppPath = discovery.stagedHelperPath(root);
+  await mkdir(bundledAppPath, { recursive: true });
+  const discover = rs.fn(async () => {
+    if (!(await stat(bundledAppPath).catch(() => undefined))?.isDirectory())
+      throw new ComputerUseError("computer_use_helper_missing");
+    return bundledAppPath;
+  });
+  const ensureHelper = rs.fn(async () => {
+    await mkdir(bundledAppPath, { recursive: true });
+    return true;
+  });
+  const probePermissions = rs.fn(async () => true);
+  mock.launch.mockResolvedValue(fakeHelper());
+  const host = new ComputerUseHost({
+    bundledAppPath,
+    strictBundledAppPath: true,
+    discover,
+    ensureHelper,
+    probePermissions,
+  });
+  cleanups.push(() => host.disconnect());
+  expect((await host.info(peer)).capability.state).toBe("on");
+  expect(ensureHelper).toHaveBeenCalledTimes(1);
+  ensureHelper.mockImplementationOnce(async () => {
+    // The checked helper disappears before discovery opens it.
+    await rm(bundledAppPath, { recursive: true });
+    return true;
+  });
+  if (operation === "probe") {
+    const results = await Promise.all([host.info(peer), host.info(other)]);
+    expect(results.map((info) => info.capability.state)).toEqual(["on", "on"]);
+    expect(probePermissions).toHaveBeenCalledTimes(2);
+  } else {
+    const request = host.prepare("computer.windows", peer, {})!;
+    expect((await request.run()).response.ok).toBe(true);
+    request.release();
+    expect(mock.launch).toHaveBeenCalledWith(expect.objectContaining({ appPath: bundledAppPath }));
+  }
+  expect(ensureHelper).toHaveBeenCalledTimes(3);
+  expect(ensureHelper).toHaveBeenLastCalledWith({ force: true });
+  expect(discover).toHaveBeenCalledTimes(3);
+  expect(discover).toHaveBeenLastCalledWith({ bundledAppPath, strictBundledAppPath: true });
+});
+
+it("forces a repair on the same request when discovery rejects a damaged signed resource", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rome-cu-signature-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const app = discovery.stagedHelperPath(root);
+  const contents = join(app, "Contents");
+  const resource = join(contents, "_CodeSignature", "CodeResources");
+  await mkdir(join(contents, "_CodeSignature"), { recursive: true });
+  await mkdir(join(contents, "MacOS"));
+  await writeFile(join(contents, "MacOS", "RomeComputerUse"), "binary");
+  await writeFile(join(contents, "Info.plist"), "plist");
+  await writeFile(resource, "signed");
+  const ensureHelper = rs.fn<EnsureComputerUseHelper>(async (options) => {
+    if (options?.force) await writeFile(resource, "signed");
+    return true;
+  });
+  const probePermissions = rs.fn(async () => true);
+  const host = new ComputerUseHost({
+    ensureHelper,
+    discover: async () => {
+      if ((await readFile(resource, "utf8")) !== "signed")
+        throw new ComputerUseError("computer_use_helper_missing");
+      return app;
+    },
+    probePermissions,
+  });
+  expect((await host.info(peer)).capability.state).toBe("on");
+  ensureHelper.mockClear();
+  await writeFile(resource, "damaged");
+  expect((await host.info(peer)).capability.state).toBe("on");
+  expect(ensureHelper.mock.calls).toEqual([[], [{ force: true }]]);
+  expect(probePermissions).toHaveBeenCalledTimes(2);
+  expect(await readFile(resource, "utf8")).toBe("signed");
+});
+
+it.each([
+  "computer_use_helper_missing",
+  "invalid_helper_bundle",
+] as const)("bounds repair attempts after %s", async (code) => {
+  const discover = rs.fn().mockRejectedValue(new ComputerUseError(code));
+  const ensureHelper = rs.fn(async () => true);
+  const host = new ComputerUseHost({ discover, ensureHelper });
+  expect((await host.info(peer)).capability.state).toBe("off");
+  expect(ensureHelper).toHaveBeenCalledTimes(code === "computer_use_helper_missing" ? 2 : 1);
+  expect(discover).toHaveBeenCalledTimes(code === "computer_use_helper_missing" ? 2 : 1);
+});
+
+it("refuses an unready helper even on a live bridge and probes again after recovery", async () => {
+  const ensureHelper = rs.fn(async () => true);
+  const probePermissions = rs.fn(async () => true);
+  const bridge = fakeHelper();
+  mock.launch.mockResolvedValue(bridge);
+  const host = new ComputerUseHost({ ensureHelper, probePermissions });
+  cleanups.push(() => host.disconnect());
+  const windows = async () => {
+    const request = host.prepare("computer.windows", peer, {})!;
+    try {
+      return (await request.run()).response;
+    } finally {
+      request.release();
+    }
+  };
+  expect((await windows()).ok).toBe(true);
+  expect((await host.info(peer)).capability.state).toBe("on");
+  expect(probePermissions).toHaveBeenCalledTimes(1);
+  ensureHelper.mockResolvedValue(false);
+  ensureHelper.mockClear();
+  mock.discover.mockClear();
+  const [info, response] = await Promise.all([host.info(peer), windows()]);
+  expect(info.capability.state).toBe("off");
+  expect(response).toMatchObject(error("computer_use_helper_missing"));
+  expect(ensureHelper).toHaveBeenCalledTimes(1);
+  expect(mock.discover).not.toHaveBeenCalled();
+  expect(bridge.windows).toHaveBeenCalledTimes(1);
+  const cold = host.prepare("computer.windows", other, {})!;
+  expect((await cold.run()).response).toMatchObject(error("computer_use_helper_missing"));
+  cold.release();
+  expect(mock.launch).toHaveBeenCalledTimes(1);
+  ensureHelper.mockResolvedValue(true);
+  expect((await host.info(peer)).capability.state).toBe("on");
+  expect(probePermissions).toHaveBeenCalledTimes(2);
+  expect((await windows()).ok).toBe(true);
+  expect(bridge.windows).toHaveBeenCalledTimes(2);
 });
 
 it.each([

@@ -96,35 +96,42 @@ lives in `/var/lib/rome-node` (`ROME_NODE_CONFIG_DIR`), so mounting one Docker
 volume keeps the device credential, Web UI preferences, and the
 [device audit log](#device-audit-log) across container replacements.
 
+**Settings → Devices** shows the same Compose configuration and links to this section from its empty-state **Rome Node container** card and from **Link device → Rome Node container**.
+
 ```yaml
 services:
   rome-node:
     image: ghcr.io/rome-os/rome-node:latest
+    # container_name: rome-node
+    restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
       - "127.0.0.1:4310:4310"
-    # Optional: set a custom password for remote access (you can also set one inside the Web UI).
+      # For LAN or NAS access, replace the line above and set ROME_NODE_UI_PASSWORD:
+      # - "<LAN-IP>:4310:4310"
+    # Optional environment variables:
     # environment:
     #   ROME_NODE_UI_PASSWORD: "your-custom-password"
+    #   ROME_NODE_NAME: "My Container"
+    #   TZ: "UTC"
     volumes:
       - rome-node:/var/lib/rome-node
+      # Optional: mount a host directory into the container.
+      # - ./workspace:/home/node/workspace
 volumes:
-  rome-node:
+  rome-node: {}
 ```
 
-1. Start the container with `docker compose up -d` (or pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>`).
-2. Open `http://127.0.0.1:4310` in a browser. Because the container listens on
-   `0.0.0.0`, if you did not set `ROME_NODE_UI_PASSWORD`, run
-   `docker compose logs rome-node` to copy the one-time setup token and choose a
-   custom password on the initial setup screen (persisted as an `scrypt` hash in
-   `/var/lib/rome-node/web-auth.json`). When running `rome-node web` directly on
-   a loopback bind (`127.0.0.1`), local loopback access is passwordless until
-   you set a password. Always set `ROME_NODE_UI_PASSWORD` (or configure a custom
-   password first) before placing any reverse proxy or tunnel in front of the
-   Web UI.
-3. Click **Authorize device**, open the Rome Cloud verification link, confirm
-   the user code, and approve the container with your Rome Cloud account.
+1. Start the container with `docker compose up -d` or a Docker Compose UI (pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>` if you want fixed updates).
+2. Open `http://127.0.0.1:4310` on that Docker host. On first run, if `ROME_NODE_UI_PASSWORD` is unset, set a password in the browser within 10 minutes of startup. The Web UI saves the password as an `scrypt` hash in `/var/lib/rome-node/web-auth.json`. If the setup window expires, restart the container or `rome-node web` process to reopen it, or set `ROME_NODE_UI_PASSWORD` and restart.
+3. Click **Authorize device**, open the Rome Cloud verification link, confirm the user code, and approve the container with the same Rome Cloud account.
+
+Before making the Web UI available on a trusted LAN, set `ROME_NODE_UI_PASSWORD` in Compose or finish first-run browser setup with access limited to the Docker host. Then replace `127.0.0.1:4310:4310` with `<LAN-IP>:4310:4310` and open `http://<LAN-IP>:4310` from another machine. When running `rome-node web` directly on a loopback bind (`127.0.0.1`), local loopback access stays passwordless until a password is set.
+
+First-run browser setup accepts `localhost`, names ending in `.localhost`, and IP addresses by default. To block DNS rebinding, the Web UI rejects other hostnames during setup unless you list them in `ROME_NODE_UI_SETUP_HOSTS`. For a reverse proxy with custom domains, set this variable to a comma-separated list such as `rome.example.com,rome.lan` before starting Rome Node. Include any custom hostnames the proxy forwards in `X-Forwarded-Host`. Once you set a password, the Web UI accepts reverse-proxy domains without this list.
+
+Set `ROME_NODE_UI_PASSWORD` before starting an unattended or internet-exposed deployment. Anyone who can reach the Web UI through an allowed host during the 10-minute setup window can set the first password.
 
 After approval, the container connects to the account Gateway and appears on
 **Settings → Devices** and in `rome-node device`. From the Web UI you can:
@@ -157,8 +164,8 @@ If **Allow remote execution** (`executionEnabled`) was turned off in the Web UI
 (`web-config.json`), `rome-node connect` honors that setting on the shared
 volume and connects in limited mode (`computer_use_off`).
 
-To take this computer off your account, choose **Remove** on its device card. If you added
-a restart policy, stop the container with `docker compose down`.
+To take this computer off your account, choose **Remove** on its device card, then stop
+the container with `docker compose down`.
 
 ### Build the image
 
@@ -1057,11 +1064,15 @@ macOS arm64, npm installs the helper through `@rome-os/node-core-darwin-arm64`,
 an optional dependency of `@rome-os/node-core`. The host never downloads the
 helper at runtime.
 
-On macOS, the host checks `ROME_NODE_COMPUTER_USE_HELPER` first when set. A
-missing override returns `computer_use_helper_missing`. Otherwise, the host
-checks the Desktop resource, the optional platform package, `/Applications`,
-and `~/Applications`, in that order. A host running under Rosetta can use a
-helper installed in either Applications directory.
+Packaged Rome Desktop uses only `~/.rome-computer-use/Rome Computer Use.app`.
+If the copy is missing, Desktop stages it again from its signed template.
+
+On macOS, the CLI and unpackaged Desktop check `ROME_NODE_COMPUTER_USE_HELPER`
+first when set. A missing override returns `computer_use_helper_missing`.
+Otherwise, they check the Desktop resource (if supplied), then the optional
+platform package, `~/.rome-computer-use/Rome Computer Use.app`, `/Applications`,
+and `~/Applications`. A host running under Rosetta can use a helper installed in
+either Applications directory.
 
 The host verifies the signature at launch before asking for local session
 approval. Set up Accessibility and Screen Recording on the Mac that runs the

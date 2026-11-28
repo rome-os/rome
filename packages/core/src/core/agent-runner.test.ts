@@ -7628,7 +7628,7 @@ describe("AgentRunner", () => {
       });
       // Who the sender is. The account becomes a person's while the turn
       // waits behind another.
-      let who = "not linked";
+      let who = "not a member";
       const turnLinks: PromptFacts = {
         unseen: async () => [],
         read: async (ids) =>
@@ -7676,11 +7676,11 @@ describe("AgentRunner", () => {
       const first = run("first");
       await rs.waitFor(() => expect(prompts).toHaveLength(1));
       const second = run("hi", "p-42");
-      who = "Ana Lopez, inner circle";
+      who = "Ana Lopez, member";
       release();
       await Promise.all([first, second]);
 
-      expect(prompts[1]).toContain('<current_message from="Ana" who="Ana Lopez, inner circle">');
+      expect(prompts[1]).toContain('<current_message from="Ana" who="Ana Lopez, member">');
     });
   });
 

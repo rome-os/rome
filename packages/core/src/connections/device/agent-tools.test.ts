@@ -101,6 +101,17 @@ describe("the Devices page's tools", () => {
   afterEach(() => testDb.close());
 
   describe("reading the devices", () => {
+    it("explains which capabilities the device list covers", () => {
+      const { description } = readDevices.action(deps).config;
+
+      expect(description).toContain(
+        "capabilities only covers device connections reported by the Rome app, not direct computer access exposed through rome-node",
+      );
+      expect(description).toContain(
+        "an empty capabilities list on an online computer does not mean it has no rome-node capabilities",
+      );
+    });
+
     it("lists each device the page shows, whether it is online, and what it lets Rome reach", async () => {
       const result = await callTool(readDevices, deps, {});
 

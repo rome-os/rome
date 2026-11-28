@@ -20,10 +20,12 @@
  *     fallback names, and a Concierge that cannot start never fails the sign-in.
  *     Creating the seat also starts the email auto-connect; signing in to an
  *     existing seat does not.
- *   - bound instance: a session is issued for the verified account, and that
- *     account is stamped as the binding (repairing a null/stale recorded owner).
- *     Ownership is enforced server-side at /authorize, so the verified `sub` is the
- *     owner — there is no client-side cross-account reconciliation.
+ *   - bound instance: a session is issued for the seat's account. A seat with no
+ *     recorded account is linked only while the guardian is signed in; a bare
+ *     Rome Cloud sign-in, browser or native, never links it.
+ *   - a seat bound to another account refuses the verified account, browser and
+ *     native alike: no session, the seat keeps its account, and a vanilla box
+ *     does not persist the instance token the token leg minted.
  *   - id_token that fails verification (bad signature, wrong issuer, nonce
  *     mismatch): fail closed, no cookie.
  *   - token exchange failure, `iss` mismatch, and a state echo that matches no
@@ -54,10 +56,17 @@ rs.mock("../../profile-memory.js", () => ({
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../access/auth.js";
+import {
+  COOKIE_NAME,
+  createGuardianSession,
+  JWT_SECRET,
+  VISITOR_COOKIE_NAME,
+  verifySession,
+} from "../../access/auth.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
+  isInstanceLinked,
   setInstanceTokenInMemory,
 } from "../../instance/instance-identity.js";
 import type { ConciergeService } from "../../concierge/service.js";
@@ -74,7 +83,12 @@ const ISSUER = "http://localhost:3100";
 // Rome Cloud always appends `iss` to the callback (RFC 9207); the callback now
 // requires it, so the happy-path requests carry it.
 const ISS = encodeURIComponent(ISSUER);
-const ENV_KEYS = ["PANTHEON_BASE_ORIGIN"] as const;
+const ENV_KEYS = [
+  "PANTHEON_BASE_ORIGIN",
+  "PANTHEON_SLUG",
+  "PANTHEON_DOMAIN",
+  "PANTHEON_INSTANCE_ORIGIN",
+] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -87,7 +101,18 @@ beforeEach(() => {
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
+  delete process.env.PANTHEON_SLUG;
+  delete process.env.PANTHEON_DOMAIN;
+  delete process.env.PANTHEON_INSTANCE_ORIGIN;
 });
+
+// A box Rome Cloud hosts at `https://<slug>.<PANTHEON_DOMAIN>`, where Rome Cloud
+// approves only the instance's owner.
+function hostAt(slug: string, domain: string, origin?: string): void {
+  process.env.PANTHEON_SLUG = slug;
+  process.env.PANTHEON_DOMAIN = domain;
+  if (origin) process.env.PANTHEON_INSTANCE_ORIGIN = origin;
+}
 
 afterEach(() => {
   for (const key of ENV_KEYS) {
@@ -224,9 +249,13 @@ async function start(app: Hono): Promise<{ state: string; nonce: string; scope: 
 }
 
 // GET the callback from the browser that ran `start` for this state.
-function callback(app: Hono, path: string): Promise<Response> {
+// `signedIn` sends the guardian's session cookie too, as a browser does when
+// the guardian connects Rome Cloud from the dashboard.
+function callback(app: Hono, path: string, opts: { signedIn?: boolean } = {}): Promise<Response> {
   const state = new URL(path, "http://instance.test").searchParams.get("state");
-  const cookie = state ? loginCookies.get(state) : undefined;
+  const cookies = [state ? loginCookies.get(state) : undefined];
+  if (opts.signedIn) cookies.push(`${COOKIE_NAME}=${createGuardianSession("guardian").token}`);
+  const cookie = cookies.filter(Boolean).join("; ");
   return Promise.resolve(app.request(path, cookie ? { headers: { cookie } } : undefined));
 }
 
@@ -425,7 +454,9 @@ describe("/api/auth/cloud — vanilla instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`, {
+      signedIn: true,
+    });
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
@@ -465,6 +496,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
       const res = await callback(
         app,
         `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`,
+        { signedIn: true },
       );
       expect(res.headers.get("location")).toBe("/login?cloud=error&reason=key_conflict");
       expect(provisionAfterLink).not.toHaveBeenCalled();
@@ -473,6 +505,52 @@ describe("/api/auth/cloud — vanilla instance", () => {
       rs.unstubAllEnvs();
       await signer.close();
     }
+  });
+
+  it("asks for the password first on a password-only seat, without linking the box", async () => {
+    insertGuardian({ accountId: null });
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce }),
+      instance_token: "romeinst_new",
+      instance_id: "inst-1",
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=link_required");
+    expect(sessionUserId(res)).toBeNull();
+    expect(isInstanceLinked()).toBe(false);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBeNull();
+  });
+
+  it("refuses another account without linking the box or rebinding the seat", async () => {
+    insertGuardian({ accountId: "A" });
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "B", nonce }),
+      instance_token: "romeinst_other",
+      instance_id: "inst-other",
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=not_owner");
+    expect(sessionUserId(res)).toBeNull();
+    expect(isInstanceLinked()).toBe(false);
+    const stored = testDb.db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, INSTANCE_TOKEN_SETTING_KEY))
+      .all();
+    expect(stored).toEqual([]);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBe("A");
   });
 
   it("creates the guardian seat from the cloud account when none exists", async () => {
@@ -514,7 +592,9 @@ describe("/api/auth/cloud — vanilla instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`, {
+      signedIn: true,
+    });
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=malformed");
     expect(sessionUserId(res)).toBeNull();
@@ -539,11 +619,8 @@ describe("/api/auth/cloud — bound instance", () => {
     expect(autoConnectEmail).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["null", null],
-    ["stale", "OLD"],
-  ])("stamps the verified account on the seat (recorded=%s)", async (_label, recorded) => {
-    insertGuardian({ accountId: recorded });
+  it("asks for the password first on a seat with no recorded account, and leaves it unlinked", async () => {
+    insertGuardian({ accountId: null });
     setInstanceTokenInMemory("romeinst_existing");
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
@@ -552,9 +629,110 @@ describe("/api/auth/cloud — bound instance", () => {
     romeCloud.setNonce(nonce);
     const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=link_required");
+    expect(sessionUserId(res)).toBeNull();
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBeNull();
+  });
+
+  it.each([
+    ["Rome Cloud hosts the box", undefined, "A"],
+    ["the box is served at its own domain", "https://rome.example.com", null],
+  ])("on a hosted seat with no recorded account, a bare sign-in links it when %s", async (_label, origin, linked) => {
+    hostAt("acme", "romeos.test", origin);
+    insertGuardian({ accountId: null });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(sessionUserId(res)).toBe(linked);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBe(linked);
+  });
+
+  it("sends an invited member on to the visitor flow on a seat with no recorded account", async () => {
+    insertGuardian({ accountId: null });
+    setInstanceTokenInMemory("romeinst_existing");
+    const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
+    dashboardAccessState.setCloudEmailAccess(["invitee@example.com"]);
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "B", nonce, email: "invitee@example.com" }),
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, { dashboardAccessState });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(sessionUserId(res)).toBeNull();
+    const target = new URL(res.headers.get("location") as string);
+    expect(`${target.origin}${target.pathname}`).toBe(`${ISSUER}/instance/authorize`);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBeNull();
+  });
+
+  it("links a seat with no recorded account while the guardian is signed in", async () => {
+    insertGuardian({ accountId: null });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`, {
+      signedIn: true,
+    });
+
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
     expect(sessionUserId(res)).toBe("A");
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.accountId).toBe("A");
+  });
+
+  it("refuses another account and leaves the seat bound as it was", async () => {
+    insertGuardian({ accountId: "A", email: "owner@example.com" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "B", nonce, email: "other@example.com" }),
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=not_owner");
+    expect(sessionUserId(res)).toBeNull();
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row).toMatchObject({ accountId: "A", email: "owner@example.com" });
+  });
+
+  it("sends a refused account that is an invited member on to the visitor flow", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const dashboardAccessState = new DashboardAccessState();
+    await dashboardAccessState.load(testDb.db);
+    dashboardAccessState.setCloudEmailAccess(["invitee@example.com"]);
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "B", nonce, email: "invitee@example.com" }),
+    }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, { dashboardAccessState });
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(sessionUserId(res)).toBeNull();
+    const target = new URL(res.headers.get("location") as string);
+    expect(`${target.origin}${target.pathname}`).toBe(`${ISSUER}/instance/authorize`);
+    expect(target.searchParams.get("intent")).toBe("signin");
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBe("A");
   });
@@ -577,7 +755,9 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`, {
+      signedIn: true,
+    });
 
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBe("A");
@@ -1374,13 +1554,27 @@ describe("/api/auth/cloud/native/complete — guardian seat", () => {
     expect(body).toEqual({ error: "not_owner" });
   });
 
-  it("binds an unbound seat and creates a missing one", async () => {
+  it("never links a seat with no recorded account", async () => {
     insertGuardian({ accountId: null });
-    const bound = await nativeSignIn({ sub: "A" });
-    expect(bound.res.status).toBe(200);
-    expect(guardianRow()?.accountId).toBe("A");
 
-    testDb.db.delete(guardianAuth).run();
+    const { res, body } = await nativeSignIn({ sub: "A" });
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
+    expect(guardianRow()?.accountId).toBeNull();
+  });
+
+  it("links a hosted seat with no recorded account, where Rome Cloud checked the owner", async () => {
+    hostAt("acme", "romeos.test");
+    insertGuardian({ accountId: null });
+
+    const { res } = await nativeSignIn({ sub: "A" });
+
+    expect(res.status).toBe(200);
+    expect(guardianRow()?.accountId).toBe("A");
+  });
+
+  it("creates a missing seat for the first account", async () => {
     const created = await nativeSignIn({ sub: "C", email: "new@example.com" });
     expect(created.res.status).toBe(200);
     const [seat] = testDb.db.select().from(guardianAuth).all();

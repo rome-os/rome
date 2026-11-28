@@ -121,14 +121,18 @@ extension ChatOutput {
         return LinkedFile(apiPath: String(url.dropFirst(4)), query: nil, name: name, kind: previewKind)
     }
 
-    /// A file name as a title: no extension, words for dashes and underscores,
-    /// a capital first. The web's `outputTitle`.
-    var title: String {
-        var words = name.replacingOccurrences(of: #"\.[A-Za-z0-9]{1,8}$"#, with: "", options: .regularExpression)
-        words = words.replacingOccurrences(of: #"[-_]+"#, with: " ", options: .regularExpression)
+    /// A file name as a title: words for dashes and underscores, a capital
+    /// first, and its extension kept, so `trip-plan.md` reads "Trip plan.md".
+    /// The web's `outputTitle`.
+    var title: String { Self.title(of: name) }
+
+    static func title(of name: String) -> String {
+        let ext = name.range(of: #"\.[A-Za-z0-9]{1,8}$"#, options: .regularExpression).map { String(name[$0]) } ?? ""
+        let words = String(name.dropLast(ext.count))
+            .replacingOccurrences(of: #"[-_]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
         guard let first = words.first else { return name }
-        return first.uppercased() + words.dropFirst()
+        return first.uppercased() + words.dropFirst() + ext
     }
 
     /// A picture the picture viewer shows; an SVG is not one.

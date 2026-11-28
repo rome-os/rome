@@ -14,12 +14,12 @@ export type MemberOfAccount = (account: Account) => Promise<NamedMember | null>;
 /**
  * Who said a message from an account of `member`, as the agent reads it: the
  * person's name and role, such as "Ana Lopez, guardian", "ana@example.com,
- * member" or "not linked". An agent's account in the guardian's Rome Cloud
+ * member" or "not a member". An agent's account in the guardian's Rome Cloud
  * account is the guardian's, so it names the guardian. Never built from the
  * name the message showed, which the sender chose.
  */
 export function whoIs(member: NamedMember | null): string {
-  if (!member) return "not linked";
+  if (!member) return "not a member";
   return member.name ? `${member.name}, ${member.role}` : member.role;
 }
 

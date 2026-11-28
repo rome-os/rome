@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { ROME_NODE_DOCKER_COMPOSE } from "@/components/device-connection-cards";
 import i18n from "@/i18n";
 import type { DesktopDeviceStatus } from "@/lib/electron-shell";
 import DeviceActivityPage from "./DeviceActivityPage";
@@ -149,7 +150,7 @@ it("drops the device list when the service stops and does not start it on its ow
   ).toBe(true);
 });
 
-it("shows device guides and the container placeholder in the empty list", async () => {
+it("shows device guides including the container Compose config and docs link in the empty list", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
@@ -160,27 +161,37 @@ it("shows device guides and the container placeholder in the empty list", async 
   expect(setup.getByRole("link", { name: "Download Rome" })).toBeTruthy();
   expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
   expect(setup.getByText("rome-node connect")).toBeTruthy();
-  const containerHeading = setup.getByRole("heading", { name: "Rome Node container" });
-  expect(within(containerHeading.parentElement!).getByText("Coming soon")).toBeTruthy();
+  expect(setup.getByRole("heading", { name: "Rome Node container" })).toBeTruthy();
+  expect(setup.queryByText("Coming soon")).toBeNull();
+  const composeCode = setup.getByText(/ghcr\.io\/rome-os\/rome-node:latest/);
+  expect(composeCode.textContent).toBe(ROME_NODE_DOCKER_COMPOSE);
+  expect(composeCode.closest("pre")?.className).toContain("select-text");
+  expect(setup.getByRole("button", { name: "Copy Compose" })).toBeTruthy();
+  const docsLink = setup.getByRole("link", { name: "Docker deployment guide" });
+  expect(docsLink.getAttribute("href")).toBe(
+    "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker",
+  );
+  expect(docsLink.getAttribute("target")).toBe("_blank");
   expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
-it("opens each setup guide and the container placeholder from Link device", async () => {
+it("opens each setup guide from Link device, copies Compose, and returns focus on Escape", async () => {
   renderDevices(() => ({
     connection: "online",
     checkedAt: new Date().toISOString(),
     devices: [{ id: "mac", name: "MacBook", platform: "macos", status: "connected" }],
   }));
   const user = userEvent.setup();
+  const writeText = rs.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
   await screen.findByRole("link", { name: /MacBook/ });
   const trigger = screen.getByRole("button", { name: "Link device" });
   const callsBefore = rs.mocked(fetch).mock.calls.length;
   const choices = [
     ["App", "Download Rome"],
     ["Rome Node CLI", "rome-node connect"],
-    ["Rome Node container", "Coming soon"],
+    ["Rome Node container", "Docker deployment guide"],
   ] as const;
   for (const [name, text] of choices) {
     await user.click(trigger);
@@ -188,13 +199,42 @@ it("opens each setup guide and the container placeholder from Link device", asyn
     const dialog = await screen.findByRole("dialog", { name });
     expect(within(dialog).getByText(text)).toBeTruthy();
     if (name === "Rome Node container") {
-      const heading = within(dialog).getByRole("heading", { name });
-      expect(within(heading.parentElement!).getByText("Coming soon")).toBeTruthy();
+      expect(within(dialog).queryByText("Coming soon")).toBeNull();
+      const composeCode = within(dialog).getByText(/ghcr\.io\/rome-os\/rome-node:latest/);
+      expect(composeCode.textContent).toBe(ROME_NODE_DOCKER_COMPOSE);
+      await user.click(within(dialog).getByRole("button", { name: "Copy Compose" }));
+      expect(writeText).toHaveBeenCalledWith(ROME_NODE_DOCKER_COMPOSE);
+      expect(await within(dialog).findByRole("button", { name: "Copied" })).toBeTruthy();
+      expect(within(dialog).queryByRole("alert")).toBeNull();
+      expect(
+        within(dialog).getByRole("link", { name: "Docker deployment guide" }).getAttribute("href"),
+      ).toBe(
+        "https://github.com/rome-os/rome/blob/main/docs/rome-node.md#run-rome-node-with-docker",
+      );
     }
     await user.keyboard("{Escape}");
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   }
   expect(rs.mocked(fetch)).toHaveBeenCalledTimes(callsBefore);
+});
+
+it("keeps Compose selectable and alerts when the browser refuses clipboard access", async () => {
+  renderDevices(() => ({
+    connection: "stopped",
+    checkedAt: new Date().toISOString(),
+    devices: [],
+  }));
+  const user = userEvent.setup();
+  rs.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+  const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
+  await user.click(setup.getByRole("button", { name: "Copy Compose" }));
+  expect((await setup.findByRole("alert")).textContent).toBe(
+    "Could not copy. Select the configuration instead",
+  );
+  expect(setup.getByRole("button", { name: "Copy Compose" })).toBeTruthy();
+  const composeCode = setup.getByText(/ghcr\.io\/rome-os\/rome-node:latest/);
+  expect(composeCode.textContent).toBe(ROME_NODE_DOCKER_COMPOSE);
+  expect(composeCode.closest("pre")?.className).toContain("select-text");
 });
 
 it("starts only on explicit click and refreshes server truth after success", async () => {
@@ -272,8 +312,10 @@ it("localizes the service recovery and device setup in Chinese", async () => {
     expect(setup.getByRole("link", { name: "下载 Rome" })).toBeTruthy();
     expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
     expect(setup.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
-    const containerHeading = setup.getByRole("heading", { name: "Rome Node 容器" });
-    expect(within(containerHeading.parentElement!).getByText("即将推出")).toBeTruthy();
+    expect(setup.getByRole("heading", { name: "Rome Node 容器" })).toBeTruthy();
+    expect(setup.queryByText("即将推出")).toBeNull();
+    expect(setup.getByRole("button", { name: "复制 Compose" })).toBeTruthy();
+    expect(setup.getByRole("link", { name: "Docker 部署说明" })).toBeTruthy();
   } finally {
     cleanup();
     await i18n.changeLanguage("en");

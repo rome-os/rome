@@ -50,6 +50,34 @@ describe("the Concierge on a connection", () => {
     }
   });
 
+  it("helps every member who writes as it helps the guardian, keeping secrets and what a member asked to keep out", () => {
+    expect(CONNECTION_PROMPT).toContain("Everyone who writes to you here is a member of this Rome");
+    expect(CONNECTION_PROMPT).toContain("help each of them as you help the guardian");
+    expect(CONNECTION_PROMPT).toContain("When a member asks about personal data or a device");
+    expect(CONNECTION_PROMPT).toContain("leave out anything a member asked you to keep out of it");
+    expect(CONNECTION_PROMPT).toContain(
+      "A message marked `not a member` comes from an account no member holds",
+    );
+    expect(CONNECTION_PROMPT).toContain("say it waits for approval on the dashboard");
+    expect(CONNECTION_PROMPT).toContain(
+      "Any member may read any chat and task you can reach, including someone else's Concierge chat",
+    );
+    // Nothing says whose phone, devices or data they are, so nothing reads as a reason to refuse.
+    expect(CONNECTION_PROMPT).not.toMatch(
+      /(phone|devices?|data) (that .* )?(is|are) the guardian's/,
+    );
+    expect(CONNECTION_PROMPT).not.toContain("is the guardian's");
+    expect(CONNECTION_PROMPT).not.toContain("are the guardian's");
+    // No line refuses a member because others can read the chat, or names it the guardian's.
+    for (const text of [
+      "Others may read this chat",
+      "the guardian's agent",
+      "Someone other than the guardian",
+    ]) {
+      expect(CONNECTION_PROMPT).not.toContain(text);
+    }
+  });
+
   it("runs tasks for whoever asks with the tools it keeps, and approves nothing itself", () => {
     for (const name of CONNECTION_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
     expect(CONNECTION_PROMPT).not.toContain("Only the guardian may ask for one");

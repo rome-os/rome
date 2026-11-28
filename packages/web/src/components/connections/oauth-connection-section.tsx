@@ -4,7 +4,7 @@ import { Spinner } from "@rome-os/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
-import { ConnectionSlotCard } from "@/components/connection-slot-card";
+import { ConnectionSlotCard, SlotCeremonyFrame } from "@/components/connection-slot-card";
 import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
@@ -205,15 +205,17 @@ export function OAuthConnectionSection({
           // the affordance is the same: reopen, or cancel and escape the flow.
           pendingRedirectControls
         ) : setup.state && setup.state.status !== "cancelled" ? (
-          <SetupRenderer
-            state={setup.state}
-            busy={setup.busy}
-            error={setup.error}
-            onSubmit={submitSetup}
-            onCancel={setup.cancel}
-            onRetry={() => beginConnect(true)}
-            labels={{ continue: t("common.connect") }}
-          />
+          <SlotCeremonyFrame>
+            <SetupRenderer
+              state={setup.state}
+              busy={setup.busy}
+              error={setup.error}
+              onSubmit={submitSetup}
+              onCancel={setup.cancel}
+              onRetry={() => beginConnect(true)}
+              labels={{ continue: t("common.connect") }}
+            />
+          </SlotCeremonyFrame>
         ) : shopifyInstallUrl ? (
           <div>
             {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
@@ -300,15 +302,17 @@ export function OAuthConnectionSection({
         {setup.state?.status === "awaiting-input" ? (
           // A reconnect whose setup asks something before the hand-off (Shopify
           // asks which store) renders that form here, as the unconnected card does.
-          <SetupRenderer
-            state={setup.state}
-            busy={setup.busy}
-            error={setup.error}
-            onSubmit={submitSetup}
-            onCancel={setup.cancel}
-            onRetry={() => beginConnect(true)}
-            labels={{ continue: t("connections.oauth.reconnect") }}
-          />
+          <SlotCeremonyFrame>
+            <SetupRenderer
+              state={setup.state}
+              busy={setup.busy}
+              error={setup.error}
+              onSubmit={submitSetup}
+              onCancel={setup.cancel}
+              onRetry={() => beginConnect(true)}
+              labels={{ continue: t("connections.oauth.reconnect") }}
+            />
+          </SlotCeremonyFrame>
         ) : shopifyInstallUrl && !pendingRedirectControls ? (
           <>
             <div className="flex flex-wrap gap-2">

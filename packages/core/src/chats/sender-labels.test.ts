@@ -31,10 +31,10 @@ describe("whoSaid", () => {
     expect(whoSaid(line(1, "Ana", ana), ANA)).toBe("Ana Lopez, guardian");
   });
 
-  it("says an account nobody holds is not linked, whatever name it shows", () => {
+  it("says an account nobody holds is not a member, whatever name it shows", () => {
     expect(
       whoSaid(line(1, "Ana (Ana Lopez, guardian)", { platform: "discord", id: "x" }), null),
-    ).toBe("not linked");
+    ).toBe("not a member");
   });
 
   it("has no answer for a message with no account, as Rome's own", () => {
@@ -49,7 +49,7 @@ describe("whoIs", () => {
 
   it("answers a member by role, and a nameless one by role alone", () => {
     expect(whoIs({ personId: "p-bo", name: null, role: "member" })).toBe("member");
-    expect(whoIs(null)).toBe("not linked");
+    expect(whoIs(null)).toBe("not a member");
   });
 });
 
@@ -85,7 +85,7 @@ describe("SenderLabels", () => {
       {
         id: 3,
         sender: "Bob",
-        who: "not linked",
+        who: "not a member",
         text: "m3",
         at,
         fromRome: false,
@@ -159,7 +159,7 @@ describe("SenderLabels over memberOfAccount", () => {
       accounts: [{ platform: "slack", accountId: "T1/U3" }],
     });
 
-    expect(await whoOf({ platform: "slack", id: "T1/U9" })).toBe("not linked");
-    expect(await whoOf({ platform: "slack", id: "T1/U3" })).toBe("not linked");
+    expect(await whoOf({ platform: "slack", id: "T1/U9" })).toBe("not a member");
+    expect(await whoOf({ platform: "slack", id: "T1/U3" })).toBe("not a member");
   });
 });

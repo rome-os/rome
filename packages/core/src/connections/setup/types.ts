@@ -18,6 +18,9 @@
 import type { DrizzleTx } from "../../db/index.js";
 import type { Credential, ProfileRecord } from "../types.js";
 
+/** One selectable option on a `SetupFormField`: a bare value or a `{ value, label }` pair. */
+export type SetupFormFieldOption = string | { value: string; label: string };
+
 /**
  * One field the guardian fills in a `prompt`. Structurally identical to the
  * `GuardianInteraction.prompt` field shape so an `AuthScheme`
@@ -31,11 +34,13 @@ export interface SetupFormField {
   secret: boolean;
   format?: "line" | "multiline" | "file";
   /** Presented as a select when set. */
-  options?: string[];
+  options?: SetupFormFieldOption[];
 }
 
 /** A labeled external link inside a view (e.g. "Open the Developer Portal"). */
 export interface SetupViewLink {
+  /** Optional stable key so localized clients can translate the link label. */
+  id?: string;
   label: string;
   url: string;
 }
@@ -53,6 +58,8 @@ export interface SetupViewStep {
  *  (create the bot, copy the token) next to the field — the standard renderer
  *  shows the numbered steps and links above the inputs. */
 export interface SetupForm {
+  /** Optional stable identifier so localized clients can translate the form copy. */
+  id?: string;
   instructions?: string;
   /** A numbered how-to shown above the fields (e.g. the BotFather walkthrough). */
   steps?: SetupViewStep[];
@@ -71,10 +78,17 @@ export interface SetupForm {
  * progress/working flavor (rendered while the coroutine awaits an external
  * event inside `ctx.step`).
  */
+/** A view body paragraph: plain text, or a stable `id` + fallback `text` for localized clients. */
+export type SetupViewBodyItem = string | { id: string; text: string };
+
 export interface SetupView {
+  /** Optional stable identifier so localized clients can translate the view copy. */
+  id?: string;
+  /** Interpolation values accompanying `id` for localized clients (e.g. `{ appId }`). */
+  params?: Record<string, string>;
   title?: string;
   /** Paragraphs of plain structured text. */
-  body?: string[];
+  body?: SetupViewBodyItem[];
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL. First-class

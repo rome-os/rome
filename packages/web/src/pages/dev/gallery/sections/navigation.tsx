@@ -34,14 +34,14 @@ const EPIC_OPTIONS: SegmentedControlOption<EpicFilter>[] = [
   { value: "archived", label: "Archived", title: "Epics closed out of the board" },
 ];
 
-// Union-typed here too: `onValueChange` hands back `Bond`, not `string`.
-type Bond = "all" | "inner-circle" | "acquaintance" | "other";
+// Union-typed here too: `onValueChange` hands back `TaskStatus`, not `string`.
+type TaskStatus = "all" | "running" | "waiting" | "done";
 
-const BOND_OPTIONS: FilterChipOption<Bond>[] = [
+const TASK_STATUS_OPTIONS: FilterChipOption<TaskStatus>[] = [
   { value: "all", label: "All", count: 128 },
-  { value: "inner-circle", label: "Inner circle", count: 6 },
-  { value: "acquaintance", label: "Acquaintance", count: 24 },
-  { value: "other", label: "Other", count: 98 },
+  { value: "running", label: "Running", count: 6 },
+  { value: "waiting", label: "Waiting", count: 24 },
+  { value: "done", label: "Done", count: 98 },
 ];
 
 const OVERFLOW_OPTIONS = [
@@ -59,7 +59,7 @@ export function NavigationSection() {
   const [width, setWidth] = useState("all");
   const [smallScope, setSmallScope] = useState("json");
   const [epicFilter, setEpicFilter] = useState<EpicFilter>("open");
-  const [bond, setBond] = useState<Bond>("all");
+  const [taskStatus, setTaskStatus] = useState<TaskStatus>("all");
   const [channel, setChannel] = useState("all");
   const [overflow, setOverflow] = useState("all");
   const [state, setState] = useState("open");
@@ -210,12 +210,12 @@ export function NavigationSection() {
           note="The other one-of-N radiogroup. SegmentedControl is a fixed track for a few known views; this is a data-driven option set that scrolls rather than compresses, and sits above the rows it filters."
         >
           <div className="space-y-4">
-            <Item label={`with counts — value: ${bond}`}>
+            <Item label={`with counts — value: ${taskStatus}`}>
               <FilterChipGroup
-                aria-label="Filter people by bond"
-                options={BOND_OPTIONS}
-                value={bond}
-                onValueChange={setBond}
+                aria-label="Filter tasks by status"
+                options={TASK_STATUS_OPTIONS}
+                value={taskStatus}
+                onValueChange={setTaskStatus}
               />
             </Item>
             <Item label={`no counts — value: ${channel}`}>

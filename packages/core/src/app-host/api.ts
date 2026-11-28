@@ -19,6 +19,7 @@ import {
 import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { AppFavorRequests } from "../apps/app-favors-port.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
+import { deprecatedPortsFor } from "./deprecated-app-ports.js";
 
 export type { RomeAppApiHandler, RomeAppApiRequest, RomeAppCaller } from "@rome-os/app-runtime";
 
@@ -77,6 +78,7 @@ export class AppApiDispatcher {
         actionEngine: this.services.actionEngine,
         routinesRepo: this.services.routinesRepo,
         repositories: this.services.repositories,
+        forApp: deprecatedPortsFor(this.services),
         favorService: this.services.favorService,
         appConnections: this.services.appConnections,
         whenWorkersBusy: whenWorkersBusyFor(request.caller),

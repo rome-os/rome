@@ -306,6 +306,96 @@
     "sections": {
       "connected": "Connected · {{count}}",
       "add": "Add a connection"
+    },
+    "setup": {
+      "actions": {
+        "submit": "Continue",
+        "cancel": "Cancel",
+        "retry": "Try again",
+        "continue": "Continue",
+        "connected": "Connected",
+        "failed": "Something went wrong",
+        "cancelled": "Cancelled"
+      },
+      "forms": {
+        "feishu": {
+          "mode": {
+            "instructions": "Choose how to connect: agent-ready scans a QR code to create Rome's app in your tenant automatically; manual pastes an existing custom app's credentials.",
+            "fields": {
+              "mode": {
+                "label": "Setup method",
+                "options": {
+                  "agent-ready": "Agent-ready (scan QR code)",
+                  "manual": "Manual (App ID & App Secret)"
+                }
+              },
+              "domain": {
+                "label": "Domain",
+                "options": {
+                  "feishu": "Feishu (China · feishu.cn)",
+                  "lark": "Lark (Global · larksuite.com)"
+                }
+              }
+            }
+          },
+          "renew": {
+            "instructions": "Select your domain and paste this app's App ID and App Secret again on the next step.",
+            "fields": {
+              "domain": {
+                "label": "Domain",
+                "options": {
+                  "feishu": "Feishu (China · feishu.cn)",
+                  "lark": "Lark (Global · larksuite.com)"
+                }
+              }
+            }
+          },
+          "credentials": {
+            "instructions": "Paste your Feishu/Lark custom-app App ID and App Secret.",
+            "fields": {
+              "appId": {
+                "label": "App ID"
+              },
+              "appSecret": {
+                "label": "App secret"
+              }
+            }
+          }
+        }
+      },
+      "views": {
+        "feishu": {
+          "preparing": {
+            "title": "Creating the agent app",
+            "body": {
+              "preparing": "Preparing the app-creation QR code…"
+            }
+          },
+          "qr": {
+            "title": "Scan to create the agent app",
+            "body": {
+              "scan": "Scan this QR code in the Feishu/Lark mobile app to create Rome's agent app in your tenant.",
+              "expires": "The QR code expires at {{expiresAt}}."
+            },
+            "links": {
+              "openCreatePage": "Open the app-creation page",
+              "qrCode": "QR code"
+            }
+          },
+          "finishing": {
+            "title": "Finishing setup",
+            "body": {
+              "finishing": "Reading the bot's name…"
+            }
+          },
+          "connected": {
+            "title": "Feishu connected",
+            "body": {
+              "ready": "App {{appId}} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity."
+            }
+          }
+        }
+      }
     }
   },
   "appKeys": {
@@ -1081,8 +1171,11 @@
       },
       "desktopHelp": "Sign in to the Rome app with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
       "desktopDownload": "Download Rome",
-      "comingSoon": "Coming soon",
-      "containerHelp": "Runs Rome Node in a Docker container using Docker Compose.",
+      "containerHelp": "Run Rome Node in Docker with this Compose configuration, then open its Web UI and authorize it with the same Rome Cloud account. See the guide for initial password and LAN access.",
+      "copyCompose": "Copy Compose",
+      "copiedCompose": "Copied",
+      "copyComposeRefused": "Could not copy. Select the configuration instead",
+      "containerInstructions": "Docker deployment guide",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"

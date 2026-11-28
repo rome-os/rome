@@ -311,6 +311,72 @@ GROUP BY model
 FORMAT JSONEachRow
 ```
 
+### Deprecated app SDK symbols
+
+Each time an app uses a symbol the app SDK keeps only as deprecated, the host
+adds one to the counter `rome.app_sdk.deprecated_uses`, so a symbol is deleted
+once no app uses it. The counter has two attributes: `rome.app_sdk.symbol`
+names the symbol, such as `personMappingRepo.findByChannelUser`, and
+`rome.app.id` names the app. The identity attributes above tell the Romes
+apart. The counter holds no arguments, message content or sender ids. The host
+counts in
+[`../../packages/core/src/app-host/deprecated-app-ports.ts`](../../packages/core/src/app-host/deprecated-app-ports.ts).
+
+The main process and each action worker count in their own process and export
+every 15 seconds, and a worker exports what is left when it exits. A process
+that crashes loses the uses since its last export.
+
+The host counts a use that reaches it at run time:
+
+| `rome.app_sdk.symbol` | Counted when an app |
+|---|---|
+| `people.guardian` | calls `deps.people.guardian()` in an action |
+| `personMappingRepo.<method>` | calls any method of `deps.personMappingRepo` in an action, one symbol per method |
+| `strangerPersonId` | reads `deps.strangerPersonId` in an action, or copies `deps`, such as `{ ...deps }`, which reads it too |
+| `policyEngine.evaluate` | calls `deps.policyEngine.evaluate()` in an action |
+| `APPROVAL_TYPES.person_mapping` | creates an approval of type `person_mapping` in an action |
+| `ThreadContext.senderBondLevel` | passes it to `agentRunner.run()` or `agentRunner.runForked()`, in an action, a turn hook or an `app-started` hook |
+| `ChatStopInput.service`, `ChatStopInput.senderId` | passes it to `deps.chatStop()` in a channel message hook |
+| `repositories.guardianProfile.write` | calls it from an action, the app's API, a turn hook or an `app-started` hook |
+
+It cannot count a use that never reaches it:
+
+- Types an app compiles against: `BondLevel`, `SaidSender`, `ChannelMappingRecord`, `PersonRecord`, `PeopleService`, `PersonMappingRepository`, `PolicyEngine`, `PolicyRule`, `PolicyContext`, `GuardianProfileRepository` and `GuardianProfileWrite`.
+- Reads of fields the host leaves unset: `SaidInboundEvent.sender`, and `senderBondLevel` read from a thread context the host gives.
+- `ChatStopStatus` `"forbidden"` and `chatStopReceipt("forbidden")`, which the host never answers and the app computes alone.
+- The web SDK's `people` page, which runs in the browser.
+
+The counter lands in `otel_metrics_sum` under its own name. It is cumulative:
+each point holds the total since its process started (`StartTimeUnix`), and
+every process, told apart by `process.pid` and `host.name`, is its own series.
+The uses in a window are, per series, its last value less its value at the
+window's start, summed over the series. Uses per symbol, app and Rome over
+the last 30 days:
+
+```sql
+WITH now64(9) - INTERVAL 30 DAY AS since
+SELECT symbol, app, instance, sum(uses) AS uses
+FROM (
+  SELECT
+    Attributes['rome.app_sdk.symbol'] AS symbol,
+    Attributes['rome.app.id'] AS app,
+    ResourceAttributes['service.instance.id'] AS instance,
+    argMax(Value, TimeUnix)
+      - if(StartTimeUnix < since, argMin(Value, TimeUnix), 0) AS uses
+  FROM default.otel_metrics_sum
+  WHERE MetricName = 'rome.app_sdk.deprecated_uses'
+    AND TimeUnix > since
+  GROUP BY symbol, app, instance,
+    ResourceAttributes['host.name'], ResourceAttributes['process.pid'], StartTimeUnix
+)
+GROUP BY symbol, app, instance
+ORDER BY symbol, app, instance
+FORMAT JSONEachRow
+```
+
+A process that started before the window counts from its first point inside
+it, so up to one export interval of its uses is missed.
+
 ## Human UI
 
 HyperDX at `$OBS_UI_URL` (dev: `http://obs.rome.localhost:3000`). Same

@@ -74,6 +74,10 @@ export interface RomeAppRuntimeServices {
   repositories: AppRuntimeRepositories;
   favorService?: AppFavorRequests;
   appConnections?: AppConnectionsContextFactory;
+  /** The `repositories` and `agentRunner` that app `appId` gets, in place of
+   *  the shared ones. The host gives them so it can count that app's uses of
+   *  deprecated app SDK symbols. Without it, every app gets the shared ones. */
+  forApp?(appId: string): Pick<RomeAppRuntimeServices, "repositories" | "agentRunner">;
   /** What this context's out-of-execution `runAction` does when every action
    * worker is busy (see ActionRunContext.whenWorkersBusy). Defaults to
    * `"fail"`. Set `"queue"` only for a context built for one caller that no
@@ -322,7 +326,7 @@ export function createRomeAppContext(
     controller: undefined,
     db: createAppDbContext(app, services.db),
     log,
-    repositories: services.repositories,
+    repositories: (services.forApp?.(app.appId) ?? services).repositories,
     favors: {
       async requestAction(input) {
         const requestContext = appApiRequestContext.getStore();

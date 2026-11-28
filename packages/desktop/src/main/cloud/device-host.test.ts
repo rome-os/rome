@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, rs } from "@rstest/core";
 
 rs.mock("../logger", () => ({
@@ -64,15 +67,37 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("DeviceHost", () => {
   it("passes the bundled helper path only to the full host", async () => {
-    const computerUseHelperPath = "/resources/native/Rome Computer Use.app";
-    const { subject, gateway, limited, options } = host({ computerUseHelperPath });
-    await subject.start();
-    expect(gateway.calls[0].computerUseHelperPath).toBe(computerUseHelperPath);
-    await subject.stop();
-    options.enabled = () => false;
-    await subject.start();
-    expect(limited.calls[0]).not.toHaveProperty("computerUseHelperPath");
-    await subject.stop();
+    const root = await mkdtemp(join(tmpdir(), "rome-device-host-"));
+    const computerUseHelperPath = join(root, "Rome Computer Use.app");
+    const ensureComputerUseHelper = rs.fn(async () => {
+      await mkdir(computerUseHelperPath);
+      return true;
+    });
+    const { subject, gateway, limited, options } = host({
+      computerUseHelperPath,
+      ensureComputerUseHelper,
+      strictBundledAppPath: true,
+    });
+    try {
+      await mkdir(computerUseHelperPath);
+      await subject.start();
+      const fullHost = gateway.calls[0];
+      expect(fullHost.computerUseHelperPath).toBe(computerUseHelperPath);
+      expect(fullHost.strictBundledAppPath).toBe(true);
+      await rm(computerUseHelperPath, { recursive: true });
+      await expect(fullHost.ensureComputerUseHelper!()).resolves.toBe(true);
+      expect(ensureComputerUseHelper).toHaveBeenCalledTimes(1);
+      expect((await stat(computerUseHelperPath)).isDirectory()).toBe(true);
+      await subject.stop();
+      options.enabled = () => false;
+      await subject.start();
+      expect(limited.calls[0]).not.toHaveProperty("computerUseHelperPath");
+      expect(limited.calls[0]).not.toHaveProperty("ensureComputerUseHelper");
+      expect(limited.calls[0]).not.toHaveProperty("strictBundledAppPath");
+    } finally {
+      await subject.stop();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("stays off without a Rome Cloud sign-in", async () => {

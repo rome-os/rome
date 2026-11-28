@@ -295,28 +295,99 @@ import Testing
         let now = Date(timeIntervalSince1970: 2_000_000)
         let cutoff = now.addingTimeInterval(-7 * 86400)
         let chats = ["new", "boundary", "old", "unknown"].map { ConciergeChat(id: $0, name: $0, main: false) }
-        let groups = TopicChatsStore.groups(chats, lastActive: ["new": cutoff.addingTimeInterval(0.001), "boundary": cutoff, "old": cutoff.addingTimeInterval(-1)], pinnedAt: [:], openId: nil, now: now)
+        let groups = TopicChatsStore.groups(chats, lastActive: ["new": cutoff.addingTimeInterval(0.001), "boundary": cutoff, "old": cutoff.addingTimeInterval(-1)], pinnedAt: [:], now: now)
         #expect(groups.current.map(\.id) == ["new", "unknown"])
         #expect(groups.older.map(\.id) == ["boundary", "old"])
     }
 
-    @Test func pinsUnreadAndOnlyTheOpenOldTopicStayOutside() {
+    /// Pins and unread chats stay outside Older; an open older chat stays
+    /// in it, with only its selected state.
+    @Test func pinsAndUnreadStayOutsideAndTheOpenOldTopicStaysInOlder() {
         let now = Date.now
         let chats = ["pin", "unread", "open", "old"].map { ConciergeChat(id: $0, name: $0, main: false, unread: $0 == "unread" ? 2 : 0) }
         let times = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, now.addingTimeInterval(-30 * 86400)) })
-        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: ["pin": now], openId: "open", now: now)
-        #expect(groups.current.map(\.id) == ["pin", "unread", "open"])
-        #expect(groups.older.map(\.id) == ["old"])
+        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: ["pin": now], now: now)
+        #expect(groups.current.map(\.id) == ["pin", "unread"])
+        #expect(groups.older.map(\.id) == ["open", "old"])
     }
 
     @Test func olderCountsComeBeforePaging() {
         let now = Date.now
         let chats = (0..<130).map { ConciergeChat(id: "old-\($0)", name: "Old", main: false) }
         let times = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, now.addingTimeInterval(-8 * 86400)) })
-        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: [:], openId: "old-129", now: now)
-        #expect(groups.current.map(\.id) == ["old-129"])
-        #expect(groups.older.count == 129)
+        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: [:], now: now)
+        #expect(groups.current.isEmpty)
+        #expect(groups.older.count == 130)
         #expect(groups.older.prefix(TopicChatsStore.pageSize).count == 30)
+        // An open chat past Older's page shows, and the page grows to it.
+        #expect(TopicChatsStore.shownCount(130, limit: TopicChatsStore.pageSize, openIndex: 99) == 100)
+        #expect(TopicChatsStore.shownCount(130, limit: TopicChatsStore.pageSize, openIndex: nil) == 30)
+    }
+
+    /// An unread chat quiet for a week opens outside Older, and reading it
+    /// leaves it there while it is open: the list keeps its shape. Once
+    /// another chat opens, it goes to Older. An older chat opened stays in Older.
+    @Test func theOpenChatKeepsTheGroupItOpenedIn() async {
+        let backend = FakeBackend()
+        let now = Date.now
+        backend.topicChats = [
+            ConciergeChat(id: "quiet", name: "Quiet", main: false, unread: 1),
+            ConciergeChat(id: "old", name: "Old", main: false, unread: 0),
+        ]
+        backend.sessionRows = ["quiet", "old"].map { ChatSession(id: $0, name: $0, activityAt: RomeDate.string(now.addingTimeInterval(-9 * 86400))) }
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        func groups() -> (current: [String], older: [String]) {
+            let groups = TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, held: store.heldCurrent, now: now)
+            return (groups.current.map(\.id), groups.older.map(\.id))
+        }
+        #expect(groups().current == ["quiet"])
+        store.noteOpen("quiet", now: now)
+        store.markRead("quiet")
+        #expect(groups().current == ["quiet"])
+        // The same chat noted again, as the list changes, keeps its place.
+        store.noteOpen("quiet", now: now)
+        #expect(groups().current == ["quiet"])
+        store.noteOpen("old", now: now)
+        #expect(store.heldCurrent == nil)
+        #expect(groups().current.isEmpty)
+        #expect(groups().older.sorted() == ["old", "quiet"])
+        store.noteOpen(nil)
+        #expect(store.heldCurrent == nil)
+    }
+
+    /// A chat opened before the list arrives, as from a link or a push at
+    /// launch, holds nothing until it is listed, and is decided when the
+    /// list lands, with no second call: reading it then keeps it outside Older.
+    @Test func anOpenChatIsDecidedWhenTheListArrives() async {
+        let backend = FakeBackend()
+        let now = Date.now
+        backend.topicChats = [ConciergeChat(id: "quiet", name: "Quiet", main: false, unread: 1)]
+        backend.sessionRows = [ChatSession(id: "quiet", name: "Quiet", activityAt: RomeDate.string(now.addingTimeInterval(-9 * 86400)))]
+        let store = TopicChatsStore(backend: backend)
+        store.noteOpen("quiet")
+        #expect(store.heldCurrent == nil)
+        store.start()
+        await settle()
+        #expect(store.heldCurrent == "quiet")
+        store.markRead("quiet")
+        let groups = TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, held: store.heldCurrent)
+        #expect(groups.current.map(\.id) == ["quiet"])
+        #expect(groups.older.isEmpty)
+    }
+
+    @Test func archivedStartsCollapsedAndRemembersItsOwnStatePerInstance() {
+        let defaults = UserDefaults(suiteName: "archived-topics-\(UUID())")!
+        let fold = TopicChatsFold(host: "me.romeos.cc", defaults: defaults)
+        let store = TopicChatsStore(backend: FakeBackend(), fold: fold)
+        #expect(!store.archivedExpanded)
+        store.setArchivedExpanded(true)
+        #expect(!store.olderExpanded)
+        #expect(TopicChatsStore(backend: FakeBackend(), fold: fold).archivedExpanded)
+        #expect(!TopicChatsStore(backend: FakeBackend(), fold: TopicChatsFold(host: "other", defaults: defaults)).archivedExpanded)
+        TopicChatsFold.removeAll(defaults: defaults)
+        #expect(!fold.loadArchivedExpanded())
     }
 
     @Test func onlyAFreshTopicMessageMovesItOutOfOlder() async {
@@ -328,7 +399,7 @@ import Testing
         store.start()
         await settle()
         func groups() -> (current: [ConciergeChat], older: [ConciergeChat]) {
-            TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, openId: nil, now: now)
+            TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, now: now)
         }
         #expect(groups().older.count == 1)
         backend.sessionRows.append(ChatSession(id: "task", name: "Background task", activityAt: RomeDate.string(now)))

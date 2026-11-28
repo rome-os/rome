@@ -160,6 +160,10 @@ async function main(): Promise<void> {
             throw new Error(
               "This Rome Computer Use.app does not support guided permission setup. Install the latest Rome Node or Rome Desktop.",
             );
+          case "startup_timeout":
+            throw new Error(
+              "Rome Computer Use did not finish opening in time. If the guide appeared, continue there; otherwise run setup again from a signed-in macOS desktop session.",
+            );
           default:
             throw new Error(
               "Could not open the permission guide. Run setup from a signed-in macOS desktop session.",
@@ -215,7 +219,10 @@ async function main(): Promise<void> {
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       throw new Error("--port must be an integer between 0 and 65535.");
     }
-    const { startWebServer } = await import("./web/server.js");
+    const [{ startWebServer }, { parseAllowedSetupHosts }] = await Promise.all([
+      import("./web/server.js"),
+      import("./web/auth.js"),
+    ]);
     await withShutdown(async (signal) => {
       const running = await startWebServer({
         host,
@@ -228,6 +235,7 @@ async function main(): Promise<void> {
         explicitName: values.name !== undefined || process.env.ROME_NODE_NAME !== undefined,
         assetsDir: values["assets-dir"] ?? process.env.ROME_NODE_WEB_ASSETS_DIR,
         password: process.env.ROME_NODE_UI_PASSWORD,
+        allowedSetupHosts: parseAllowedSetupHosts(process.env.ROME_NODE_UI_SETUP_HOSTS),
         version: version(),
       });
       try {

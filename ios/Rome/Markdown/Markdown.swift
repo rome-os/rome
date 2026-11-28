@@ -124,7 +124,7 @@ enum MarkdownParser {
 
             if var lines = code {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                    blocks.append(fenced(language: codeLanguage, lines: lines, closed: true))
+                    blocks += fenced(language: codeLanguage, lines: lines, closed: true)
                     code = nil
                     codeLanguage = nil
                 } else {
@@ -218,7 +218,7 @@ enum MarkdownParser {
             paragraph.append(line)
         }
         if let lines = code {
-            blocks.append(fenced(language: codeLanguage, lines: lines, closed: false))
+            blocks += fenced(language: codeLanguage, lines: lines, closed: false)
         }
         flushAll()
         return blocks
@@ -227,9 +227,9 @@ enum MarkdownParser {
     /// A fenced block: a picture set when it is a `pictures` fence with a safe
     /// picture on at least one line, else code. `language` is the whole info
     /// string. `closed` is false for a fence the text ends inside.
-    static func fenced(language: String?, lines: [String], closed: Bool) -> MarkdownBlock {
+    static func fenced(language: String?, lines: [String], closed: Bool) -> [MarkdownBlock] {
         pictureSet(language: language, lines: lines, closed: closed)
-            ?? .code(language: language, text: lines.joined(separator: "\n"))
+            ?? [.code(language: language, text: lines.joined(separator: "\n"))]
     }
 
     /// The picture set a `pictures` fence holds, or nil when the fence is
@@ -237,12 +237,15 @@ enum MarkdownParser {
     /// image, then its note; any other line is skipped. An address the app
     /// would not load is skipped too, by the rules of `ImageSource`. The last
     /// line of a fence still open may be half written, so it waits.
-    static func pictureSet(language: String?, lines: [String], closed: Bool) -> MarkdownBlock? {
+    /// An SVG line becomes a file link, with its note, in a paragraph after
+    /// the set: the phone cannot draw one as a picture.
+    static func pictureSet(language: String?, lines: [String], closed: Bool) -> [MarkdownBlock]? {
         let words = (language ?? "").split(whereSeparator: \.isWhitespace).map { String($0) }
         guard words.first == "pictures" else { return nil }
         let layout: PictureLayout = words.count > 1 && words[1] == "list" ? .list : .grid
         let complete = closed ? lines : Array(lines.dropLast())
         var items: [PictureItem] = []
+        var links: [String] = []
         for line in complete {
             let text = line.trimmingCharacters(in: .whitespaces) as NSString
             guard let match = imagePattern.firstMatch(in: text as String, range: NSRange(location: 0, length: text.length)),
@@ -250,12 +253,36 @@ enum MarkdownParser {
             else { continue }
             let src = text.substring(with: match.range(at: 2))
             guard ImageSource(src: src) != .rejected else { continue }
+            let note = text.substring(from: match.range.location + match.range.length).trimmingCharacters(in: .whitespaces)
+            if let link = svgLink(label: text.substring(with: match.range(at: 1)), src: src) {
+                links.append(note.isEmpty ? link : link + " " + note)
+                continue
+            }
             items.append(PictureItem(
                 alt: unescapedLabel(text.substring(with: match.range(at: 1))).trimmingCharacters(in: .whitespaces),
                 src: src,
-                note: text.substring(from: match.range.location + match.range.length).trimmingCharacters(in: .whitespaces)))
+                note: note))
         }
-        return items.isEmpty ? nil : .pictures(layout: layout, items: items)
+        var blocks: [MarkdownBlock] = items.isEmpty ? [] : [.pictures(layout: layout, items: items)]
+        if !links.isEmpty { blocks.append(.paragraph(links.joined(separator: "\n"))) }
+        return blocks.isEmpty ? nil : blocks
+    }
+
+    /// The file link an image of an SVG shows as, `[label](src)`, or nil for
+    /// any other image: ImageIO cannot draw an SVG, and a tap opens it the way
+    /// any linked file opens. `label` is the image's written label; an empty
+    /// one gives the file's name.
+    static func svgLink(label: String, src: String) -> String? {
+        let path = src.prefix { $0 != "?" && $0 != "#" }
+        guard path.lowercased().hasSuffix(".svg") else { return nil }
+        guard label.trimmingCharacters(in: .whitespaces).isEmpty else { return "[\(label)](\(src))" }
+        let last = String(path.split(separator: "/").last ?? "")
+        let name = last.removingPercentEncoding ?? last
+        let escaped = name.reduce(into: "") { result, character in
+            if "[]\\".contains(character) { result.append("\\") }
+            result.append(character)
+        }
+        return "[\(escaped)](\(src))"
     }
 
     /// A Markdown image. The label may hold backslash escapes (`\[1\]`), and the
@@ -286,21 +313,34 @@ enum MarkdownParser {
 
     /// A paragraph's text with its Markdown images as blocks of their own.
     /// Only image syntax counts: a plain link to an image file stays a link.
+    /// An image of an SVG stays in the text as a link to the file (`svgLink`).
     static func splitImages(_ text: String) -> [MarkdownBlock] {
         let nsText = text as NSString
         let matches = imagePattern.matches(in: text, range: NSRange(location: 0, length: nsText.length))
         guard !matches.isEmpty else { return [.paragraph(text)] }
         var blocks: [MarkdownBlock] = []
+        // The text since the last image block, SVG links included.
+        var pending = ""
+        func flush() {
+            let trimmed = pending.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { blocks.append(.paragraph(trimmed)) }
+            pending = ""
+        }
         var cursor = 0
         for match in matches {
-            let before = nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !before.isEmpty { blocks.append(.paragraph(before)) }
-            blocks.append(.image(alt: unescapedLabel(nsText.substring(with: match.range(at: 1))), src: nsText.substring(with: match.range(at: 2))))
+            pending += nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
             cursor = match.range.location + match.range.length
+            let label = nsText.substring(with: match.range(at: 1))
+            let src = nsText.substring(with: match.range(at: 2))
+            if let link = svgLink(label: label, src: src) {
+                pending += link
+                continue
+            }
+            flush()
+            blocks.append(.image(alt: unescapedLabel(label), src: src))
         }
-        let after = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !after.isEmpty { blocks.append(.paragraph(after)) }
+        pending += nsText.substring(from: cursor)
+        flush()
         return blocks
     }
 
