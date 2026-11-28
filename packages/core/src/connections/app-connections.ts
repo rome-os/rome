@@ -788,18 +788,25 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       ? operation.value.find((entry) => entry.name === invocation.operation)
       : null;
     const declared = descriptor?.appAccess?.approvalPreview;
+    const declaredFields = (declared?.fields ?? []).slice(0, 8).flatMap((field) => {
+      const label = clip(field.label, 80);
+      const resolved = resolvePointer(invocation.input, field.inputPointer);
+      if (resolved.found && resolved.value !== undefined) {
+        return [{ label, value: previewValue(resolved.value) }];
+      }
+      if (invocation.input !== null) {
+        const meta = previewFieldMeta(descriptor?.inputSchema, field.inputPointer);
+        if (meta.hasDefault) return [{ label, value: previewValue(meta.defaultValue) }];
+        if (meta.optional) return [];
+      }
+      return [{ label, value: "Unavailable" }];
+    });
     const fields = [
       { label: "App", value: invocation.appId },
       { label: "Connection", value: connection?.label ?? invocation.connectionId },
       { label: "Identity", value: invocation.identity },
       { label: "Operation", value: invocation.operation },
-      ...(declared?.fields ?? []).slice(0, 8).map((field) => {
-        const resolved = resolvePointer(invocation.input, field.inputPointer);
-        return {
-          label: clip(field.label, 80),
-          value: resolved.found ? previewValue(resolved.value) : "Unavailable",
-        };
-      }),
+      ...declaredFields,
     ];
     return {
       kind: "generic" as const,
@@ -1177,6 +1184,39 @@ function resolvePointer(value: unknown, pointer: string): { found: boolean; valu
     current = (current as Record<string, unknown>)[key];
   }
   return { found: true, value: current };
+}
+
+function previewFieldMeta(
+  schema: Record<string, unknown> | undefined,
+  pointer: string,
+): { hasDefault: boolean; defaultValue?: unknown; optional: boolean } {
+  if (!schema || !pointer.startsWith("/")) return { hasDefault: false, optional: false };
+  const segments = pointer
+    .slice(1)
+    .split("/")
+    .map((raw) => raw.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let current: unknown = schema;
+  let optional = false;
+  for (const key of segments) {
+    if (typeof current !== "object" || current === null) {
+      return { hasDefault: false, optional: false };
+    }
+    const obj = current as Record<string, unknown>;
+    const properties = obj.properties;
+    if (typeof properties !== "object" || properties === null || !(key in properties)) {
+      return { hasDefault: false, optional: false };
+    }
+    const required = Array.isArray(obj.required) ? obj.required : [];
+    if (!required.includes(key)) optional = true;
+    current = (properties as Record<string, unknown>)[key];
+  }
+  if (typeof current === "object" && current !== null && "default" in current) {
+    const defaultValue = (current as Record<string, unknown>).default;
+    if (defaultValue !== undefined) {
+      return { hasDefault: true, defaultValue, optional };
+    }
+  }
+  return { hasDefault: false, optional };
 }
 
 function isConstraintValue(value: unknown): value is string | number | boolean {

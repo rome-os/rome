@@ -289,8 +289,15 @@ describe("App connection broker", () => {
       expect(h.invocations).toHaveLength(0);
       expect((await facade.invoke({ ...target, input })).status).toBe("pending_approval");
       expect(h.approvalRequests[0]?.preview).toMatchObject({
-        fields: expect.arrayContaining([{ label: "Attendees", value: "ou_one, ou_two" }]),
+        fields: expect.arrayContaining([
+          { label: "Calendar", value: "primary" },
+          { label: "Attendees", value: "ou_one, ou_two" },
+        ]),
       });
+      const createPreview = h.approvalRequests[0]?.preview as
+        | { fields?: Array<{ label: string; value: string }> }
+        | undefined;
+      expect(createPreview?.fields?.map((field) => field.label)).not.toContain("Description");
       const attendeeOpenIds = Array.from({ length: 20 }, (_, i) => `ou_${i}_${"x".repeat(40)}`);
       await facade.invoke({
         ...target,
@@ -318,16 +325,14 @@ describe("App connection broker", () => {
           input: { documentId: "doccn123" },
           summary: "Read Feishu document",
           expectedFields: [{ label: "Document ID", value: "doccn123" }],
+          omittedLabels: [],
         },
         {
           operation: "feishu.im.messages.list",
-          input: { chatId: "oc_chat_1", startTime: "100", endTime: "200" },
+          input: { chatId: "oc_chat_1" },
           summary: "List Feishu chat messages",
-          expectedFields: [
-            { label: "Chat ID", value: "oc_chat_1" },
-            { label: "Start", value: "100" },
-            { label: "End", value: "200" },
-          ],
+          expectedFields: [{ label: "Chat ID", value: "oc_chat_1" }],
+          omittedLabels: ["Start", "End"],
         },
         {
           operation: "feishu.sheets.cells.read",
@@ -338,15 +343,17 @@ describe("App connection broker", () => {
             { label: "Sheet ID", value: "sheet_a" },
             { label: "Range", value: "A1:C5" },
           ],
+          omittedLabels: [],
         },
         {
           operation: "feishu.calendar.events.search",
-          input: { calendarId: "primary", query: "roadmap" },
+          input: { query: "roadmap" },
           summary: "Search Feishu calendar events",
           expectedFields: [
             { label: "Calendar", value: "primary" },
             { label: "Query", value: "roadmap" },
           ],
+          omittedLabels: ["Start", "End"],
         },
       ] as const;
 
@@ -371,6 +378,13 @@ describe("App connection broker", () => {
             fields: expect.arrayContaining([...testCase.expectedFields]),
           },
         });
+        const preview = h.approvalRequests[index]?.preview as
+          | { fields?: Array<{ label: string; value: string }> }
+          | undefined;
+        const labels = preview?.fields?.map((field) => field.label);
+        for (const omitted of testCase.omittedLabels) {
+          expect(labels).not.toContain(omitted);
+        }
       }
     } finally {
       h.close();

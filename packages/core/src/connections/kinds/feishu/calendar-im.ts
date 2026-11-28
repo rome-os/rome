@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { operation, pageOf, pageParams, pagination, text, token } from "./operation.js";
 
+// Feishu Calendar v4 event endpoints accept `"primary"` directly (matching official lark-cli).
 const calendarId = z
   .string()
   .regex(/^(?!\.{1,2}$)[a-zA-Z0-9_.@-]{1,256}$/)
