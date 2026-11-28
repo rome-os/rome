@@ -2686,7 +2686,7 @@ export function Chat({
           });
           const output = outputOfLink(list.outputs, path);
           if (!output) return false;
-          open({ id: output.id, name: output.name, link: output.link });
+          open(output.id);
           return true;
         } catch {
           return false;

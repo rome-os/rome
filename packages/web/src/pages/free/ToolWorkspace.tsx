@@ -2,7 +2,6 @@ import {
   ChevronDown,
   ExternalLink,
   FileOutput,
-  FileText,
   LayoutGrid,
   ListChecks,
   ListTree,
@@ -46,13 +45,8 @@ import { TaskList } from "@/components/concierge/TaskList";
 import { TaskGlyph } from "@/components/concierge/TaskGlyph";
 import { TaskLinksProvider, useTaskLink } from "@/components/chat/task-link/task-links";
 import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
-import { OutputFile, OutputsPanel, outputTitle } from "@/components/chat/outputs/OutputsPanel";
-import {
-  type OutputsTabFile,
-  type OutputsTabOptions,
-  ToolOutputsContext,
-  type ToolOutputsHost,
-} from "./tool-outputs";
+import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
+import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
 import { TaskChatInPaneContext, ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import { useSessionNames } from "./use-session-names";
@@ -92,18 +86,7 @@ const TASKS_TAB_ID = "__tasks__";
 const CHAT_TAB_ID = "__task_chat__";
 // Tab value of the Outputs tab, likewise.
 const OUTPUTS_TAB_ID = "__outputs__";
-// Tab values of the file tabs: the prefix, then the file's key.
-const FILE_TAB_PREFIX = "__file__:";
-type BuiltinTab = "trace" | "tasks" | "chat" | "outputs" | "file";
-
-/** A file open in a tab of its own: one of chat `chatId`'s outputs. */
-interface FileTab {
-  key: string;
-  chatId: string;
-  file: OutputsTabFile;
-}
-
-const fileKey = (chatId: string, id: string) => `${chatId}/${id}`;
+type BuiltinTab = "trace" | "tasks" | "chat" | "outputs";
 
 function readRatio() {
   const value = Number(readStored(WIDTH_KEY));
@@ -272,8 +255,8 @@ export function ToolWorkspace({
   //   redundant and clears, so the app stays visible after the trace closes.
   //
   // The Tasks tab, and the Chat tab beside it, are the same kind of tab: view
-  // state, never saved, at most one each. So are the Outputs tab and the file
-  // tabs opened from it, one per file. At most one built-in tab is selected,
+  // state, never saved, at most one each. So is the Outputs tab, which opens a
+  // file in the list's place. At most one built-in tab is selected,
   // and a built-in tab opened over a collapsed pane holds it open with the
   // same flag, until the last of them closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
@@ -294,20 +277,15 @@ export function ToolWorkspace({
     (taskChatId ? taskChatNames.get(taskChatId) : undefined) ||
     openedName.trim() ||
     t("chat.taskChatTab");
-  // The chat whose outputs the tab lists.
+  // The chat whose outputs the tab shows, and the output it was opened on.
   const [outputsTarget, setOutputsTarget] = useState<{
     chatId: string;
+    outputId: string | null;
+    /** Counts each opening, so opening the same output again chooses it again. */
+    seq: number;
     taskChats: boolean;
   } | null>(null);
   const outputsOpen = outputsTarget !== null;
-  // The files open in tabs of their own, in the order they were opened, and
-  // the one chosen while `selected` is "file". View state, like the Outputs tab.
-  const [files, setFiles] = useState<FileTab[]>([]);
-  const [activeFile, setActiveFile] = useState<string | null>(null);
-  const activeFileRef = useRef(activeFile);
-  activeFileRef.current = activeFile;
-  // Each file tab's check before it closes, which settles a file being edited.
-  const fileGuards = useRef(new Map<string, LeaveGuard>());
   // The tab row's place for the chosen tab's own buttons: the tab is its header.
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -365,7 +343,7 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const builtinOpen = trace !== null || tasksOpen || chatOpen || outputsOpen || files.length > 0;
+  const builtinOpen = trace !== null || tasksOpen || chatOpen || outputsOpen;
   // The hold ends with the last built-in tab: the pane falls back to the
   // session's stored state.
   useEffect(() => {
@@ -381,10 +359,7 @@ export function ToolWorkspace({
   const tasksActive = tasksOpen && selected === "tasks";
   const chatActive = chatOpen && selected === "chat";
   const outputsActive = outputsOpen && selected === "outputs";
-  const fileActiveKey =
-    selected === "file" && files.some((tab) => tab.key === activeFile) ? activeFile : null;
-  const builtinActive =
-    traceActive || tasksActive || chatActive || outputsActive || fileActiveKey !== null;
+  const builtinActive = traceActive || tasksActive || chatActive || outputsActive;
   const traceActions = traceActive && open ? actions : null;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({
@@ -446,61 +421,29 @@ export function ToolWorkspace({
     }),
     [tasksActive, open, compact, showTasks, hideTasks, canOpenTask, openTask],
   );
-  // A file opens in a tab of its own, after the others, or chooses its tab
-  // when it is already open.
-  const openFile = useCallback((chatId: string, file: OutputsTabFile) => {
-    if (latest.current.view.collapsed) setHoldsOpen(true);
-    const key = fileKey(chatId, file.id);
-    setFiles((prev) =>
-      prev.some((tab) => tab.key === key) ? prev : [...prev, { key, chatId, file }],
-    );
-    setActiveFile(key);
-    setSelected("file");
-  }, []);
   const showOutputs = useCallback(
-    (chatId: string, file?: OutputsTabFile, options?: OutputsTabOptions) => {
-      if (file) return openFile(chatId, file);
+    (chatId: string, outputId?: string, options?: OutputsTabOptions) => {
       if (latest.current.view.collapsed) setHoldsOpen(true);
-      setOutputsTarget({ chatId, taskChats: options?.taskChats === true });
+      setOutputsTarget((prev) => ({
+        chatId,
+        outputId: outputId ?? null,
+        seq: (prev?.seq ?? 0) + 1,
+        taskChats: options?.taskChats === true,
+      }));
       setSelected("outputs");
     },
-    [openFile],
+    [],
   );
-  // The Outputs tab's own close leaves the files opened from it.
-  const closeOutputsTab = useCallback(() => {
+  const hideOutputs = useCallback(() => {
     setOutputsTarget(null);
     setSelected((current) => (current === "outputs" ? null : current));
   }, []);
-  const guardFor = (key: string): LeaveGuard => {
-    let guard = fileGuards.current.get(key);
-    if (!guard) {
-      guard = { current: null };
-      fileGuards.current.set(key, guard);
-    }
-    return guard;
-  };
-  // A file tab's close settles a file being edited in it first.
-  const closeFile = useCallback((key: string) => {
-    const remove = () => {
-      fileGuards.current.delete(key);
-      setFiles((prev) => prev.filter((tab) => tab.key !== key));
-      if (activeFileRef.current === key) {
-        setActiveFile(null);
-        setSelected((current) => (current === "file" ? null : current));
-      }
-    };
-    const guard = fileGuards.current.get(key);
-    if (guard) leaveEditor(guard, remove);
-    else remove();
-  }, []);
-  // The chat going takes the Outputs tab and every file tab with it.
-  const hideOutputs = useCallback(() => {
-    closeOutputsTab();
-    fileGuards.current.clear();
-    setFiles([]);
-    setActiveFile(null);
-    setSelected((current) => (current === "file" ? null : current));
-  }, [closeOutputsTab]);
+  // The tab's own close settles a file being edited in it first.
+  const outputsLeaveGuard: LeaveGuard = useRef(null);
+  const closeOutputsTab = useCallback(
+    () => leaveEditor(outputsLeaveGuard, hideOutputs),
+    [hideOutputs],
+  );
   const outputsHost = useMemo<ToolOutputsHost>(
     () => ({ active: outputsActive && open, compact, show: showOutputs, hide: hideOutputs }),
     [outputsActive, open, compact, showOutputs, hideOutputs],
@@ -575,7 +518,6 @@ export function ToolWorkspace({
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
     ...(chatOpen ? [CHAT_TAB_ID] : []),
     ...(outputsOpen ? [OUTPUTS_TAB_ID] : []),
-    ...files.map((tab) => FILE_TAB_PREFIX + tab.key),
     ...sorted.map((widget) => widget.id),
   ];
   const builtinTabId = traceActive
@@ -586,9 +528,7 @@ export function ToolWorkspace({
         ? CHAT_TAB_ID
         : outputsActive
           ? OUTPUTS_TAB_ID
-          : fileActiveKey !== null
-            ? FILE_TAB_PREFIX + fileActiveKey
-            : null;
+          : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   // Each tab's name, which the measuring row below draws for every tab, the
   // ones in the menu too, so the strip knows each tab's own width.
@@ -603,9 +543,6 @@ export function ToolWorkspace({
     ...(tasksOpen ? { [TASKS_TAB_ID]: t("chat.tasksTab") } : {}),
     ...(chatOpen ? { [CHAT_TAB_ID]: taskChatLabel } : {}),
     ...(outputsOpen ? { [OUTPUTS_TAB_ID]: tChat("outputs.title") } : {}),
-    ...Object.fromEntries(
-      files.map((tab) => [FILE_TAB_PREFIX + tab.key, outputTitle(tab.file.name)]),
-    ),
     ...Object.fromEntries(sorted.map((widget) => [widget.id, label(widget)])),
   };
   const shownIds = new Set(
@@ -664,17 +601,6 @@ export function ToolWorkspace({
               onClose={closeOutputsTab}
             />
           )}
-          {files
-            .filter((tab) => shownIds.has(FILE_TAB_PREFIX + tab.key))
-            .map((tab) => (
-              <ToolTab
-                key={tab.key}
-                id={FILE_TAB_PREFIX + tab.key}
-                label={outputTitle(tab.file.name)}
-                active={fileActiveKey === tab.key}
-                onClose={() => closeFile(tab.key)}
-              />
-            ))}
           {sorted
             .filter((widget) => shownIds.has(widget.id))
             .map((widget) => (
@@ -774,12 +700,6 @@ export function ToolWorkspace({
                 {tChat("outputs.title")}
               </DropdownMenuItem>
             )}
-            {files.map((tab) => (
-              <DropdownMenuItem key={tab.key} onSelect={() => pickTab(FILE_TAB_PREFIX + tab.key)}>
-                <FileText className="size-3.5" />
-                {outputTitle(tab.file.name)}
-              </DropdownMenuItem>
-            ))}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -815,10 +735,6 @@ export function ToolWorkspace({
     if (id === TASKS_TAB_ID) return setSelected("tasks");
     if (id === CHAT_TAB_ID) return setSelected("chat");
     if (id === OUTPUTS_TAB_ID) return setSelected("outputs");
-    if (id.startsWith(FILE_TAB_PREFIX)) {
-      setActiveFile(id.slice(FILE_TAB_PREFIX.length));
-      return setSelected("file");
-    }
     setSelected(null);
     selectTool(id);
   }
@@ -1037,14 +953,10 @@ export function ToolWorkspace({
                 <OutputsPanel
                   key={outputsTarget.chatId}
                   chatId={outputsTarget.chatId}
+                  selectedId={outputsTarget.outputId}
+                  selectionSeq={outputsTarget.seq}
+                  leaveGuard={outputsLeaveGuard}
                   taskChats={outputsTarget.taskChats}
-                  onOpenOutput={(output) =>
-                    openFile(outputsTarget.chatId, {
-                      id: output.id,
-                      name: output.name,
-                      link: output.link,
-                    })
-                  }
                   onOpenTaskChat={
                     outputsTarget.taskChats && canOpenTask
                       ? (id, name) => openTask(outputsTarget.chatId, id, name)
@@ -1053,29 +965,6 @@ export function ToolWorkspace({
                 />
               </TabsContent>
             )}
-            {/* Each file stays mounted while another tab shows, so an edit
-                under way survives switching away. */}
-            {files.map((tab) => {
-              const active = fileActiveKey === tab.key;
-              return (
-                <TabsContent
-                  key={tab.key}
-                  value={FILE_TAB_PREFIX + tab.key}
-                  forceMount
-                  inert={!active}
-                  aria-hidden={!active}
-                  style={{ display: active ? undefined : "none" }}
-                  className="absolute inset-0 overflow-hidden"
-                >
-                  <OutputFile
-                    chatId={tab.chatId}
-                    opened={tab.file}
-                    actions={active && open ? actions : null}
-                    leaveGuard={guardFor(tab.key)}
-                  />
-                </TabsContent>
-              );
-            })}
           </div>
         </Tabs>
         {resizing && <div className="absolute inset-0 z-30 cursor-col-resize" />}
