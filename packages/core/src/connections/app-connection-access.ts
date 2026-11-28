@@ -231,19 +231,21 @@ export class AppConnectionAccessRepository {
   async putIfAppActive(
     {
       expectedRevision,
+      preserveExistingConstraints,
       ...input
     }: Parameters<AppConnectionAccessRepository["put"]>[0] & {
       expectedRevision?: number;
+      preserveExistingConstraints?: boolean;
     },
     isAppActive: () => boolean,
-    canEditConstraints?: (existing: AppConnectionResourceConstraint[]) => boolean,
-  ): Promise<AppConnectionAccessRecord | "unsupported_constraints" | "policy_conflict" | null> {
+  ): Promise<AppConnectionAccessRecord | "policy_conflict" | null> {
     return await this.appLifecycle.runExclusive(input.appId, () =>
       this.db.transaction((tx) => {
         if (!isAppActive()) return null;
         const now = new Date();
+        let nextInput = input;
         // Read under the same write lock as the upsert so concurrent edits see one revision.
-        if (expectedRevision !== undefined || canEditConstraints) {
+        if (expectedRevision !== undefined || preserveExistingConstraints) {
           const active = tx
             .select()
             .from(appConnectionAccess)
@@ -257,13 +259,14 @@ export class AppConnectionAccessRepository {
             .get();
           if (expectedRevision !== undefined && expectedRevision !== (active?.revision ?? 0))
             return "policy_conflict";
-          if (
-            canEditConstraints &&
-            !canEditConstraints(active ? toAccessRecord(active).constraints : [])
-          )
-            return "unsupported_constraints";
+          if (preserveExistingConstraints && active) {
+            nextInput = {
+              ...input,
+              constraints: toAccessRecord(active).constraints,
+            };
+          }
         }
-        return this.writePolicy(tx, input, now);
+        return this.writePolicy(tx, nextInput, now);
       }),
     );
   }
@@ -286,15 +289,21 @@ export class AppConnectionAccessRepository {
           const input = { appId, ...entry };
           let nextInput = input;
           if (preserveExistingConstraints) {
-            const unrevoked = tx
+            const active = tx
               .select()
               .from(appConnectionAccess)
-              .where(and(policyKey(input), isNull(appConnectionAccess.revokedAt)))
+              .where(
+                and(
+                  policyKey(input),
+                  isNull(appConnectionAccess.revokedAt),
+                  or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
+                ),
+              )
               .get();
-            if (unrevoked) {
+            if (active) {
               nextInput = {
                 ...input,
-                constraints: toAccessRecord(unrevoked).constraints,
+                constraints: toAccessRecord(active).constraints,
               };
             }
           }

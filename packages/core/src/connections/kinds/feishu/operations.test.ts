@@ -389,6 +389,10 @@ describe("Feishu writes", () => {
       attendeeOpenIds: ["ou_demo-1"],
     };
     const descriptor = FEISHU_OPERATIONS.find((op) => op.name === "feishu.calendar.event.create")!;
+    expect(descriptor.appAccess?.approvalPreview?.fields).toContainEqual({
+      label: "Description",
+      inputPointer: "/description",
+    });
     expect(descriptor.inputSchema).toMatchObject({
       properties: { attendeeOpenIds: { items: { pattern: "^ou_[a-zA-Z0-9_-]{1,125}$" } } },
     });

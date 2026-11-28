@@ -14,7 +14,6 @@ export interface AppConnectionAccessOperationDto {
   requiredScopes?: string[];
   /** Each group needs one granted scope. */
   requiredScopeGroups?: string[][];
-  resourceConstraintKind?: "documentIds";
   approvalPreviewSummary?: string;
 }
 
@@ -51,7 +50,6 @@ export interface PutAppConnectionAccessPolicy {
   /** Zero expects no active policy. Omit to write unconditionally. */
   expectedRevision?: number;
   approvalMode?: AppConnectionApprovalMode;
-  constraints?: AppConnectionAccessPolicyDto["constraints"];
 }
 
 export type ConnectionAccessPreset = "read" | "read_and_write" | "custom";

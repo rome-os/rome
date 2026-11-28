@@ -100,7 +100,6 @@ export const documentOperations = [
         throw new ProviderOperationError("provider_response_too_large");
       return { documentId, content, format: "plain_text", complete: true };
     },
-    { resourceConstraintKind: "documentIds" },
   ),
   operation(
     "document.create",
@@ -175,7 +174,6 @@ export const documentOperations = [
     },
     {
       sideEffects: "write",
-      resourceConstraintKind: "documentIds",
       approvalPreview: {
         summary: "Update Feishu document",
         fields: [

@@ -53,7 +53,6 @@ function makeApp(
             inputSchema: { type: "object" },
             appAccess: {
               sideEffects: "read-only",
-              resourceConstraintKind: "documentIds",
               requiredScopes: ["docs.read"],
               requiredScopeGroups: [["docs.read", "docs.manage"]],
             },
@@ -176,7 +175,6 @@ describe("Connection-scoped App access", () => {
                 sideEffect: "read-only",
                 requiredScopes: ["docs.read"],
                 requiredScopeGroups: [["docs.read", "docs.manage"]],
-                resourceConstraintKind: "documentIds",
               },
               {
                 name: "documents.create",
@@ -187,15 +185,11 @@ describe("Connection-scoped App access", () => {
           },
         ],
       });
-      expect(
-        await (
-          await h.request(path + "/policies", put({ ...policy, constraints: [constraint] }))
-        ).json(),
-      ).toMatchObject({
+      expect(await (await h.request(path + "/policies", put(policy))).json()).toMatchObject({
         policy: {
           ...policy,
           approvalMode: "not_required",
-          constraints: [constraint],
+          constraints: [],
           grantStatus: "current",
           revision: 1,
         },
@@ -213,9 +207,7 @@ describe("Connection-scoped App access", () => {
         { appId: "notes", operation: "documents.create", approvalMode: "required" },
       ]);
       for (const input of [
-        { ...policy, constraints: [{ ...constraint, allowedValues: ["../Doc1"] }] },
-        { ...policy, constraints: [{ ...constraint, inputPointer: "/other" }] },
-        { ...policy, operation: "documents.create", constraints: [constraint] },
+        { ...policy, constraints: [constraint] },
         { ...policy, expectedRevision: -1 },
         { ...policy, expectedRevision: 1.5 },
         { ...policy, expiresAt: "2099-01-01T00:00:00Z" },
@@ -348,29 +340,23 @@ describe("Connection-scoped App access", () => {
     }
   });
 
-  it("rejects a stale policy edit without restoring removed documents", async () => {
+  it("rejects a stale policy edit based on expectedRevision", async () => {
     const h = makeApp();
     try {
-      const save = (
-        expectedRevision: number,
-        allowedValues: string[],
-        approvalMode?: "required" | "not_required",
-      ) =>
+      const save = (expectedRevision: number, approvalMode?: "required" | "not_required") =>
         h.request(
           path + "/policies",
           put({
             ...policy,
             expectedRevision,
-            constraints: [{ ...constraint, allowedValues }],
             ...(approvalMode ? { approvalMode } : {}),
           }),
         );
-      const original = ["A", "B"];
-      expect((await save(1, original)).status).toBe(409);
-      expect((await save(0, original)).status).toBe(200);
-      expect((await save(0, original)).status).toBe(409);
-      expect((await save(1, ["A"])).status).toBe(200);
-      const stale = await save(1, original, "required");
+      expect((await save(1)).status).toBe(409);
+      expect((await save(0, "not_required")).status).toBe(200);
+      expect((await save(0, "not_required")).status).toBe(409);
+      expect((await save(1, "required")).status).toBe(200);
+      const stale = await save(1, "not_required");
       expect(stale.status).toBe(409);
       expect(await stale.json()).toMatchObject({
         error: "policy_conflict",
@@ -379,24 +365,23 @@ describe("Connection-scoped App access", () => {
       expect((await (await h.request(path)).json()).policies).toMatchObject([
         {
           revision: 2,
-          constraints: [{ ...constraint, allowedValues: ["A"] }],
-          approvalMode: "not_required",
+          approvalMode: "required",
         },
       ]);
 
       await h.access.revoke(policy.appId, "connection-1", policy.identity, policy.operation);
-      expect((await save(2, original)).status).toBe(409);
-      expect((await save(0, ["A"])).status).toBe(200);
+      expect((await save(2, "not_required")).status).toBe(409);
+      expect((await save(0, "not_required")).status).toBe(200);
     } finally {
       h.close();
     }
   });
 
-  it("preserves non-document constraints through scoped edits", async () => {
+  it("preserves active constraints server-side and does not resurrect expired constraints", async () => {
     const h = makeApp();
     try {
       const extra = { inputPointer: "/workspace", allowedValues: ["internal"] };
-      const original = [constraint, extra, { ...constraint, allowedValues: ["Doc1", "Doc2"] }];
+      const original = [constraint, extra];
       await h.access.put({
         appId: policy.appId,
         connectionId: "connection-1",
@@ -408,17 +393,34 @@ describe("Connection-scoped App access", () => {
         expiresAt: null,
         grantEpoch: "grant-1",
       });
-      for (const constraints of [original, [extra, { ...constraint, allowedValues: ["Doc2"] }]]) {
-        const response = await h.request(
-          path + "/policies",
-          put({ ...policy, constraints, approvalMode: "required" }),
-        );
-        expect(response.status).toBe(200);
-        expect((await response.json()).policy.constraints).toEqual(constraints);
-      }
-      expect(
-        (await h.request(path + "/policies", put({ ...policy, constraints: [constraint] }))).status,
-      ).toBe(400);
+      const response = await h.request(
+        path + "/policies",
+        put({ ...policy, approvalMode: "required" }),
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).policy.constraints).toEqual(original);
+
+      // Expired rows do not carry constraints into a newly granted policy.
+      await h.access.put({
+        appId: "notes",
+        connectionId: "connection-1",
+        identity: policy.identity,
+        operation: policy.operation,
+        sideEffects: "read-only",
+        approval: "not_required",
+        constraints: [constraint],
+        expiresAt: new Date(Date.now() - 60_000),
+        grantEpoch: "grant-1",
+      });
+      const renewed = await h.request(
+        path + "/policies",
+        put({ ...policy, appId: "notes", expectedRevision: 0, approvalMode: "not_required" }),
+      );
+      expect(renewed.status).toBe(200);
+      expect((await renewed.json()).policy).toMatchObject({
+        constraints: [],
+        expiresAt: null,
+      });
     } finally {
       h.close();
     }

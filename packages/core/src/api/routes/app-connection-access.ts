@@ -1,5 +1,4 @@
 import { Hono, type Context } from "hono";
-import { isDeepStrictEqual } from "node:util";
 import type {
   AppConnectionAccessAuditPage,
   AppConnectionAccessPolicyDto,
@@ -16,16 +15,6 @@ import { appAccessibleOperations, describeAct } from "../../connections/app-conn
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 
-const ConstraintSchema = z
-  .object({
-    inputPointer: z.string().refine((value) => value === "" || value.startsWith("/")),
-    allowedValues: z
-      .array(z.union([z.string(), z.number(), z.boolean()]))
-      .min(1)
-      .max(100),
-  })
-  .strict();
-
 const ConnectionPutSchema = z
   .object({
     appId: z.string().min(1),
@@ -33,7 +22,6 @@ const ConnectionPutSchema = z
     operation: z.string().min(1),
     expectedRevision: z.int().nonnegative().optional(),
     approvalMode: z.enum(["required", "not_required"]).optional(),
-    constraints: z.array(ConstraintSchema).max(20).default([]),
   })
   .strict();
 
@@ -113,7 +101,6 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
                     summary: op.description,
                     requiredScopes: op.appAccess!.requiredScopes,
                     requiredScopeGroups: op.appAccess!.requiredScopeGroups,
-                    resourceConstraintKind: op.appAccess!.resourceConstraintKind,
                     approvalPreviewSummary: op.appAccess!.approvalPreview?.summary,
                   }))
                 : [],
@@ -212,18 +199,13 @@ async function putPolicy(
   c: Context,
   deps: ApiDeps,
   key: PolicyTarget,
-  policyInput: Pick<
-    z.infer<typeof ConnectionPutSchema>,
-    "approvalMode" | "constraints" | "expectedRevision"
-  >,
+  policyInput: Pick<z.infer<typeof ConnectionPutSchema>, "approvalMode" | "expectedRevision">,
 ) {
   const target = await resolveTarget(deps, key);
   if (!target.ok) return c.json({ error: target.error }, target.status);
   const access = target.value.access;
   const approval =
     policyInput.approvalMode ?? (access.sideEffects === "write" ? "required" : "not_required");
-  const editable = (rule: z.infer<typeof ConstraintSchema>) =>
-    access.resourceConstraintKind === "documentIds" && rule.inputPointer === "/documentId";
   const policy = await deps.appConnectionAccessRepo.putIfAppActive(
     {
       appId: target.value.appId,
@@ -233,7 +215,8 @@ async function putPolicy(
       sideEffects: target.value.access.sideEffects,
       approval,
       expectedRevision: policyInput.expectedRevision,
-      constraints: policyInput.constraints,
+      constraints: [],
+      preserveExistingConstraints: true,
       expiresAt: null,
       grantEpoch: target.value.grantEpoch,
     },
@@ -241,31 +224,12 @@ async function putPolicy(
       const app = deps.appCatalog.get(target.value.appId);
       return isResolvedApp(app) && app.enabled;
     },
-    (existing) => {
-      const incoming = policyInput.constraints;
-      if (isDeepStrictEqual(existing, incoming)) return true;
-      return (
-        isDeepStrictEqual(
-          existing.filter((r) => !editable(r)),
-          incoming.filter((r) => !editable(r)),
-        ) &&
-        incoming
-          .filter(editable)
-          .every((r) =>
-            r.allowedValues.every(
-              (id) => typeof id === "string" && /^[a-zA-Z0-9]{1,128}$/.test(id),
-            ),
-          )
-      );
-    },
   );
   if (policy === "policy_conflict")
     return c.json(
       { error: policy, message: "The access policy changed. Refresh and try again." },
       409,
     );
-  if (policy === "unsupported_constraints")
-    return c.json({ error: "Unsupported resource constraint." }, 400);
   if (!policy) return c.json({ error: "App not found or disabled." }, 409);
   return c.json({ policy: policyDto(policy, target.value.grant) });
 }

@@ -55,12 +55,11 @@ describe("Feishu app access guidance", () => {
 });
 
 describe("Feishu document reads", () => {
-  it("exposes document.read with its bounded schema and document constraint", () => {
+  it("exposes document.read with its bounded schema and required scopes", () => {
     expect(FEISHU_OPERATIONS.find((op) => op.name === FEISHU_DOCUMENT_READ)?.appAccess).toEqual({
       sideEffects: "read-only",
       requiredScopes: ["docx:document:readonly"],
       requiredScopeGroups: [["docx:document:readonly", "docx:document"]],
-      resourceConstraintKind: "documentIds",
     });
   });
   it("uses the selected bot and returns only bounded plain text", async () => {

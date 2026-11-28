@@ -777,7 +777,7 @@ function PermissionRow({
                       count: additionalPermissionIds.length,
                       scopes: additionalPermissionIds.join(", "),
                     })}
-                    className="h-4 cursor-default border-0 px-1 font-mono text-xs leading-none font-normal text-muted-foreground"
+                    className="h-5 cursor-default border-0 px-1 font-mono leading-none font-normal text-muted-foreground"
                   >
                     +{additionalPermissionIds.length}
                   </Badge>
@@ -887,7 +887,11 @@ function AppDetailDialog({
     for (const op of targetOps) {
       const existing = byOperation.get(op.name);
       const desiredApproval = op.sideEffect === "write" ? "required" : "not_required";
-      if (existing && existing.approvalMode === desiredApproval) {
+      if (
+        existing &&
+        existing.grantStatus === "current" &&
+        existing.approvalMode === desiredApproval
+      ) {
         continue;
       }
       requests.push({
@@ -897,7 +901,6 @@ function AppDetailDialog({
           operation: op.name,
           expectedRevision: existing?.revision ?? 0,
           approvalMode: desiredApproval,
-          constraints: existing?.constraints ?? [],
         },
       });
     }
@@ -1102,7 +1105,7 @@ function OperationRow({
   docUrl: string | null;
   canGrant: boolean;
   busy: boolean;
-  onSave: (values: Pick<PutAppConnectionAccessPolicy, "constraints" | "approvalMode">) => void;
+  onSave: (values: Pick<PutAppConnectionAccessPolicy, "approvalMode">) => void;
   onRevoke: () => void;
 }) {
   const { t } = useTranslation("settings", { keyPrefix: "connectionAppAccess" });
@@ -1112,7 +1115,6 @@ function OperationRow({
   const permissionIds = primaryPermissionIds(operation);
   const extraIds = extraPermissionIds(operation);
   const accessMode = policyAccessMode(policy);
-  const constraints = policy?.constraints ?? [];
 
   const handleModeChange = (nextMode: OperationAccessMode) => {
     if (nextMode === accessMode) return;
@@ -1122,7 +1124,6 @@ function OperationRow({
     }
     onSave({
       approvalMode: nextMode === "ask" ? "required" : "not_required",
-      constraints,
     });
   };
 

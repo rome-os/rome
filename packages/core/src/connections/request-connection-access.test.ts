@@ -360,6 +360,40 @@ describe("core:request_connection_access", () => {
     }
   });
 
+  it("does not resurrect constraints from an expired policy when granting via chat approval", async () => {
+    const f1 = makeFixture();
+    try {
+      await f1.access.put({
+        appId: "lark",
+        connectionId: "feishu-1",
+        identity: "app",
+        operation: "feishu.document.read",
+        sideEffects: "read-only",
+        approval: "not_required",
+        constraints: [{ inputPointer: "/documentId", allowedValues: ["expiredDoc"] }],
+        grantEpoch: "epoch-1",
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+
+      const resolved = await resolveConnectionAccessRequest(f1.deps, {
+        appId: "lark",
+        connectionKind: "feishu",
+        reason: "Read Feishu documents",
+      });
+      expect(resolved.ok).toBe(true);
+      if (!resolved.ok) return;
+
+      const granted = await grantConnectionAccessOperations(f1.deps, resolved.value);
+      expect(granted.ok).toBe(true);
+
+      const docPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.document.read");
+      expect(docPolicy?.expiresAt).toBeNull();
+      expect(docPolicy?.constraints).toEqual([]);
+    } finally {
+      f1.close();
+    }
+  });
+
   it("refuses execute when findApproval preview no longer matches the current request", async () => {
     const { deps, access, close } = makeFixture();
     try {

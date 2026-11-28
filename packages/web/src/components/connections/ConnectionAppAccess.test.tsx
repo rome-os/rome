@@ -80,7 +80,6 @@ const detail: ConnectionAppAccessDto = {
         {
           name: read,
           sideEffect: "read-only",
-          resourceConstraintKind: "documentIds",
           requiredScopes: ["docx:read", "docx:metadata"],
         },
         { name: write, sideEffect: "write" },
@@ -156,12 +155,18 @@ function setup({
     if (url === `${endpoint}/policies` && options?.method === "PUT") {
       const body = JSON.parse(String(options.body)) as PutAppConnectionAccessPolicy;
       puts.push(body);
+      const existing = policies.find(
+        (item) =>
+          item.appId === body.appId &&
+          item.identity === body.identity &&
+          item.operation === body.operation,
+      );
       const policy: AppConnectionAccessPolicyDto = {
         ...body,
         connectionId: "bot-a",
         sideEffect: body.operation === write ? "write" : "read-only",
         approvalMode: body.approvalMode ?? "not_required",
-        constraints: body.constraints ?? [],
+        constraints: existing?.constraints ?? [],
         expiresAt: null,
         grantStatus: "current",
         revision: ++revision,
@@ -370,19 +375,18 @@ describe("ConnectionAppAccess", () => {
     const extraBadge = opRow(spaces).getByText("+2");
     expect(extraBadge.getAttribute("aria-label")).toContain("wiki:wiki:readonly");
     expect(extraBadge.getAttribute("aria-label")).toContain("wiki:wiki");
-    expect(extraBadge.className).toContain("text-xs");
-    expect(extraBadge.className).toContain("h-4");
+    expect(extraBadge.className).toContain("text-badge");
+    expect(extraBadge.className).toContain("h-5");
 
     // Granting and revoking via the dropdown works cleanly
     fireEvent.change(opModeSelect(read), { target: { value: "allow" } });
     await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0]).toMatchObject({
+    expect(puts[0]).toEqual({
       appId: "app-b",
       expectedRevision: 0,
       identity: "app",
       operation: read,
       approvalMode: "not_required",
-      constraints: [],
     });
 
     await waitFor(() => expect(opModeSelect(read).value).toBe("allow"));
@@ -469,29 +473,79 @@ describe("ConnectionAppAccess", () => {
     );
   });
 
-  it("preserves existing policy constraints verbatim when changing access mode", async () => {
+  it("renews replaced policies when reapplying an access template after reconnect", async () => {
+    const replacedRead: AppConnectionAccessPolicyDto = {
+      ...currentPolicy(read),
+      grantStatus: "replaced",
+    };
+    const replacedWrite: AppConnectionAccessPolicyDto = {
+      ...currentPolicy(write),
+      sideEffect: "write",
+      approvalMode: "required",
+      grantStatus: "replaced",
+    };
+    const { puts } = setup({
+      data: { ...detail, policies: [replacedRead, replacedWrite] },
+    });
+    await openAuthorizedApp("App A");
+
+    const templateTrigger = await screen.findByRole<HTMLButtonElement>("button", {
+      name: "Use template",
+    });
+    await waitFor(() => expect(templateTrigger.disabled).toBe(false));
+    await userEvent.click(templateTrigger);
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: /Read & write \(ask on write\)/ }),
+    );
+
+    await waitFor(() => expect(puts).toHaveLength(3));
+    expect(puts).toEqual([
+      {
+        appId: "@a/app-a",
+        identity: "app",
+        operation: read,
+        expectedRevision: 1,
+        approvalMode: "not_required",
+      },
+      {
+        appId: "@a/app-a",
+        identity: "app",
+        operation: write,
+        expectedRevision: 1,
+        approvalMode: "required",
+      },
+      {
+        appId: "@a/app-a",
+        identity: "app",
+        operation: spaces,
+        expectedRevision: 0,
+        approvalMode: "not_required",
+      },
+    ]);
+  });
+
+  it("omits constraints when changing access mode so the server preserves stored constraints", async () => {
     const extra = { inputPointer: "/workspace", allowedValues: [4, true] };
-    const constraints = [
-      { inputPointer: "/documentId", allowedValues: ["A", "B"] },
-      extra,
-      { inputPointer: "/documentId", allowedValues: ["A"] },
-    ];
+    const constraints = [{ inputPointer: "/documentId", allowedValues: ["A", "B"] }, extra];
     const { puts } = setup({ data: { ...detail, policies: [currentPolicy(read, constraints)] } });
     await openAuthorizedApp("App A");
 
     fireEvent.change(opModeSelect(read), { target: { value: "ask" } });
     await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0].constraints).toEqual(constraints);
-    expect(puts[0].approvalMode).toBe("required");
+    expect(puts[0]).toEqual({
+      appId: "@a/app-a",
+      identity: "app",
+      operation: read,
+      expectedRevision: 1,
+      approvalMode: "required",
+    });
     await waitFor(() => expect(opModeSelect(read).value).toBe("ask"));
   });
 
   it("refreshes and explains a revision conflict after a stale access mode edit", async () => {
-    const previous = currentPolicy(read, [
-      { inputPointer: "/documentId", allowedValues: ["A", "B"] },
-    ]);
+    const previous = currentPolicy(read);
     const current = {
-      ...currentPolicy(read, [{ inputPointer: "/documentId", allowedValues: ["A"] }]),
+      ...currentPolicy(read),
       revision: 2,
     };
     const { requests } = setup({
@@ -512,9 +566,12 @@ describe("ConnectionAppAccess", () => {
     const put = fetch.mock.calls.find(
       ([url, options]) => url === endpoint + "/policies" && options?.method === "PUT",
     );
-    expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      appId: "@a/app-a",
+      identity: "app",
+      operation: read,
       expectedRevision: 1,
-      constraints: previous.constraints,
+      approvalMode: "required",
     });
     expect(requests.filter((url) => url === endpoint)).toHaveLength(2);
   });

@@ -21,13 +21,11 @@ const operations: ConnectionAppAccessDto["identities"][number]["operations"] = [
     name: "feishu.document.read",
     sideEffect: "read-only",
     ...feishuOperationScopes("document.read"),
-    resourceConstraintKind: "documentIds",
   },
   {
     name: "feishu.document.update",
     sideEffect: "write",
     ...feishuOperationScopes("document.update"),
-    resourceConstraintKind: "documentIds",
     approvalPreviewSummary: "Update Feishu document",
   },
   {
@@ -159,7 +157,7 @@ export const appConnectionAccessHandlers = [
       sideEffect: operation.sideEffect,
       approvalMode:
         input.approvalMode ?? (operation.sideEffect === "write" ? "required" : "not_required"),
-      constraints: input.constraints ?? [],
+      constraints: existing?.constraints ?? [],
       expiresAt: null,
       grantStatus: "current",
       createdAt: policies[index]?.createdAt ?? updatedAt,

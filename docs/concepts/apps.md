@@ -114,8 +114,10 @@ identity for one operation.
 **Contracts:**
 
 - Access defaults to denied. A Core-owned policy names the app, Connection, identity,
-  operation, side-effect classification, approval mode, optional input constraints, and
-  optional expiry. A descriptor change from read to write requires a new policy. Disabling
+  operation, side-effect classification, approval mode, and any stored input constraints.
+  Policies granted from Settings or chat stay active until revoked or replaced by a new
+  grant epoch (Core still honors an existing stored expiry if present). A descriptor change
+  from read to write requires a new policy. Disabling
   or removing the app revokes its policies. The policy is bound to the provider
   grant's current epoch. Reconnecting the Connection creates a new epoch and requires
   new App access. Fixing or otherwise giving its grant again does the same. Automatic
@@ -149,10 +151,19 @@ identity for one operation.
   or removing an App also rejects its pending invocations and clears their stored input.
   Startup preserves a pending invocation only when its durable approval exists. A duplicate
   of a failed invocation includes the original structured error code.
-- Read operations execute synchronously and cannot use deferred approval. An
-  approval-gated write returns `pending_approval`. Its later provider output is not
-  delivered to the App. Providers should expose a follow-up read when the App needs to
-  resolve the created resource.
+- Read operations default to `approvalMode: "not_required"` (**Allow**) and execute
+  synchronously. If the guardian sets a read operation to `approvalMode: "required"`
+  (**Ask every time**), `ctx.connections.invoke` returns `pending_approval` and queues a
+  `core:app_connection_read_with_approval` approval request. Once approved, Core replays
+  that action and returns the provider output to the replayed action result and
+  originating agent turn rather than to the earlier `invoke` call. Because read
+  invocations do not deduplicate by `requestId`, apps should treat `pending_approval` on a
+  read as terminal for the current call instead of retrying automatically.
+- Write operations default to `approvalMode: "required"` (**Ask every time**) and return
+  `pending_approval`. Their later provider output is not delivered to the App, so
+  providers should expose a follow-up read when the App needs to resolve the created
+  resource. A guardian can switch an individual write operation to **Allow**
+  (`approvalMode: "not_required"`) in Settings to skip per-call approval.
 - Core rechecks the policy revision and the provider grant immediately before calling
   the live capability. Revocation, expiry, degradation, or replacement cannot leave a
   captured authority usable. Startup reconciles persisted policies against the current
@@ -201,8 +212,9 @@ Feishu operations run as the connected bot with identity `app`.
 | Chats | List messages in a chat |
 | Scopes | List the bot's tenant scope grants |
 
-Creating or updating a document and creating a calendar event require guardian
-approval. For `feishu.document.read`, the bot needs a scope that covers
+Creating or updating a document and creating a calendar event ask for guardian
+approval by default (`approvalMode: "required"`), and the guardian can switch
+individual operations to **Allow** in Settings. For `feishu.document.read`, the bot needs a scope that covers
 `docx:document:readonly` and permission to open the document. The SDK input
 `{ documentId }` takes a Docx ID of at most 128 ASCII letters and digits.
 The output contains the ID, `content`, `format: "plain_text"`, and

@@ -179,7 +179,6 @@ export interface OperationDescriptor {
     sideEffects: "read-only" | "write";
     requiredScopes?: string[];
     requiredScopeGroups?: string[][];
-    resourceConstraintKind?: "documentIds";
     /** Safe fields Core may show when a guardian approves this operation. A
      * write operation must declare this contract before an App can use it. */
     approvalPreview?: {

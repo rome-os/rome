@@ -210,6 +210,7 @@ export const calendarOperations = [
         fields: [
           { label: "Calendar", inputPointer: "/calendarId" },
           { label: "Summary", inputPointer: "/summary" },
+          { label: "Description", inputPointer: "/description" },
           { label: "Start", inputPointer: "/startTime" },
           { label: "End", inputPointer: "/endTime" },
           { label: "Attendees", inputPointer: "/attendeeOpenIds" },
