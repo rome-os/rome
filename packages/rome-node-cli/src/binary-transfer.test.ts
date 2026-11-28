@@ -200,9 +200,7 @@ async function fixture(computerUse = false) {
       join(directory, "files"),
       undefined,
       testHelper?.preload,
-      helper
-        ? { ROME_NODE_COMPUTER_USE_HELPER: testHelper?.appPath ?? join(root, "missing.app") }
-        : undefined,
+      { ROME_NODE_COMPUTER_USE_HELPER: testHelper?.appPath ?? join(root, "missing.app") },
     );
     if (letter === "a") firstHost = host;
     cleanup.push(async () => {
@@ -270,9 +268,10 @@ const discovery = new URL("discovery.js", ${JSON.stringify(bridgeModule)}).href;
 registerHooks({ load(url, context, next) {
   if (url !== discovery) return next(url, context);
   return { format: "module", shortCircuit: true, source: \`
+    export * from \${JSON.stringify(discovery + "?headless")};
     import { discoverHelper as discover } from \${JSON.stringify(discovery + "?headless")};
     export function discoverHelper() {
-      return discover({ platform: "darwin" });
+      return discover({ platform: "darwin", stagedAppPath: null });
     }
   \` };
 }});

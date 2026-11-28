@@ -1,4 +1,14 @@
-import { getApiErrorMessage } from "@/lib/api-error";
+import { apiErrorMessageFrom } from "@/lib/api-error";
+
+export class FetchJsonError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
 
 export interface FetchJsonOptions extends Omit<RequestInit, "body" | "credentials" | "cache"> {
   // Serialized as the request body with a JSON content-type. Use this instead
@@ -35,7 +45,12 @@ export async function fetchJson<T>(url: string, options: FetchJsonOptions): Prom
     ...(json !== undefined ? { body: JSON.stringify(json) } : {}),
   });
   if (!response.ok) {
-    throw new Error(await getApiErrorMessage(response, fallback));
+    const body = await response.json().catch(() => null);
+    throw new FetchJsonError(
+      apiErrorMessageFrom(body, fallback),
+      response.status,
+      typeof body?.error === "string" ? body.error : undefined,
+    );
   }
   if (response.status === 204) {
     return undefined as T;

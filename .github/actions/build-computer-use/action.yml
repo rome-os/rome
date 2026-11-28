@@ -74,8 +74,7 @@ runs:
         }
         helper="packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"
         script=packages/rome-node-core/scripts/computer-use.swift
-        swift "$script" build --app "$helper" --identity "$signing_identity"
-        codesign --verify --strict --verbose=2 "$helper"
+        (umask 022; swift "$script" build --app "$helper" --identity "$signing_identity")
         if [ "$NOTARIZE" = true ]; then
           test -n "$APP_STORE_CONNECT_KEY_ID" && test -n "$APP_STORE_CONNECT_ISSUER_ID" && test -n "$APP_STORE_CONNECT_P8_CONTENT" || {
             echo "::error::Standalone helper publication requires the App Store Connect notarization key."
@@ -90,6 +89,10 @@ runs:
           xcrun notarytool submit "$archive" --key "$api_key_path" --key-id "$APP_STORE_CONNECT_KEY_ID" --issuer "$APP_STORE_CONNECT_ISSUER_ID" --wait --timeout 20m --output-format json > "$receipt"
           jq -e '.status == "Accepted"' "$receipt"
           xcrun stapler staple "$helper"
+        fi
+        chmod -R a+rX "$helper"
+        codesign --verify --strict --verbose=2 "$helper"
+        if [ "$NOTARIZE" = true ]; then
           spctl --assess --type execute --verbose=2 "$helper"
           swift "$script" verify --release --app "$helper"
         fi

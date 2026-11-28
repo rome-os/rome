@@ -54,7 +54,10 @@ async function checkInstalled(manager, name, archive, overrides) {
     const { discoverHelper } = await import(
       pathToFileURL(join(dirname(hostEntry), "computer-use/discovery.js"))
     );
-    assert.equal(await discoverHelper({ envPath: undefined, applications: [] }), join(helper, app));
+    assert.equal(
+      await discoverHelper({ envPath: undefined, stagedAppPath: null, applications: [] }),
+      join(helper, app),
+    );
   } else {
     assert.throws(resolveHelper, { code: "MODULE_NOT_FOUND" });
   }

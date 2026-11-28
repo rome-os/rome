@@ -74,7 +74,14 @@ type Bridge = Pick<
   | "onCancelRequested"
 >;
 
-interface HostDeps {
+export type EnsureComputerUseHelper = (options?: { force?: boolean }) => Promise<boolean>;
+
+export interface HelperOptions {
+  ensureHelper?: EnsureComputerUseHelper;
+  strictBundledAppPath?: boolean;
+}
+
+interface HostDeps extends HelperOptions {
   bundledAppPath?: string;
   discover: typeof discoverHelper;
   probePermissions: typeof probeHelperPermissions;
@@ -156,6 +163,7 @@ export class ComputerUseHost {
     { result: Promise<boolean | undefined>; expiresAt: number }
   >();
   private discovering?: Promise<string>;
+  private ensuring?: Promise<void>;
 
   constructor(deps: Partial<HostDeps> = {}) {
     this.deps = {
@@ -337,7 +345,7 @@ export class ComputerUseHost {
     const session = this.sessions.get(peer);
     const stopped = Boolean(session?.stop);
     const live = session?.phase?.status === "authorized" && !session.bridge?.closed;
-    const installed = Boolean(appPath) || live;
+    const installed = Boolean(appPath) || (!this.deps.ensureHelper && live);
     const state = stopped || !installed ? "off" : (permitted ?? live) ? "on" : "needs_permission";
     const operations = Object.entries<Operation>(this.operations);
     const advertised = installed
@@ -398,6 +406,10 @@ export class ComputerUseHost {
     const run = async (refusal?: ActionResponse) => {
       try {
         if (stopping) return await stopping;
+        if (session?.bridge && this.deps.ensureHelper) {
+          await this.ensureReady(this.deps.ensureHelper);
+          this.check(session);
+        }
         if (refusal) return { response: refusal, body: empty };
         if (body?.byteLength)
           return failure("invalid_request", "Computer Use takes no binary input.");
@@ -482,12 +494,44 @@ export class ComputerUseHost {
   }
 
   private findHelper(): Promise<string> {
-    this.discovering ??= this.deps
-      .discover({ bundledAppPath: this.deps.bundledAppPath })
-      .finally(() => {
-        this.discovering = undefined;
-      });
+    this.discovering ??= this.resolveHelper().finally(() => {
+      this.discovering = undefined;
+    });
     return this.discovering;
+  }
+
+  private ensureReady(ensureHelper: EnsureComputerUseHelper, force = false) {
+    if (this.ensuring && !force) return this.ensuring;
+    // A forced repair runs after any live bridge's check and also serves later callers.
+    const previous = this.ensuring?.catch(() => {}) ?? Promise.resolve();
+    const pending = previous
+      .then(() => (force ? ensureHelper({ force: true }) : ensureHelper()))
+      .catch(() => false)
+      .then((ready) => {
+        if (!ready) {
+          this.permissionProbes.clear();
+          throw new ComputerUseError("computer_use_helper_missing");
+        }
+      })
+      .finally(() => {
+        if (this.ensuring === pending) this.ensuring = undefined;
+      });
+    this.ensuring = pending;
+    return pending;
+  }
+
+  private async resolveHelper(): Promise<string> {
+    const { discover, bundledAppPath, strictBundledAppPath, ensureHelper } = this.deps;
+    const options = { bundledAppPath, strictBundledAppPath };
+    if (ensureHelper) await this.ensureReady(ensureHelper);
+    try {
+      return await discover(options);
+    } catch (cause) {
+      if (!ensureHelper || errorCode(cause) !== "computer_use_helper_missing") throw cause;
+      this.permissionProbes.clear();
+      await this.ensureReady(ensureHelper, true);
+      return discover(options);
+    }
   }
 
   private permissions(appPath: string): Promise<boolean | undefined> {

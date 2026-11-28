@@ -39,7 +39,9 @@ function previewLines(preview: PreviewPayload): unknown[] {
  *  agent wants to do, and, while it waits, where the guardian answers it. */
 export function approvalCardText(card: ApprovalCard): string {
   const title =
-    card.preview.kind === "generic" || card.preview.kind === "secret_access"
+    card.preview.kind === "generic" ||
+    card.preview.kind === "secret_access" ||
+    card.preview.kind === "connection_access"
       ? typeof card.preview.title === "string"
         ? card.preview.title
         : card.actionName

@@ -314,8 +314,9 @@ final class DemoBackend: RomeBackend {
 
     func archivedTopicChats() async throws -> [ChatSession] {
         try await pause(0.2)
-        return archivedTopics.map { chat in
-            ChatSession(id: chat.id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now), activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: nil)
+        // Latest archived first, an hour apart.
+        return archivedTopics.enumerated().map { index, chat in
+            ChatSession(id: chat.id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now.addingTimeInterval(Double(-index * 3600))), activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: nil)
         }
     }
 
@@ -1375,10 +1376,9 @@ final class DemoBackend: RomeBackend {
         let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900, "topic-reply-links": 1000, "topic-ai": 1100, "topic-provider": 1200]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
-        // Archived topic chats, out of the drawer's list: the Archived button's
-        // sheet lists them, and each opens read only. The car's archive moved
-        // a follow to the main chat, so its Restore asks about it. Their last
-        // activity spans weeks, months and a year, for the sheet's groups.
+        // Archived topic chats, out of the drawer's list: the drawer's
+        // Archived group lists them, and each opens read only. The car's
+        // archive moved a follow to the main chat, so its Restore asks about it.
         archivedTopics = [
             ConciergeChat(id: "topic-archived-gift", name: "生日礼物清单", main: false),
             ConciergeChat(id: "topic-archived-car", name: "二手车比价", main: false),

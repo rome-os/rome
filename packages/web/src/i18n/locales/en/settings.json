@@ -320,10 +320,10 @@
       "forms": {
         "feishu": {
           "mode": {
-            "instructions": "Choose how to connect: agent-ready scans a QR code to create Rome's app in your tenant automatically; manual pastes an existing custom app's credentials.",
             "fields": {
               "mode": {
                 "label": "Setup method",
+                "description": "Choose how to connect: agent-ready scans a QR code to create Rome's app in your tenant automatically; manual pastes an existing custom app's credentials.",
                 "options": {
                   "agent-ready": "Agent-ready (scan QR code)",
                   "manual": "Manual (App ID & App Secret)"
@@ -1181,30 +1181,223 @@
       "instructions": "Installation and connection guide"
     }
   },
-  "appDocuments": {
-    "title": "App document access",
-    "scope": "Allow an installed app to read one document through a connected Feishu/Lark bot. This does not grant the bot permissions in Feishu.",
-    "app": "Choose an app",
-    "bot": "Choose a bot connection",
-    "loadFailed": "Could not load document access.",
-    "saveFailed": "Could not save document access.",
-    "previous": "Previous connections",
-    "next": "More connections",
-    "unsupported": "This Core does not support document reading on this connection.",
-    "disconnected": "This connection needs to be fixed before granting access.",
-    "providerScope": "Required bot permission (not checked):",
-    "feishuConsole": "Feishu app permissions",
-    "larkConsole": "Lark app permissions",
-    "providerGuidance": "An app administrator must grant and publish the required permission in the provider console. Share the document with the bot as needed. This screen does not request or change provider permissions.",
-    "document": "Document ID (not a URL)",
-    "replaceWarning": "Allows only this document for 24 hours. Replaces this app’s existing document-read rule on the selected bot. Writes are not allowed.",
-    "allow": "Allow the selected app to read this document",
-    "allDocuments": "No document restriction",
-    "active": "Active",
-    "inactive": "Expired or connection authorization changed",
-    "revoke": "Revoke this app’s access",
-    "loading": "Loading access…",
-    "saved": "Access updated",
-    "refresh": "Refresh access"
+  "connectionAppAccess": {
+    "title": "App Access",
+    "access": "Authorized apps",
+    "audit": "Activity",
+    "app": "App",
+    "appOption": "{{name}} · {{id}}",
+    "identity": "Connection identity",
+    "hasGrants": "Has grants",
+    "disabled": "Disabled",
+    "needsAttention": "Needs attention",
+    "done": "Done",
+    "addApp": "Add app",
+    "authorizeManually": "Authorize an app",
+    "manualPanelTitle": "Authorize an app",
+    "configureManually": "Customize permissions",
+    "presetLabel": "Access level",
+    "presetRead": "Read-only",
+    "presetReadAndWrite": "Read & write",
+    "presetReadHint": "Allows reading documents, Drive metadata, Wiki, Base, Sheets, Calendar, and chats.",
+    "presetReadAndWriteHint": "Includes all read-only and write operations. Every write still asks for your approval.",
+    "grantAndOpen": "Grant access",
+    "cancel": "Cancel",
+    "close": "Done",
+    "readCount": "{{count}} read",
+    "writeCount": "{{count}} write",
+    "noActiveGrants": "No active grants",
+    "emptyAuthorizedTitle": "No authorized apps yet",
+    "emptyAuthorizedDescription": "When an agent needs an app to use this connection, it will send an authorization card in chat for one-click approval.",
+    "useTemplate": "Use template",
+    "revokeAll": "Revoke all",
+    "refresh": "Refresh access",
+    "grant": "Grant",
+    "save": "Save changes",
+    "retry": "Try again",
+    "loadingApps": "Loading installed apps…",
+    "emptyApps": "No apps are installed.",
+    "emptyOperations": "This identity offers no operations to apps.",
+    "loadFailed": "Could not load app access.",
+    "saveFailed": "Could not update app access.",
+    "policyConflict": "This access policy changed elsewhere. Review the refreshed policy before saving again.",
+    "configureOperation": "Configure {{name}}",
+    "viewPermissionDocs": "Open developer documentation for {{name}}",
+    "additionalPermissionsTitle": "Additional equivalent scopes",
+    "additionalPermissions": "{{count}} more equivalent scopes: {{scopes}}",
+    "restrictedDocsShort": "{{count}} docs allowed",
+    "noAllowedDocumentsShort": "No docs allowed",
+    "documentIds": "Allowed documents",
+    "noAllowedDocuments": "The current rules allow no documents. Enter Docx IDs or links to change access.",
+    "documentHelp": "Enter Docx IDs or Feishu or Lark Docx links, separated by commas or new lines. Leave blank to allow all documents the bot can access.",
+    "invalidDocuments": "Enter up to 100 valid Docx IDs or Feishu or Lark Docx links.",
+    "accessMode": {
+      "disabled": "Disabled",
+      "allow": "Allow",
+      "ask": "Ask every time"
+    },
+    "templates": {
+      "readOnly": {
+        "title": "All read-only",
+        "description": "Allow all read-only operations"
+      },
+      "readAndWrite": {
+        "title": "Read & write (ask on write)",
+        "description": "Allow all reads; ask before every write"
+      },
+      "docsAndWiki": {
+        "title": "Docs & Wiki read-only",
+        "description": "Read documents, Drive metadata, and Wiki only"
+      }
+    },
+    "providerScopesTitle": "Provider permissions",
+    "providerScopesSubtitle": "Verify that required scopes are enabled in the provider console",
+    "providerScopesAllGranted": "All {{total}} required scopes are enabled",
+    "providerScopesMissingSummary": "{{missing}} of {{total}} required scopes missing",
+    "providerConsole": "Developer console",
+    "providerPermissions": "Permissions console",
+    "providerDocs": "Scope docs",
+    "checkScopes": "Check scopes",
+    "checkingScopes": "Checking…",
+    "checkedAt": "Checked at {{date}}",
+    "scopeGranted": "Granted",
+    "scopeMissing": "Missing",
+    "scopeOr": "or",
+    "viewScopeDetails": "View details",
+    "noRequiredScopes": "Current grants require no provider scopes to verify for this identity.",
+    "auditApp": "App",
+    "allApps": "All apps",
+    "loadingAudit": "Loading activity…",
+    "auditFailed": "Could not load the audit log.",
+    "emptyAudit": "No calls recorded.",
+    "loadMore": "Load more",
+    "auditError": "Error code · {{code}}",
+    "execution": "Execution · {{id}}",
+    "request": "Request hash · {{hash}}",
+    "revision": "Grant revision · {{revision}}",
+    "groups": {
+      "document": "Documents",
+      "drive": "Drive",
+      "wiki": "Wiki",
+      "base": "Base",
+      "sheets": "Sheets",
+      "calendar": "Calendar",
+      "im": "Chats",
+      "scopes": "Scopes",
+      "other": "Other operations"
+    },
+    "operations": {
+      "feishu_scopes_list": {
+        "title": "List bot scopes",
+        "description": "Check which Feishu scopes are enabled on this bot"
+      },
+      "feishu_document_read": {
+        "title": "Read documents",
+        "description": "Read document titles and content blocks"
+      },
+      "feishu_document_create": {
+        "title": "Create documents",
+        "description": "Create new cloud documents with optional initial content"
+      },
+      "feishu_document_update": {
+        "title": "Update documents",
+        "description": "Append to or overwrite existing cloud documents"
+      },
+      "feishu_drive_inspect": {
+        "title": "Inspect Drive metadata",
+        "description": "Resolve Feishu URLs and inspect file metadata"
+      },
+      "feishu_wiki_spaces": {
+        "title": "List Wiki spaces",
+        "description": "Browse accessible Feishu Wiki spaces"
+      },
+      "feishu_wiki_node_get": {
+        "title": "Read Wiki node",
+        "description": "Resolve a Wiki page node and its backing object"
+      },
+      "feishu_wiki_nodes_list": {
+        "title": "List Wiki pages",
+        "description": "Browse child pages within a Wiki space or node"
+      },
+      "feishu_base_get": {
+        "title": "Read Base info",
+        "description": "Inspect a Bitable app name and metadata"
+      },
+      "feishu_base_tables_list": {
+        "title": "List Base tables",
+        "description": "List tables inside a Bitable app"
+      },
+      "feishu_base_fields_list": {
+        "title": "List table fields",
+        "description": "Read column schemas for a Bitable table"
+      },
+      "feishu_base_records_list": {
+        "title": "Read table records",
+        "description": "Query rows from a Bitable table"
+      },
+      "feishu_sheets_info": {
+        "title": "Read spreadsheet info",
+        "description": "Read spreadsheet metadata and sheet list"
+      },
+      "feishu_sheets_cells_read": {
+        "title": "Read spreadsheet cells",
+        "description": "Read cell values from a spreadsheet range"
+      },
+      "feishu_calendar_events_list": {
+        "title": "List calendar events",
+        "description": "List events in a time range"
+      },
+      "feishu_calendar_event_get": {
+        "title": "Read event details",
+        "description": "Read full details for a single calendar event"
+      },
+      "feishu_calendar_events_search": {
+        "title": "Search calendar events",
+        "description": "Search calendar events by keyword"
+      },
+      "feishu_calendar_event_create": {
+        "title": "Create calendar events",
+        "description": "Create a new calendar event and optionally invite attendees"
+      },
+      "feishu_im_messages_list": {
+        "title": "Read chat messages",
+        "description": "List message history in a chat conversation"
+      }
+    },
+    "sideEffect": {
+      "read-only": "Read-only",
+      "write": "Write",
+      "unknown": "Unknown"
+    },
+    "renew": "Renew",
+    "grantStatus": {
+      "current": "Granted",
+      "authorization_required": "Connection needs authorization",
+      "replaced": "Connection authorization changed",
+      "unavailable": "Grant unavailable"
+    },
+    "identityState": {
+      "needs_authorization": "Authorize the connection before managing app access.",
+      "unhealthy": "Repair the connection before managing app access.",
+      "unsupported": "This connection identity cannot run app operations."
+    },
+    "scopeStatus": {
+      "checked": "Provider scopes checked.",
+      "unsupported": "This provider does not support scope checks.",
+      "unavailable": "The connection is unavailable for a scope check.",
+      "error": "Could not check provider scopes."
+    },
+    "outcome": {
+      "outcome_unknown": "Outcome unknown — do not retry",
+      "succeeded": "Succeeded",
+      "pending": "Awaiting approval",
+      "failed": "Failed"
+    },
+    "approval": {
+      "not_required": "No approval required",
+      "pending": "Approval pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
   }
 }

@@ -30,6 +30,8 @@ export interface SetupFormField {
   /** The answer key this field lands under in the returned record. */
   name: string;
   label: string;
+  /** Optional helper text displayed beneath this field's control. */
+  description?: string;
   /** Credentials default to secret; a plain identifier passes `secret: false`. */
   secret: boolean;
   format?: "line" | "multiline" | "file";

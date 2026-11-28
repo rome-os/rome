@@ -26,8 +26,17 @@ import type {
 import type { GrantValue } from "./grant.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
+import {
+  createRequestConnectionAccessAction,
+  REQUEST_CONNECTION_ACCESS_ACTION,
+  type AppCatalogLookup,
+  type RequestConnectionAccessDeps,
+} from "./request-connection-access.js";
+
+export { REQUEST_CONNECTION_ACCESS_ACTION };
 
 const READ_ACTION = "core:app_connection_read";
+export const APP_CONNECTION_READ_APPROVAL_ACTION = "core:app_connection_read_with_approval";
 export const APP_CONNECTION_WRITE_ACTION = "core:app_connection_write";
 const APPROVED_WRITE_ACTION = "core:app_connection_write_without_approval";
 const DEFAULT_PAGE_SIZE = 20;
@@ -38,7 +47,7 @@ const DEFAULT_INVOKE_LIMIT = 120;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
 export const APP_CONNECTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-type BrokerActionMode = "read" | "write" | "write_without_approval";
+type BrokerActionMode = "read" | "read_with_approval" | "write" | "write_without_approval";
 
 export type AppConnectionBrokerResult<T> =
   | { ok: true; value: T }
@@ -170,6 +179,8 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly rateWindowMs: number;
   private readonly now: () => number;
   private readonly isReady: () => boolean;
+  private readonly lookupApp?: AppCatalogLookup;
+  private readonly findApproval?: RequestConnectionAccessDeps["findApproval"];
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -180,12 +191,16 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       rateWindowMs?: number;
       now?: () => number;
       isReady?: () => boolean;
+      lookupApp?: AppCatalogLookup;
+      findApproval?: RequestConnectionAccessDeps["findApproval"];
     } = {},
   ) {
     this.invokeLimit = options.invokeLimit ?? DEFAULT_INVOKE_LIMIT;
     this.rateWindowMs = options.rateWindowMs ?? DEFAULT_RATE_WINDOW_MS;
     this.now = options.now ?? Date.now;
     this.isReady = options.isReady ?? (() => true);
+    this.lookupApp = options.lookupApp;
+    this.findApproval = options.findApproval;
   }
 
   forApp(appId: string): AppConnectionsCapability {
@@ -194,8 +209,20 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
 
   registerActions(registry: ActionRegistryImpl): void {
     registry.register(this.action(READ_ACTION, "read", false));
+    registry.register(this.action(APP_CONNECTION_READ_APPROVAL_ACTION, "read_with_approval", true));
     registry.register(this.action(APP_CONNECTION_WRITE_ACTION, "write", true));
     registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
+    if (this.lookupApp) {
+      registry.register(
+        createRequestConnectionAccessAction({
+          registry: this.registry,
+          access: this.access,
+          lookupApp: this.lookupApp,
+          findApproval: this.findApproval,
+          isReady: this.isReady,
+        }),
+      );
+    }
   }
 
   async list(
@@ -380,11 +407,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (activePolicy.sideEffects !== sideEffects) {
       return await denied(failure("access_denied", "The operation access classification changed."));
     }
-    if (sideEffects === "read-only" && activePolicy.approval === "required") {
-      return await denied(
-        failure("access_denied", "Read operations cannot use deferred approval."),
-      );
-    }
     if (sideEffects === "write" && input.requestId === undefined) {
       return await denied(
         failure("request_id_required", "Write operations require a stable requestId."),
@@ -476,7 +498,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   async approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> {
-    if (actionName !== APP_CONNECTION_WRITE_ACTION || typeof args.invocationId !== "string") {
+    if (
+      (actionName !== APP_CONNECTION_WRITE_ACTION &&
+        actionName !== APP_CONNECTION_READ_APPROVAL_ACTION) ||
+      typeof args.invocationId !== "string"
+    ) {
       return;
     }
     const invocation = await this.access.getInvocation(args.invocationId);
@@ -511,7 +537,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           return { status: "error", error: "Missing connection invocation id." };
         }
         const result = await this.execute(args.invocationId, mode);
-        if (mode === "write") {
+        if (requiresApproval) {
           if (!result.ok) return { status: "error", error: result.error.message };
           if (result.value.status === "outcome_unknown") {
             return {
@@ -532,7 +558,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
     if (!this.isReady()) return brokerUnavailable();
     const expectedEffect = mode.startsWith("read") ? "read-only" : "write";
-    const expectedApproval = mode === "write";
+    const expectedApproval = mode === "write" || mode === "read_with_approval";
     const expectedStatus = expectedApproval ? "pending_approval" : "ready";
     const executionApproval = expectedApproval ? "approved" : "not_required";
     const invocation = await this.access.getInvocation(invocationId);
@@ -660,7 +686,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           !currentGrant ||
           currentGrant.state !== "authorized" ||
           currentGrant.grantEpoch !== grant.grantEpoch ||
-          !this.access.isInvocationPolicyCurrent(invocation, "not_required")
+          !this.access.isInvocationPolicyCurrent(
+            invocation,
+            expectedApproval ? "required" : "not_required",
+          )
         ) {
           return await fail("access_denied");
         }
@@ -679,7 +708,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         value: {
           status: "ok",
           executionId: invocation.id,
-          ...(data === undefined || expectedApproval ? {} : { data: JSON.parse(output.value) }),
+          ...(data === undefined || (expectedApproval && expectedEffect === "write")
+            ? {}
+            : { data: JSON.parse(output.value) }),
         },
       };
     } catch (error) {
@@ -757,18 +788,25 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       ? operation.value.find((entry) => entry.name === invocation.operation)
       : null;
     const declared = descriptor?.appAccess?.approvalPreview;
+    const declaredFields = (declared?.fields ?? []).slice(0, 8).flatMap((field) => {
+      const label = clip(field.label, 80);
+      const resolved = resolvePointer(invocation.input, field.inputPointer);
+      if (resolved.found && resolved.value !== undefined) {
+        return [{ label, value: previewValue(resolved.value) }];
+      }
+      if (invocation.input !== null) {
+        const meta = previewFieldMeta(descriptor?.inputSchema, field.inputPointer);
+        if (meta.hasDefault) return [{ label, value: previewValue(meta.defaultValue) }];
+        if (meta.optional) return [];
+      }
+      return [{ label, value: "Unavailable" }];
+    });
     const fields = [
       { label: "App", value: invocation.appId },
       { label: "Connection", value: connection?.label ?? invocation.connectionId },
       { label: "Identity", value: invocation.identity },
       { label: "Operation", value: invocation.operation },
-      ...(declared?.fields ?? []).slice(0, 8).map((field) => {
-        const resolved = resolvePointer(invocation.input, field.inputPointer);
-        return {
-          label: clip(field.label, 80),
-          value: resolved.found ? previewValue(resolved.value) : "Unavailable",
-        };
-      }),
+      ...declaredFields,
     ];
     return {
       kind: "generic" as const,
@@ -883,7 +921,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         return failure("invalid_input", "The operation has an invalid input schema.");
       }
     }
-    if (!validator(input)) {
+    if (!validator(input) || (operation.validateInput && !operation.validateInput(input))) {
       return failure("invalid_input", "The input does not satisfy the operation schema.");
     }
     return { ok: true, value: true };
@@ -998,7 +1036,7 @@ function actionFor(
   approval: "required" | "not_required",
 ): string {
   if (sideEffects === "read-only") {
-    return READ_ACTION;
+    return approval === "required" ? APP_CONNECTION_READ_APPROVAL_ACTION : READ_ACTION;
   }
   return approval === "required" ? APP_CONNECTION_WRITE_ACTION : APPROVED_WRITE_ACTION;
 }
@@ -1009,6 +1047,9 @@ function clip(value: string, limit: number): string {
 
 function previewValue(value: unknown): string {
   if (typeof value === "string") return clip(value, 500);
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return clip(value.join(", "), 500);
+  }
   if (typeof value === "number" || typeof value === "boolean" || value === null) {
     return String(value);
   }
@@ -1019,7 +1060,7 @@ function previewValue(value: unknown): string {
   }
 }
 
-function describeAct(connection: Connection): AppConnectionDescription["act"] {
+export function describeAct(connection: Connection): AppConnectionDescription["act"] {
   const status = connection.status().act;
   if (status.state === "unsupported") return { state: "unsupported" };
   if (status.state === "needs-auth") {
@@ -1143,6 +1184,39 @@ function resolvePointer(value: unknown, pointer: string): { found: boolean; valu
     current = (current as Record<string, unknown>)[key];
   }
   return { found: true, value: current };
+}
+
+function previewFieldMeta(
+  schema: Record<string, unknown> | undefined,
+  pointer: string,
+): { hasDefault: boolean; defaultValue?: unknown; optional: boolean } {
+  if (!schema || !pointer.startsWith("/")) return { hasDefault: false, optional: false };
+  const segments = pointer
+    .slice(1)
+    .split("/")
+    .map((raw) => raw.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let current: unknown = schema;
+  let optional = false;
+  for (const key of segments) {
+    if (typeof current !== "object" || current === null) {
+      return { hasDefault: false, optional: false };
+    }
+    const obj = current as Record<string, unknown>;
+    const properties = obj.properties;
+    if (typeof properties !== "object" || properties === null || !(key in properties)) {
+      return { hasDefault: false, optional: false };
+    }
+    const required = Array.isArray(obj.required) ? obj.required : [];
+    if (!required.includes(key)) optional = true;
+    current = (properties as Record<string, unknown>)[key];
+  }
+  if (typeof current === "object" && current !== null && "default" in current) {
+    const defaultValue = (current as Record<string, unknown>).default;
+    if (defaultValue !== undefined) {
+      return { hasDefault: true, defaultValue, optional };
+    }
+  }
+  return { hasDefault: false, optional };
 }
 
 function isConstraintValue(value: unknown): value is string | number | boolean {

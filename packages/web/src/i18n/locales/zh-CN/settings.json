@@ -320,10 +320,10 @@
       "forms": {
         "feishu": {
           "mode": {
-            "instructions": "选择连接方式：自动创建会通过扫码在你的飞书 / Lark 企业内自动创建 Rome 应用；手动配置则填写已有自建应用的凭证。",
             "fields": {
               "mode": {
                 "label": "连接方式",
+                "description": "选择连接方式：自动创建会通过扫码在你的飞书 / Lark 企业内自动创建 Rome 应用；手动配置则填写已有自建应用的凭证。",
                 "options": {
                   "agent-ready": "自动创建（扫码创建应用）",
                   "manual": "手动配置（填写 App ID 和 App Secret）"
@@ -1181,30 +1181,223 @@
       "instructions": "安装与连接指南"
     }
   },
-  "appDocuments": {
-    "title": "App 文档读取授权",
-    "scope": "允许已安装 App 使用所选飞书/Lark Bot 读取一份文档。这不会增加 Bot 在飞书侧的权限。",
-    "app": "选择 App",
-    "bot": "选择 Bot 连接",
-    "loadFailed": "无法加载文档读取授权。",
-    "saveFailed": "无法保存文档读取授权。",
-    "previous": "上一页连接",
-    "next": "更多连接",
-    "unsupported": "此 Core 尚不支持通过这个连接读取文档。",
-    "disconnected": "此连接需要修复，暂不能授予调用权限。",
-    "providerScope": "Bot 所需权限（尚未检查）：",
-    "feishuConsole": "飞书应用权限管理",
-    "larkConsole": "Lark 应用权限管理",
-    "providerGuidance": "请由应用管理员在对应控制台配置权限，完成必要的审批与发布，并按需向 Bot 分享文档。此页面不会提交或修改飞书侧权限。",
-    "document": "文档 ID（不是链接）",
-    "replaceWarning": "仅允许读取这份文档，有效期 24 小时。会替换所选 App 在这个 Bot 上已有的文档读取规则，不允许写入。",
-    "allow": "允许所选 App 读取这份文档",
-    "allDocuments": "未限制文档范围",
-    "active": "有效",
-    "inactive": "已过期或连接授权已变更",
-    "revoke": "撤销此 App 的调用权限",
-    "loading": "正在加载授权…",
-    "saved": "授权已更新",
-    "refresh": "刷新授权"
+  "connectionAppAccess": {
+    "title": "应用访问权限",
+    "access": "已授权应用",
+    "audit": "调用记录",
+    "app": "应用",
+    "appOption": "{{name}} · {{id}}",
+    "identity": "连接身份",
+    "hasGrants": "已有权限",
+    "disabled": "已停用",
+    "needsAttention": "需检查",
+    "done": "完成",
+    "addApp": "添加应用",
+    "authorizeManually": "手动授权应用",
+    "manualPanelTitle": "为应用授予访问权限",
+    "configureManually": "自定义权限",
+    "presetLabel": "权限范围",
+    "presetRead": "仅只读",
+    "presetReadAndWrite": "只读 + 写入",
+    "presetReadHint": "允许读取文档、云盘、知识库、表格、日历和聊天记录。",
+    "presetReadAndWriteHint": "包含全部只读权限及写入权限；每次写入操作仍会先请你确认。",
+    "grantAndOpen": "一键授权",
+    "cancel": "取消",
+    "close": "收起",
+    "readCount": "{{count}} 项只读",
+    "writeCount": "{{count}} 项写入",
+    "noActiveGrants": "暂无生效权限",
+    "emptyAuthorizedTitle": "暂无已授权应用",
+    "emptyAuthorizedDescription": "当你在对话中让助手使用飞书等应用时，助手会直接发送授权卡片供你一键确认。",
+    "useTemplate": "使用配置模板",
+    "revokeAll": "撤销全部",
+    "refresh": "刷新",
+    "grant": "授予权限",
+    "save": "保存设置",
+    "retry": "重试",
+    "loadingApps": "正在加载已安装应用…",
+    "emptyApps": "当前尚未安装任何应用。",
+    "emptyOperations": "此连接身份暂无可授予应用的操作。",
+    "loadFailed": "无法加载应用访问权限。",
+    "saveFailed": "无法更新应用访问权限。",
+    "policyConflict": "此权限策略已在别处更新，已为你刷新最新内容，请确认后再保存。",
+    "configureOperation": "配置「{{name}}」的高级选项",
+    "viewPermissionDocs": "查看「{{name}}」的开发者文档",
+    "additionalPermissionsTitle": "其他关联权限",
+    "additionalPermissions": "另外 {{count}} 项关联权限：{{scopes}}",
+    "restrictedDocsShort": "限定 {{count}} 篇文档",
+    "noAllowedDocumentsShort": "当前无允许文档",
+    "documentIds": "允许访问的文档",
+    "noAllowedDocuments": "当前规则不允许访问任何文档。请输入文档 ID 或链接以修改权限。",
+    "documentHelp": "输入 Docx 文档 ID 或飞书/Lark 文档链接，用逗号或换行分隔；留空表示允许机器人可访问的全部文档。",
+    "invalidDocuments": "最多可输入 100 个有效的 Docx 文档 ID 或飞书/Lark 文档链接。",
+    "accessMode": {
+      "disabled": "禁用",
+      "allow": "允许",
+      "ask": "每次询问"
+    },
+    "templates": {
+      "readOnly": {
+        "title": "全部只读",
+        "description": "允许全部只读操作"
+      },
+      "readAndWrite": {
+        "title": "只读 + 写入时每次询问",
+        "description": "允许全部只读，写入操作每次询问确认"
+      },
+      "docsAndWiki": {
+        "title": "仅文档与知识库只读",
+        "description": "仅允许读取云文档、云盘与知识库"
+      }
+    },
+    "providerScopesTitle": "服务商权限状态",
+    "providerScopesSubtitle": "核对已授权功能所需的服务商后台权限是否已开通",
+    "providerScopesAllGranted": "所需的 {{total}} 项服务商权限已全部开通",
+    "providerScopesMissingSummary": "缺少 {{missing}} 项服务商权限（共 {{total}} 项）",
+    "providerConsole": "开发者后台",
+    "providerPermissions": "权限后台",
+    "providerDocs": "权限文档",
+    "checkScopes": "检查权限",
+    "checkingScopes": "检查中…",
+    "checkedAt": "检查于 {{date}}",
+    "scopeGranted": "已开通",
+    "scopeMissing": "未开通",
+    "scopeOr": "或",
+    "viewScopeDetails": "查看详情",
+    "noRequiredScopes": "当前生效授权无需额外检查服务商权限范围。",
+    "auditApp": "应用",
+    "allApps": "全部应用",
+    "loadingAudit": "正在加载调用记录…",
+    "auditFailed": "无法加载调用记录。",
+    "emptyAudit": "暂无调用记录。",
+    "loadMore": "加载更多",
+    "auditError": "错误码 · {{code}}",
+    "execution": "执行 ID · {{id}}",
+    "request": "请求哈希 · {{hash}}",
+    "revision": "授权版本 · {{revision}}",
+    "groups": {
+      "document": "文档",
+      "drive": "云盘",
+      "wiki": "知识库",
+      "base": "多维表格",
+      "sheets": "电子表格",
+      "calendar": "日历",
+      "im": "聊天",
+      "scopes": "权限范围",
+      "other": "其他操作"
+    },
+    "operations": {
+      "feishu_scopes_list": {
+        "title": "查询机器人权限",
+        "description": "检查当前飞书机器人已开通的服务商权限列表"
+      },
+      "feishu_document_read": {
+        "title": "读取文档",
+        "description": "读取云文档的标题与正文内容"
+      },
+      "feishu_document_create": {
+        "title": "创建文档",
+        "description": "新建空白或带初始内容的云文档"
+      },
+      "feishu_document_update": {
+        "title": "修改文档",
+        "description": "向云文档追加或覆盖写入内容"
+      },
+      "feishu_drive_inspect": {
+        "title": "查看云盘元数据",
+        "description": "解析飞书链接并读取文件或文档的基础信息"
+      },
+      "feishu_wiki_spaces": {
+        "title": "列出知识空间",
+        "description": "查看机器人可访问的飞书知识库空间列表"
+      },
+      "feishu_wiki_node_get": {
+        "title": "读取知识库节点",
+        "description": "解析知识库页面节点及其关联的文档或表格"
+      },
+      "feishu_wiki_nodes_list": {
+        "title": "列出知识库目录",
+        "description": "浏览知识空间或父节点下的子页面列表"
+      },
+      "feishu_base_get": {
+        "title": "读取多维表格信息",
+        "description": "获取多维表格应用名称与基础元数据"
+      },
+      "feishu_base_tables_list": {
+        "title": "列出数据表",
+        "description": "查看多维表格中的所有数据表"
+      },
+      "feishu_base_fields_list": {
+        "title": "列出表格字段",
+        "description": "读取指定数据表的列定义与字段类型"
+      },
+      "feishu_base_records_list": {
+        "title": "读取表格记录",
+        "description": "分页查询数据表中的行记录"
+      },
+      "feishu_sheets_info": {
+        "title": "读取电子表格信息",
+        "description": "获取电子表格元数据与工作表列表"
+      },
+      "feishu_sheets_cells_read": {
+        "title": "读取单元格数据",
+        "description": "按范围读取电子表格中的单元格内容"
+      },
+      "feishu_calendar_events_list": {
+        "title": "列出日程",
+        "description": "按时间范围读取机器人可访问的日历日程"
+      },
+      "feishu_calendar_event_get": {
+        "title": "读取日程详情",
+        "description": "查看单条日程的完整时间、地点与说明"
+      },
+      "feishu_calendar_events_search": {
+        "title": "搜索日程",
+        "description": "按关键词检索日历中的日程安排"
+      },
+      "feishu_calendar_event_create": {
+        "title": "创建日程",
+        "description": "在日历中新建日程并可邀请参会人"
+      },
+      "feishu_im_messages_list": {
+        "title": "读取聊天记录",
+        "description": "获取指定会话中的历史消息记录"
+      }
+    },
+    "sideEffect": {
+      "read-only": "只读",
+      "write": "写入",
+      "unknown": "类型未知"
+    },
+    "renew": "重新授权",
+    "grantStatus": {
+      "current": "已授权",
+      "authorization_required": "连接需重新授权",
+      "replaced": "连接授权已更换",
+      "unavailable": "授权不可用"
+    },
+    "identityState": {
+      "needs_authorization": "请先完成连接授权，再管理应用访问权限。",
+      "unhealthy": "请先修复连接异常，再管理应用访问权限。",
+      "unsupported": "此连接身份暂不支持应用访问操作。"
+    },
+    "scopeStatus": {
+      "checked": "已完成服务商权限检查。",
+      "unsupported": "此服务商不支持在线检查权限范围。",
+      "unavailable": "连接当前不可用，无法检查权限范围。",
+      "error": "无法检查服务商权限范围。"
+    },
+    "outcome": {
+      "outcome_unknown": "结果未知（请勿重试）",
+      "succeeded": "成功",
+      "pending": "等待批准",
+      "failed": "失败"
+    },
+    "approval": {
+      "not_required": "无需批准",
+      "pending": "待批准",
+      "approved": "已批准",
+      "rejected": "已拒绝"
+    }
   }
 }

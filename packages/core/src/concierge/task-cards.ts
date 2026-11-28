@@ -150,7 +150,9 @@ export function approvalCard(
     | { kind?: unknown; title?: unknown; summary?: unknown }
     | undefined;
   const title =
-    (preview?.kind === "generic" || preview?.kind === "secret_access") &&
+    (preview?.kind === "generic" ||
+      preview?.kind === "secret_access" ||
+      preview?.kind === "connection_access") &&
     typeof preview.title === "string" &&
     typeof preview.summary === "string"
       ? preview.title

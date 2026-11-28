@@ -569,21 +569,6 @@ enum RelativeTime {
         return date.formatted(withYear ? format.year() : format)
     }
 
-    /// "14:05" today, "Nov 12" this year, "Nov 12, 2025" before; "11月12日"
-    /// or "2025年11月12日" in Chinese.
-    static func moment(_ date: Date, now: Date = .now, calendar: Calendar = .current, locale: Locale = locale) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return clock(date) }
-        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        return day(date, withYear: !sameYear, calendar: calendar, locale: locale)
-    }
-
-    /// "October" this year, "October 2025" before; "10月" or "2025年10月" in Chinese.
-    static func month(_ date: Date, now: Date = .now, calendar: Calendar = .current, locale: Locale = locale) -> String {
-        let format = style(calendar, locale).month(.wide)
-        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        return date.formatted(sameYear ? format : format.year())
-    }
-
     private static func style(_ calendar: Calendar, _ locale: Locale) -> Date.FormatStyle {
         Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
     }

@@ -72,6 +72,30 @@ export function secretAccessOutcome(
     : t("approvals.secretAccess.allowed", { name, minutes: preview.ttlMinutes });
 }
 
+/**
+ * How a decided app-connection-access request reads folded: granted or rejected,
+ * naming the app and connection.
+ */
+export function connectionAccessOutcome(
+  t: TFunction<"chat">,
+  preview: { appName: string; connectionLabel: string },
+  status: string,
+  resolvedBy: string | null | undefined,
+): string {
+  if (resolvedBy?.startsWith("rome:") || status === "failed") {
+    return approvalOutcome(t, status, resolvedBy);
+  }
+  return status === "rejected"
+    ? t("approvals.connectionAccess.rejected", {
+        appName: preview.appName,
+        connectionLabel: preview.connectionLabel,
+      })
+    : t("approvals.connectionAccess.allowed", {
+        appName: preview.appName,
+        connectionLabel: preview.connectionLabel,
+      });
+}
+
 const CARD =
   "flex w-full min-w-0 flex-col rounded-12 border border-border bg-surface px-4 py-2 text-left";
 
