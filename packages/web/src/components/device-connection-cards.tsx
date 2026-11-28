@@ -22,17 +22,25 @@ const CONTAINER_DOCS_URL =
 export const ROME_NODE_DOCKER_COMPOSE = `services:
   rome-node:
     image: ghcr.io/rome-os/rome-node:latest
+    # container_name: rome-node
+    restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
       - "127.0.0.1:4310:4310"
-    # Optional: set a Web UI password for remote access.
+      # For LAN or NAS access, replace the line above and set ROME_NODE_UI_PASSWORD:
+      # - "<LAN-IP>:4310:4310"
+    # Optional environment variables:
     # environment:
     #   ROME_NODE_UI_PASSWORD: "your-custom-password"
+    #   ROME_NODE_NAME: "My Container"
+    #   TZ: "UTC"
     volumes:
       - rome-node:/var/lib/rome-node
+      # Optional: mount a host directory into the container.
+      # - ./workspace:/home/node/workspace
 volumes:
-  rome-node:`;
+  rome-node: {}`;
 
 function ContainerConnectionGuide() {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
