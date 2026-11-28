@@ -3,19 +3,15 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetTitle } from "@/components/ui/sheet";
-import {
-  type OutputsTabFile,
-  type OutputsTabOptions,
-  useToolOutputs,
-} from "@/pages/free/tool-outputs";
+import { type OutputsTabOptions, useToolOutputs } from "@/pages/free/tool-outputs";
 import { type LeaveGuard, leaveEditor } from "./OutputEditor";
 import { OutputsPanel } from "./OutputsPanel";
 
 /**
- * Opens a chat's outputs, or one of them: in the side pane's Outputs tab or the
- * file's own tab, or in a full-height sheet where the pane would take the
- * whole width. Render `sheet` once,
- * outside any menu, so it outlives what opened it.
+ * Opens a chat's outputs, or one of them in the list's place: in the side
+ * pane's Outputs tab, or in a full-height sheet where the pane would take the
+ * whole width. Render `sheet` once, outside any menu, so it outlives what
+ * opened it.
  */
 export function useOutputsPane(chatId: string | null, options: OutputsTabOptions = {}) {
   const { t } = useTranslation("chat");
@@ -26,11 +22,11 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
   const hide = pane?.hide;
   useEffect(() => () => hide?.(), [hide]);
 
-  const open = (file?: OutputsTabFile) => {
+  const open = (outputId?: string) => {
     if (!chatId) return;
     if (!pane || pane.compact) {
-      setSheet((prev) => ({ outputId: file?.id ?? null, seq: (prev?.seq ?? 0) + 1 }));
-    } else pane.show(chatId, file, options);
+      setSheet((prev) => ({ outputId: outputId ?? null, seq: (prev?.seq ?? 0) + 1 }));
+    } else pane.show(chatId, outputId, options);
   };
   // Closing the sheet first settles a file being edited in it.
   const leaveGuard: LeaveGuard = useRef(null);

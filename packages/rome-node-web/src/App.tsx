@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Languages,
   LayoutDashboard,
@@ -58,6 +58,7 @@ export function App() {
   const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference());
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => readTabFromLocation());
   const [session, setSession] = useState<AuthSession | null>(null);
+  const sessionRequestEpochRef = useRef(0);
   const [snapshot, setSnapshot] = useState<HostSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,6 +90,7 @@ export function App() {
   }, [theme]);
 
   const handleUnauthorized = useCallback(() => {
+    sessionRequestEpochRef.current += 1;
     setSession((prev) => ({
       authRequired: true,
       authenticated: false,
@@ -114,22 +116,26 @@ export function App() {
     }
   }, [handleUnauthorized]);
 
-  const bootstrap = useCallback(async () => {
+  const loadSession = useCallback(async () => {
+    const epoch = ++sessionRequestEpochRef.current;
     setLoadError(null);
     try {
       const nextSession = await api.session();
+      if (epoch !== sessionRequestEpochRef.current) return;
       setSession(nextSession);
       if (nextSession.authenticated) {
         await loadStatus();
       }
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
+      if (epoch === sessionRequestEpochRef.current) throw err;
     }
   }, [loadStatus]);
 
   useEffect(() => {
-    void bootstrap();
-  }, [bootstrap]);
+    void loadSession().catch((err: unknown) => {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    });
+  }, [loadSession]);
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -157,6 +163,13 @@ export function App() {
     }
   }
 
+  function handleUnlocked(nextSession: AuthSession) {
+    // A session request started before unlock can still return the setup state.
+    sessionRequestEpochRef.current += 1;
+    setSession(nextSession);
+    void loadStatus();
+  }
+
   async function handleLogout() {
     try {
       await api.logout();
@@ -176,16 +189,16 @@ export function App() {
     <UiScaleProvider>
       {session && session.authRequired && !session.authenticated ? (
         <LoginView
+          key={session.passwordSource}
           t={t}
           passwordSource={session.passwordSource}
+          setup={session.setup}
           themeIcon={<ThemeIcon pref={theme} />}
           themeLabel={themeLabel}
           onCycleTheme={handleCycleTheme}
           onToggleLocale={handleToggleLocale}
-          onUnlocked={(nextSession) => {
-            setSession(nextSession);
-            void loadStatus();
-          }}
+          onRefreshSession={loadSession}
+          onUnlocked={handleUnlocked}
         />
       ) : (
         <main className="min-h-screen bg-background text-foreground">

@@ -15,7 +15,11 @@ import {
 } from "./audit-api.js";
 import {
   createWebAuth,
+  DEFAULT_SETUP_WINDOW_MS,
+  hasDuplicateHostHeader,
   isSecureRequest,
+  parseAllowedSetupHosts,
+  resolveSetupWindowMs,
   validateNewPassword,
   type PasswordSource,
 } from "./auth.js";
@@ -30,6 +34,33 @@ import {
 const MAX_JSON_BYTES = 16 * 1024;
 const MAX_SSE_CLIENTS = 16;
 const SSE_HEARTBEAT_MS = 20_000;
+const SETUP_CONFLICT = { error: "First-run setup is not active.", code: "setup_conflict" };
+const SETUP_EXPIRED = {
+  error:
+    "First-run setup window has expired. Restart the server or set ROME_NODE_UI_PASSWORD to continue.",
+  code: "setup_expired",
+};
+const UNTRUSTED_SETUP_HOST = {
+  error:
+    "First-run setup only allows localhost, IP addresses, or hosts listed in ROME_NODE_UI_SETUP_HOSTS. Open via localhost/IP, add this host to ROME_NODE_UI_SETUP_HOSTS, or set ROME_NODE_UI_PASSWORD.",
+  code: "untrusted_setup_host",
+};
+const UNTRUSTED_SETUP_HOST_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rome Node — First-Run Setup</title>
+  </head>
+  <body>
+    <main>
+      <h1>This host is blocked during first-run setup</h1>
+      <p>Open the Web UI via <code>localhost</code> or an IP address.</p>
+      <p>To use this domain, add it to <code>ROME_NODE_UI_SETUP_HOSTS</code> and restart Rome Node.</p>
+      <p>To skip first-run setup, set <code>ROME_NODE_UI_PASSWORD</code> and restart Rome Node.</p>
+    </main>
+  </body>
+</html>`;
 
 const UNTRUSTED_HOST_HTML = `<!doctype html>
 <html lang="en">
@@ -65,6 +96,9 @@ export interface WebServerOptions {
   explicitName?: boolean;
   assetsDir?: string;
   password?: string;
+  allowedSetupHosts?: readonly string[];
+  setupWindowMs?: number;
+  monotonicNow?: () => number;
   version?: string;
   signal?: AbortSignal;
   log?: (line: string) => void;
@@ -77,7 +111,6 @@ export interface RunningWebServer {
   readonly port: number;
   readonly authRequired: boolean;
   readonly passwordSource: PasswordSource;
-  readonly setupToken: string | null;
   readonly controller: HostController;
   close(): Promise<void>;
 }
@@ -143,7 +176,11 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     host: options.host,
     configDirectory: options.configDirectory,
     password: options.password,
+    allowedSetupHosts:
+      options.allowedSetupHosts ?? parseAllowedSetupHosts(process.env.ROME_NODE_UI_SETUP_HOSTS),
     now: options.deps?.now,
+    monotonicNow: options.monotonicNow,
+    setupWindowMs: options.setupWindowMs,
   });
   const controller = new HostController({
     configDirectory: options.configDirectory,
@@ -208,16 +245,34 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   });
 
   function sessionPayload(authenticated: boolean) {
+    const setup = auth.setupWindow;
     return {
       authRequired: auth.authRequired,
       authenticated,
       passwordSource: auth.passwordSource,
       canRemovePassword: auth.canRemovePassword,
+      ...(setup ? { setup } : {}),
     };
+  }
+
+  function rejectInactiveSetup(res: ServerResponse): boolean {
+    if (auth.passwordSource !== "setup") {
+      sendJson(res, 409, SETUP_CONFLICT);
+      return true;
+    }
+    if (auth.setupWindow?.expired) {
+      sendJson(res, 410, SETUP_EXPIRED);
+      return true;
+    }
+    return false;
   }
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     setSecurityHeaders(res);
+    if (hasDuplicateHostHeader(req)) {
+      sendJson(res, 400, { error: "Duplicate Host header." });
+      return;
+    }
     const method = req.method ?? "GET";
     const parsedUrl = new URL(req.url ?? "/", "http://localhost");
     const { pathname } = parsedUrl;
@@ -232,18 +287,25 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     }
 
     if (!auth.isTrustedHost(req)) {
+      const setup = auth.passwordSource === "setup";
       if (pathname.startsWith("/api/")) {
-        sendJson(res, 403, {
-          error:
-            "Local passwordless mode only allows localhost requests. Set a password from localhost or via ROME_NODE_UI_PASSWORD for remote access.",
-        });
+        sendJson(
+          res,
+          403,
+          setup
+            ? UNTRUSTED_SETUP_HOST
+            : {
+                error:
+                  "Local passwordless mode only allows localhost requests. Set a password from localhost or via ROME_NODE_UI_PASSWORD for remote access.",
+              },
+        );
       } else {
         res
           .writeHead(403, {
             "content-type": "text/html; charset=utf-8",
             "cache-control": "no-store",
           })
-          .end(UNTRUSTED_HOST_HTML);
+          .end(setup ? UNTRUSTED_SETUP_HOST_HTML : UNTRUSTED_HOST_HTML);
       }
       return;
     }
@@ -264,51 +326,26 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       }
 
       if (pathname === "/api/auth/setup" && method === "POST") {
-        if (auth.passwordSource !== "setup") {
-          sendJson(res, 409, { error: "Initial setup is not active." });
+        if (rejectInactiveSetup(res)) return;
+        const body = await readJsonBody(req);
+        if (rejectInactiveSetup(res)) return;
+        const newPasswordError = validateNewPassword(body.newPassword);
+        if (newPasswordError) {
+          throw new ControllerInputError(newPasswordError);
+        }
+        const result = await auth.completeSetup(body.newPassword as string);
+        if (result.status === "expired") {
+          sendJson(res, 410, SETUP_EXPIRED);
           return;
         }
-        const remote = req.socket.remoteAddress ?? "unknown";
-        const limit = auth.reserveLoginAttempt(remote);
-        if (!limit.allowed) {
-          sendJson(
-            res,
-            429,
-            {
-              error: `Too many failed setup attempts. Try again in ${limit.retryAfterSeconds}s.`,
-              retryAfterSeconds: limit.retryAfterSeconds,
-            },
-            { "retry-after": String(limit.retryAfterSeconds) },
-          );
+        if (result.status === "conflict") {
+          sendJson(res, 409, SETUP_CONFLICT);
           return;
         }
-        try {
-          const body = await readJsonBody(req);
-          const token = typeof body.token === "string" ? body.token.trim() : "";
-          const newPasswordError = validateNewPassword(body.newPassword);
-          if (newPasswordError) {
-            throw new ControllerInputError(newPasswordError);
-          }
-          const result = await auth.completeSetup(token, body.newPassword as string);
-          if (result.status === "invalid_token") {
-            limit.finish("failure");
-            sendJson(res, 401, { error: "Invalid setup token." });
-            return;
-          }
-          if (result.status === "conflict") {
-            limit.finish("abort");
-            sendJson(res, 409, { error: "Initial setup is already complete." });
-            return;
-          }
-          limit.finish("success");
-          closeAllSseClients();
-          sendJson(res, 200, sessionPayload(true), {
-            "set-cookie": auth.sessionCookieHeader(result.sessionId, isSecureRequest(req)),
-          });
-          return;
-        } finally {
-          limit.finish("abort");
-        }
+        sendJson(res, 200, sessionPayload(true), {
+          "set-cookie": auth.sessionCookieHeader(result.sessionId, isSecureRequest(req)),
+        });
+        return;
       }
 
       if (pathname === "/api/auth/login" && method === "POST") {
@@ -318,7 +355,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         }
         if (auth.passwordSource === "setup") {
           sendJson(res, 409, {
-            error: "Initial password setup is required. Use the one-time setup token first.",
+            error: "Set the first password in the Web UI before signing in.",
           });
           return;
         }
@@ -694,12 +731,11 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   } else if (auth.passwordSource === "file") {
     log("Web UI authentication: enabled (custom password).");
   } else if (auth.passwordSource === "setup") {
+    const windowMs = resolveSetupWindowMs(options.setupWindowMs);
+    const duration =
+      windowMs === DEFAULT_SETUP_WINDOW_MS ? "10 minutes" : `${windowMs / 1000} seconds`;
     log(
-      "Web UI authentication: one-time setup token required (non-loopback bind without password).",
-    );
-    log(`Web UI setup token: ${auth.setupToken}`);
-    log(
-      "Open the Web UI and enter this setup token to set a password, or restart with ROME_NODE_UI_PASSWORD.",
+      `First-run browser password setup is open for ${duration} after startup. Open the Web UI to set a password, or set ROME_NODE_UI_PASSWORD and restart.`,
     );
   } else {
     log(
@@ -742,9 +778,6 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     },
     get passwordSource() {
       return auth.passwordSource;
-    },
-    get setupToken() {
-      return auth.setupToken;
     },
     controller,
     close,

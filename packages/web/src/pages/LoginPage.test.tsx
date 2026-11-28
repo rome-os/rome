@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -16,7 +16,11 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderLogin(url: string, method: "cloud" | "local" = "cloud") {
+function renderLogin(
+  url: string,
+  method: "cloud" | "local" = "cloud",
+  dashboardVisitorAccess = true,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData<AuthState>(AUTH_QUERY_KEY, {
     ready: true,
@@ -25,7 +29,7 @@ function renderLogin(url: string, method: "cloud" | "local" = "cloud") {
       phase: "needs-signin",
       method,
       localPasswordAvailable: true,
-      dashboardVisitorAccess: true,
+      dashboardVisitorAccess,
     },
   });
   return render(
@@ -136,6 +140,58 @@ describe("auto sign-in from Rome Cloud", () => {
 
     await screen.findByRole("alert");
     expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  function visitorStartCalls(fetchSpy: ReturnType<typeof stubCloudStart>): number {
+    return fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/visitor/start")
+      .length;
+  }
+
+  it.each([
+    "cloud",
+    "local",
+  ] as const)("starts the visitor sign-in once when a shared Rome is opened (%s)", async (method) => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=visitor", method);
+
+    await waitFor(() => expect(visitorStartCalls(fetchSpy)).toBe(1));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(visitorStartCalls(fetchSpy)).toBe(1);
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("does not start the visitor sign-in again after it failed", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=visitor&visitor=error&reason=forbidden");
+
+    await screen.findByRole("alert");
+    expect(visitorStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("does not start the visitor sign-in on a box that lets no visitors in", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=visitor", "cloud", false);
+
+    await screen.findByRole("button", { name: "Continue with Rome Cloud" });
+    expect(visitorStartCalls(fetchSpy)).toBe(0);
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("keeps the cloud button busy while the visitor sign-in starts", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((() => new Promise<Response>(() => {})) as typeof fetch);
+
+    renderLogin("/login?via=visitor");
+
+    const busy = await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+    fireEvent.click(busy);
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
+    ).toBe(0);
   });
 
   it("does not start on a local-first box", async () => {
@@ -249,5 +305,67 @@ describe("one sign-in method at a time", () => {
     expect(
       fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
     ).toBe(1);
+  });
+});
+
+describe.each([
+  {
+    name: "visitor",
+    method: "local",
+    buttonLabel: "Open shared dashboard",
+    endpoint: "/api/auth/visitor/start",
+    startError: "Could not start shared dashboard sign-in. Please try again.",
+  },
+  {
+    name: "cloud",
+    method: "cloud",
+    buttonLabel: "Continue with Rome Cloud",
+    endpoint: "/api/auth/cloud/start",
+    startError: "Could not start sign-in. Please try again.",
+  },
+] as const)("$name sign-in button", ({ method, buttonLabel, endpoint, startError }) => {
+  it("starts once on rapid clicks and stays locked on success", async () => {
+    const { promise, resolve } = Promise.withResolvers<Response>();
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockReturnValue(promise);
+    renderLogin("/login", method);
+    const button = screen.getByRole("button", { name: buttonLabel });
+
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => resolve(Response.json({ authorizeUrl: window.location.href })));
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      endpoint,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("unlocks and allows retry after a start failure", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }))
+      .mockImplementation(async () => Response.json({ authorizeUrl: window.location.href }));
+    renderLogin("/login", method);
+    const button = screen.getByRole("button", { name: buttonLabel });
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.getByRole("alert").textContent).toBe(startError);
+    expect(button.hasAttribute("aria-busy")).toBe(false);
+    expect(button.hasAttribute("aria-disabled")).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });

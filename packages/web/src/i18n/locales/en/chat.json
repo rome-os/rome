@@ -865,20 +865,16 @@
     "edit": "Edit",
     "doneEditing": "Done",
     "filterLabel": "Show",
-    "more": "More",
-    "moreChosen": "More: {{kind}}",
     "today": "Today",
     "earlier": "Earlier",
     "filters": {
       "all": "All",
-      "document": "Documents",
-      "image": "Pictures",
-      "spreadsheet": "Spreadsheets",
-      "page": "Pages",
-      "audio": "Audio",
-      "video": "Videos",
-      "code": "Code",
-      "file": "Other"
+      "files": "Files",
+      "media": "Media"
+    },
+    "filterEmpty": {
+      "files": "No files yet.",
+      "media": "No pictures, videos or audio yet."
     },
     "types": {
       "document": "Document",

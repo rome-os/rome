@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FormRows } from "@rome-os/ui/layout-form";
@@ -172,5 +172,86 @@ describe("SystemDiagnosisRow", () => {
     await user.click(await screen.findByRole("button", { name: "Refresh" }));
 
     expect(await screen.findByText("Healthy")).toBeTruthy();
+  });
+});
+
+describe("SystemDiagnosisRow reconnect", () => {
+  function mockReconnect() {
+    const start = rs.fn<typeof fetch>(async () =>
+      Response.json({ authorizeUrl: window.location.href }),
+    );
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      switch (String(input)) {
+        case "/api/diagnosis":
+          return Response.json(
+            diagnosis({ instance: { auth: "revoked", accountId: null, instanceId: null } }),
+          );
+        case "/api/instance/enroll/start":
+          return start(input, init);
+        default:
+          throw new Error(`unexpected request: ${input}`);
+      }
+    });
+    return start;
+  }
+
+  it("starts once on rapid clicks and stays locked on success", async () => {
+    const { promise, resolve } = Promise.withResolvers<Response>();
+    const start = mockReconnect().mockReturnValueOnce(promise);
+    renderSection();
+    const button = await screen.findByRole("button", { name: "Reconnect" });
+
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+      expect(start).toHaveBeenCalledTimes(1);
+    });
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("status", { name: "Reconnecting…" })).toBeTruthy();
+
+    await act(async () => resolve(Response.json({ authorizeUrl: window.location.href })));
+    const busy = screen.getByRole("button", { name: "Reconnecting…" });
+    expect(busy.hasAttribute("disabled")).toBe(false);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(busy);
+    expect(start).toHaveBeenCalledExactlyOnceWith(
+      "/api/instance/enroll/start",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it.each([
+    "HTTP failure",
+    "network error",
+  ])("shows an error and allows retry after %s", async (failure) => {
+    const start = mockReconnect();
+    if (failure === "HTTP failure") {
+      start.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    } else {
+      start.mockRejectedValueOnce(new TypeError("network down"));
+    }
+    renderSection();
+    const button = await screen.findByRole("button", { name: "Reconnect" });
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    const errorMessage = "Could not start reconnect. Please try again.";
+    expect(screen.getByText(errorMessage)).toBeTruthy();
+    const retry = screen.getByRole("button", { name: "Reconnect" });
+    expect(retry.getAttribute("aria-busy")).toBeNull();
+    expect(retry.getAttribute("aria-disabled")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.queryByText(errorMessage)).toBeNull();
+    const busy = screen.getByRole("button", { name: "Reconnecting…" });
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.getAttribute("aria-disabled")).toBe("true");
+    expect(start).toHaveBeenCalledTimes(2);
   });
 });

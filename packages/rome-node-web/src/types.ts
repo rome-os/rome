@@ -113,9 +113,16 @@ export interface HostSnapshot {
 
 export type PasswordSource = "none" | "setup" | "file" | "env";
 
+export interface AuthSetupWindow {
+  expired: boolean;
+  remainingMs: number;
+  expiresAt: string;
+}
+
 export interface AuthSession {
   authRequired: boolean;
   authenticated: boolean;
   passwordSource: PasswordSource;
   canRemovePassword?: boolean;
+  setup?: AuthSetupWindow;
 }
