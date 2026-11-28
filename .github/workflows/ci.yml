@@ -100,6 +100,7 @@ jobs:
       - run: pnpm check:ui:tailwind
       - run: pnpm lint:agents
       - run: pnpm lint:agent-tools
+      - run: pnpm lint:docs
       - run: pnpm lint:imports
       - run: pnpm lint:inside-checks
 
