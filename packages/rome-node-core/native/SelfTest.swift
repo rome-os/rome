@@ -1320,47 +1320,67 @@ final class SelfTest {
         try expect(try readBytes(client, count: request.count) == request && forwarded == response && count == 0,
                    "the private socket forwards the approved request and its framed response")
         admission.whenStopped { [weak permissions] in permissions?.stopExecution() }
-        let child = Admission()
-        let revoked = DispatchSemaphore(value: 0)
-        child.whenStopped { revoked.signal() }
-        let childPeer = try Peer.authenticate(client, expecting: ProcessIdentity.read(getpid()), signed: false)
-        let childChannel = try Connection(fd: dup(client), peer: childPeer, admission: child, intact: { true })
-        let finished = DispatchGroup()
-        finished.enter()
-        let watchdog = ExecutionHandoff.watchParent(childChannel, until: finished)
-        defer { watchdog.cancel(); finished.leave() }
-        let dragRequest = try Wire.frame(["v": 1, "id": "drag", "method": "act",
-            "params": ["action": "drag", "x": 1, "y": 1, "toX": 2, "toY": 2]])
-        let drag = try require(WindowInput(action: "drag", args: Wire.request(Data(dragRequest.dropFirst(8))).params!), "drag fixture")
-        let target = WindowRow(id: 1, pid: getpid(), bounds: CGRect(x: 0, y: 0, width: 10, height: 10))
-        try rejects("connection_closed") {
-            try drag.execute(window: target, locate: { $0 }, lookupKey: { _, _ in nil }, send: { _, events in
-                try child.check()
-                if events.first?.type == .leftMouseDown {
-                    starts.record("down")
-                    _ = admission.stop()
-                    try expect(revoked.wait(timeout: .now() + .seconds(1)) == .success, "parent watchdog seals input")
-                }
-            }, release: { if $0.type == .leftMouseUp { starts.record("up") } })
+        do {
+            let child = Admission()
+            let revoked = DispatchSemaphore(value: 0)
+            child.whenStopped { revoked.signal() }
+            let childPeer = try Peer.authenticate(client, expecting: ProcessIdentity.read(getpid()), signed: false)
+            let childChannel = try Connection(fd: dup(client), peer: childPeer, admission: child, intact: { true })
+            let finished = DispatchGroup()
+            finished.enter()
+            let watchdog = ExecutionHandoff.watchParent(childChannel, until: finished)
+            defer { watchdog.cancel(); finished.leave() }
+            let dragRequest = try Wire.frame(["v": 1, "id": "drag", "method": "act",
+                "params": ["action": "drag", "x": 1, "y": 1, "toX": 2, "toY": 2]])
+            let drag = try require(WindowInput(action: "drag", args: Wire.request(Data(dragRequest.dropFirst(8))).params!), "drag fixture")
+            let target = WindowRow(id: 1, pid: getpid(), bounds: CGRect(x: 0, y: 0, width: 10, height: 10))
+            try rejects("connection_closed") {
+                try drag.execute(window: target, locate: { $0 }, lookupKey: { _, _ in nil }, send: { _, events in
+                    try child.check()
+                    if events.first?.type == .leftMouseDown {
+                        starts.record("down")
+                        _ = admission.stop()
+                        try expect(revoked.wait(timeout: .now() + .seconds(1)) == .success, "parent watchdog seals input")
+                    }
+                }, release: { if $0.type == .leftMouseUp { starts.record("up") } })
+            }
+            try expect(starts.drain() == ["down", "up"], "handoff disconnect releases the drag before process exit")
+            var event = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+            var byte: UInt8 = 0
+            try expect(poll(&event, 1, 250) > 0 && recv(client, &byte, 1, MSG_DONTWAIT) == 0,
+                       "stopping the original admission immediately closes the execution channel")
+            try rejects("cancelled") { _ = try permissions.executor() }
         }
-        try expect(starts.drain() == ["down", "up"], "handoff disconnect releases the drag before process exit")
-        var event = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
-        var byte: UInt8 = 0
-        try expect(poll(&event, 1, 250) > 0 && recv(client, &byte, 1, MSG_DONTWAIT) == 0,
-                   "stopping the original admission immediately closes the execution channel")
-        try rejects("cancelled") { _ = try permissions.executor() }
 
         let loginWindow = "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"
         let privacyExtension = "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension"
+        let systemSettings = "/System/Applications/System Settings.app/Contents/MacOS/System Settings"
+        let osascript = "/usr/bin/osascript"
         let plainQuit = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
                                                eventID: AEEventID(kAEQuitApplication),
                                                targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
                                                transactionID: AETransactionID(kAnyTransactionID))
-        var systemQuits = 0
-        try expect(TerminationPolicy.reply(for: nil) { systemQuits += 1 } == .terminateCancel && systemQuits == 0,
-                   "nil termination events do not kill an active session helper")
-        try expect(TerminationPolicy.reply(for: plainQuit) { systemQuits += 1 } == .terminateCancel && systemQuits == 0,
-                   "Quit & Reopen AppleEvents without a system shutdown reason do not kill an active session helper")
+        var quitReasons: [String] = []
+        try expect(TerminationPolicy.reply(for: nil) { quitReasons.append($0) } == .terminateLater &&
+                   quitReasons == ["local_stop"],
+                   "nil termination events fail open to graceful local stop")
+        quitReasons.removeAll()
+        try expect(TerminationPolicy.reply(for: plainQuit) { quitReasons.append($0) } == .terminateLater &&
+                   quitReasons == ["local_stop"],
+                   "ordinary Quit AppleEvents without a sender fail open to graceful local stop")
+        quitReasons.removeAll()
+        try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                           executablePath: { _ in osascript }) { quitReasons.append($0) } == .terminateLater &&
+                   quitReasons == ["local_stop"],
+                   "ordinary osascript Quit AppleEvents terminate the session cleanly")
+        quitReasons.removeAll()
+        for settingsSender in [privacyExtension, systemSettings] {
+            try expect(TerminationPolicy.reply(for: plainQuit, senderPID: { _ in 4242 },
+                                               executablePath: { _ in settingsSender }) {
+                quitReasons.append($0)
+            } == .terminateCancel && quitReasons.isEmpty,
+                       "plain Quit & Reopen from \(settingsSender) does not kill an active session")
+        }
         for reason in [OSType(kAELogOut), OSType(kAEReallyLogOut), OSType(kAERestart),
                        OSType(kAEShutDown), OSType(kAEShowRestartDialog), OSType(kAEShowShutdownDialog)] {
             let quitEvent = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
@@ -1369,25 +1389,29 @@ final class SelfTest {
                                                    transactionID: AETransactionID(kAnyTransactionID))
             quitEvent.setAttribute(NSAppleEventDescriptor(enumCode: reason),
                                    forKeyword: AEKeyword(kAEQuitReason))
-            try expect(TerminationPolicy.reply(for: quitEvent) { systemQuits += 1 } == .terminateCancel &&
-                       systemQuits == 0, "Quit AppleEvents without a verified sender do not terminate an active session")
-            try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
-                                               executablePath: { _ in privacyExtension }) {
-                systemQuits += 1
-            } == .terminateCancel && systemQuits == 0,
-                       "System Settings Quit & Reopen from SecurityPrivacyExtension does not kill an active session")
-            let before = systemQuits
+            for settingsSender in [privacyExtension, systemSettings] {
+                try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                                   executablePath: { _ in settingsSender }) {
+                    quitReasons.append($0)
+                } == .terminateCancel && quitReasons.isEmpty,
+                           "System Settings Quit & Reopen from \(settingsSender) does not kill an active session")
+            }
+            try expect(TerminationPolicy.reply(for: quitEvent) { quitReasons.append($0) } == .terminateLater &&
+                       quitReasons == ["console_unavailable"],
+                       "system shutdown Quit with unresolvable sender fails open and never blocks logout")
+            quitReasons.removeAll()
             try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
                                                executablePath: { $0 == 4242 ? loginWindow : nil }) {
-                systemQuits += 1
-            } == .terminateLater && systemQuits == before + 1,
+                quitReasons.append($0)
+            } == .terminateLater && quitReasons == ["console_unavailable"],
                        "loginwindow shutdown/logout Quit AppleEvents trigger graceful exit")
+            quitReasons.removeAll()
             try expect(TerminationPolicy.reply(for: quitEvent, terminateNow: true, senderPID: { _ in 4242 },
                                                executablePath: { $0 == 4242 ? loginWindow : nil }) {
-                systemQuits += 1
-            } == .terminateNow && systemQuits == before + 2,
+                quitReasons.append($0)
+            } == .terminateNow && quitReasons == ["console_unavailable"],
                        "modal error state allows immediate exit on loginwindow shutdown")
-            systemQuits = 0
+            quitReasons.removeAll()
         }
 
         let cleanupPath = path + "-close-cleanup"
@@ -1418,6 +1442,46 @@ final class SelfTest {
         cleanupPermissions.close()
         try expect(!FileManager.default.fileExists(atPath: cleanupPath),
                    "SessionPermissions.close synchronously removes the private execution socket directory")
+
+        // Verify that a stop racing handoff() stops and waits for the child so executionHelperRunning clears.
+        let racePath = path + "-handoff-race"
+        defer { try? FileManager.default.removeItem(atPath: racePath) }
+        try expect(mkdir(racePath, 0o700) == 0, "create handoff race directory")
+        var racePair: [Int32] = [-1, -1]
+        try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &racePair) == 0, "connect handoff race fixture")
+        let raceFD = racePair[0]
+        defer { close(racePair[1]) }
+        let sleeper = Process()
+        sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        sleeper.arguments = ["10"]
+        try sleeper.run()
+        defer { if sleeper.isRunning { kill(sleeper.processIdentifier, SIGKILL); sleeper.waitUntilExit() } }
+        let raceAdmission = Admission()
+        let raceEnded = DispatchSemaphore(value: 0)
+        let racePermissions = SessionPermissions(checks: cleanupChecks, locale: .en, mayOpenGuide: false,
+            live: { try raceAdmission.check() }, handoff: {
+                let raceListener = try Listener(state: StateDirectory(racePath))
+                let racePeer = try Peer.authenticate(raceFD, expecting: ProcessIdentity.read(getpid()), signed: false)
+                let raceChannel = try Connection(fd: raceFD, listener: raceListener,
+                                                 peer: racePeer, admission: raceAdmission)
+                let childIdentity = try ProcessIdentity.read(sleeper.processIdentifier)
+                raceAdmission.setExecutionHelperRunning(true)
+                let handoff = ExecutionHandoff(channel: raceChannel, listener: raceListener, childIdentity: childIdentity) {
+                    raceAdmission.setExecutionHelperRunning(false)
+                }
+                // Simulate a stop arriving right after handoff() succeeds and before child is stored.
+                _ = raceAdmission.stop("local_stop")
+                return handoff
+            }, end: { _ in raceEnded.signal() })
+        defer { racePermissions.close() }
+        _ = try racePermissions.start()
+        racePermissions.monitor()
+        try expect(raceEnded.wait(timeout: .now() + .seconds(5)) == .success,
+                   "handoff race terminates permissions monitoring")
+        try expect(raceAdmission.status()["stop"] as? String == "stop_confirmed",
+                   "handoff race stops and waits for the child so stop_confirmed is reached")
+        try expect(!FileManager.default.fileExists(atPath: racePath),
+                   "handoff race removes the temporary execution socket directory")
     }
 
     private func localStopDuringResponse(_ path: String, server: Int32, client: Int32, peer: Peer) throws {

@@ -168,10 +168,16 @@ final class SessionPermissions: @unchecked Sendable {
         guard fresh.accessibility, !current.contains("accessibility") else { return ["accessibility"] }
         try live()
         let execution = try handoff()
-        try live()
-        try socketLock.withLock {
-            guard !closed else { throw Failure("cancelled") }
-            child = execution
+        do {
+            try live()
+            try socketLock.withLock {
+                guard !closed else { throw Failure("cancelled") }
+                child = execution
+            }
+        } catch {
+            execution.stop()
+            execution.waitForExit()
+            throw error
         }
         return []
     }

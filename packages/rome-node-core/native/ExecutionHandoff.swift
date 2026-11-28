@@ -62,22 +62,53 @@ extension Windows {
     }
 }
 
+private final class ExitSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+    private var finished = false
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func runOnce(_ body: () -> Void) {
+        let shouldRun = lock.withLock {
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+        guard shouldRun else { return }
+        body()
+        lock.withLock { finished = true }
+        semaphore.signal()
+    }
+
+    func wait(timeout: DispatchTime) -> Bool {
+        if lock.withLock({ finished }) { return true }
+        if semaphore.wait(timeout: timeout) == .success {
+            semaphore.signal()
+            return true
+        }
+        return lock.withLock({ finished })
+    }
+}
+
 final class ExecutionHandoff: Sendable {
     static let greeting = Data("Rome approved execution v1\n".utf8)
     private let channel: Connection
     private let listener: Listener
+    private let childIdentity: ProcessIdentity
     private let exited: DispatchSourceProcess
-    private let childFinished = DispatchGroup()
+    private let exitSignal = ExitSignal()
 
-    init(channel: Connection, listener: Listener, onExit: @escaping @Sendable () -> Void) {
+    init(channel: Connection, listener: Listener, childIdentity: ProcessIdentity? = nil,
+         onExit: @escaping @Sendable () -> Void) {
         self.channel = channel
         self.listener = listener
-        exited = DispatchSource.makeProcessSource(identifier: channel.peer.identity.pid, eventMask: .exit,
+        let identity = childIdentity ?? channel.peer.identity
+        self.childIdentity = identity
+        exited = DispatchSource.makeProcessSource(identifier: identity.pid, eventMask: .exit,
                                                   queue: .global(qos: .userInitiated))
-        childFinished.enter()
-        exited.setEventHandler { [childFinished] in
-            onExit()
-            childFinished.leave()
+        let exitSignal = self.exitSignal
+        exited.setEventHandler {
+            exitSignal.runOnce(onExit)
         }
         exited.resume()
     }
@@ -143,10 +174,11 @@ final class ExecutionHandoff: Sendable {
     func stop() { shutdown(channel.fd, SHUT_RDWR) }
 
     func waitForExit() {
-        if childFinished.wait(timeout: .now() + .seconds(2)) == .timedOut,
-           (try? channel.peer.identity.verify()) != nil {
-            kill(channel.peer.identity.pid, SIGKILL)
-            _ = childFinished.wait(timeout: .now() + .seconds(1))
+        guard childIdentity.pid != getpid() else { return }
+        if !exitSignal.wait(timeout: .now() + .seconds(2)),
+           (try? childIdentity.verify()) != nil {
+            kill(childIdentity.pid, SIGKILL)
+            _ = exitSignal.wait(timeout: .now() + .seconds(1))
         }
     }
 
@@ -254,12 +286,12 @@ final class ExecutionHandoff: Sendable {
 
 @MainActor
 private final class ExecutionAppDelegate: NSObject, NSApplicationDelegate {
-    private let onSystemQuit: () -> Void
+    private let onQuit: (String) -> Void
 
-    init(onSystemQuit: @escaping () -> Void) { self.onSystemQuit = onSystemQuit }
+    init(onQuit: @escaping (String) -> Void) { self.onQuit = onQuit }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent, onSystemQuit: onSystemQuit)
+        TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent, onQuit: onQuit)
     }
 }
 
@@ -268,7 +300,7 @@ func runApprovedExecution(path: String, parent: pid_t) throws -> Never {
     let app = NSApplication.shared
     try requireAccessoryPolicy(current: app.activationPolicy, set: app.setActivationPolicy)
     let admission = Admission()
-    let delegate = ExecutionAppDelegate { admission.terminate("console_unavailable") }
+    let delegate = ExecutionAppDelegate { admission.terminate($0) }
     app.delegate = delegate
     DispatchQueue.global(qos: .userInitiated).async {
         do { try ExecutionHandoff.serve(path: path, parent: parent, admission: admission); exit(0) }

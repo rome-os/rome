@@ -355,7 +355,10 @@ func revokeTrustedKeys(admission: Admission, persistent: Bool, remove: () throws
 }
 
 enum TerminationPolicy {
-    private static let loginWindowPath = canonicalPath("/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow")
+    private static let systemSettingsPaths: Set<String> = Set([
+        "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension",
+        "/System/Applications/System Settings.app/Contents/MacOS/System Settings",
+    ].compactMap(canonicalPath))
     private static let systemQuitReasons: Set<OSType> = [
         OSType(kAELogOut),
         OSType(kAEReallyLogOut),
@@ -378,29 +381,37 @@ enum TerminationPolicy {
         return nil
     }
 
-    static func isSystemShutdown(_ event: NSAppleEventDescriptor?,
-                                 senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
-                                 executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
-        // System Settings "Quit & Reopen" sends kAEQuitApplication with kAEQuitReason = kAEReallyLogOut
-        // from SecurityPrivacyExtension; only loginwindow initiates genuine logout, restart, or shutdown.
+    static func isSystemSettingsQuit(_ event: NSAppleEventDescriptor?,
+                                     senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
+                                     executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath) -> Bool {
+        // System Settings "Quit & Reopen" sends kAEQuitApplication (often with kAEQuitReason = kAEReallyLogOut)
+        // from SecurityPrivacyExtension or System Settings. Ignore only confirmed System Settings quits so real
+        // logout, restart, shutdown, and ordinary user quits (Activity Monitor, osascript) are never blocked.
         guard let event,
-              let reason = event.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue,
-              systemQuitReasons.contains(reason),
-              let loginWindowPath,
               let sender = senderPID(event),
               let path = executablePath(sender),
-              canonicalPath(path) == loginWindowPath else {
+              let resolved = canonicalPath(path) else {
             return false
         }
-        return true
+        return systemSettingsPaths.contains(resolved)
+    }
+
+    static func quitReason(for event: NSAppleEventDescriptor?) -> String {
+        if let reason = event?.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue,
+           systemQuitReasons.contains(reason) {
+            return "console_unavailable"
+        }
+        return "local_stop"
     }
 
     static func reply(for event: NSAppleEventDescriptor?, terminateNow: Bool = false,
                       senderPID: (NSAppleEventDescriptor) -> pid_t? = senderPID(for:),
                       executablePath: (pid_t) -> String? = ConsentOcclusion.executablePath,
-                      onSystemQuit: () -> Void) -> NSApplication.TerminateReply {
-        guard isSystemShutdown(event, senderPID: senderPID, executablePath: executablePath) else { return .terminateCancel }
-        onSystemQuit()
+                      onQuit: (String) -> Void) -> NSApplication.TerminateReply {
+        guard !isSystemSettingsQuit(event, senderPID: senderPID, executablePath: executablePath) else {
+            return .terminateCancel
+        }
+        onQuit(quitReason(for: event))
         return terminateNow ? .terminateNow : .terminateLater
     }
 }
@@ -431,8 +442,9 @@ final class DesktopSession: NSObject, NSMenuDelegate, NSApplicationDelegate {
         }
         let workspace = NSWorkspace.shared.notificationCenter
         // Do not observe NSWorkspace.willPowerOffNotification here: AppKit posts it on kAEReallyLogOut
-        // even when SecurityPrivacyExtension sends Quit & Reopen. Genuine logout/restart/shutdown is
-        // handled via applicationShouldTerminate after verifying the loginwindow sender.
+        // even when SecurityPrivacyExtension sends Quit & Reopen. Genuine logout, restart, shutdown,
+        // and ordinary user quits are handled via applicationShouldTerminate after filtering out
+        // System Settings Quit & Reopen.
         workspaceObservers = [
             NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification,
             NSWorkspace.screensDidSleepNotification,
@@ -443,10 +455,10 @@ final class DesktopSession: NSObject, NSMenuDelegate, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // System Settings "Quit & Reopen" sends a Quit AppleEvent to all instances of the helper bundle.
-        // Active sessions survive via ExecutionHandoff instead of terminating mid-approval.
+        // Active sessions ignore only those System Settings quits and survive via ExecutionHandoff.
         TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent,
-                                terminateNow: presentingRevocationError) {
-            admission.terminate("console_unavailable")
+                                terminateNow: presentingRevocationError) { reason in
+            admission.terminate(reason)
         }
     }
 
