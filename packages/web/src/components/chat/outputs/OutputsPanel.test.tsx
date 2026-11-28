@@ -517,6 +517,46 @@ describe("OutputsPanel", () => {
     expect(screen.getByRole("button", { name: "Back to outputs" })).toBeTruthy();
   });
 
+  it("keeps a file open when the agent writes it again under a new record, and shows the new text", async () => {
+    outputs = [
+      output("one", { name: "notes.txt", link: "/projects/demo/notes.txt" }),
+      output("other", { name: "other.txt" }),
+    ];
+    files[outputs[0].contentUrl!] = "first take";
+    renderPanel({ selectedId: "one", taskChats: true });
+    expect(await screen.findByText("first take")).toBeTruthy();
+
+    const rewrite = (records: ChatOutputDto[]) => {
+      outputs = records;
+      acceptLatestSocket().receive({
+        type: "event",
+        topic: chatTasksTopicName("chat-1"),
+        event: TASK_LIST_CHANGED_EVENT,
+        data: { chatId: "chat-1" },
+      });
+    };
+    // The same file again: a new record, so the old one's id is gone.
+    files["/api/chat/sessions/chat-1/outputs/two/content"] = "second take";
+    rewrite([
+      output("two", { name: "notes.txt", link: "/projects/demo/notes.txt" }),
+      output("other", { name: "other.txt" }),
+    ]);
+    expect(await screen.findByText("second take")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to outputs" })).toBeTruthy();
+    // And again: it keeps following the file.
+    files["/api/chat/sessions/chat-1/outputs/three/content"] = "third take";
+    rewrite([
+      output("three", { name: "notes.txt", link: "/projects/demo/notes.txt" }),
+      output("other", { name: "other.txt" }),
+    ]);
+    expect(await screen.findByText("third take")).toBeTruthy();
+
+    // Gone from the list altogether: back to the list.
+    rewrite([output("other", { name: "other.txt" })]);
+    expect(await screen.findByRole("list", { name: "Today" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
+  });
+
   it("comes back from a file to the list as it was: its filter, its scroll and the file marked", async () => {
     const user = userEvent.setup();
     // jsdom lays nothing out, so each element keeps the scroll it is given.
@@ -547,10 +587,16 @@ describe("OutputsPanel", () => {
       fireEvent.scroll(list);
 
       await user.click(screen.getByRole("button", { name: "Plan.md" }));
-      await user.click(await screen.findByRole("button", { name: "Back to outputs" }));
+      const back = await screen.findByRole("button", { name: "Back to outputs" });
+      // The file opens at its top, not at the list's scroll.
+      const file = screen.getByTestId("chat-outputs");
+      expect(file).not.toBe(list);
+      expect(file.scrollTop).toBe(0);
+      await user.click(back);
 
-      const back = screen.getByTestId("chat-outputs");
-      expect(back.scrollTop).toBe(240);
+      const again = screen.getByTestId("chat-outputs");
+      expect(again).not.toBe(list);
+      expect(again.scrollTop).toBe(240);
       expect(screen.getByRole("radio", { name: "Files" }).getAttribute("aria-checked")).toBe(
         "true",
       );

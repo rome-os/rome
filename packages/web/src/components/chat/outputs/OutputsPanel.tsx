@@ -284,7 +284,19 @@ export function OutputsPanel({
       {t("outputs.indexing")}
     </p>
   ) : null;
-  const current = list.find((output) => output.id === chosen) ?? null;
+  // The file open in the list's place: its record, or the record that replaced
+  // it once the agent wrote the same file again, found by the link it had.
+  const followed = useRef<{ id: string; link: string | null } | null>(null);
+  const current =
+    list.find((output) => output.id === chosen) ??
+    list.find(
+      (output) =>
+        followed.current?.id === chosen &&
+        followed.current.link !== null &&
+        output.link === followed.current.link,
+    ) ??
+    null;
+  if (current && chosen !== null) followed.current = { id: chosen, link: current.link };
   const showingList = !editing && !current;
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
@@ -298,8 +310,10 @@ export function OutputsPanel({
     row?.scrollIntoView?.({ block: "nearest" });
   });
 
+  // Keyed apart from the list's, so a file opens at its top and the list keeps
+  // the scroll it had.
   const preview = (output: ChatOutput) => (
-    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
+    <div key="file" className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
       <OutputPreview
         key={output.id}
         output={output}
@@ -383,6 +397,7 @@ export function OutputsPanel({
 
   return (
     <div
+      key="list"
       ref={scrollerRef}
       onScroll={(event) => {
         listScroll.current = event.currentTarget.scrollTop;
