@@ -55,6 +55,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
     if let app {
         try requireAccessoryPolicy(current: app.activationPolicy, set: app.setActivationPolicy)
         let ui = DesktopSession(admission: admission, store: store)
+        app.delegate = ui
         session = ui
         consent = { prompt, canContinue in
             try DispatchQueue.main.sync { try ui.confirm(prompt, canContinue: canContinue) }
@@ -80,7 +81,7 @@ func launch(path: String, desktop: Bool, store: any TrustedKeyStore, testConsent
         else { exit(code) }
     }
 
-    if let app { app.run() }
+    if let app { withExtendedLifetime(session) { app.run() } }
     dispatchMain()
 }
 

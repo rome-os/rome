@@ -1349,6 +1349,75 @@ final class SelfTest {
         try expect(poll(&event, 1, 250) > 0 && recv(client, &byte, 1, MSG_DONTWAIT) == 0,
                    "stopping the original admission immediately closes the execution channel")
         try rejects("cancelled") { _ = try permissions.executor() }
+
+        let loginWindow = "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow"
+        let privacyExtension = "/System/Library/ExtensionKit/Extensions/SecurityPrivacyExtension.appex/Contents/MacOS/SecurityPrivacyExtension"
+        let plainQuit = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+                                               eventID: AEEventID(kAEQuitApplication),
+                                               targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                                               transactionID: AETransactionID(kAnyTransactionID))
+        var systemQuits = 0
+        try expect(TerminationPolicy.reply(for: nil) { systemQuits += 1 } == .terminateCancel && systemQuits == 0,
+                   "nil termination events do not kill an active session helper")
+        try expect(TerminationPolicy.reply(for: plainQuit) { systemQuits += 1 } == .terminateCancel && systemQuits == 0,
+                   "Quit & Reopen AppleEvents without a system shutdown reason do not kill an active session helper")
+        for reason in [OSType(kAELogOut), OSType(kAEReallyLogOut), OSType(kAERestart),
+                       OSType(kAEShutDown), OSType(kAEShowRestartDialog), OSType(kAEShowShutdownDialog)] {
+            let quitEvent = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+                                                   eventID: AEEventID(kAEQuitApplication),
+                                                   targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                                                   transactionID: AETransactionID(kAnyTransactionID))
+            quitEvent.setAttribute(NSAppleEventDescriptor(enumCode: reason),
+                                   forKeyword: AEKeyword(kAEQuitReason))
+            try expect(TerminationPolicy.reply(for: quitEvent) { systemQuits += 1 } == .terminateCancel &&
+                       systemQuits == 0, "Quit AppleEvents without a verified sender do not terminate an active session")
+            try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                               executablePath: { _ in privacyExtension }) {
+                systemQuits += 1
+            } == .terminateCancel && systemQuits == 0,
+                       "System Settings Quit & Reopen from SecurityPrivacyExtension does not kill an active session")
+            let before = systemQuits
+            try expect(TerminationPolicy.reply(for: quitEvent, senderPID: { _ in 4242 },
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }) {
+                systemQuits += 1
+            } == .terminateLater && systemQuits == before + 1,
+                       "loginwindow shutdown/logout Quit AppleEvents trigger graceful exit")
+            try expect(TerminationPolicy.reply(for: quitEvent, terminateNow: true, senderPID: { _ in 4242 },
+                                               executablePath: { $0 == 4242 ? loginWindow : nil }) {
+                systemQuits += 1
+            } == .terminateNow && systemQuits == before + 2,
+                       "modal error state allows immediate exit on loginwindow shutdown")
+            systemQuits = 0
+        }
+
+        let cleanupPath = path + "-close-cleanup"
+        defer { try? FileManager.default.removeItem(atPath: cleanupPath) }
+        try expect(mkdir(cleanupPath, 0o700) == 0, "create execution cleanup directory")
+        var cleanupPair: [Int32] = [-1, -1]
+        try expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &cleanupPair) == 0, "connect cleanup fixture")
+        let cleanupFD = cleanupPair[0]
+        defer { close(cleanupPair[1]) }
+        let cleanupAdmission = Admission()
+        let cleanupChecks = PermissionChecks(missing: { ["screen_recording"] },
+                                             freshGrants: { PermissionGrants(accessibility: true, screenRecording: true) },
+                                             openGuide: { _ in true })
+        let cleanupPermissions = SessionPermissions(checks: cleanupChecks, locale: .en, mayOpenGuide: false,
+            live: { try cleanupAdmission.check() }, handoff: {
+                let cleanupListener = try Listener(state: StateDirectory(cleanupPath))
+                let cleanupPeer = try Peer.authenticate(cleanupFD, expecting: ProcessIdentity.read(getpid()), signed: false)
+                let cleanupChannel = try Connection(fd: cleanupFD, listener: cleanupListener,
+                                                    peer: cleanupPeer, admission: cleanupAdmission)
+                return ExecutionHandoff(channel: cleanupChannel, listener: cleanupListener, onExit: {})
+            }, end: { cleanupAdmission.terminate($0) })
+        _ = try cleanupPermissions.start()
+        cleanupPermissions.monitor()
+        let cleanupDeadline = DispatchTime.now() + .seconds(3)
+        while (try? cleanupPermissions.executor()) == nil, DispatchTime.now() < cleanupDeadline { usleep(10_000) }
+        try expect(FileManager.default.fileExists(atPath: cleanupPath + "/helper.sock"),
+                   "handoff socket exists before close")
+        cleanupPermissions.close()
+        try expect(!FileManager.default.fileExists(atPath: cleanupPath),
+                   "SessionPermissions.close synchronously removes the private execution socket directory")
     }
 
     private func localStopDuringResponse(_ path: String, server: Int32, client: Int32, peer: Peer) throws {

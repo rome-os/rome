@@ -194,7 +194,7 @@ final class ExecutionHandoff: Sendable {
         try access.recording(granted: recording, required: true)
     }
 
-    static func serve(path: String, parent: pid_t) throws {
+    static func serve(path: String, parent: pid_t, admission: Admission = Admission()) throws {
         let state = try StateDirectory(path)
         guard let socket = state.socketIdentity() else { throw Failure("socket_unavailable") }
         let host = try ProcessIdentity.read(parent)
@@ -206,11 +206,12 @@ final class ExecutionHandoff: Sendable {
             peer = try Peer.authenticate(fd, expecting: host, signed: true)
             try peer.requireSameHelper()
         } catch { close(fd); throw error }
-        let admission = Admission()
         let channel = try Connection(fd: fd, peer: peer, admission: admission, intact: { state.socketIdentity() == socket })
+        admission.whenStopped { [weak channel] in channel?.end() }
         let access = DesktopAccess()
         let worker = DispatchQueue(label: "rome.computer-use.approved-window")
         let check = {
+            try admission.check()
             try channel.verify()
             try checkAccess(access)
         }
@@ -252,14 +253,28 @@ final class ExecutionHandoff: Sendable {
 }
 
 @MainActor
+private final class ExecutionAppDelegate: NSObject, NSApplicationDelegate {
+    private let onSystemQuit: () -> Void
+
+    init(onSystemQuit: @escaping () -> Void) { self.onSystemQuit = onSystemQuit }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        TerminationPolicy.reply(for: NSAppleEventManager.shared().currentAppleEvent, onSystemQuit: onSystemQuit)
+    }
+}
+
+@MainActor
 func runApprovedExecution(path: String, parent: pid_t) throws -> Never {
     let app = NSApplication.shared
     try requireAccessoryPolicy(current: app.activationPolicy, set: app.setActivationPolicy)
+    let admission = Admission()
+    let delegate = ExecutionAppDelegate { admission.terminate("console_unavailable") }
+    app.delegate = delegate
     DispatchQueue.global(qos: .userInitiated).async {
-        do { try ExecutionHandoff.serve(path: path, parent: parent); exit(0) }
+        do { try ExecutionHandoff.serve(path: path, parent: parent, admission: admission); exit(0) }
         catch let failure as Failure where failure.code == "connection_closed" { exit(0) }
         catch { exit(1) }
     }
-    app.run()
+    withExtendedLifetime(delegate) { app.run() }
     exit(0)
 }

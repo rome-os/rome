@@ -186,7 +186,13 @@ final class SessionPermissions: @unchecked Sendable {
     func waitForExecutionExit() { socketLock.withLock { child }?.waitForExit() }
 
     func close() {
-        stopExecution()
+        let released = socketLock.withLock {
+            closed = true
+            let current = child
+            child = nil
+            return current
+        }
+        released?.stop()
         queue.sync {
             timer?.cancel()
             waiter = nil
