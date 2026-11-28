@@ -22,7 +22,7 @@ export function hasStagedHelperDirectory(path: string): boolean {
   const parent = dirname(path);
   const uid = process.getuid?.();
   try {
-    return [dirname(parent), parent, path].every((dir) => {
+    return [parent, path].every((dir) => {
       const info = lstatSync(dir, { throwIfNoEntry: false });
       return info?.isDirectory() && (uid === undefined || info.uid === uid);
     });
@@ -99,12 +99,12 @@ export function findInstalledHelper({
     const app = installed(bundledAppPath);
     if (app) return app;
   }
-  if (stagedAppPath !== null && hasUsableStagedHelper(stagedAppPath)) return stagedAppPath;
   const optionalApp = platformApp();
   if (optionalApp !== undefined) {
     const app = installed(optionalApp);
     if (app) return app;
   }
+  if (stagedAppPath !== null && hasUsableStagedHelper(stagedAppPath)) return stagedAppPath;
   for (const directory of applications) {
     const app = installed(join(directory, APP_NAME));
     if (app) return app;

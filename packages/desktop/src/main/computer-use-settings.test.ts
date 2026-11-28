@@ -10,7 +10,7 @@ rs.mock("electron", () => ({
   shell: { openExternal: rs.fn(), showItemInFolder: rs.fn() },
 }));
 
-const helperPath = "/Users/test/.rome/computer-use/Rome Computer Use.app";
+const helperPath = "/Users/test/.rome-computer-use/Rome Computer Use.app";
 
 beforeEach(() => {
   rs.resetAllMocks();

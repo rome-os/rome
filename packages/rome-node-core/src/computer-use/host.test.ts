@@ -185,12 +185,12 @@ it("discovers paths without signature verification and stops at an invalid expli
   await expect(discovery.discoverHelper({ ...env, envPath: undefined })).resolves.toBe(preferred);
 });
 
-it("prefers the override, caller, staged helper, platform package, then Applications", async () => {
+it("prefers the override, caller, platform package, staged helper, then Applications", async () => {
   const home = await mkdtemp(join(tmpdir(), "rome-cu-discovery-"));
   cleanups.push(() => rm(home, { recursive: true, force: true }));
   const app = "Rome Computer Use.app";
   const stagedAppPath = discovery.stagedHelperPath(home);
-  expect(stagedAppPath).toBe(join(home, ".rome", "computer-use", app));
+  expect(stagedAppPath).toBe(join(home, ".rome-computer-use", app));
   const paths = ["env", "bundled", "platform", "Applications"].map((dir) => join(home, dir, app));
   const [envPath, bundledAppPath, platformPath, application] = paths;
   for (const path of [...paths, stagedAppPath]) await mkdir(path, { recursive: true });
@@ -211,15 +211,15 @@ it("prefers the override, caller, staged helper, platform package, then Applicat
   await expect(discovery.discoverHelper({ ...options, bundledAppPath })).resolves.toBe(
     bundledAppPath,
   );
-  await expect(discovery.discoverHelper(options)).resolves.toBe(stagedAppPath);
-  await expect(discovery.discoverHelper({ ...options, stagedAppPath: null })).resolves.toBe(
-    platformPath,
-  );
-  await rm(stagedBinary);
-  await expect(discovery.discoverHelper(options)).resolves.toBe(platformPath);
-  await rm(stagedAppPath, { recursive: true });
   await expect(discovery.discoverHelper(options)).resolves.toBe(platformPath);
   await rm(platformPath, { recursive: true });
+  await expect(discovery.discoverHelper(options)).resolves.toBe(stagedAppPath);
+  await expect(discovery.discoverHelper({ ...options, stagedAppPath: null })).resolves.toBe(
+    application,
+  );
+  await rm(stagedBinary);
+  await expect(discovery.discoverHelper(options)).resolves.toBe(application);
+  await rm(stagedAppPath, { recursive: true });
   await expect(discovery.discoverHelper(options)).resolves.toBe(application);
   const pinned = { ...options, bundledAppPath: stagedAppPath, strictBundledAppPath: true };
   await expect(discovery.discoverHelper(pinned)).rejects.toMatchObject({

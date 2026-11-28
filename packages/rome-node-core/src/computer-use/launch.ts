@@ -35,7 +35,7 @@ const POLL_INTERVAL_MS = 25;
 const run = promisify(execFile);
 
 export function stagedHelperPath(home = homedir()): string {
-  return join(home, ".rome", "computer-use", APP_NAME);
+  return join(home, ".rome-computer-use", APP_NAME);
 }
 
 interface LaunchContext {

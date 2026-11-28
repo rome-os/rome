@@ -119,6 +119,10 @@ async function bootstrap() {
     if (audit.state.state === "unavailable")
       log.warn(`Audit log unavailable: ${audit.state.message}`);
     registerAuditHandlers(audit);
+    const deviceListeners = new Set<() => void>();
+    const notifyDeviceListeners = () => {
+      for (const listener of deviceListeners) listener();
+    };
     let ensureComputerUseHelper: EnsureComputerUseHelper | undefined;
     let computerUseHelperPath: string | undefined;
     let computerUseSettings: ReturnType<typeof createComputerUseSettings> | undefined;
@@ -126,9 +130,13 @@ async function bootstrap() {
       if (app.isPackaged) {
         const stagedPath = stagedHelperPath();
         const templatePath = join(process.resourcesPath, "native", APP_NAME);
-        const helper = createStagedComputerUseHelper({ templatePath, stagedPath, log });
+        const helper = createStagedComputerUseHelper({
+          templatePath,
+          stagedPath,
+          log,
+          onReadyChange: notifyDeviceListeners,
+        });
         ensureComputerUseHelper = helper.ensureHelper;
-        await ensureComputerUseHelper();
         computerUseHelperPath = stagedPath;
         computerUseSettings = createComputerUseSettings(stagedPath, readDeviceEnabled, helper);
       } else {
@@ -145,7 +153,6 @@ async function bootstrap() {
     }
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
-    const deviceListeners = new Set<() => void>();
     const deviceHost = !devDashboardUrl
       ? new DeviceHost({
           cloudOrigin: cloudAccount.cloudOrigin,
@@ -174,7 +181,7 @@ async function bootstrap() {
             }),
           onStatus: (status) => {
             keepAwake.sync(status);
-            for (const listener of deviceListeners) listener();
+            notifyDeviceListeners();
             // Only the app's own pages and the open Rome hear it, as with device:get.
             const origin = controller.activeTarget().instance?.origin;
             for (const window of BrowserWindow.getAllWindows()) {
@@ -196,7 +203,8 @@ async function bootstrap() {
       },
       setEnabled: async (enabled: boolean) => {
         writeDeviceEnabled(enabled);
-        for (const listener of deviceListeners) listener();
+        notifyDeviceListeners();
+        if (enabled && ensureComputerUseHelper) void ensureComputerUseHelper();
         await deviceHost?.stop();
         await device.start();
       },
@@ -399,6 +407,9 @@ async function bootstrap() {
     // an instance token.
     void runtime.ensureReady();
     void device.start();
+    if (ensureComputerUseHelper && readDeviceEnabled()) {
+      void ensureComputerUseHelper();
+    }
 
     log.info("Bootstrap complete");
   } catch (err) {
