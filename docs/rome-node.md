@@ -102,17 +102,25 @@ volume keeps the device credential, Web UI preferences, and the
 services:
   rome-node:
     image: ghcr.io/rome-os/rome-node:latest
+    # container_name: rome-node
+    restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
       - "127.0.0.1:4310:4310"
-    # Optional: set a Web UI password for remote access.
+      # For LAN or NAS access, replace the line above and set ROME_NODE_UI_PASSWORD:
+      # - "<LAN-IP>:4310:4310"
+    # Optional environment variables:
     # environment:
     #   ROME_NODE_UI_PASSWORD: "your-custom-password"
+    #   ROME_NODE_NAME: "My Container"
+    #   TZ: "UTC"
     volumes:
       - rome-node:/var/lib/rome-node
+      # Optional: mount a host directory into the container.
+      # - ./workspace:/home/node/workspace
 volumes:
-  rome-node:
+  rome-node: {}
 ```
 
 1. Start the container with `docker compose up -d` or a Docker Compose UI (pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>` if you want fixed updates).
@@ -156,8 +164,8 @@ If **Allow remote execution** (`executionEnabled`) was turned off in the Web UI
 (`web-config.json`), `rome-node connect` honors that setting on the shared
 volume and connects in limited mode (`computer_use_off`).
 
-To take this computer off your account, choose **Remove** on its device card. If you added
-a restart policy, stop the container with `docker compose down`.
+To take this computer off your account, choose **Remove** on its device card, then stop
+the container with `docker compose down`.
 
 ### Build the image
 
