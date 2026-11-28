@@ -1878,15 +1878,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       sessionId,
       await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
     );
-    const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
-    const shownIds = new Set(messages.map((m) => m.id));
-    const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const sources = await deps.webchatRepo.getUserMessageSources(sessionId);
-    const senders = await resolveChatSenders(
-      deps,
-      actors,
-      new Map([...sources].filter(([id]) => shownIds.has(id))),
-    );
+    // Only the shown user messages are read, so a page costs the same however long the chat is.
+    const userIds = messages.flatMap((m) => (m.role === "user" ? [m.id] : []));
+    if (userIds.length === 0) return withTraces;
+    const actors = await deps.webchatRepo.getUserMessageActors(sessionId, userIds);
+    const sources = await deps.webchatRepo.getUserMessageSources(sessionId, userIds);
+    const senders = await resolveChatSenders(deps, actors, sources);
     if (senders.size === 0) return withTraces;
     return withTraces.map((message) => {
       const sender = senders.get(message.id);

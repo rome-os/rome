@@ -500,6 +500,10 @@ describe("WebChatRepository", () => {
     expect(await repo.getUserMessageSources("source-chat")).toEqual(
       new Map([["source-input", senderId]]),
     );
+    expect(await repo.getUserMessageSources("source-chat", ["source-input"])).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getUserMessageSources("source-chat", ["other"])).size).toBe(0);
     expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
     if (senderId.startsWith("automated::")) {
       expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(

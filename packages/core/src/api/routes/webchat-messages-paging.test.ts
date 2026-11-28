@@ -120,6 +120,17 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     expect(page.nextCursor).toEqual(expect.any(String));
   });
 
+  it("reads who sent only the page's own user messages", async () => {
+    for (let i = 0; i < 5; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
+    const actors = rs.spyOn(deps.webchatRepo, "getUserMessageActors");
+    const sources = rs.spyOn(deps.webchatRepo, "getUserMessageSources");
+
+    await getPage("?limit=4");
+
+    expect(actors).toHaveBeenCalledWith(SESSION_ID, ["u-3", "u-4"]);
+    expect(sources).toHaveBeenCalledWith(SESSION_ID, ["u-3", "u-4"]);
+  });
+
   it("carries the saved layout on the first page only", async () => {
     for (let i = 0; i < 3; i += 1) await seedTurn(i, BASE_SECONDS + i * 10);
     const layout = [{ id: "w1", type: "projects", order: 1 }];

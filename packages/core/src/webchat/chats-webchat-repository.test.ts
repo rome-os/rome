@@ -1,6 +1,6 @@
 import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { eq, type SQL } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { chatKey } from "../chats/storage/place.js";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
@@ -8,7 +8,7 @@ import { type Message, type RecordedMessage } from "../chats/storage/message.js"
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
+import { ChatsWebChatRepository, sessionLines } from "./chats-webchat-repository.js";
 
 // The dashboard's repository over Chats' tables. What these pin: a dashboard
 // chat is a webchat DM keyed by its session, its user and assistant lines are
@@ -56,6 +56,10 @@ describe("ChatsWebChatRepository", () => {
     expect(await repo.getUserMessageSources("source-chat")).toEqual(
       new Map([["source-input", senderId]]),
     );
+    expect(await repo.getUserMessageSources("source-chat", ["source-input"])).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getUserMessageSources("source-chat", ["other"])).size).toBe(0);
     expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
     expect((await repo.getMessagesPage("source-chat", { limit: 1 })).rows[0]).toMatchObject({
       id: "source-input",
@@ -98,6 +102,19 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getUserMessageSources("source-chat")).has("old-loopback")).toBe(false);
     expect((await repo.getUserMessageActors("source-chat")).get("old-loopback")?.kind).toBe(
       "guardian",
+    );
+  });
+  it.each([
+    "user",
+    "trace",
+  ])("reads a session's %s lines by the session, not by every session's rows of that role", (role) => {
+    const plan = testDb.db
+      .all<{ detail: string }>(
+        sql`EXPLAIN QUERY PLAN SELECT * FROM ${sessionLines(["chat-1"])} WHERE role = ${role}`,
+      )
+      .map((row) => row.detail);
+    expect(plan.some((detail) => detail.includes("idx_rome_agent_messages_role_created_at"))).toBe(
+      false,
     );
   });
   it("starts a webchat chat for a new session, keyed by the session", async () => {

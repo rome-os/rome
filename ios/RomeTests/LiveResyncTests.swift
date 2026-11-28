@@ -39,6 +39,16 @@ import Testing
         #expect(owed7)
     }
 
+    @Test func aTopicIsOwedUntilConfirmed() {
+        var resync = LiveResync()
+        resync.dropped()
+        resync.connecting(topics: ["a"])
+        #expect(resync.owes("a"))
+        #expect(!resync.owes("b"))
+        _ = resync.confirmed("a")
+        #expect(!resync.owes("a"))
+    }
+
     @Test func aHealthyConnectionOwesNothingLater() {
         var resync = LiveResync()
         resync.dropped()
@@ -58,15 +68,57 @@ import Testing
         LiveEventsSocket(client: APIClient(origin: URL(string: "http://127.0.0.1:9")!, token: { nil }))
     }
 
-    @Test func resumeAsksListenersToRefetchWithoutAnyFrame() {
+    @Test func resumeAsksTheChatOnScreenToRefetchWithoutAnyFrame() {
         let events = socket()
         var refetches = 0
         _ = events.subscribe(LiveTopic.chat("concierge")) { event in
             if case .reconnected = event { refetches += 1 }
         }
+        events.watch("concierge")
         events.pause()
         events.resume()
         #expect(refetches == 1)
+        events.pause()
+    }
+
+    /// What is not on screen refetches once, when the server confirms its
+    /// topic, so on a slow link the chat on screen goes first.
+    @Test func resumeLeavesWhatIsOffScreenToTheSocket() {
+        let events = socket()
+        var refetches: [String] = []
+        for topic in [LiveTopic.chat("topic"), LiveTopic.chat("concierge"), LiveTopic.chatStatus] {
+            _ = events.subscribe(topic) { event in
+                if case .reconnected = event { refetches.append(topic) }
+            }
+        }
+        events.watch("topic")
+        events.pause()
+        events.resume()
+        #expect(refetches == [LiveTopic.chat("topic")])
+        events.watch(nil)
+        events.resume()
+        #expect(refetches == [LiveTopic.chat("topic")])
+        events.pause()
+    }
+
+    /// A chat brought on screen before the socket confirms it refetches as it
+    /// shows, so a socket that never comes back cannot leave it stale.
+    @Test func aChatShownBeforeTheSocketConfirmsRefetchesAsItShows() {
+        let events = socket()
+        var refetches: [String] = []
+        for topic in [LiveTopic.chat("topic"), LiveTopic.chat("concierge")] {
+            _ = events.subscribe(topic) { event in
+                if case .reconnected = event { refetches.append(topic) }
+            }
+        }
+        events.watch("topic")
+        events.pause()
+        events.resume()
+        events.watch("concierge")
+        #expect(refetches == [LiveTopic.chat("topic"), LiveTopic.chat("concierge")])
+        // Shown again, still unconfirmed: the same chat does not read twice in a row.
+        events.watch("concierge")
+        #expect(refetches.count == 2)
         events.pause()
     }
 
@@ -74,9 +126,10 @@ import Testing
     @Test func resumeWithoutAPauseStillRefetches() {
         let events = socket()
         var refetches = 0
-        _ = events.subscribe(LiveTopic.chatStatus) { event in
+        _ = events.subscribe(LiveTopic.chat("concierge")) { event in
             if case .reconnected = event { refetches += 1 }
         }
+        events.watch("concierge")
         events.resume()
         #expect(refetches == 1)
         events.resume()
@@ -216,6 +269,28 @@ final class DeadThenAliveProtocol: URLProtocol, @unchecked Sendable {
         #expect(store.messages.map(\.id).contains("late"))
         // Counted like a live reply, so the list can offer "New messages".
         #expect(store.arrivals == arrivalsBefore + 1)
+    }
+
+    /// A push opens its chat: its refetch and the screen's first read are one.
+    @Test func openingDuringAPushRefetchReadsOnce() async {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: "topic", kind: .concierge, backend: backend)
+        store.resync()
+        store.start()
+        await settle()
+        #expect(backend.newestFetches == 1)
+    }
+
+    /// The chat refetches on its own topic's confirmation, not on chat.status's too.
+    @Test func aConfirmedStatusTopicDoesNotReloadTheChat() async {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: "topic", kind: .concierge, backend: backend)
+        store.start()
+        await settle()
+        let before = backend.newestFetches
+        backend.bus.emit(LiveTopic.chatStatus, .reconnected)
+        await settle()
+        #expect(backend.newestFetches == before)
     }
 
     @Test func theFirstLoadIsNotAnArrival() async {

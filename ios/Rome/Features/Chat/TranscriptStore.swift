@@ -273,11 +273,14 @@ final class TranscriptStore {
             self?.handle(event)
         })
         tokens.append(backend.events.subscribe(LiveTopic.chatStatus) { [weak self] event in
+            // The chat's own topic says when to read again: one refetch, not two.
+            if case .reconnected = event { return }
             self?.handle(event)
         })
         // Entering a chat whose load failed tries again where it shows: the
-        // bar's spinner runs at once, never a Retry left from before.
-        if loadFailed { retryLoad() } else { Task { await reload() } }
+        // bar's spinner runs at once, never a Retry left from before. Else the
+        // read joins one already asked for, as by the push that opened the chat.
+        if loadFailed { retryLoad() } else { resync() }
     }
 
     /// A chat made just now holds nothing yet: it counts as loaded at once,
