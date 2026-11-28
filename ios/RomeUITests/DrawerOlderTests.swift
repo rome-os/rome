@@ -43,17 +43,25 @@ final class DrawerOlderTests: XCTestCase {
     }
 
     @MainActor
-    func testFoldingPersistenceAndOpenException() {
+    private func launch() -> XCUIApplication {
         let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_DEMO"] = "older-topics"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        return app
+    }
+
+    /// Older opens in place and remembers it; an older chat opened keeps its
+    /// place in Older, selected, and Older keeps its count.
+    @MainActor
+    func testOlderOpensInPlaceAndKeepsTheOpenChat() {
+        let app = launch()
         openDrawer(app)
         let header = app.buttons["older-topic-chats-header"].firstMatch
         // Make the start independent of a preceding run's saved preference.
         if header.value as? String == "Expanded" { header.tap() }
-        XCTAssertEqual(header.label, "Older · 3")
+        XCTAssertEqual(header.label, "Older, 3")
         XCTAssertFalse(row(app, "今天吃了什么").isHittable)
         XCTAssertTrue(row(app, "京都旅行计划").isHittable)
         XCTAssertTrue(row(app, "读书笔记").isHittable)
@@ -65,38 +73,44 @@ final class DrawerOlderTests: XCTestCase {
         XCTAssertEqual(header.value as? String, "Expanded")
         row(app, "今天吃了什么").tap()
         openDrawer(app)
-        XCTAssertEqual(header.label, "Older · 2")
+        XCTAssertEqual(header.label, "Older, 3")
+        XCTAssertTrue(row(app, "今天吃了什么").isSelected)
         header.tap()
         XCTAssertEqual(header.value as? String, "Collapsed")
-        XCTAssertTrue(row(app, "今天吃了什么").isHittable)
-        XCTAssertFalse(row(app, "附近的咖啡馆").isHittable)
+        XCTAssertFalse(row(app, "今天吃了什么").isHittable)
         app.terminate()
         app.launch()
         openDrawer(app)
         XCTAssertEqual(header.value as? String, "Collapsed")
     }
 
-    /// The Archived button sits in the Topic chats header, folded or not,
-    /// and opens the sheet.
+    /// Archived is a row under the list, like Older: it folds away with the
+    /// list, opens in place, and its chats' menu unarchives or deletes.
     @MainActor
-    func testArchivedButtonStaysInTheHeaderWhenFolded() {
-        let app = XCUIApplication.forUITests()
-        app.launchEnvironment["ROME_DEMO"] = "older-topics"
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launch()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+    func testArchivedOpensInPlace() {
+        let app = launch()
         openDrawer(app)
-        let archived = app.buttons["archived-topic-chats"].firstMatch
+        let archived = app.buttons["archived-topic-chats-header"].firstMatch
         XCTAssertTrue(archived.waitForExistence(timeout: 10))
         waitOnScreen(app, archived)
-        XCTAssertEqual(archived.label, "Archived")
+        XCTAssertEqual(archived.label, "Archived, 7")
+        XCTAssertFalse(app.buttons["archived-topic-chats"].exists)
+        if archived.value as? String == "Expanded" { archived.tap() }
         let fold = app.buttons["topic-chats-header"].firstMatch
         fold.tap()
-        waitOnScreen(app, archived)
+        XCTAssertFalse(archived.waitForExistence(timeout: 1))
         // The fold persists: unfold again for the next test.
         fold.tap()
-        XCTAssertTrue(app.buttons["older-topic-chats-header"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(archived.waitForExistence(timeout: 5))
+        let car = row(app, "二手车比价")
+        XCTAssertFalse(car.exists && car.isHittable)
         archived.tap()
-        XCTAssertTrue(app.buttons["archived-topic-chat"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(car.waitForExistence(timeout: 5))
+        waitOnScreen(app, car)
+        car.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Unarchive"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Delete"].exists)
+        XCTAssertFalse(app.buttons["Pin"].exists)
+        XCTAssertFalse(app.buttons["Rename"].exists)
     }
 }

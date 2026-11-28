@@ -70,10 +70,6 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
-    /// The Archived sheet, from the drawer's row under the topic chats.
-    @State private var showArchived = false
-    /// The archived chat tapped in that sheet: it opens once the sheet is gone.
-    @State private var openArchived: String?
     /// Goes up with each widget link followed: a later one wins.
     @State private var linkSerial = 0
     /// A short notice after a widget link, such as an app that is gone.
@@ -103,7 +99,6 @@ struct MainShell: View {
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
     @State private var connectPreview: String?
-    @State private var archivedPreview = false
     @State private var loginPreview: AIAccount?
     #endif
 
@@ -202,8 +197,6 @@ struct MainShell: View {
                 photoViewerPreview = open
             case .connectSheet(let id):
                 connectPreview = id
-            case .archivedSheet(let open):
-                archivedPreview = open
             case .aiLoginSheet(let account):
                 loginPreview = account
             case .composerPhotos, .appIdeas, nil: break
@@ -248,12 +241,7 @@ struct MainShell: View {
                     },
                     // The open chat archived or deleted from its row: the main
                     // Chat shows, as from the chat's own header; the drawer stays.
-                    onTopicGone: leave,
-                    // Over the open drawer, as Settings is.
-                    onArchived: {
-                        openArchived = nil
-                        showArchived = true
-                    }
+                    onTopicGone: leave
                 )
                 .frame(width: width, height: geometry.size.height)
             } page: {
@@ -315,23 +303,6 @@ struct MainShell: View {
         .sheet(isPresented: $showSettings) {
             settingsSheet
         }
-        .sheet(isPresented: $showArchived, onDismiss: {
-            // The chat opens once the sheet is gone, and the drawer goes with it.
-            guard let id = openArchived else { return }
-            openArchived = nil
-            show(.topic(id))
-            closeDrawer()
-        }) {
-            archivedSheet
-                // It stops at half height and floats on iOS 26, where the
-                // system dims nothing behind it: the drawer and the chat
-                // would read clearly around it.
-                .background(SheetDim())
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(Palette.sheet)
-                .presentationCornerRadius(22)
-        }
         // A connect card's device connection: its authorization, then the card checks.
         .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
             ConnectDeviceSheet(request: request)
@@ -353,16 +324,6 @@ struct MainShell: View {
             }
             if settingsPreview {
                 SheetStandIn { settingsSheet }
-            }
-            if archivedPreview {
-                // A sheet at medium height, over the open drawer.
-                ZStack(alignment: .bottom) {
-                    SheetScrim()
-                    archivedSheet
-                        .frame(height: 420)
-                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
-                }
-                .ignoresSafeArea(edges: .bottom)
             }
             if let loginPreview {
                 ZStack(alignment: .bottom) {
@@ -649,8 +610,8 @@ struct MainShell: View {
         }
     }
 
-    /// A topic chat archived or deleted from the drawer or the Archived
-    /// sheet: if it is open, the main Chat shows, as from the chat's own header.
+    /// A topic chat archived or deleted from the drawer: if it is open, the
+    /// main Chat shows, as from the chat's own header.
     private func leave(_ chatId: String) {
         if let next = Self.section(after: section, retired: chatId) { show(next) }
     }
@@ -661,18 +622,10 @@ struct MainShell: View {
         current == .topic(retired) ? .chat : nil
     }
 
-    /// The Archived sheet: a tapped row closes it, and its chat opens after.
-    private var archivedSheet: some View {
-        ArchivedTopicsSheet(workspace: workspace, onOpen: { id in
-            openArchived = id
-            showArchived = false
-        }, onDeleted: leave)
-    }
-
     /// A pushed page, the Agent page's cover or a large sheet (an app, a
     /// dashboard page, Settings) hides the stack's root. A sheet leaves the
     /// root on screen, so its animations would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived || workspace.linkedFileShown }
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || workspace.linkedFileShown }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
@@ -776,9 +729,7 @@ struct MainShell: View {
         if agentPage != nil {
             return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sheetCoversChat)
         }
-        // The Archived sheet covers it too: beside a pinned drawer (iPad)
-        // the drawer is not open while the sheet shows.
-        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sheetCoversChat)
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || page != nil || openApp != nil || workspace.sheetCoversChat)
     }
 
     /// The chat on screen while the Agent page is up: a task chat pushed
