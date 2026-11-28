@@ -14,9 +14,7 @@ import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-webs
 import { ThemeProvider } from "@/hooks/use-theme";
 import { LARGE_TEXT_FILE_BYTES, getProjectsAutoSavePolicy } from "@/lib/projects-autosave";
 import {
-  type FilterRowSize,
-  kindsThatFit,
-  kindsThatStillFit,
+  filterOf,
   OutputsPanel,
   outputTitle,
   pageHrefOf,
@@ -263,164 +261,56 @@ describe("OutputsPanel", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("offers All and each kind the chat holds, the most held first", async () => {
+  it("offers All, Files and Media, in that order, once the chat holds more than ten outputs", async () => {
     const user = userEvent.setup();
     outputs = [
       output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
-      output("map", { name: "map.png", mimeType: "image/png", kind: "shown" }),
+      output("clip", { name: "clip.mp4", mimeType: "video/mp4", fileKind: "video" }),
+      output("song", { name: "song.mp3", mimeType: "audio/mpeg" }),
       output("sheet", { name: "sheet.xlsx", mimeType: null }),
-      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+      output("page", { name: "page.html", mimeType: "text/html" }),
+      ...Array.from({ length: 6 }, (_, i) => output(`note-${i}`, { name: `note-${i}.md` })),
     ];
     renderPanel();
     await screen.findByRole("list", { name: "Today" });
-    // Pictures lead with two; the kinds held once keep their usual order.
     expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
       "All",
-      "Pictures",
-      "Documents",
-      "Spreadsheets",
+      "Files",
+      "Media",
     ]);
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
-    await user.click(screen.getByRole("radio", { name: "Spreadsheets" }));
-    expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Sheet.xlsx"),
-    ]);
+    const names = () =>
+      within(screen.getByRole("list", { name: "Today" }))
+        .getAllByRole("button")
+        .map((row) => row.textContent);
+    await user.click(screen.getByRole("radio", { name: "Media" }));
+    expect(names()).toEqual(["Pic.png", "Clip.mp4", "Song.mp3"]);
+    await user.click(screen.getByRole("radio", { name: "Files" }));
+    expect(names()).toHaveLength(8);
+    expect(names()).not.toContain("Pic.png");
     await user.click(screen.getByRole("radio", { name: "All" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(names()).toHaveLength(11);
   });
 
-  it("puts the kinds past three under More, which names the one it filters by", async () => {
+  it("keeps a filter with nothing in it, which says so", async () => {
     const user = userEvent.setup();
-    outputs = [
-      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
-      output("plan", { name: "plan.md", mimeType: "text/markdown" }),
-      output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
-      output("sheet", { name: "sheet.csv", mimeType: "text/csv" }),
-      output("site", { name: "site.html", mimeType: "text/html" }),
-      output("voice", { name: "voice.wav", mimeType: "audio/wav" }),
-      output("script", { name: "script.ts", mimeType: "text/typescript" }),
-    ];
+    outputs = Array.from({ length: 11 }, (_, i) => output(`note-${i}`, { name: `note-${i}.md` }));
     renderPanel();
     await screen.findByRole("list", { name: "Today" });
-    expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
-      "All",
-      "Documents",
-      "Pictures",
-      "Spreadsheets",
-    ]);
-    await user.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-      "Pages",
-      "Audio",
-      "Code",
-    ]);
-    await user.click(screen.getByRole("menuitemradio", { name: "Audio" }));
-    const more = screen.getByRole("button", { name: "More: Audio" });
-    expect(more.textContent).toBe("Audio");
-    expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Voice.wav"),
-    ]);
-    expect(
-      screen.getAllByRole("radio").some((chip) => chip.getAttribute("aria-checked") === "true"),
-    ).toBe(false);
-    await user.click(screen.getByRole("radio", { name: "All" }));
-    expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+    await user.click(screen.getByRole("radio", { name: "Media" }));
+    expect(screen.getByText("No pictures, videos or audio yet.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Today" })).toBeNull();
   });
 
-  it("shows as many kinds as the row's width holds, and lays them out again as it resizes", async () => {
-    // Every chip is 8px a letter plus its padding, side by side with no gap.
-    const original = Element.prototype.getBoundingClientRect;
-    const OriginalObserver = globalThis.ResizeObserver;
-    const resized: (() => void)[] = [];
-    let rowWidth = 260;
-    const widthOf = (element: Element) => (element.textContent?.length ?? 0) * 8 + 24;
-    const box = (left: number, width: number) =>
-      ({
-        left,
-        right: left + width,
-        width,
-        top: 0,
-        bottom: 0,
-        height: 0,
-        x: left,
-        y: 0,
-      }) as DOMRect;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (this.getAttribute("data-slot") === "output-filters") return box(0, rowWidth);
-      const measure = this.closest('[data-slot="output-filters-measure"]');
-      if (!measure) return original.call(this);
-      if (!this.matches("[data-slot=filter-chip]")) return box(0, widthOf(this) + 16);
-      let left = 0;
-      for (const chip of measure.querySelectorAll("[data-slot=filter-chip]")) {
-        if (chip === this) break;
-        left += widthOf(chip);
-      }
-      return box(left, widthOf(this));
-    };
-    globalThis.ResizeObserver = class {
-      constructor(callback: () => void) {
-        resized.push(callback);
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-    try {
-      const user = userEvent.setup();
-      outputs = [
-        output("notes", { name: "notes.md", mimeType: "text/markdown" }),
-        output("plan", { name: "plan.md", mimeType: "text/markdown" }),
-        output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
-        output("sheet", { name: "sheet.csv", mimeType: "text/csv" }),
-        output("site", { name: "site.html", mimeType: "text/html" }),
-        output("voice", { name: "voice.wav", mimeType: "audio/wav" }),
-        output("script", { name: "script.ts", mimeType: "text/typescript" }),
-      ];
-      renderPanel();
-      await screen.findByRole("list", { name: "Today" });
-      const chips = () => screen.getAllByRole("radio").map((chip) => chip.textContent);
-      // 260px holds All (48), Documents (96) and More (72), not Pictures too.
-      await waitFor(() => expect(chips()).toEqual(["All", "Documents"]));
-      const resize = (width: number) => {
-        rowWidth = width;
-        act(() => {
-          for (const callback of resized) callback();
-        });
-      };
-      // 310px fits Pictures beside More (304) but not with the 12px to spare.
-      resize(310);
-      expect(chips()).toEqual(["All", "Documents"]);
-      // Choosing a filter does not bring it in either; only room to spare does.
-      await user.click(screen.getByRole("radio", { name: "Documents" }));
-      expect(chips()).toEqual(["All", "Documents"]);
-      resize(330);
-      expect(chips()).toEqual(["All", "Documents", "Pictures"]);
-      await user.click(screen.getByRole("button", { name: "More" }));
-      expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-        "Spreadsheets",
-        "Pages",
-        "Audio",
-        "Code",
-      ]);
-      await user.click(screen.getByRole("menuitemradio", { name: "Audio" }));
-      expect(screen.getByRole("button", { name: "More: Audio" }).textContent).toBe("Audio");
-      expect(chips()).toEqual(["All", "Documents", "Pictures"]);
-    } finally {
-      Element.prototype.getBoundingClientRect = original;
-      globalThis.ResizeObserver = OriginalObserver;
-    }
-  });
-
-  it("offers no filters while the chat holds one kind", async () => {
+  it("shows no filters at ten outputs or fewer, mixed kinds or not", async () => {
     outputs = [
-      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
-      output("plan", { name: "plan.txt" }),
+      output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      ...Array.from({ length: 9 }, (_, i) => output(`note-${i}`, { name: `note-${i}.md` })),
     ];
     renderPanel();
     await screen.findByRole("list", { name: "Today" });
     expect(screen.queryByRole("radio")).toBeNull();
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getAllByRole("listitem")).toHaveLength(10);
   });
 
   it("says a file that moved or went is gone, and offers nothing to open", async () => {
@@ -646,11 +536,12 @@ describe("OutputsPanel", () => {
         output("notes", { name: "notes.md", mimeType: "text/markdown" }),
         output("plan", { name: "plan.md", mimeType: "text/markdown" }),
         output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+        ...Array.from({ length: 8 }, (_, i) => output(`log-${i}`, { name: `log-${i}.txt` })),
       ];
       files[outputs[1].contentUrl!] = "# Plan";
       renderPanel();
       await screen.findByRole("list", { name: "Today" });
-      await user.click(screen.getByRole("radio", { name: "Documents" }));
+      await user.click(screen.getByRole("radio", { name: "Files" }));
       const list = screen.getByTestId("chat-outputs");
       list.scrollTop = 240;
       fireEvent.scroll(list);
@@ -660,7 +551,7 @@ describe("OutputsPanel", () => {
 
       const back = screen.getByTestId("chat-outputs");
       expect(back.scrollTop).toBe(240);
-      expect(screen.getByRole("radio", { name: "Documents" }).getAttribute("aria-checked")).toBe(
+      expect(screen.getByRole("radio", { name: "Files" }).getAttribute("aria-checked")).toBe(
         "true",
       );
       expect(screen.queryByRole("button", { name: "Pic.png" })).toBeNull();
@@ -923,33 +814,16 @@ describe("outputTypeOf and outputTitle", () => {
   });
 });
 
-describe("kindsThatFit", () => {
-  // All ends at 50 and each of three kinds adds 100; More is 60 wide, or 100 naming a kind.
-  const size = (width: number): FilterRowSize => ({
-    width,
-    gap: 8,
-    ends: [50, 150, 250, 350],
-    more: 60,
-    moreNamed: [100, 100, 100],
-  });
-
-  it("shows as many kinds as fit beside All and More, and needs no More when all fit", () => {
-    expect(kindsThatFit(size(100), -1)).toBe(0);
-    expect(kindsThatFit(size(300), -1)).toBe(1);
-    expect(kindsThatFit(size(330), -1)).toBe(2);
-    expect(kindsThatFit(size(350), -1)).toBe(3);
-  });
-
-  it("leaves room for More to name the kind chosen under it", () => {
-    expect(kindsThatFit(size(330), 2)).toBe(1);
-    expect(kindsThatFit(size(330), 0)).toBe(2);
-  });
-
-  it("drops a chip as soon as it no longer fits, and shows one again only with room to spare", () => {
-    expect(kindsThatStillFit(size(317), -1, 2)).toBe(1);
-    expect(kindsThatStillFit(size(320), -1, 1)).toBe(1);
-    expect(kindsThatStillFit(size(331), -1, 1)).toBe(2);
-    expect(kindsThatStillFit(size(320), -1, 2)).toBe(2);
+describe("filterOf", () => {
+  it("puts pictures, video and audio under Media by the shared file kinds, and the rest under Files", () => {
+    expect(filterOf({ path: "a.png", mimeType: "image/png" })).toBe("media");
+    expect(filterOf({ path: "a.svg", mimeType: null })).toBe("media");
+    expect(filterOf({ path: "a.mov", mimeType: null })).toBe("media");
+    expect(filterOf({ path: "a.wav", mimeType: "audio/wav" })).toBe("media");
+    expect(filterOf({ path: "x", mimeType: null, fileKind: "video" })).toBe("media");
+    for (const path of ["a.md", "a.pdf", "a.csv", "a.html", "a.ts", "a.zip", "a"]) {
+      expect(filterOf({ path, mimeType: null }), path).toBe("files");
+    }
   });
 });
 

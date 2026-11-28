@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   AppWindow,
-  ChevronDown,
   ChevronLeft,
   Download,
   ExternalLink,
@@ -16,7 +15,6 @@ import {
   Sheet,
 } from "lucide-react";
 import {
-  type CSSProperties,
   type MouseEvent,
   type ReactNode,
   useEffect,
@@ -29,13 +27,6 @@ import { Link } from "react-router-dom";
 import { describeFile, type FileKind, fileKindOfMimeType } from "@rome/api-types/file-kinds";
 import { FilePreview } from "@/components/file-preview";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   EmptyState,
   EmptyStateDescription,
@@ -90,9 +81,7 @@ export function pageHrefOf(
 }
 
 /**
- * What an output is, as the list names it and filters it. Two kinds a list
- * holds as many of keep this order: what people come back for first, working
- * files last.
+ * What an output is, as the list names it and draws its icon.
  */
 const OUTPUT_TYPES = [
   "document",
@@ -123,74 +112,20 @@ export function outputTypeOf(
   return "file";
 }
 
-/** The most kinds the filters show as chips after All; the rest wait under More. */
-export const CHIP_KINDS = 3;
+/** The list's filters, in this order. */
+export const FILTERS = ["all", "files", "media"] as const;
+type Filter = (typeof FILTERS)[number];
 
-/** A filter row as laid out, in pixels. */
-export interface FilterRowSize {
-  /** The row's width. */
-  width: number;
-  /** The space between two chips. */
-  gap: number;
-  /** Where All's chip and then each kind's ends, from the row's start, side by side. */
-  ends: number[];
-  /** The More chip's width while it reads More. */
-  more: number;
-  /** The More chip's width while it names each kind, in the kinds' order. */
-  moreNamed: number[];
-}
+/** The filters show only once a chat holds more outputs than this. */
+export const FILTER_FROM = 10;
 
 /**
- * How many kinds show as chips: as many as fit beside All, and beside More
- * when any kind is left for it, up to CHIP_KINDS. More names the chosen kind
- * when it holds it, so it is measured that wide. `chosen` is the chosen kind's
- * place among the kinds, or -1 for All.
+ * Which filter an output falls under: Media for a picture, a video or an
+ * audio file by the shared file kinds, Files for anything else.
  */
-export function kindsThatFit(size: FilterRowSize, chosen: number): number {
-  const kinds = size.ends.length - 1;
-  for (let count = Math.min(CHIP_KINDS, kinds); count > 0; count--) {
-    const more =
-      count === kinds
-        ? 0
-        : size.gap + (chosen >= count ? (size.moreNamed[chosen] ?? size.more) : size.more);
-    if ((size.ends[count] ?? 0) + more <= size.width) return count;
-  }
-  return 0;
-}
-
-/**
- * How far past the width one more chip needs the row must grow before it
- * shows, so a width resting on the edge does not flip it back and forth.
- */
-export const FIT_SLACK = 12;
-
-/**
- * kindsThatFit as the row resizes or a filter is chosen: one fewer as soon as
- * a chip no longer fits, one more only once the row is FIT_SLACK past the
- * width it needs.
- */
-export function kindsThatStillFit(size: FilterRowSize, chosen: number, previous: number): number {
-  const fits = kindsThatFit(size, chosen);
-  if (fits < previous) return fits;
-  return Math.max(previous, kindsThatFit({ ...size, width: size.width - FIT_SLACK }, chosen));
-}
-
-/**
- * The kinds a list holds, the one it holds most of first, for its filters.
- * None while it holds one kind, which All already shows.
- */
-export function kindsOf(
-  outputs: readonly Pick<ChatOutput, "name" | "path" | "mimeType" | "fileKind">[],
-): OutputType[] {
-  const counts = new Map<OutputType, number>();
-  for (const output of outputs) {
-    const type = outputTypeOf(output);
-    counts.set(type, (counts.get(type) ?? 0) + 1);
-  }
-  if (counts.size < 2) return [];
-  return OUTPUT_TYPES.filter((type) => counts.has(type)).sort(
-    (a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0),
-  );
+export function filterOf(output: Pick<ChatOutput, "path" | "mimeType" | "fileKind">): Filter {
+  const kind = fileKindOf(output);
+  return kind === "image" || kind === "video" || kind === "audio" ? "media" : "files";
 }
 
 /**
@@ -207,8 +142,6 @@ export function outputTitle(name: string): string {
   if (!words) return name;
   return words.charAt(0).toLocaleUpperCase() + words.slice(1) + extension;
 }
-
-type Filter = "all" | OutputType;
 
 const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
   document: { icon: <FileText />, tint: "bg-primary/10 text-primary" },
@@ -420,10 +353,10 @@ export function OutputsPanel({
   }
 
   const now = new Date();
-  const kinds = kindsOf(list);
-  // A chosen kind this list does not hold, as another chat's, falls back to All.
-  const active = filter !== "all" && kinds.includes(filter) ? filter : "all";
-  const shown = list.filter((output) => active === "all" || outputTypeOf(output) === active);
+  const filtered = list.length > FILTER_FROM;
+  // With no filters showing, the whole list shows.
+  const active = filtered ? filter : "all";
+  const shown = list.filter((output) => active === "all" || filterOf(output) === active);
   const today = shown.filter((output) => sameDay(new Date(output.at), now));
   const earlier = shown.filter((output) => !sameDay(new Date(output.at), now));
   const group = (key: "today" | "earlier", items: ChatOutput[]) =>
@@ -458,182 +391,28 @@ export function OutputsPanel({
       data-testid="chat-outputs"
     >
       <div className="flex flex-col gap-4 p-4 max-md:px-3">
-        {kinds.length > 0 && <KindFilters kinds={kinds} value={active} onValueChange={setFilter} />}
-        {indexingNote}
-        <div className="flex flex-col gap-4">
-          {group("today", today)}
-          {group("earlier", earlier)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** The kit's filter chip, as More's menu trigger rather than a radio. */
-function moreChipClass(chosen: boolean): string {
-  return cn(
-    "inline-flex shrink-0 items-center gap-1 rounded-full border px-[var(--control-filter-px)] py-1 text-badge min-h-[var(--control-min-h)] whitespace-nowrap transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4",
-    chosen
-      ? "border-transparent bg-primary text-primary-foreground"
-      : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",
-  );
-}
-
-/**
- * All and as many kinds as the row's width holds, up to CHIP_KINDS, with the
- * rest under More, so the row never scrolls. A hidden copy of every chip is
- * measured to tell how many fit, again whenever the row or the chips resize.
- */
-function KindFilters({
-  kinds,
-  value,
-  onValueChange,
-}: {
-  kinds: OutputType[];
-  value: Filter;
-  onValueChange: (filter: Filter) => void;
-}) {
-  const { t, i18n } = useTranslation("chat");
-  const rowRef = useRef<HTMLDivElement>(null);
-  const measureRef = useRef<HTMLDivElement>(null);
-  const [fitted, setFitted] = useState(CHIP_KINDS);
-  // The count last shown, kept across choosing a filter as well as resizes, so
-  // a click never adds a chip that only the slack was holding back.
-  const shownRef = useRef<number | null>(null);
-  const count = Math.min(fitted, kinds.length);
-  const chosen = value === "all" ? -1 : kinds.indexOf(value);
-  const kindsKey = kinds.join(",");
-  const label = (filter: Filter) => t(`outputs.filters.${filter}`);
-
-  // Measured again whenever the kinds, the chosen one or the language change what the chips say.
-  useLayoutEffect(() => {
-    const row = rowRef.current;
-    const measure = measureRef.current;
-    if (!row || !measure) return;
-    const fit = () => {
-      // Unrounded, as the chips are measured, so a fractional width cannot round up past them.
-      const width = row.getBoundingClientRect().width;
-      // Not laid out, as in a closed sheet: keep the most chips until it is.
-      if (width === 0) return;
-      const chips = [...measure.querySelectorAll<HTMLElement>("[data-slot=filter-chip]")];
-      const start = chips[0]?.getBoundingClientRect().left ?? 0;
-      const widthOf = (selector: string) =>
-        measure.querySelector<HTMLElement>(selector)?.getBoundingClientRect().width ?? 0;
-      const size: FilterRowSize = {
-        width,
-        gap: Number.parseFloat(getComputedStyle(row).columnGap) || 0,
-        ends: chips.map((chip) => chip.getBoundingClientRect().right - start),
-        more: widthOf("[data-more]"),
-        moreNamed: kinds.map((kind) => widthOf(`[data-more-named="${kind}"]`)),
-      };
-      const next = kindsThatStillFit(size, chosen, shownRef.current ?? CHIP_KINDS);
-      shownRef.current = next;
-      setFitted(next);
-    };
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(row);
-    observer.observe(measure);
-    return () => observer.disconnect();
-  }, [kindsKey, chosen, i18n.language]);
-
-  return (
-    // Chips a step tighter than the kit's touch spacing, so more of them fit.
-    <div
-      ref={rowRef}
-      data-slot="output-filters"
-      className="relative flex min-w-0 items-start gap-2"
-      style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}
-    >
-      <FilterChipGroup<Filter>
-        aria-label={t("outputs.filterLabel")}
-        value={value}
-        onValueChange={onValueChange}
-        options={(["all", ...kinds.slice(0, count)] as Filter[]).map((filter) => ({
-          value: filter,
-          label: label(filter),
-        }))}
-      />
-      {count < kinds.length && (
-        <MoreKinds kinds={kinds.slice(count)} value={value} onValueChange={onValueChange} />
-      )}
-      {/* Clipped to nothing, so the copy's full width never scrolls the pane. */}
-      <div
-        aria-hidden
-        inert
-        className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 overflow-hidden"
-      >
-        <div
-          ref={measureRef}
-          data-slot="output-filters-measure"
-          className="flex w-max items-start gap-2"
-        >
+        {filtered && (
           <FilterChipGroup<Filter>
             aria-label={t("outputs.filterLabel")}
-            value={value}
-            onValueChange={onValueChange}
-            options={(["all", ...kinds] as Filter[]).map((filter) => ({
-              value: filter,
-              label: label(filter),
-            }))}
+            value={active}
+            onValueChange={setFilter}
+            options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
           />
-          <span data-more className={moreChipClass(false)}>
-            {t("outputs.more")}
-            <ChevronDown aria-hidden />
-          </span>
-          {kinds.map((kind) => (
-            <span key={kind} data-more-named={kind} className={moreChipClass(true)}>
-              {label(kind)}
-              <ChevronDown aria-hidden />
-            </span>
-          ))}
-        </div>
+        )}
+        {indexingNote}
+        {shown.length === 0 ? (
+          // Only a filter can leave nothing: All shows the whole, non-empty list.
+          <p className="px-3 text-ui text-muted-foreground">
+            {t(active === "media" ? "outputs.filterEmpty.media" : "outputs.filterEmpty.files")}
+          </p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {group("today", today)}
+            {group("earlier", earlier)}
+          </div>
+        )}
       </div>
     </div>
-  );
-}
-
-/**
- * The kinds past the chips, under one chip that opens a menu of them. It reads
- * as chosen, and names the kind, while one of them filters the list.
- */
-function MoreKinds({
-  kinds,
-  value,
-  onValueChange,
-}: {
-  kinds: OutputType[];
-  value: Filter;
-  onValueChange: (kind: OutputType) => void;
-}) {
-  const { t } = useTranslation("chat");
-  const chosen = kinds.find((kind) => kind === value);
-  const chosenLabel = chosen && t(`outputs.filters.${chosen}`);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={chosenLabel ? t("outputs.moreChosen", { kind: chosenLabel }) : undefined}
-          className={moreChipClass(Boolean(chosen))}
-        >
-          {chosenLabel ?? t("outputs.more")}
-          <ChevronDown aria-hidden />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup
-          value={chosen ?? ""}
-          onValueChange={(next) => onValueChange(next as OutputType)}
-        >
-          {kinds.map((kind) => (
-            <DropdownMenuRadioItem key={kind} value={kind}>
-              {t(`outputs.filters.${kind}`)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
