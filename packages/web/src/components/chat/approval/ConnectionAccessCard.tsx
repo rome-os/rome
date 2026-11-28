@@ -3,7 +3,6 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import {
-  expiryPresetToIso,
   GROUP_ORDER,
   type OperationGroupKey,
   operationGroupKey,
@@ -11,17 +10,9 @@ import {
 } from "@/components/connections/connection-operation-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { PreviewPayload } from "@/lib/chat-types";
 
 type ConnectionAccess = Extract<PreviewPayload, { kind: "connection_access" }>;
-type ExpiryPreset = "never" | "7d" | "30d";
 
 /**
  * A calm, reversible authorization card shown in chat when an agent asks for an
@@ -45,11 +36,10 @@ export function ConnectionAccessCard({
   failure?: string | null;
   submitting: "approve" | "reject" | null;
   submitError: string | null;
-  submit: (intent: "approve" | "reject", options?: { expiresAt: string | null }) => void;
+  submit: (intent: "approve" | "reject") => void;
 }) {
   const { t } = useTranslation("chat");
   const { t: tSettings } = useTranslation("settings", { keyPrefix: "connectionAppAccess" });
-  const [expiry, setExpiry] = useState<ExpiryPreset>("never");
   const [expanded, setExpanded] = useState(false);
 
   const grouped = useMemo(() => {
@@ -168,53 +158,28 @@ export function ConnectionAccessCard({
       </div>
 
       {awaiting && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle pt-3">
-          <div className="flex items-center gap-2">
-            <span className="text-aux text-muted-foreground">
-              {t("approvals.connectionAccess.expiryLabel")}
-            </span>
-            <Select
-              value={expiry}
-              onValueChange={(value) => setExpiry(value as ExpiryPreset)}
-              disabled={submitting !== null}
-            >
-              <SelectTrigger
-                aria-label={t("approvals.connectionAccess.expiryLabel")}
-                className="h-7 w-auto min-w-[6.5rem] text-aux"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="never">{tSettings("never")}</SelectItem>
-                <SelectItem value="7d">{tSettings("sevenDays")}</SelectItem>
-                <SelectItem value="30d">{tSettings("thirtyDays")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => submit("reject")}
-              disabled={submitting !== null}
-            >
-              {submitting === "reject"
-                ? t("approvals.actions.rejecting")
-                : t("approvals.actions.reject")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => submit("approve", { expiresAt: expiryPresetToIso(expiry) })}
-              disabled={submitting !== null}
-            >
-              {submitting === "approve"
-                ? t("approvals.actions.approving")
-                : t("approvals.connectionAccess.allow")}
-            </Button>
-          </div>
+        <div className="mt-3 flex items-center justify-end gap-2 border-t border-border-subtle pt-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => submit("reject")}
+            disabled={submitting !== null}
+          >
+            {submitting === "reject"
+              ? t("approvals.actions.rejecting")
+              : t("approvals.actions.reject")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => submit("approve")}
+            disabled={submitting !== null}
+          >
+            {submitting === "approve"
+              ? t("approvals.actions.approving")
+              : t("approvals.connectionAccess.allow")}
+          </Button>
         </div>
       )}
 

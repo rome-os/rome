@@ -13,6 +13,7 @@ export type SetupFormFieldOption = string | { value: string; label: string };
 export interface SetupFormField {
   name: string;
   label: string;
+  description?: string;
   secret: boolean;
   format?: "line" | "multiline" | "file";
   options?: SetupFormFieldOption[];

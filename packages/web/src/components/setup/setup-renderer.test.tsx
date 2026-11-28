@@ -285,11 +285,11 @@ describe("setup form option labels and i18n", () => {
         status: "awaiting-input",
         form: {
           id: "feishu.mode",
-          instructions: "English fallback instructions",
           fields: [
             {
               name: "mode",
               label: "Setup method",
+              description: "English fallback description",
               secret: false,
               options: [
                 { value: "agent-ready", label: "Agent-ready (scan QR code)" },
@@ -311,15 +311,23 @@ describe("setup form option labels and i18n", () => {
       { onSubmit },
     );
 
-    expect(screen.getByText(/选择连接方式：自动创建会通过扫码在你的飞书/)).toBeTruthy();
+    const modeSelect = screen.getByLabelText("连接方式");
+    const modeDescription = screen.getByText(/选择连接方式：自动创建会通过扫码在你的飞书/);
+    const domainSelect = screen.getByLabelText("服务区域");
+    expect(
+      modeSelect.compareDocumentPosition(modeDescription) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      modeDescription.compareDocumentPosition(domainSelect) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
-    await user.click(screen.getByLabelText("连接方式"));
+    await user.click(modeSelect);
     await user.click(
       within(await screen.findByRole("listbox")).getByRole("option", {
         name: "自动创建（扫码创建应用）",
       }),
     );
-    await user.click(screen.getByLabelText("服务区域"));
+    await user.click(domainSelect);
     await user.click(
       within(await screen.findByRole("listbox")).getByRole("option", {
         name: "飞书（中国大陆 · feishu.cn）",
@@ -327,6 +335,21 @@ describe("setup form option labels and i18n", () => {
     );
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(onSubmit).toHaveBeenCalledWith({ mode: "agent-ready", domain: "feishu" });
+  });
+
+  it("renders presenting cancel button with outline variant and muted secondary text", () => {
+    renderState({
+      status: "presenting",
+      view: {
+        id: "feishu.preparing",
+        title: "Creating the agent app",
+        body: [{ id: "preparing", text: "Preparing the app-creation QR code…" }],
+        progress: true,
+      },
+    });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel.getAttribute("data-variant")).toBe("outline");
+    expect(cancel.className).toContain("text-muted-foreground");
   });
 
   it("localizes parameterized setup views in zh-CN", async () => {

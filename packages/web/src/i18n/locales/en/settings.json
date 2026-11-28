@@ -320,10 +320,10 @@
       "forms": {
         "feishu": {
           "mode": {
-            "instructions": "Choose how to connect: agent-ready scans a QR code to create Rome's app in your tenant automatically; manual pastes an existing custom app's credentials.",
             "fields": {
               "mode": {
                 "label": "Setup method",
+                "description": "Choose how to connect: agent-ready scans a QR code to create Rome's app in your tenant automatically; manual pastes an existing custom app's credentials.",
                 "options": {
                   "agent-ready": "Agent-ready (scan QR code)",
                   "manual": "Manual (App ID & App Secret)"
@@ -1191,11 +1191,11 @@
     "hasGrants": "Has grants",
     "disabled": "Disabled",
     "needsAttention": "Needs attention",
-    "back": "Back",
+    "done": "Done",
     "addApp": "Add app",
     "authorizeManually": "Authorize an app",
     "manualPanelTitle": "Authorize an app",
-    "configureManually": "Configure individually",
+    "configureManually": "Customize permissions",
     "presetLabel": "Access level",
     "presetRead": "Read-only",
     "presetReadAndWrite": "Read & write",
@@ -1209,12 +1209,11 @@
     "noActiveGrants": "No active grants",
     "emptyAuthorizedTitle": "No authorized apps yet",
     "emptyAuthorizedDescription": "When an agent needs an app to use this connection, it will send an authorization card in chat for one-click approval.",
-    "grantReads": "Grant all reads",
+    "useTemplate": "Use template",
     "revokeAll": "Revoke all",
     "refresh": "Refresh access",
     "grant": "Grant",
     "save": "Save changes",
-    "revoke": "Revoke",
     "retry": "Try again",
     "loadingApps": "Loading installed apps…",
     "emptyApps": "No apps are installed.",
@@ -1222,22 +1221,35 @@
     "loadFailed": "Could not load app access.",
     "saveFailed": "Could not update app access.",
     "policyConflict": "This access policy changed elsewhere. Review the refreshed policy before saving again.",
-    "approvalRequired": "Guardian approval required",
-    "approvalRequiredShort": "Requires approval",
     "configureOperation": "Configure {{name}}",
-    "expiresShort": "Until {{date}}",
+    "viewPermissionDocs": "Open developer documentation for {{name}}",
+    "additionalPermissionsTitle": "Additional equivalent scopes",
+    "additionalPermissions": "{{count}} more equivalent scopes: {{scopes}}",
     "restrictedDocsShort": "{{count}} docs allowed",
     "noAllowedDocumentsShort": "No docs allowed",
-    "requiredScopes": "Required scopes · {{scopes}}",
     "documentIds": "Allowed documents",
     "noAllowedDocuments": "The current rules allow no documents. Enter Docx IDs or links to change access.",
     "documentHelp": "Enter Docx IDs or Feishu or Lark Docx links, separated by commas or new lines. Leave blank to allow all documents the bot can access.",
     "invalidDocuments": "Enter up to 100 valid Docx IDs or Feishu or Lark Docx links.",
-    "expiry": "Expires",
-    "keepExpiry": "Keep expiry · {{date}}",
-    "never": "Never",
-    "sevenDays": "In 7 days",
-    "thirtyDays": "In 30 days",
+    "accessMode": {
+      "disabled": "Disabled",
+      "allow": "Allow",
+      "ask": "Ask every time"
+    },
+    "templates": {
+      "readOnly": {
+        "title": "All read-only",
+        "description": "Allow all read-only operations"
+      },
+      "readAndWrite": {
+        "title": "Read & write (ask on write)",
+        "description": "Allow all reads; ask before every write"
+      },
+      "docsAndWiki": {
+        "title": "Docs & Wiki read-only",
+        "description": "Read documents, Drive metadata, and Wiki only"
+      }
+    },
     "providerScopesTitle": "Provider permissions",
     "providerScopesSubtitle": "Verify that required scopes are enabled in the provider console",
     "providerScopesAllGranted": "All {{total}} required scopes are enabled",
@@ -1251,8 +1263,7 @@
     "scopeGranted": "Granted",
     "scopeMissing": "Missing",
     "scopeOr": "or",
-    "expandDetails": "Show details",
-    "collapseDetails": "Hide details",
+    "viewScopeDetails": "View details",
     "noRequiredScopes": "Current grants require no provider scopes to verify for this identity.",
     "auditApp": "App",
     "allApps": "All apps",

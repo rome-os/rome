@@ -147,14 +147,7 @@ export function ApprovalCard({
         failure={status === "failed" ? record?.executionError : null}
         submitting={submitting}
         submitError={submitError}
-        submit={(intent, options) =>
-          submit(
-            intent,
-            intent === "approve" && options
-              ? { kind: "connection_access", expiresAt: options.expiresAt }
-              : undefined,
-          )
-        }
+        submit={(intent) => submit(intent)}
       />
     );
   }

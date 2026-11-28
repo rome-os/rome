@@ -1,8 +1,4 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import {
-  FEISHU_DOCUMENT_READ,
-  feishuDocumentGuidance,
-} from "../../connections/kinds/feishu/index.js";
 import { Hono } from "hono";
 import { createTestDb } from "../../test/db.js";
 import { AppConnectionAccessRepository } from "../../connections/app-connection-access.js";
@@ -26,18 +22,12 @@ function makeApp(
       grantedAt: Date;
       grantEpoch: string;
     }>;
-    approvalsRepo?: Record<string, unknown>;
-    approvalHandler?: Record<string, unknown>;
   } = {},
 ) {
   const { db, close } = createTestDb();
   const access = new AppConnectionAccessRepository(db);
   const descriptor = {
     grant: "account",
-    documentAccessGuidance:
-      options.connectionKind === "feishu"
-        ? { operation: FEISHU_DOCUMENT_READ, guidance: feishuDocumentGuidance }
-        : undefined,
     appAccessGuidance: options.checkScopes
       ? () => ({ consoleUrl: "https://fixture.test", scopeCheckOperation: "documents.scopes" })
       : undefined,
@@ -74,7 +64,6 @@ function makeApp(
             inputSchema: { type: "object" },
             appAccess: {
               sideEffects: "write",
-              approvalRequired: true,
               approvalPreview: {
                 summary: "Create a document.",
                 fields: [{ label: "Title", inputPointer: "/title" }],
@@ -146,8 +135,6 @@ function makeApp(
         })),
     },
     appConnectionAccessRepo: access,
-    approvalsRepo: options.approvalsRepo,
-    approvalHandler: options.approvalHandler,
   } as unknown as ApiDeps;
   const app = new Hono();
   app.use("*", entryStep());
@@ -159,272 +146,6 @@ function makeApp(
   ) => runWithSessionActor(actor, () => app.request(path, init));
   return { request, close, access };
 }
-
-describe("App connection access management", () => {
-  it("persists and revokes an exact App, connection, identity, and operation grant", async () => {
-    const { request, close } = makeApp();
-    try {
-      const path = "/app-connection-access/notes/connection-1/account/documents.get";
-      const put = await request(path, {
-        method: "PUT",
-        headers: sameOrigin,
-        body: JSON.stringify({
-          approval: "not_required",
-          constraints: [{ inputPointer: "/workspaceId", allowedValues: ["workspace-1"] }],
-        }),
-      });
-      expect(put.status).toBe(200);
-      expect(await put.json()).toMatchObject({
-        policy: {
-          appId: "notes",
-          connectionId: "connection-1",
-          identity: "account",
-          operation: "documents.get",
-          sideEffects: "read-only",
-          revision: 1,
-        },
-      });
-
-      const listed = await request("/app-connection-access/notes");
-      expect(await listed.json()).toMatchObject({
-        policies: [{ operation: "documents.get", grantStatus: "current" }],
-      });
-
-      expect((await request(path, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
-      expect(await (await request("/app-connection-access/notes")).json()).toEqual({
-        policies: [],
-      });
-    } finally {
-      close();
-    }
-  });
-
-  it("marks a policy stale when giving the grant again replaces its epoch", async () => {
-    let grantEpoch = "grant-1";
-    const { request, close } = makeApp({
-      getGrant: async () => ({
-        state: "authorized",
-        grantedAt: new Date("2026-10-26T00:00:00.000Z"),
-        grantEpoch,
-      }),
-    });
-    try {
-      const path = "/app-connection-access/notes/connection-1/account/documents.get";
-      expect(
-        (
-          await request(path, {
-            method: "PUT",
-            headers: sameOrigin,
-            body: JSON.stringify({ approval: "not_required", constraints: [] }),
-          })
-        ).status,
-      ).toBe(200);
-
-      grantEpoch = "grant-2";
-      expect(await (await request("/app-connection-access/notes")).json()).toMatchObject({
-        policies: [{ operation: "documents.get", grantStatus: "replaced" }],
-      });
-    } finally {
-      close();
-    }
-  });
-
-  it("cannot recreate access after concurrent App disable completes", async () => {
-    let enabled = true;
-    let enteredGrantLookup!: () => void;
-    let releaseGrantLookup!: () => void;
-    const grantLookupStarted = new Promise<void>((resolve) => {
-      enteredGrantLookup = resolve;
-    });
-    const grantLookupReleased = new Promise<void>((resolve) => {
-      releaseGrantLookup = resolve;
-    });
-    const { request, close, access } = makeApp({
-      appEnabled: () => enabled,
-      getGrant: async () => {
-        enteredGrantLookup();
-        await grantLookupReleased;
-        return {
-          state: "authorized",
-          grantedAt: new Date("2026-10-26T00:00:00.000Z"),
-          grantEpoch: "grant-1",
-        };
-      },
-    });
-    try {
-      const pendingPut = request(
-        "/app-connection-access/notes/connection-1/account/documents.get",
-        {
-          method: "PUT",
-          headers: sameOrigin,
-          body: JSON.stringify({ approval: "not_required", constraints: [] }),
-        },
-      );
-      await grantLookupStarted;
-      enabled = false;
-      await access.revokeApp("notes");
-      releaseGrantLookup();
-
-      expect((await pendingPut).status).toBe(409);
-      expect(await access.listActiveForApp("notes")).toEqual([]);
-    } finally {
-      close();
-    }
-  });
-
-  it("cannot grant a Core-only raw operation", async () => {
-    const { request, close } = makeApp();
-    try {
-      const response = await request("/app-connection-access/notes/connection-1/account/raw.http", {
-        method: "PUT",
-        headers: sameOrigin,
-        body: JSON.stringify({ approval: "not_required", constraints: [] }),
-      });
-      expect(response.status).toBe(404);
-    } finally {
-      close();
-    }
-  });
-
-  it("cannot grant a write operation without a safe approval preview", async () => {
-    const { request, close } = makeApp();
-    try {
-      const response = await request(
-        "/app-connection-access/notes/connection-1/account/documents.unsafe-create",
-        {
-          method: "PUT",
-          headers: sameOrigin,
-          body: JSON.stringify({ approval: "required", constraints: [] }),
-        },
-      );
-      expect(response.status).toBe(404);
-    } finally {
-      close();
-    }
-  });
-
-  it("rejects deferred approval for reads", async () => {
-    const { request, close } = makeApp();
-    try {
-      const response = await request(
-        "/app-connection-access/notes/connection-1/account/documents.get",
-        {
-          method: "PUT",
-          headers: sameOrigin,
-          body: JSON.stringify({ approval: "required", constraints: [] }),
-        },
-      );
-      expect(response.status).toBe(400);
-    } finally {
-      close();
-    }
-  });
-
-  it("accepts an encoded scoped App id", async () => {
-    const { request, close } = makeApp();
-    try {
-      const appId = "@acme/notes";
-      const path = `/app-connection-access/${encodeURIComponent(appId)}/connection-1/account/documents.get`;
-      const response = await request(path, {
-        method: "PUT",
-        headers: sameOrigin,
-        body: JSON.stringify({ approval: "not_required", constraints: [] }),
-      });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ policy: { appId } });
-    } finally {
-      close();
-    }
-  });
-
-  it("rejects a policy mutation outside the guardian origin", async () => {
-    const { request, close } = makeApp();
-    try {
-      const response = await request(
-        "/app-connection-access/notes/connection-1/account/documents.get",
-        {
-          method: "PUT",
-          headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
-          body: JSON.stringify({ approval: "not_required", constraints: [] }),
-        },
-      );
-      expect(response.status).toBe(403);
-      expect(await (await request("/app-connection-access/notes")).json()).toEqual({
-        policies: [],
-      });
-    } finally {
-      close();
-    }
-  });
-
-  it("pages the redacted audit trail", async () => {
-    const { request, close, access } = makeApp();
-    try {
-      for (const executionId of ["execution-1", "execution-2"]) {
-        await access.appendAudit({
-          appId: "notes",
-          connectionId: "connection-1",
-          identity: "account",
-          operation: "documents.get",
-          approval: "not_required",
-          executionId,
-          status: "succeeded",
-        });
-      }
-      const first = await (await request("/app-connection-access/notes/audit?limit=1")).json();
-      expect(first).toMatchObject({
-        events: [{ executionId: "execution-1" }],
-        nextCursor: 1,
-      });
-      const second = await (
-        await request(`/app-connection-access/notes/audit?limit=1&cursor=${first.nextCursor}`)
-      ).json();
-      expect(second).toMatchObject({ events: [{ executionId: "execution-2" }] });
-      expect(second).not.toHaveProperty("nextCursor");
-    } finally {
-      close();
-    }
-  });
-});
-
-describe("Document access discovery", () => {
-  it("shows safe provider guidance without inspecting scopes or exposing grant material", async () => {
-    const h = makeApp({
-      connectionKind: "feishu",
-      getGrant: async () => ({
-        state: "authorized",
-        grantedAt: new Date(),
-        grantEpoch: "grant-fixture",
-        profile: { appId: "cli_fixture", domain: "lark" },
-        credential: { material: { appSecret: "SYNTHETIC_NOT_FOR_UI" } },
-      }),
-    });
-    try {
-      const path = "/app-connection-access/notes/documents?limit=1";
-      const response = await h.request(path);
-      expect(response.status).toBe(200);
-      const value = await response.json();
-      expect(value).toMatchObject({
-        connections: [
-          {
-            connectionId: "connection-1",
-            scopeStatus: "not_checked",
-            scope: "docx:document:readonly",
-            supported: false,
-            consoles: [{ brand: "lark", url: "https://open.larksuite.com/app/cli_fixture/auth" }],
-          },
-        ],
-      });
-      expect(JSON.stringify(value)).not.toContain("SYNTHETIC_NOT_FOR_UI");
-      expect((await h.request("/app-connection-access/missing/documents")).status).toBe(404);
-      expect((await h.request("/app-connection-access/notes/documents?limit=101")).status).toBe(
-        400,
-      );
-    } finally {
-      h.close();
-    }
-  });
-});
 
 describe("Connection-scoped App access", () => {
   const path = "/app-connection-access/connections/connection-1";
@@ -495,43 +216,153 @@ describe("Connection-scoped App access", () => {
         { ...policy, constraints: [{ ...constraint, allowedValues: ["../Doc1"] }] },
         { ...policy, constraints: [{ ...constraint, inputPointer: "/other" }] },
         { ...policy, operation: "documents.create", constraints: [constraint] },
-        { ...policy, operation: "documents.create", approvalMode: "not_required" },
-        { ...policy, approvalMode: "required" },
         { ...policy, expectedRevision: -1 },
         { ...policy, expectedRevision: 1.5 },
-        { ...policy, expiresAt: "2000-01-01T00:00:00Z" },
+        { ...policy, expiresAt: "2099-01-01T00:00:00Z" },
       ])
         expect((await h.request(path + "/policies", put(input))).status).toBe(400);
       expect(
         (
           await h.request(
-            "/app-connection-access/notes/connection-1/account/documents.create",
-            put({ approval: "not_required" }),
+            path + "/policies",
+            put({
+              ...policy,
+              appId: "notes",
+              operation: "documents.create",
+              approvalMode: "not_required",
+            }),
           )
         ).status,
-      ).toBe(400);
+      ).toBe(200);
       const del = path + "/policies/%40acme%2Fnotes/account/documents.get";
       expect((await h.request(del, { method: "DELETE" })).status).toBe(403);
       expect((await h.request(del, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
       expect(
         (await h.access.listActiveForConnectionId("connection-1")).map((p) => p.appId),
       ).toEqual(["notes"]);
+      // Legacy per-app routes are no longer mounted.
+      expect((await h.request("/app-connection-access/notes")).status).toBe(404);
+      expect((await h.request("/app-connection-access/notes/documents")).status).toBe(404);
+      expect(
+        (
+          await h.request(
+            "/app-connection-access/notes/connection-1/account/documents.get",
+            put({ approval: "not_required" }),
+          )
+        ).status,
+      ).toBe(404);
     } finally {
       h.close();
     }
   });
 
-  it("rejects a stale expiry edit without restoring removed documents", async () => {
+  it("marks a policy stale when giving the grant again replaces its epoch", async () => {
+    let grantEpoch = "grant-1";
+    const h = makeApp({
+      getGrant: async () => ({
+        state: "authorized",
+        grantedAt: new Date("2026-10-26T00:00:00.000Z"),
+        grantEpoch,
+      }),
+    });
+    try {
+      expect((await h.request(path + "/policies", put(policy))).status).toBe(200);
+      grantEpoch = "grant-2";
+      expect(await (await h.request(path)).json()).toMatchObject({
+        policies: [{ operation: "documents.get", grantStatus: "replaced" }],
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("cannot recreate access after concurrent App disable completes", async () => {
+    let enabled = true;
+    let enteredGrantLookup!: () => void;
+    let releaseGrantLookup!: () => void;
+    const grantLookupStarted = new Promise<void>((resolve) => {
+      enteredGrantLookup = resolve;
+    });
+    const grantLookupReleased = new Promise<void>((resolve) => {
+      releaseGrantLookup = resolve;
+    });
+    const h = makeApp({
+      appEnabled: () => enabled,
+      getGrant: async () => {
+        enteredGrantLookup();
+        await grantLookupReleased;
+        return {
+          state: "authorized",
+          grantedAt: new Date("2026-10-26T00:00:00.000Z"),
+          grantEpoch: "grant-1",
+        };
+      },
+    });
+    try {
+      const pendingPut = h.request(path + "/policies", put({ ...policy, appId: "notes" }));
+      await grantLookupStarted;
+      enabled = false;
+      await h.access.revokeApp("notes");
+      releaseGrantLookup();
+
+      expect((await pendingPut).status).toBe(409);
+      expect(await h.access.listActiveForApp("notes")).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("rejects Core-only, unsafe-write, and cross-site mutations while allowing per-call approval for reads", async () => {
     const h = makeApp();
     try {
-      const save = (expectedRevision: number, allowedValues: string[], expiresAt?: string) =>
+      expect(
+        (await h.request(path + "/policies", put({ ...policy, operation: "raw.http" }))).status,
+      ).toBe(404);
+      expect(
+        (
+          await h.request(
+            path + "/policies",
+            put({ ...policy, operation: "documents.unsafe-create", approvalMode: "required" }),
+          )
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await h.request(path + "/policies", {
+            method: "PUT",
+            headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+            body: JSON.stringify(policy),
+          })
+        ).status,
+      ).toBe(403);
+      const readAsk = await h.request(
+        path + "/policies",
+        put({ ...policy, approvalMode: "required" }),
+      );
+      expect(readAsk.status).toBe(200);
+      expect(await readAsk.json()).toMatchObject({
+        policy: { operation: "documents.get", approvalMode: "required" },
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("rejects a stale policy edit without restoring removed documents", async () => {
+    const h = makeApp();
+    try {
+      const save = (
+        expectedRevision: number,
+        allowedValues: string[],
+        approvalMode?: "required" | "not_required",
+      ) =>
         h.request(
           path + "/policies",
           put({
             ...policy,
             expectedRevision,
             constraints: [{ ...constraint, allowedValues }],
-            expiresAt,
+            ...(approvalMode ? { approvalMode } : {}),
           }),
         );
       const original = ["A", "B"];
@@ -539,7 +370,7 @@ describe("Connection-scoped App access", () => {
       expect((await save(0, original)).status).toBe(200);
       expect((await save(0, original)).status).toBe(409);
       expect((await save(1, ["A"])).status).toBe(200);
-      const stale = await save(1, original, "2099-01-01T00:00:00Z");
+      const stale = await save(1, original, "required");
       expect(stale.status).toBe(409);
       expect(await stale.json()).toMatchObject({
         error: "policy_conflict",
@@ -549,7 +380,7 @@ describe("Connection-scoped App access", () => {
         {
           revision: 2,
           constraints: [{ ...constraint, allowedValues: ["A"] }],
-          expiresAt: null,
+          approvalMode: "not_required",
         },
       ]);
 
@@ -561,19 +392,26 @@ describe("Connection-scoped App access", () => {
     }
   });
 
-  it("preserves constraints from the legacy policy route through scoped edits", async () => {
+  it("preserves non-document constraints through scoped edits", async () => {
     const h = makeApp();
     try {
       const extra = { inputPointer: "/workspace", allowedValues: ["internal"] };
       const original = [constraint, extra, { ...constraint, allowedValues: ["Doc1", "Doc2"] }];
-      const legacy = "/app-connection-access/%40acme%2Fnotes/connection-1/account/documents.get";
-      expect(
-        (await h.request(legacy, put({ approval: "not_required", constraints: original }))).status,
-      ).toBe(200);
+      await h.access.put({
+        appId: policy.appId,
+        connectionId: "connection-1",
+        identity: policy.identity,
+        operation: policy.operation,
+        sideEffects: "read-only",
+        approval: "not_required",
+        constraints: original,
+        expiresAt: null,
+        grantEpoch: "grant-1",
+      });
       for (const constraints of [original, [extra, { ...constraint, allowedValues: ["Doc2"] }]]) {
         const response = await h.request(
           path + "/policies",
-          put({ ...policy, constraints, expiresAt: "2099-01-01T00:00:00Z" }),
+          put({ ...policy, constraints, approvalMode: "required" }),
         );
         expect(response.status).toBe(200);
         expect((await response.json()).policy.constraints).toEqual(constraints);
@@ -703,267 +541,6 @@ describe("Connection-scoped App access", () => {
       );
       expect((await h.request(path + "/audit?limit=101")).status).toBe(400);
       expect((await h.request(path + "/audit?beforeSeq=-1")).status).toBe(400);
-    } finally {
-      h.close();
-    }
-  });
-
-  it("approves pending connection access requests with optional expiry and enforces origin and state", async () => {
-    const onApproved = rs.fn(async () => {});
-    const pendingApproval = {
-      id: "appr-conn-1",
-      type: "action_execution",
-      status: "pending",
-      payload: {
-        actionName: "core:request_connection_access",
-        args: {
-          appId: "notes",
-          connectionKind: "fake-docs",
-          preset: "read_and_write",
-          reason: "Read and create notes",
-        },
-        preview: {
-          kind: "connection_access",
-          appId: "notes",
-          appName: "notes",
-          connectionId: "connection-1",
-          connectionKind: "fake-docs",
-          connectionLabel: "Docs",
-          identity: "account",
-          grantEpoch: "grant-1",
-          preset: "read_and_write",
-          operations: [
-            { name: "documents.get", sideEffect: "read-only" },
-            { name: "documents.create", sideEffect: "write", approvalRequired: true },
-          ],
-          reason: "Read and create notes",
-          title: "Allow notes to access Docs",
-          summary: "Read and create notes (1 read and 1 write operations)",
-        },
-      },
-    };
-    let currentApproval: typeof pendingApproval | null = pendingApproval;
-    const h = makeApp({
-      approvalsRepo: {
-        findById: async (id: string) => (id === "appr-conn-1" ? currentApproval : null),
-        resolvePending: async (id: string, action: string) => ({
-          outcome: "resolved",
-          approval: {
-            ...pendingApproval,
-            id,
-            status: action === "approve" ? "approved" : "rejected",
-          },
-        }),
-      },
-      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
-    });
-    try {
-      // Cross-origin rejected
-      expect(
-        (
-          await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({}),
-          })
-        ).status,
-      ).toBe(403);
-
-      // Past expiry rejected
-      expect(
-        (
-          await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
-            method: "POST",
-            headers: sameOrigin,
-            body: JSON.stringify({ expiresAt: "2020-01-01T00:00:00.000Z" }),
-          })
-        ).status,
-      ).toBe(400);
-
-      // Valid approval grants operations with requested expiresAt and resolves approval
-      const expiresAt = new Date(
-        Math.floor(Date.now() / 1000) * 1000 + 7 * 86_400_000,
-      ).toISOString();
-      const res = await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({ expiresAt }),
-      });
-      expect(res.status).toBe(202);
-      expect(await res.json()).toEqual({
-        ok: true,
-        grantedOperations: ["documents.get", "documents.create"],
-      });
-      expect(onApproved).toHaveBeenCalledWith("appr-conn-1");
-
-      const policies = await h.access.listActiveForConnection("notes", "connection-1");
-      expect(policies.map((p) => [p.operation, p.approval, p.expiresAt?.toISOString()])).toEqual([
-        ["documents.create", "required", expiresAt],
-        ["documents.get", "not_required", expiresAt],
-      ]);
-
-      // Already-resolved approval returns 409 stale_request
-      currentApproval = { ...pendingApproval, status: "approved" };
-      const stale = await h.request("/app-connection-access/approvals/appr-conn-1/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({}),
-      });
-      expect(stale.status).toBe(409);
-      expect(await stale.json()).toMatchObject({ code: "stale_request" });
-    } finally {
-      h.close();
-    }
-  });
-
-  it("rejects approval as stale when preview drifted and writes zero grants if concurrent rejection wins", async () => {
-    const onApproved = rs.fn(async () => {});
-    const resolvePending = rs.fn(async () => ({
-      outcome: "already_resolved" as const,
-      approval: { id: "appr-race-1", status: "rejected" },
-    }));
-    const basePayload = {
-      actionName: "core:request_connection_access",
-      args: {
-        appId: "notes",
-        connectionKind: "fake-docs",
-        preset: "read_and_write",
-        reason: "Read and create notes",
-      },
-      preview: {
-        kind: "connection_access",
-        appId: "notes",
-        appName: "notes",
-        connectionId: "connection-1",
-        connectionKind: "fake-docs",
-        connectionLabel: "Docs",
-        identity: "account",
-        grantEpoch: "grant-1",
-        preset: "read_and_write",
-        operations: [
-          { name: "documents.get", sideEffect: "read-only" },
-          { name: "documents.create", sideEffect: "write", approvalRequired: true },
-        ],
-        reason: "Read and create notes",
-        title: "Allow notes to access Docs",
-        summary: "Read and create notes",
-      },
-    };
-    let approvalPayload: Record<string, unknown> = {
-      ...basePayload,
-      preview: {
-        ...basePayload.preview,
-        // Card only listed documents.create (e.g. documents.get was revoked afterwards)
-        operations: [{ name: "documents.create", sideEffect: "write", approvalRequired: true }],
-      },
-    };
-    const h = makeApp({
-      approvalsRepo: {
-        findById: async (id: string) =>
-          id === "appr-race-1"
-            ? { id, type: "action_execution", status: "pending", payload: approvalPayload }
-            : null,
-        resolvePending,
-      },
-      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
-    });
-    try {
-      // 1. Drifted preview returns 409 stale_request without claiming or writing any grants
-      const drifted = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({}),
-      });
-      expect(drifted.status).toBe(409);
-      expect(await drifted.json()).toMatchObject({ code: "stale_request" });
-      expect(resolvePending).not.toHaveBeenCalled();
-      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
-
-      // 2. Reconnected grantEpoch mismatch also returns 409 stale_request with zero grants
-      approvalPayload = {
-        ...basePayload,
-        preview: { ...basePayload.preview, grantEpoch: "epoch-old" },
-      };
-      const epochDrift = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({}),
-      });
-      expect(epochDrift.status).toBe(409);
-      expect(await epochDrift.json()).toMatchObject({ code: "stale_request" });
-      expect(resolvePending).not.toHaveBeenCalled();
-      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
-
-      // 3. Matching preview, but concurrent rejection wins resolvePending -> 409 and ZERO grants written
-      approvalPayload = basePayload;
-      const lostRace = await h.request("/app-connection-access/approvals/appr-race-1/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({}),
-      });
-      expect(lostRace.status).toBe(409);
-      expect(resolvePending).toHaveBeenCalledTimes(1);
-      expect(onApproved).not.toHaveBeenCalled();
-      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
-    } finally {
-      h.close();
-    }
-  });
-
-  it("dispatches onApproved when state changes after claim so the agent continuation is not orphaned", async () => {
-    const onApproved = rs.fn(async () => {});
-    let appEnabled = true;
-    const payload = {
-      actionName: "core:request_connection_access",
-      args: {
-        appId: "notes",
-        connectionKind: "fake-docs",
-        preset: "read_and_write",
-        reason: "Read and create notes",
-      },
-      preview: {
-        kind: "connection_access",
-        appId: "notes",
-        appName: "notes",
-        connectionId: "connection-1",
-        connectionKind: "fake-docs",
-        connectionLabel: "Docs",
-        identity: "account",
-        grantEpoch: "grant-1",
-        preset: "read_and_write",
-        operations: [
-          { name: "documents.get", sideEffect: "read-only" },
-          { name: "documents.create", sideEffect: "write", approvalRequired: true },
-        ],
-        reason: "Read and create notes",
-        title: "Allow notes to access Docs",
-        summary: "Read and create notes",
-      },
-    };
-    const h = makeApp({
-      appEnabled: () => appEnabled,
-      approvalsRepo: {
-        findById: async (id: string) =>
-          id === "appr-post-claim"
-            ? { id, type: "action_execution", status: "pending", payload }
-            : null,
-        resolvePending: async (id: string) => {
-          // Simulate app getting disabled concurrently right as the approval is claimed.
-          appEnabled = false;
-          return { outcome: "resolved", approval: { id, status: "approved", payload } };
-        },
-      },
-      approvalHandler: { onApproved, onRejected: rs.fn(async () => {}) },
-    });
-    try {
-      const res = await h.request("/app-connection-access/approvals/appr-post-claim/approve", {
-        method: "POST",
-        headers: sameOrigin,
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(409);
-      expect(onApproved).toHaveBeenCalledWith("appr-post-claim");
-      expect(await h.access.listActiveForConnection("notes", "connection-1")).toHaveLength(0);
     } finally {
       h.close();
     }

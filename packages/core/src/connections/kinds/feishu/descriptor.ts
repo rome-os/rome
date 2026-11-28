@@ -35,11 +35,7 @@ import {
 } from "./feishu.js";
 import { z } from "zod";
 import { createFeishuActor, FEISHU_OPERATIONS } from "./actor.js";
-import {
-  FEISHU_DOCUMENT_READ,
-  feishuAppAccessGuidance,
-  feishuDocumentGuidance,
-} from "./documents.js";
+import { feishuAppAccessGuidance } from "./documents.js";
 import type { FeishuDocumentRequest, FeishuRequest } from "./transport.js";
 import { CredentialRejected, Disconnected } from "../../errors.js";
 import { credentialsPaste } from "../../schemes.js";
@@ -218,11 +214,16 @@ const FEISHU_RENEW_FORM: SetupForm = {
 
 const FEISHU_MODE_FORM: SetupForm = {
   id: "feishu.mode",
-  instructions:
-    "Choose how to connect: agent-ready scans a QR code to create Rome's app in your " +
-    "tenant automatically; manual pastes an existing custom app's credentials.",
   fields: [
-    { name: "mode", label: "Setup method", secret: false, options: FEISHU_MODE_OPTIONS },
+    {
+      name: "mode",
+      label: "Setup method",
+      description:
+        "Choose how to connect: agent-ready scans a QR code to create Rome's app in your " +
+        "tenant automatically; manual pastes an existing custom app's credentials.",
+      secret: false,
+      options: FEISHU_MODE_OPTIONS,
+    },
     { name: "domain", label: "Domain", secret: false, options: FEISHU_DOMAIN_OPTIONS },
   ],
 };
@@ -563,7 +564,6 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     link: "own_account",
     grant: "app",
     appAccessGuidance: feishuAppAccessGuidance,
-    documentAccessGuidance: { operation: FEISHU_DOCUMENT_READ, guidance: feishuDocumentGuidance },
     chatRules: FEISHU_CHAT_RULES,
     auth: appScheme,
     capabilities: {

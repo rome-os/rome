@@ -460,7 +460,6 @@
       "hideDetails": "Hide permissions",
       "readBadge": "Read",
       "writeBadge": "Write · asks each time",
-      "expiryLabel": "Expires",
       "allow": "Grant access",
       "allowed": "Granted {{appName}} access to {{connectionLabel}}",
       "rejected": "Declined {{appName}} access to {{connectionLabel}}"

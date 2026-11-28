@@ -274,7 +274,6 @@ export type PreviewPayload =
         name: string;
         sideEffect: "read-only" | "write";
         summary?: string;
-        approvalRequired?: boolean;
       }[];
       reason: string;
       title: string;

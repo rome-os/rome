@@ -205,7 +205,6 @@ export const calendarOperations = [
     },
     {
       sideEffects: "write",
-      approvalRequired: true,
       approvalPreview: {
         summary: "Create Feishu calendar event",
         fields: [

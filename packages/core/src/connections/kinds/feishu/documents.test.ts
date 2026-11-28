@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { createFeishuActor, FEISHU_OPERATIONS } from "./actor.js";
-import { FEISHU_DOCUMENT_READ, feishuDocumentGuidance } from "./documents.js";
+import { FEISHU_DOCUMENT_READ, feishuAppAccessGuidance } from "./documents.js";
 import { CredentialRejected, ProviderOperationError } from "../../errors.js";
 rs.mock("@larksuiteoapi/node-sdk", () => ({
   Domain: { Feishu: "https://open.feishu.cn", Lark: "https://open.larksuite.com" },
@@ -29,24 +29,27 @@ rs.mock("@larksuiteoapi/node-sdk", () => ({
 }));
 const material = { appId: "cli_fixture", appSecret: "synthetic-only", domain: "feishu" as const };
 const call = { operation: FEISHU_DOCUMENT_READ, input: { documentId: "DocumentA" } };
-describe("Feishu document guidance", () => {
-  it("uses only valid public profile fields and never guesses an unknown provider region", () => {
+describe("Feishu app access guidance", () => {
+  it("uses only valid public profile fields and never exposes secrets or untrusted app IDs", () => {
     expect(
-      feishuDocumentGuidance({ appId: "https://untrusted.example", domain: "unknown" }).consoles,
-    ).toEqual([
-      { brand: "feishu", url: "https://open.feishu.cn/app" },
-      { brand: "lark", url: "https://open.larksuite.com/app" },
-    ]);
+      feishuAppAccessGuidance({ appId: "https://untrusted.example", domain: "unknown" }),
+    ).toEqual({
+      consoleUrl: "https://open.feishu.cn/app",
+      scopesUrl: "https://open.feishu.cn/app",
+      docsUrl: "https://open.feishu.cn/document/server-docs/application-scope/introduction",
+      scopeCheckOperation: "feishu.scopes.list",
+    });
     expect(
-      feishuDocumentGuidance({
+      feishuAppAccessGuidance({
         appId: "cli_fixture",
-        domain: "feishu",
+        domain: "lark",
         secret: "SYNTHETIC_NOT_FOR_UI",
       }),
     ).toEqual({
-      scope: "docx:document:readonly",
-      scopeStatus: "not_checked",
-      consoles: [{ brand: "feishu", url: "https://open.feishu.cn/app/cli_fixture/auth" }],
+      consoleUrl: "https://open.larksuite.com/app/cli_fixture",
+      scopesUrl: "https://open.larksuite.com/app/cli_fixture/auth",
+      docsUrl: "https://open.larksuite.com/document/server-docs/application-scope/introduction",
+      scopeCheckOperation: "feishu.scopes.list",
     });
   });
 });

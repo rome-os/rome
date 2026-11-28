@@ -173,21 +173,18 @@ identity for one operation.
 
 ### App access in connection details
 
-Settings → Connections shows **App Connection Access & Audit** in the details
-of each connection that offers operations to apps. **App Access** lists the
-operations by identity and shows which installed apps have grants. The
-guardian can grant or revoke each operation, grant all read operations for
-one identity, or revoke all grants for one app on the connection. A grant
-can last 7 days, 30 days, or until the guardian revokes it. For operations
-that accept a document allowlist, the dashboard accepts Docx IDs and Feishu
-or Lark Docx URLs and saves the IDs. An empty allowlist permits any document
-the connection can access.
+Settings → Connections shows **App Access** in the details of each connection
+that offers operations to apps. It lists the operations by identity and shows
+which installed apps have grants. The guardian can set each operation to
+**Deny**, **Allow**, or **Ask every time**, apply a preset template (read-only,
+read-only with ask on writes, or docs & wiki read-only), or revoke all grants
+for one app on the connection.
 
 Where the provider offers a scope check, the dashboard compares its result
 with the scopes required by the selected app's grants. The check reads the
 provider's scope status. An administrator manages scopes in the provider
-console and gives the bot access to individual resources as needed. **Audit Log**
-shows recent calls newest first and can filter by app.
+console and gives the bot access to individual resources as needed. The app
+access modal also lists recent audit entries newest first.
 
 ### Feishu bot operations
 

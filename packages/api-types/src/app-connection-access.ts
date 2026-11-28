@@ -1,30 +1,3 @@
-export interface DocumentAccessOptions {
-  connections: Array<{
-    connectionId: string;
-    label: string;
-    identity: string;
-    operation: string;
-    supported: boolean;
-    authorized: boolean;
-    scope: string;
-    scopeStatus: "not_checked";
-    consoles: Array<{ brand: "feishu" | "lark"; url: string }>;
-  }>;
-  nextCursor?: number;
-}
-
-export interface AppConnectionPolicies {
-  policies: Array<{
-    appId: string;
-    connectionId: string;
-    identity: string;
-    operation: string;
-    constraints: Array<{ inputPointer: string; allowedValues: Array<string | number | boolean> }>;
-    grantStatus: "current" | "authorization_required" | "replaced" | "unavailable";
-    expiresAt: string | null;
-  }>;
-}
-
 export interface AppAccessProviderGuidance {
   consoleUrl: string;
   scopesUrl?: string;
@@ -43,16 +16,22 @@ export interface AppConnectionAccessOperationDto {
   requiredScopeGroups?: string[][];
   resourceConstraintKind?: "documentIds";
   approvalPreviewSummary?: string;
-  approvalRequired?: boolean;
 }
 
-export type AppConnectionAccessPolicyDto = AppConnectionPolicies["policies"][number] & {
+export interface AppConnectionAccessPolicyDto {
+  appId: string;
+  connectionId: string;
+  identity: string;
+  operation: string;
   sideEffect: AppConnectionAccessOperationDto["sideEffect"];
   approvalMode: AppConnectionApprovalMode;
+  constraints: Array<{ inputPointer: string; allowedValues: Array<string | number | boolean> }>;
+  grantStatus: "current" | "authorization_required" | "replaced" | "unavailable";
+  expiresAt: string | null;
   revision: number;
   createdAt: string;
   updatedAt: string;
-};
+}
 
 export interface ConnectionAppAccessDto {
   connection: { connectionId: string; connectionKind: string; label: string };
@@ -73,14 +52,9 @@ export interface PutAppConnectionAccessPolicy {
   expectedRevision?: number;
   approvalMode?: AppConnectionApprovalMode;
   constraints?: AppConnectionAccessPolicyDto["constraints"];
-  expiresAt?: string | null;
 }
 
 export type ConnectionAccessPreset = "read" | "read_and_write" | "custom";
-
-export interface ApproveConnectionAccessRequest {
-  expiresAt?: string | null;
-}
 
 export interface AppConnectionAccessAuditEntryDto {
   seq: number;

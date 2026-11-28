@@ -36,6 +36,7 @@ import {
 export { REQUEST_CONNECTION_ACCESS_ACTION };
 
 const READ_ACTION = "core:app_connection_read";
+export const APP_CONNECTION_READ_APPROVAL_ACTION = "core:app_connection_read_with_approval";
 export const APP_CONNECTION_WRITE_ACTION = "core:app_connection_write";
 const APPROVED_WRITE_ACTION = "core:app_connection_write_without_approval";
 const DEFAULT_PAGE_SIZE = 20;
@@ -46,7 +47,7 @@ const DEFAULT_INVOKE_LIMIT = 120;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
 export const APP_CONNECTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-type BrokerActionMode = "read" | "write" | "write_without_approval";
+type BrokerActionMode = "read" | "read_with_approval" | "write" | "write_without_approval";
 
 export type AppConnectionBrokerResult<T> =
   | { ok: true; value: T }
@@ -208,6 +209,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
 
   registerActions(registry: ActionRegistryImpl): void {
     registry.register(this.action(READ_ACTION, "read", false));
+    registry.register(this.action(APP_CONNECTION_READ_APPROVAL_ACTION, "read_with_approval", true));
     registry.register(this.action(APP_CONNECTION_WRITE_ACTION, "write", true));
     registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
     if (this.lookupApp) {
@@ -405,14 +407,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (activePolicy.sideEffects !== sideEffects) {
       return await denied(failure("access_denied", "The operation access classification changed."));
     }
-    if (operation.appAccess!.approvalRequired && activePolicy.approval !== "required") {
-      return await denied(failure("access_denied", "This operation requires approval."));
-    }
-    if (sideEffects === "read-only" && activePolicy.approval === "required") {
-      return await denied(
-        failure("access_denied", "Read operations cannot use deferred approval."),
-      );
-    }
     if (sideEffects === "write" && input.requestId === undefined) {
       return await denied(
         failure("request_id_required", "Write operations require a stable requestId."),
@@ -504,7 +498,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   async approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> {
-    if (actionName !== APP_CONNECTION_WRITE_ACTION || typeof args.invocationId !== "string") {
+    if (
+      (actionName !== APP_CONNECTION_WRITE_ACTION &&
+        actionName !== APP_CONNECTION_READ_APPROVAL_ACTION) ||
+      typeof args.invocationId !== "string"
+    ) {
       return;
     }
     const invocation = await this.access.getInvocation(args.invocationId);
@@ -539,7 +537,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           return { status: "error", error: "Missing connection invocation id." };
         }
         const result = await this.execute(args.invocationId, mode);
-        if (mode === "write") {
+        if (requiresApproval) {
           if (!result.ok) return { status: "error", error: result.error.message };
           if (result.value.status === "outcome_unknown") {
             return {
@@ -560,7 +558,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
     if (!this.isReady()) return brokerUnavailable();
     const expectedEffect = mode.startsWith("read") ? "read-only" : "write";
-    const expectedApproval = mode === "write";
+    const expectedApproval = mode === "write" || mode === "read_with_approval";
     const expectedStatus = expectedApproval ? "pending_approval" : "ready";
     const executionApproval = expectedApproval ? "approved" : "not_required";
     const invocation = await this.access.getInvocation(invocationId);
@@ -665,7 +663,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     const act = connection.act;
     if (!act) return await fail("capability_unavailable");
     const live = act.operations().find((entry) => entry.name === invocation.operation);
-    if (live?.appAccess?.approvalRequired && !expectedApproval) return await fail("access_denied");
     if (!live?.appAccess || live.appAccess.sideEffects !== expectedEffect) {
       return await fail("operation_not_found");
     }
@@ -689,7 +686,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           !currentGrant ||
           currentGrant.state !== "authorized" ||
           currentGrant.grantEpoch !== grant.grantEpoch ||
-          !this.access.isInvocationPolicyCurrent(invocation, "not_required")
+          !this.access.isInvocationPolicyCurrent(
+            invocation,
+            expectedApproval ? "required" : "not_required",
+          )
         ) {
           return await fail("access_denied");
         }
@@ -708,7 +708,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         value: {
           status: "ok",
           executionId: invocation.id,
-          ...(data === undefined || expectedApproval ? {} : { data: JSON.parse(output.value) }),
+          ...(data === undefined || (expectedApproval && expectedEffect === "write")
+            ? {}
+            : { data: JSON.parse(output.value) }),
         },
       };
     } catch (error) {
@@ -1027,7 +1029,7 @@ function actionFor(
   approval: "required" | "not_required",
 ): string {
   if (sideEffects === "read-only") {
-    return READ_ACTION;
+    return approval === "required" ? APP_CONNECTION_READ_APPROVAL_ACTION : READ_ACTION;
   }
   return approval === "required" ? APP_CONNECTION_WRITE_ACTION : APPROVED_WRITE_ACTION;
 }

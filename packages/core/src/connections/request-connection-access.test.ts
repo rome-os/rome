@@ -45,7 +45,6 @@ function makeFixture(
       inputSchema: { type: "object" },
       appAccess: {
         sideEffects: "write" as const,
-        approvalRequired: true,
         approvalPreview: {
           summary: "Update document",
           fields: [{ label: "Document", inputPointer: "/documentId" }],
@@ -146,7 +145,7 @@ describe("core:request_connection_access", () => {
     }
   });
 
-  it("includes write operations with approvalRequired when preset is read_and_write", async () => {
+  it("includes write operations when preset is read_and_write", async () => {
     const { action, close } = makeFixture();
     try {
       const preview = await action.preview!({
@@ -172,7 +171,6 @@ describe("core:request_connection_access", () => {
             name: "feishu.document.update",
             sideEffect: "write",
             summary: "Update a Feishu document.",
-            approvalRequired: true,
           },
         ]);
       }
@@ -284,44 +282,6 @@ describe("core:request_connection_access", () => {
     }
   });
 
-  it("preserves custom expiresAt written by the approval endpoint when execute runs afterward", async () => {
-    const { deps, action, access, close } = makeFixture();
-    try {
-      const expiresAt = new Date(Math.floor(Date.now() / 1000) * 1000 + 7 * 86_400_000);
-      const resolved = await resolveConnectionAccessRequest(deps, {
-        appId: "lark",
-        connectionKind: "feishu",
-        reason: "Temporary read access",
-      });
-      expect(resolved.ok).toBe(true);
-      if (!resolved.ok) return;
-
-      const grantResult = await grantConnectionAccessOperations(deps, resolved.value, {
-        expiresAt,
-      });
-      expect(grantResult.ok).toBe(true);
-
-      // Action execution triggered by resolveApproval sees missingOperations === 0 and does not overwrite expiresAt
-      const execResult = await actionExecutionContext.run(
-        { executionId: "exec-1", rootExecutionId: "root-1", initiator: "approval:appr-1" },
-        () =>
-          action.execute(
-            { appId: "lark", connectionKind: "feishu", reason: "Temporary read access" },
-            { emitActionEvent() {} },
-          ),
-      );
-      expect(execResult).toMatchObject({ status: "ok", data: { alreadyGranted: true } });
-
-      const stored = await access.listActiveForConnection("lark", "feishu-1");
-      expect(stored).toHaveLength(2);
-      for (const policy of stored) {
-        expect(policy.expiresAt?.toISOString()).toBe(expiresAt.toISOString());
-      }
-    } finally {
-      close();
-    }
-  });
-
   it("ignores RoutineEngine's __triggerPayload while still rejecting unknown caller keys", async () => {
     const { deps, close } = makeFixture();
     try {
@@ -345,7 +305,7 @@ describe("core:request_connection_access", () => {
     }
   });
 
-  it("preserves existing /documentId constraints and does not extend expiry when renewing after a reconnect", async () => {
+  it("preserves existing /documentId constraints when renewing after a reconnect", async () => {
     const f1 = makeFixture({
       connections: [
         {
@@ -359,7 +319,6 @@ describe("core:request_connection_access", () => {
       ],
     });
     try {
-      const existingExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 + 2 * 86_400_000);
       await f1.access.put({
         appId: "lark",
         connectionId: "feishu-1",
@@ -369,7 +328,7 @@ describe("core:request_connection_access", () => {
         approval: "not_required",
         constraints: [{ inputPointer: "/documentId", allowedValues: ["docA"] }],
         grantEpoch: "epoch-1",
-        expiresAt: existingExpiry,
+        expiresAt: null,
       });
 
       const resolved = await resolveConnectionAccessRequest(f1.deps, {
@@ -384,12 +343,7 @@ describe("core:request_connection_access", () => {
         "feishu.wiki.spaces",
       ]);
 
-      // Approving with a longer expiry (or no expiry) must preserve the doc allowlist
-      // and must not silently extend the existing shorter expiry.
-      const longerExpiry = new Date(existingExpiry.getTime() + 5 * 86_400_000);
-      const granted = await grantConnectionAccessOperations(f1.deps, resolved.value, {
-        expiresAt: longerExpiry,
-      });
+      const granted = await grantConnectionAccessOperations(f1.deps, resolved.value);
       expect(granted.ok).toBe(true);
 
       const docPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.document.read");
@@ -397,12 +351,10 @@ describe("core:request_connection_access", () => {
       expect(docPolicy?.constraints).toEqual([
         { inputPointer: "/documentId", allowedValues: ["docA"] },
       ]);
-      expect(docPolicy?.expiresAt?.toISOString()).toBe(existingExpiry.toISOString());
 
       const wikiPolicy = await f1.access.get("lark", "feishu-1", "app", "feishu.wiki.spaces");
       expect(wikiPolicy?.grantEpoch).toBe("epoch-2");
       expect(wikiPolicy?.constraints).toEqual([]);
-      expect(wikiPolicy?.expiresAt?.toISOString()).toBe(longerExpiry.toISOString());
     } finally {
       f1.close();
     }
@@ -445,50 +397,6 @@ describe("core:request_connection_access", () => {
       );
       expect(rejected.status).toBe("error");
       expect(await access.listActiveForConnection("lark", "feishu-1")).toHaveLength(0);
-    } finally {
-      close();
-    }
-  });
-
-  it("preserves /documentId constraints and applies the new expiry when renewing an expired policy", async () => {
-    const { deps, access, close } = makeFixture();
-    try {
-      const pastExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
-      await access.put({
-        appId: "lark",
-        connectionId: "feishu-1",
-        identity: "app",
-        operation: "feishu.document.read",
-        sideEffects: "read-only",
-        approval: "not_required",
-        constraints: [{ inputPointer: "/documentId", allowedValues: ["docA"] }],
-        grantEpoch: "epoch-1",
-        expiresAt: pastExpiry,
-      });
-
-      const resolved = await resolveConnectionAccessRequest(deps, {
-        appId: "lark",
-        connectionKind: "feishu",
-        reason: "Renew expired read access",
-      });
-      expect(resolved.ok).toBe(true);
-      if (!resolved.ok) return;
-      expect(resolved.value.missingOperations.map((op) => op.name)).toEqual([
-        "feishu.document.read",
-        "feishu.wiki.spaces",
-      ]);
-
-      const renewedExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 + 7 * 86_400_000);
-      const granted = await grantConnectionAccessOperations(deps, resolved.value, {
-        expiresAt: renewedExpiry,
-      });
-      expect(granted.ok).toBe(true);
-
-      const docPolicy = await access.get("lark", "feishu-1", "app", "feishu.document.read");
-      expect(docPolicy?.constraints).toEqual([
-        { inputPointer: "/documentId", allowedValues: ["docA"] },
-      ]);
-      expect(docPolicy?.expiresAt?.toISOString()).toBe(renewedExpiry.toISOString());
     } finally {
       close();
     }

@@ -3,35 +3,20 @@ import type { ProfileRecord } from "../../types.js";
 import { ProviderOperationError } from "../../errors.js";
 import { documentId, operation, token, type RequestData } from "./operation.js";
 export const FEISHU_DOCUMENT_READ = "feishu.document.read";
-export const FEISHU_DOCUMENT_SCOPE = "docx:document:readonly";
 const MAX_CONTENT_BYTES = 128 * 1024;
 /** Only public profile fields may become provider-console links. */
-export function feishuDocumentGuidance(profile?: ProfileRecord) {
+export function feishuAppAccessGuidance(profile?: ProfileRecord) {
   const appId =
     typeof profile?.appId === "string" && /^cli_[a-zA-Z0-9]+$/.test(profile.appId)
       ? profile.appId
       : null;
-  const brands: Array<"feishu" | "lark"> =
-    profile?.domain === "feishu" || profile?.domain === "lark"
-      ? [profile.domain]
-      : ["feishu", "lark"];
+  const origin =
+    profile?.domain === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn";
+  const consoleUrl = `${origin}/app${appId ? `/${encodeURIComponent(appId)}` : ""}`;
   return {
-    scope: FEISHU_DOCUMENT_SCOPE,
-    scopeStatus: "not_checked" as const,
-    consoles: brands.map((brand) => ({
-      brand,
-      url: `${brand === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn"}/app${appId ? `/${encodeURIComponent(appId)}/auth` : ""}`,
-    })),
-  };
-}
-
-export function feishuAppAccessGuidance(profile?: ProfileRecord) {
-  const { url } = feishuDocumentGuidance(profile).consoles[0];
-  const base = new URL(url).origin;
-  return {
-    consoleUrl: url.replace(/\/auth$/, ""),
-    scopesUrl: url,
-    docsUrl: base + "/document/server-docs/application-scope/introduction",
+    consoleUrl,
+    scopesUrl: appId ? `${consoleUrl}/auth` : consoleUrl,
+    docsUrl: `${origin}/document/server-docs/application-scope/introduction`,
     scopeCheckOperation: "feishu.scopes.list",
   };
 }
@@ -145,7 +130,6 @@ export const documentOperations = [
     },
     {
       sideEffects: "write",
-      approvalRequired: true,
       approvalPreview: {
         summary: "Create Feishu document",
         fields: [
@@ -191,7 +175,6 @@ export const documentOperations = [
     },
     {
       sideEffects: "write",
-      approvalRequired: true,
       resourceConstraintKind: "documentIds",
       approvalPreview: {
         summary: "Update Feishu document",

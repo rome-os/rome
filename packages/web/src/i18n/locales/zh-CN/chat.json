@@ -460,7 +460,6 @@
       "hideDetails": "收起权限明细",
       "readBadge": "只读",
       "writeBadge": "写入 · 需确认",
-      "expiryLabel": "有效期",
       "allow": "授权访问",
       "allowed": "已授权 {{appName}} 访问 {{connectionLabel}}",
       "rejected": "已拒绝 {{appName}} 访问 {{connectionLabel}}"

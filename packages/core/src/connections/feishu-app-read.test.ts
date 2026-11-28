@@ -242,8 +242,6 @@ it("executes a constrained Feishu write only after approval and audits the redac
       grantEpoch: (await h.registry.grantOf(connection.id))!.grantEpoch!,
     };
     const app = h.broker.forApp("notes");
-    await h.access.put({ ...policy, approval: "not_required" });
-    await expect(app.invoke(request)).rejects.toMatchObject({ detail: { code: "access_denied" } });
     await h.access.put({ ...policy, approval: "required" });
     await expect(
       app.invoke({ ...request, input: { ...request.input, documentId: "Other" } }),
@@ -264,6 +262,12 @@ it("executes a constrained Feishu write only after approval and audits the redac
       status: "succeeded",
     });
     expect(JSON.stringify(audit)).not.toContain("private paragraphs");
+
+    // When policy explicitly allows writes without per-call approval, execution succeeds directly
+    await h.access.put({ ...policy, approval: "not_required" });
+    const direct = await app.invoke({ ...request, requestId: "unique-request-direct" });
+    expect(direct).toMatchObject({ status: "ok" });
+    expect(providerCalls).toHaveLength(2);
   } finally {
     await h.registry.stopAll();
     h.close();

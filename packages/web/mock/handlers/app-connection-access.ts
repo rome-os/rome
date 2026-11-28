@@ -28,7 +28,6 @@ const operations: ConnectionAppAccessDto["identities"][number]["operations"] = [
     sideEffect: "write",
     ...feishuOperationScopes("document.update"),
     resourceConstraintKind: "documentIds",
-    approvalRequired: true,
     approvalPreviewSummary: "Update Feishu document",
   },
   {
@@ -54,7 +53,6 @@ const operations: ConnectionAppAccessDto["identities"][number]["operations"] = [
   {
     name: "feishu.calendar.event.create",
     sideEffect: "write",
-    approvalRequired: true,
     approvalPreviewSummary: "Create Feishu calendar event",
     ...feishuOperationScopes("calendar.event.create"),
   },
@@ -77,10 +75,6 @@ const audit: AppConnectionAccessAuditEntryDto[] = Array.from({ length: 32 }, (_,
   };
 });
 let revision = 0;
-
-function isActive(policy: AppConnectionAccessPolicyDto) {
-  return !policy.expiresAt || Date.parse(policy.expiresAt) > Date.now();
-}
 
 export const appConnectionAccessHandlers = [
   http.get(endpoint, ({ params }) => {
@@ -109,9 +103,7 @@ export const appConnectionAccessHandlers = [
               },
             ]
           : [],
-      policies: policies.filter(
-        (policy) => policy.connectionId === connection.id && isActive(policy),
-      ),
+      policies: policies.filter((policy) => policy.connectionId === connection.id),
     } satisfies ConnectionAppAccessDto);
   }),
   http.post(`${endpoint}/scopes/check`, ({ params }) => {
@@ -154,7 +146,7 @@ export const appConnectionAccessHandlers = [
         policy.operation === input.operation,
     );
     const existing = policies[index];
-    const currentRevision = existing && isActive(existing) ? existing.revision : 0;
+    const currentRevision = existing ? existing.revision : 0;
     if (expectedRevision !== undefined && expectedRevision !== currentRevision)
       return HttpResponse.json(
         { error: "policy_conflict", message: "The access policy changed. Refresh and try again." },
@@ -166,9 +158,9 @@ export const appConnectionAccessHandlers = [
       connectionId,
       sideEffect: operation.sideEffect,
       approvalMode:
-        input.approvalMode ?? (operation.approvalRequired ? "required" : "not_required"),
+        input.approvalMode ?? (operation.sideEffect === "write" ? "required" : "not_required"),
       constraints: input.constraints ?? [],
-      expiresAt: input.expiresAt ?? null,
+      expiresAt: null,
       grantStatus: "current",
       createdAt: policies[index]?.createdAt ?? updatedAt,
       updatedAt,

@@ -424,6 +424,7 @@ import {
 } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
+  APP_CONNECTION_READ_APPROVAL_ACTION,
   APP_CONNECTION_WRITE_ACTION,
   APP_CONNECTION_RETENTION_MS,
   AppConnectionBroker,
@@ -1090,8 +1091,13 @@ async function main() {
   appConnections.registerActions(actionRegistry);
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");
   const activeAppConnectionApprovalInvocationIds = (
-    await approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION)
-  ).flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
+    await Promise.all([
+      approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION),
+      approvalsRepo.findActiveActionArgs(APP_CONNECTION_READ_APPROVAL_ACTION),
+    ])
+  )
+    .flat()
+    .flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
   const recoveredAppConnectionInvocations =
     await appConnectionAccessRepo.recoverInterruptedInvocations(
       activeAppConnectionApprovalInvocationIds,

@@ -251,7 +251,6 @@ const connectionAccessPreviewSchema = z.object({
     z.object({
       name: z.string().min(1),
       sideEffect: z.enum(["read-only", "write"]),
-      approvalRequired: z.boolean().optional(),
     }),
   ),
 });
@@ -284,11 +283,7 @@ export function matchesConnectionAccessPreview(
   const previewByName = new Map(preview.operations.map((op) => [op.name, op]));
   for (const actual of resolved.missingOperations) {
     const expected = previewByName.get(actual.name);
-    if (
-      !expected ||
-      expected.sideEffect !== actual.appAccess?.sideEffects ||
-      Boolean(expected.approvalRequired) !== Boolean(actual.appAccess?.approvalRequired)
-    ) {
+    if (!expected || expected.sideEffect !== actual.appAccess?.sideEffects) {
       return false;
     }
   }
@@ -298,7 +293,6 @@ export function matchesConnectionAccessPreview(
 export async function grantConnectionAccessOperations(
   deps: RequestConnectionAccessDeps,
   resolved: ResolvedConnectionAccessRequest,
-  options: { expiresAt?: Date | null } = {},
 ): Promise<{ ok: true; grantedOperations: string[] } | { ok: false; error: string }> {
   const written = await deps.access.putManyIfAppActive(
     resolved.appId,
@@ -312,11 +306,9 @@ export async function grantConnectionAccessOperations(
         approval: sideEffects === "write" ? "required" : "not_required",
         constraints: [],
         grantEpoch: resolved.grantEpoch,
-        expiresAt: options.expiresAt ?? null,
-        // Chat approvals never disclose or overwrite existing resource allowlists
-        // or shorten/extend an active expiry carried over across a reconnect.
+        expiresAt: null,
+        // Chat approvals never disclose or overwrite existing resource allowlists.
         preserveExistingConstraints: true,
-        preserveExistingExpiry: true,
       };
     }),
     () => {
@@ -359,7 +351,6 @@ function buildPreview(resolved: ResolvedConnectionAccessRequest): PreviewPayload
       name: op.name,
       sideEffect: op.appAccess!.sideEffects,
       ...(op.description ? { summary: op.description } : {}),
-      ...(op.appAccess!.approvalRequired ? { approvalRequired: true } : {}),
     })),
     reason: resolved.reason,
     title: `Allow ${resolved.appName} to access ${resolved.connectionLabel}`,

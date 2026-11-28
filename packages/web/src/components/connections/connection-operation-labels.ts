@@ -1,4 +1,9 @@
-import type { AppConnectionAccessOperationDto } from "@rome/api-types/app-connection-access";
+import type {
+  AppConnectionAccessOperationDto,
+  ConnectionAppAccessDto,
+} from "@rome/api-types/app-connection-access";
+
+type ProviderGuidance = ConnectionAppAccessDto["identities"][number]["providerGuidance"];
 
 export type OperationGroupKey =
   | "document"
@@ -57,6 +62,29 @@ export const KNOWN_OPERATION_KEYS: ReadonlySet<string> = new Set([
   "feishu.im.messages.list",
 ]);
 
+const FEISHU_OPERATION_DOC_PATHS: Readonly<Record<string, string>> = {
+  "feishu.scopes.list": "/document/uAjLw4CM/ukTMukTMukTM/application-v6/scope/list",
+  "feishu.document.read": "/document/server-docs/docs/docs/docx-v1/document/raw_content",
+  "feishu.document.create": "/document/server-docs/docs/docs/docx-v1/document/create",
+  "feishu.document.update": "/document/server-docs/docs/docs/docx-v1/document-block/create",
+  "feishu.drive.inspect": "/document/server-docs/docs/drive-v1/file/batch_query",
+  "feishu.wiki.spaces": "/document/server-docs/docs/wiki-v2/space/list",
+  "feishu.wiki.node.get": "/document/server-docs/docs/wiki-v2/space-node/get_node",
+  "feishu.wiki.nodes.list": "/document/server-docs/docs/wiki-v2/space-node/list",
+  "feishu.base.get": "/document/server-docs/docs/bitable-v1/app/get",
+  "feishu.base.tables.list": "/document/server-docs/docs/bitable-v1/app-table/list",
+  "feishu.base.fields.list": "/document/server-docs/docs/bitable-v1/app-table-field/list",
+  "feishu.base.records.list": "/document/server-docs/docs/bitable-v1/app-table-record/list",
+  "feishu.sheets.info": "/document/server-docs/docs/sheets-v3/spreadsheet/get",
+  "feishu.sheets.cells.read":
+    "/document/server-docs/docs/sheets-v3/data-operation/reading-a-single-range",
+  "feishu.calendar.events.list": "/document/server-docs/calendar-v4/calendar-event/list",
+  "feishu.calendar.event.get": "/document/server-docs/calendar-v4/calendar-event/get",
+  "feishu.calendar.events.search": "/document/server-docs/calendar-v4/calendar-event/search",
+  "feishu.calendar.event.create": "/document/server-docs/calendar-v4/calendar-event/create",
+  "feishu.im.messages.list": "/document/server-docs/im-v1/message/list",
+};
+
 export function operationGroupKey(
   operationName: string,
   connectionKind?: string,
@@ -71,6 +99,70 @@ export function operationGroupKey(
 
 export function operationI18nKey(operationName: string): string | null {
   return KNOWN_OPERATION_KEYS.has(operationName) ? operationName.replaceAll(".", "_") : null;
+}
+
+export function providerDocOrigin(guidance?: ProviderGuidance | null): string | null {
+  for (const candidate of [guidance?.docsUrl, guidance?.scopesUrl, guidance?.consoleUrl]) {
+    if (!candidate || !/^https?:\/\//i.test(candidate)) continue;
+    try {
+      return new URL(candidate).origin;
+    } catch {
+      // Ignore malformed URLs and try the next guidance link.
+    }
+  }
+  return null;
+}
+
+export function operationDocUrl(
+  operationName: string,
+  guidance?: ProviderGuidance | null,
+): string | null {
+  const feishuPath = FEISHU_OPERATION_DOC_PATHS[operationName];
+  if (feishuPath) {
+    const origin = providerDocOrigin(guidance) ?? "https://open.feishu.cn";
+    return `${origin}${feishuPath}`;
+  }
+  if (guidance?.docsUrl && /^https?:\/\//i.test(guidance.docsUrl)) {
+    return guidance.docsUrl;
+  }
+  return null;
+}
+
+export function primaryPermissionIds(
+  operation: Pick<
+    AppConnectionAccessOperationDto,
+    "name" | "requiredScopes" | "requiredScopeGroups"
+  >,
+): string[] {
+  if (operation.requiredScopes?.length) {
+    return [...new Set(operation.requiredScopes)];
+  }
+  if (operation.requiredScopeGroups?.length) {
+    const ids = operation.requiredScopeGroups
+      .map((group) => group[0])
+      .filter((scope): scope is string => Boolean(scope));
+    if (ids.length) return [...new Set(ids)];
+  }
+  return [operation.name];
+}
+
+export function extraPermissionIds(
+  operation: Pick<
+    AppConnectionAccessOperationDto,
+    "name" | "requiredScopes" | "requiredScopeGroups"
+  >,
+): string[] {
+  const primary = new Set(primaryPermissionIds(operation));
+  const extras: string[] = [];
+  const seen = new Set<string>();
+  for (const group of operation.requiredScopeGroups ?? []) {
+    for (const scope of group) {
+      if (primary.has(scope) || seen.has(scope)) continue;
+      seen.add(scope);
+      extras.push(scope);
+    }
+  }
+  return extras;
 }
 
 export function scopeRequirements(
@@ -110,10 +202,4 @@ export function parseDocumentIds(input: string): string[] | null {
     ids.add(id);
   }
   return ids.size <= 100 ? [...ids] : null;
-}
-
-export function expiryPresetToIso(preset: "never" | "7d" | "30d"): string | null {
-  if (preset === "never") return null;
-  const days = preset === "7d" ? 7 : 30;
-  return new Date(Date.now() + days * 86_400_000).toISOString();
 }

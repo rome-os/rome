@@ -320,10 +320,10 @@
       "forms": {
         "feishu": {
           "mode": {
-            "instructions": "选择连接方式：自动创建会通过扫码在你的飞书 / Lark 企业内自动创建 Rome 应用；手动配置则填写已有自建应用的凭证。",
             "fields": {
               "mode": {
                 "label": "连接方式",
+                "description": "选择连接方式：自动创建会通过扫码在你的飞书 / Lark 企业内自动创建 Rome 应用；手动配置则填写已有自建应用的凭证。",
                 "options": {
                   "agent-ready": "自动创建（扫码创建应用）",
                   "manual": "手动配置（填写 App ID 和 App Secret）"
@@ -1191,11 +1191,11 @@
     "hasGrants": "已有权限",
     "disabled": "已停用",
     "needsAttention": "需检查",
-    "back": "返回",
+    "done": "完成",
     "addApp": "添加应用",
     "authorizeManually": "手动授权应用",
     "manualPanelTitle": "为应用授予访问权限",
-    "configureManually": "逐项配置",
+    "configureManually": "自定义权限",
     "presetLabel": "权限范围",
     "presetRead": "仅只读",
     "presetReadAndWrite": "只读 + 写入",
@@ -1209,12 +1209,11 @@
     "noActiveGrants": "暂无生效权限",
     "emptyAuthorizedTitle": "暂无已授权应用",
     "emptyAuthorizedDescription": "当你在对话中让助手使用飞书等应用时，助手会直接发送授权卡片供你一键确认。",
-    "grantReads": "授予全部只读",
+    "useTemplate": "使用配置模板",
     "revokeAll": "撤销全部",
     "refresh": "刷新",
     "grant": "授予权限",
     "save": "保存设置",
-    "revoke": "撤销",
     "retry": "重试",
     "loadingApps": "正在加载已安装应用…",
     "emptyApps": "当前尚未安装任何应用。",
@@ -1222,22 +1221,35 @@
     "loadFailed": "无法加载应用访问权限。",
     "saveFailed": "无法更新应用访问权限。",
     "policyConflict": "此权限策略已在别处更新，已为你刷新最新内容，请确认后再保存。",
-    "approvalRequired": "需守护者批准",
-    "approvalRequiredShort": "写入需审批",
     "configureOperation": "配置「{{name}}」的高级选项",
-    "expiresShort": "至 {{date}}",
+    "viewPermissionDocs": "查看「{{name}}」的开发者文档",
+    "additionalPermissionsTitle": "其他关联权限",
+    "additionalPermissions": "另外 {{count}} 项关联权限：{{scopes}}",
     "restrictedDocsShort": "限定 {{count}} 篇文档",
     "noAllowedDocumentsShort": "当前无允许文档",
-    "requiredScopes": "所需服务商权限 · {{scopes}}",
     "documentIds": "允许访问的文档",
     "noAllowedDocuments": "当前规则不允许访问任何文档。请输入文档 ID 或链接以修改权限。",
     "documentHelp": "输入 Docx 文档 ID 或飞书/Lark 文档链接，用逗号或换行分隔；留空表示允许机器人可访问的全部文档。",
     "invalidDocuments": "最多可输入 100 个有效的 Docx 文档 ID 或飞书/Lark 文档链接。",
-    "expiry": "有效期",
-    "keepExpiry": "保持现有期限 · {{date}}",
-    "never": "永不过期",
-    "sevenDays": "7 天后过期",
-    "thirtyDays": "30 天后过期",
+    "accessMode": {
+      "disabled": "禁用",
+      "allow": "允许",
+      "ask": "每次询问"
+    },
+    "templates": {
+      "readOnly": {
+        "title": "全部只读",
+        "description": "允许全部只读操作"
+      },
+      "readAndWrite": {
+        "title": "只读 + 写入时每次询问",
+        "description": "允许全部只读，写入操作每次询问确认"
+      },
+      "docsAndWiki": {
+        "title": "仅文档与知识库只读",
+        "description": "仅允许读取云文档、云盘与知识库"
+      }
+    },
     "providerScopesTitle": "服务商权限状态",
     "providerScopesSubtitle": "核对已授权功能所需的服务商后台权限是否已开通",
     "providerScopesAllGranted": "所需的 {{total}} 项服务商权限已全部开通",
@@ -1251,8 +1263,7 @@
     "scopeGranted": "已开通",
     "scopeMissing": "未开通",
     "scopeOr": "或",
-    "expandDetails": "展开详情",
-    "collapseDetails": "收起详情",
+    "viewScopeDetails": "查看详情",
     "noRequiredScopes": "当前生效授权无需额外检查服务商权限范围。",
     "auditApp": "应用",
     "allApps": "全部应用",

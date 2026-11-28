@@ -1190,7 +1190,7 @@ describe("App connection broker", () => {
     }
   });
 
-  it("fails closed for a legacy read policy that requires deferred approval", async () => {
+  it("supports per-call approval for read-only operations and returns read output after approval", async () => {
     const h = harness();
     try {
       const connection = await connect(h, "docs");
@@ -1200,15 +1200,80 @@ describe("App connection broker", () => {
         operation: "documents.get",
         approval: "required",
       });
-      await expect(
-        h.broker.forApp("app-a").invoke({
-          connectionId: connection.id,
-          identity: "account",
-          operation: "documents.get",
-          input: { workspaceId: "one", documentId: "doc" },
-        }),
-      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      const pending = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        input: { workspaceId: "one", documentId: "doc-1" },
+      });
+      expect(pending).toMatchObject({ status: "pending_approval" });
+      if (pending.status !== "pending_approval") throw new Error("expected pending_approval");
       expect(h.invocations).toEqual([]);
+      expect(h.approvalRequests[0]).toMatchObject({
+        actionName: "core:app_connection_read_with_approval",
+      });
+
+      // Unapproved read action cannot bypass a pending read_with_approval invocation
+      const bypass = await appContext("app-a", h).runAction("core:app_connection_read", {
+        invocationId: pending.executionId,
+      });
+      expect(bypass).toMatchObject({
+        status: "ok",
+        data: { ok: false, error: { code: "access_denied" } },
+      });
+      expect(h.invocations).toEqual([]);
+
+      // Approving executes the read and returns the provider data
+      const readApprovalAction = h.actionRegistry.get("core:app_connection_read_with_approval")!;
+      const executed = await readApprovalAction.execute({ invocationId: pending.executionId });
+      expect(executed).toMatchObject({
+        status: "ok",
+        data: {
+          ok: true,
+          value: {
+            status: "ok",
+            executionId: pending.executionId,
+            data: { operation: "documents.get", secretResult: "not-for-audit" },
+          },
+        },
+      });
+      expect(h.invocations).toHaveLength(1);
+      expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
+        status: "succeeded",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({
+          operation: "documents.get",
+          approval: "approved",
+          status: "succeeded",
+        }),
+      );
+
+      // Rejecting marks the read invocation rejected and audits approval_rejected
+      const second = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        input: { workspaceId: "one", documentId: "doc-2" },
+      });
+      if (second.status !== "pending_approval") throw new Error("expected pending_approval");
+      await h.broker.approvalRejected("core:app_connection_read_with_approval", {
+        invocationId: second.executionId,
+      });
+      expect(await h.access.getInvocation(second.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "approval_rejected",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({
+          operation: "documents.get",
+          approval: "rejected",
+          status: "approval_rejected",
+        }),
+      );
+      expect(h.invocations).toHaveLength(1);
     } finally {
       h.close();
     }

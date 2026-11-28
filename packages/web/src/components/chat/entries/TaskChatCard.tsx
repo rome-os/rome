@@ -146,7 +146,6 @@ const previewSchema = z
           name: z.string(),
           sideEffect: z.enum(["read-only", "write"]),
           summary: z.string().optional(),
-          approvalRequired: z.boolean().optional(),
         }),
       ),
       reason: z.string(),

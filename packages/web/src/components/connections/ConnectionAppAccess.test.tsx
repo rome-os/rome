@@ -38,8 +38,18 @@ rs.mock("@/components/ui/select", () => ({
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  SelectItem: ({ value, children }: { value: string; children: ReactNode }) => (
-    <option value={value}>{children}</option>
+  SelectItem: ({
+    value,
+    disabled,
+    children,
+  }: {
+    value: string;
+    disabled?: boolean;
+    children: ReactNode;
+  }) => (
+    <option value={value} disabled={disabled}>
+      {children}
+    </option>
   ),
 }));
 
@@ -73,7 +83,7 @@ const detail: ConnectionAppAccessDto = {
           resourceConstraintKind: "documentIds",
           requiredScopes: ["docx:read", "docx:metadata"],
         },
-        { name: write, sideEffect: "write", approvalRequired: true },
+        { name: write, sideEffect: "write" },
         {
           name: spaces,
           sideEffect: "read-only",
@@ -152,7 +162,7 @@ function setup({
         sideEffect: body.operation === write ? "write" : "read-only",
         approvalMode: body.approvalMode ?? "not_required",
         constraints: body.constraints ?? [],
-        expiresAt: body.expiresAt ?? null,
+        expiresAt: null,
         grantStatus: "current",
         revision: ++revision,
         createdAt: checkedAt,
@@ -198,10 +208,15 @@ function opRow(operation: string) {
   return within(el);
 }
 
+function opModeSelect(operation: string) {
+  return opRow(operation).getAllByRole<HTMLSelectElement>("combobox")[0];
+}
+
 async function openManualApp(appId: string) {
   await userEvent.click(await screen.findByRole("button", { name: "Authorize an app" }));
-  fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: appId } });
-  await userEvent.click(screen.getByRole("button", { name: "Configure individually" }));
+  const dialog = await screen.findByRole("dialog", { name: "Authorize an app" });
+  fireEvent.change(within(dialog).getAllByRole("combobox")[0], { target: { value: appId } });
+  await userEvent.click(within(dialog).getByRole("button", { name: "Customize permissions" }));
 }
 
 async function openAuthorizedApp(name: string) {
@@ -253,90 +268,192 @@ describe("ConnectionAppAccess", () => {
     expect(requests).toEqual([endpoint]);
   });
 
-  it("supports quick manual preset authorization from the overview", async () => {
+  it("supports quick manual preset authorization in a modal dialog with Customize permissions between Cancel and Grant access", async () => {
     const { puts } = setup();
     await userEvent.click(await screen.findByRole("button", { name: "Authorize an app" }));
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "app-b" } });
-    await userEvent.click(screen.getByRole("button", { name: "Grant access" }));
+    const dialog = await screen.findByRole("dialog", { name: "Authorize an app" });
+
+    // Footer buttons appear in order: Cancel → Customize permissions → Grant access
+    const footerButtons = within(dialog)
+      .getAllByRole("button")
+      .map((btn) => btn.textContent?.trim())
+      .filter(Boolean);
+    expect(footerButtons).toEqual(["Cancel", "Customize permissions", "Grant access"]);
+
+    // Cancel closes the modal cleanly
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Reopen and grant preset
+    await userEvent.click(screen.getByRole("button", { name: "Authorize an app" }));
+    const reopened = await screen.findByRole("dialog", { name: "Authorize an app" });
+    fireEvent.change(within(reopened).getAllByRole("combobox")[0], { target: { value: "app-b" } });
+    await userEvent.click(within(reopened).getByRole("button", { name: "Grant access" }));
 
     await waitFor(() => expect(puts.map((p) => p.operation)).toEqual([read, spaces]));
     expect(puts.every((p) => p.appId === "app-b")).toBe(true);
-    // Drills straight into the newly authorized app
-    expect(await screen.findByText("App B")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    // Opens the newly authorized app in a modal dialog
+    const appDialog = await screen.findByRole("dialog", { name: "App B" });
+    await userEvent.click(within(appDialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(await screen.findByRole("button", { name: /App B/ })).toBeTruthy();
   });
 
-  it("grants, updates, and revokes only the selected app's document access via the inline config tray", async () => {
+  it("opens app editing in a modal with gray permission IDs and Feishu/Lark developer doc links", async () => {
+    const larkDetail: ConnectionAppAccessDto = {
+      ...detail,
+      identities: [
+        {
+          ...detail.identities[0],
+          providerGuidance: {
+            consoleUrl: "https://open.larksuite.com/app/cli_lark",
+            scopesUrl: "https://open.larksuite.com/app/cli_lark/auth",
+            scopeCheckOperation: "feishu.scopes.list",
+          },
+        },
+      ],
+      policies: [currentPolicy(read)],
+    };
+    setup({ data: larkDetail });
+    await openAuthorizedApp("App A");
+
+    const dialog = await screen.findByRole("dialog", { name: "App A" });
+    const readRow = within(dialog.querySelector<HTMLLIElement>(`li[data-operation="${read}"]`)!);
+    expect(readRow.getByText("docx:read")).toBeTruthy();
+    expect(readRow.getByText("docx:metadata")).toBeTruthy();
+    expect(
+      readRow
+        .getByRole("link", { name: "Open developer documentation for Read documents" })
+        .getAttribute("href"),
+    ).toBe(
+      "https://open.larksuite.com/document/server-docs/docs/docs/docx-v1/document/raw_content",
+    );
+
+    const spacesRow = within(
+      dialog.querySelector<HTMLLIElement>(`li[data-operation="${spaces}"]`)!,
+    );
+    expect(spacesRow.getByText("wiki:space:retrieve")).toBeTruthy();
+    expect(
+      spacesRow
+        .getByRole("link", { name: "Open developer documentation for List Wiki spaces" })
+        .getAttribute("href"),
+    ).toBe("https://open.larksuite.com/document/server-docs/docs/wiki-v2/space/list");
+
+    // Operations without declared scopes still show their operation ID
+    const writeRow = within(dialog.querySelector<HTMLLIElement>(`li[data-operation="${write}"]`)!);
+    expect(writeRow.getByText(write)).toBeTruthy();
+    expect(
+      writeRow
+        .getByRole("link", { name: "Open developer documentation for Update documents" })
+        .getAttribute("href"),
+    ).toBe(
+      "https://open.larksuite.com/document/server-docs/docs/docs/docx-v1/document-block/create",
+    );
+
+    // ProviderScopes summary card is hidden inside AppDetailDialog
+    expect(within(dialog).queryByText("Provider permissions")).toBeNull();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows +N badge for extra equivalent scopes and does not render fine-grained document config trays", async () => {
     const { puts, deletes } = setup();
     await openManualApp("app-b");
 
-    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
-    const input = opRow(read).getByRole("textbox", { name: "Allowed documents" });
-    fireEvent.change(input, { target: { value: "https://other.test/docx/DocumentA" } });
-    expect(opRow(read).getByRole<HTMLButtonElement>("button", { name: "Grant" }).disabled).toBe(
-      true,
-    );
+    // No per-operation fine-grained configure button is rendered for any operation
+    expect(opRow(read).queryByRole("button", { name: /Configure/ })).toBeNull();
+    expect(opRow(write).queryByRole("button", { name: /Configure/ })).toBeNull();
+    expect(opRow(spaces).queryByRole("button", { name: /Configure/ })).toBeNull();
 
-    fireEvent.change(input, {
-      target: { value: "DocumentA, https://demo.feishu.cn/docx/DocumentB?from=share\nDocumentA" },
-    });
-    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(opRow(read).getByRole("button", { name: "Grant" }));
+    // Extra equivalent scopes render as a compact +N badge on the title line with full scope list accessible
+    const extraBadge = opRow(spaces).getByText("+2");
+    expect(extraBadge.getAttribute("aria-label")).toContain("wiki:wiki:readonly");
+    expect(extraBadge.getAttribute("aria-label")).toContain("wiki:wiki");
+    expect(extraBadge.className).toContain("text-xs");
+    expect(extraBadge.className).toContain("h-4");
+
+    // Granting and revoking via the dropdown works cleanly
+    fireEvent.change(opModeSelect(read), { target: { value: "allow" } });
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]).toMatchObject({
       appId: "app-b",
       expectedRevision: 0,
       identity: "app",
       operation: read,
-      constraints: [{ inputPointer: "/documentId", allowedValues: ["DocumentA", "DocumentB"] }],
+      approvalMode: "not_required",
+      constraints: [],
     });
-    expect(Date.parse(puts[0].expiresAt!) - Date.now()).toBeGreaterThan(7 * 86_400_000 - 60_000);
 
-    await waitFor(() => expect(opRow(read).getByText("2 docs allowed")).toBeTruthy());
-    fireEvent.change(opRow(read).getByRole("textbox"), { target: { value: "" } });
-    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(puts[1]).toMatchObject({
-        expectedRevision: 1,
-        constraints: [],
-        expiresAt: puts[0].expiresAt,
-      }),
-    );
-
-    // Toggle switch OFF revokes immediately
-    const toggle = opRow(read).getByRole("switch", { name: "Read documents" });
-    await waitFor(() => expect(toggle.getAttribute("data-state")).toBe("checked"));
-    await userEvent.click(toggle);
+    await waitFor(() => expect(opModeSelect(read).value).toBe("allow"));
+    fireEvent.change(opModeSelect(read), { target: { value: "disabled" } });
     await waitFor(() => expect(deletes).toEqual([`${endpoint}/policies/app-b/app/${read}`]));
   });
 
-  it("toggles operations with Switch, grants missing reads, and revokes all grants across identities", async () => {
+  it("changes per-operation access via dropdown, applies config templates, and revokes all grants across identities", async () => {
     const { puts, deletes } = setup();
     await openManualApp("@a/app-a");
-    expect(opRow(write).getByText("Requires approval")).toBeTruthy();
+    // No redundant "Requires approval" badge on write operations
+    expect(opRow(write).queryByText("Requires approval")).toBeNull();
 
-    await userEvent.click(opRow(write).getByRole("switch", { name: "Update documents" }));
+    // Dropdown exposes the 3 modes for both read-only and write operations
+    const expectedModes = [
+      { value: "disabled", label: "Disabled", disabled: false },
+      { value: "allow", label: "Allow", disabled: false },
+      { value: "ask", label: "Ask every time", disabled: false },
+    ];
+    for (const op of [read, write]) {
+      const options = Array.from(opModeSelect(op).options).map((opt) => ({
+        value: opt.value,
+        label: opt.textContent,
+        disabled: opt.disabled,
+      }));
+      expect(options).toEqual(expectedModes);
+    }
+
+    fireEvent.change(opModeSelect(read), { target: { value: "ask" } });
     await waitFor(() =>
-      expect(puts[0]).toMatchObject({ operation: write, approvalMode: "required" }),
+      expect(puts[0]).toMatchObject({ operation: read, approvalMode: "required" }),
+    );
+    await waitFor(() => expect(opModeSelect(read).value).toBe("ask"));
+
+    fireEvent.change(opModeSelect(write), { target: { value: "allow" } });
+    await waitFor(() =>
+      expect(puts[1]).toMatchObject({ operation: write, approvalMode: "not_required" }),
+    );
+    await waitFor(() => expect(opModeSelect(write).value).toBe("allow"));
+    fireEvent.change(opModeSelect(write), { target: { value: "ask" } });
+    await waitFor(() =>
+      expect(puts[2]).toMatchObject({ operation: write, approvalMode: "required" }),
     );
 
-    const batch = await screen.findByRole<HTMLButtonElement>("button", {
-      name: "Grant all reads",
+    // Template menu only offers the 3 templates
+    const templateTrigger = await screen.findByRole<HTMLButtonElement>("button", {
+      name: "Use template",
     });
-    await waitFor(() => expect(batch.disabled).toBe(false));
-    fireEvent.click(batch);
+    await waitFor(() => expect(templateTrigger.disabled).toBe(false));
+    await userEvent.click(templateTrigger);
+    const menuItems = await screen.findAllByRole("menuitem");
+    expect(menuItems.map((el) => el.textContent)).toEqual([
+      expect.stringContaining("All read-only"),
+      expect.stringContaining("Read & write (ask on write)"),
+      expect.stringContaining("Docs & Wiki read-only"),
+    ]);
+    await userEvent.click(menuItems[1]);
     await waitFor(() =>
-      expect(puts.slice(1).map((item) => item.operation)).toEqual([read, spaces]),
+      expect(puts.slice(3).map((item) => item.operation)).toEqual([read, spaces]),
     );
+    await waitFor(() => expect(opModeSelect(read).value).toBe("allow"));
 
+    // Switch identity and apply "All read-only" template
     await waitFor(() =>
       expect(screen.getAllByRole<HTMLSelectElement>("combobox")[0].disabled).toBe(false),
     );
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "assistant" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Grant all reads" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use template" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /All read-only/ }));
     await waitFor(() =>
-      expect(puts[3]).toMatchObject({ operation: "wiki.read", identity: "assistant" }),
+      expect(puts[5]).toMatchObject({ operation: "wiki.read", identity: "assistant" }),
     );
 
     const revokeAll = screen.getByRole<HTMLButtonElement>("button", { name: "Revoke all" });
@@ -352,7 +469,7 @@ describe("ConnectionAppAccess", () => {
     );
   });
 
-  it("preserves every constraint verbatim when only expiry changes and edits only document rules", async () => {
+  it("preserves existing policy constraints verbatim when changing access mode", async () => {
     const extra = { inputPointer: "/workspace", allowedValues: [4, true] };
     const constraints = [
       { inputPointer: "/documentId", allowedValues: ["A", "B"] },
@@ -361,39 +478,15 @@ describe("ConnectionAppAccess", () => {
     ];
     const { puts } = setup({ data: { ...detail, policies: [currentPolicy(read, constraints)] } });
     await openAuthorizedApp("App A");
-    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
 
-    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
-    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
+    fireEvent.change(opModeSelect(read), { target: { value: "ask" } });
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0].constraints).toEqual(constraints);
-    expect(Date.parse(puts[0].expiresAt!)).toBeGreaterThan(Date.now());
-    await waitFor(() =>
-      expect(opRow(read).getByRole<HTMLSelectElement>("combobox").value).toBe("keep"),
-    );
-    fireEvent.change(opRow(read).getByRole("textbox"), { target: { value: "C" } });
-    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(puts[1]?.constraints).toEqual([
-        extra,
-        { inputPointer: "/documentId", allowedValues: ["C"] },
-      ]),
-    );
+    expect(puts[0].approvalMode).toBe("required");
+    await waitFor(() => expect(opModeSelect(read).value).toBe("ask"));
   });
 
-  it("keeps a disjoint document policy closed when its empty draft is saved", async () => {
-    const rules = ["A", "B"].map((id) => ({ inputPointer: "/documentId", allowedValues: [id] }));
-    const { puts } = setup({ data: { ...detail, policies: [currentPolicy(read, rules)] } });
-    await openAuthorizedApp("App A");
-    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
-
-    expect(await screen.findByText(/current rules allow no documents/)).toBeTruthy();
-    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(puts[0]?.constraints).toEqual(rules));
-  });
-
-  it("refreshes the allowlist and explains a revision conflict after a stale expiry edit", async () => {
+  it("refreshes and explains a revision conflict after a stale access mode edit", async () => {
     const previous = currentPolicy(read, [
       { inputPointer: "/documentId", allowedValues: ["A", "B"] },
     ]);
@@ -406,15 +499,12 @@ describe("ConnectionAppAccess", () => {
       data: { ...detail, policies: [current] },
     });
     await openAuthorizedApp("App A");
-    await userEvent.click(opRow(read).getByRole("button", { name: "Configure Read documents" }));
 
-    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A\nB");
     const fetch = rs.mocked(globalThis.fetch);
     fetch.mockResolvedValueOnce(
       Response.json({ error: "policy_conflict", message: "Revision mismatch" }, { status: 409 }),
     );
-    fireEvent.change(opRow(read).getByRole("combobox"), { target: { value: "7d" } });
-    fireEvent.click(opRow(read).getByRole("button", { name: "Save changes" }));
+    fireEvent.change(opModeSelect(read), { target: { value: "ask" } });
     const feedback = await screen.findByRole("alert");
     expect(feedback.textContent).toBe(
       "This access policy changed elsewhere. Review the refreshed policy before saving again.",
@@ -427,7 +517,6 @@ describe("ConnectionAppAccess", () => {
       constraints: previous.constraints,
     });
     expect(requests.filter((url) => url === endpoint)).toHaveLength(2);
-    expect(opRow(read).getByRole<HTMLTextAreaElement>("textbox").value).toBe("A");
   });
 
   it("keeps standalone scopes alongside granted alternatives", async () => {
@@ -477,16 +566,28 @@ describe("ConnectionAppAccess", () => {
       ],
     });
     await userEvent.click(await screen.findByRole("button", { name: "Check scopes" }));
-    await screen.findByText("Provider scopes checked.");
-    const status = within(screen.getByRole("status"));
+    const dialog = await screen.findByRole("dialog", { name: "Provider permissions" });
+    await within(dialog).findByText("Provider scopes checked.");
+    const status = within(within(dialog).getByRole("status"));
+    expect(status.getByText("Documents")).toBeTruthy();
+    expect(status.getByText("Wiki")).toBeTruthy();
     expect(within(status.getByText("docx:read").closest("li")!).getByText("Missing")).toBeTruthy();
     expect(
       within(status.getByText("docx:metadata").closest("li")!).getByText("Granted"),
     ).toBeTruthy();
+    const wikiItem = within(status.getByText("wiki:space:retrieve").closest("li")!);
+    expect(wikiItem.getByText("Granted")).toBeTruthy();
     expect(
-      within(status.getByText("wiki:space:retrieve").closest("li")!).getByText("Granted"),
-    ).toBeTruthy();
+      wikiItem
+        .getByRole("link", { name: "Open developer documentation for List Wiki spaces" })
+        .getAttribute("href"),
+    ).toBe("https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/list");
     expect(status.getAllByText("Missing")).toHaveLength(1);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "View details" }));
+    expect(await screen.findByRole("dialog", { name: "Provider permissions" })).toBeTruthy();
   });
 
   it("checks base message history scopes and accepts only supported drive metadata scopes", async () => {
@@ -585,12 +686,9 @@ describe("ConnectionAppAccess", () => {
     ).toBe("https://open.feishu.cn/app/cli_test");
 
     await openManualApp("@a/app-a");
-    await user.click(opRow(read).getByRole("switch", { name: "Read documents" }));
-    await waitFor(() =>
-      expect(
-        opRow(read).getByRole("switch", { name: "Read documents" }).getAttribute("data-state"),
-      ).toBe("checked"),
-    );
+    fireEvent.change(opModeSelect(read), { target: { value: "allow" } });
+    await waitFor(() => expect(opModeSelect(read).value).toBe("allow"));
+    await user.click(screen.getByRole("button", { name: "Done" }));
 
     const check = () => user.click(screen.getByRole("button", { name: "Check scopes" }));
     await check();

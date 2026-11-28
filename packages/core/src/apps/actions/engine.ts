@@ -171,6 +171,7 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:device_describe",
   "core:device_run",
   "core:app_connection_read",
+  "core:app_connection_read_with_approval",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
   "core:request_connection_access",

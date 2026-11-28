@@ -273,7 +273,6 @@ export class AppConnectionAccessRepository {
     inputs: ReadonlyArray<
       Omit<Parameters<AppConnectionAccessRepository["put"]>[0], "appId"> & {
         preserveExistingConstraints?: boolean;
-        preserveExistingExpiry?: boolean;
       }
     >,
     isAppActive: () => boolean,
@@ -283,25 +282,19 @@ export class AppConnectionAccessRepository {
         if (!isAppActive()) return null;
         const now = new Date();
         const written: AppConnectionAccessRecord[] = [];
-        for (const { preserveExistingConstraints, preserveExistingExpiry, ...entry } of inputs) {
+        for (const { preserveExistingConstraints, ...entry } of inputs) {
           const input = { appId, ...entry };
           let nextInput = input;
-          if (preserveExistingConstraints || preserveExistingExpiry) {
+          if (preserveExistingConstraints) {
             const unrevoked = tx
               .select()
               .from(appConnectionAccess)
               .where(and(policyKey(input), isNull(appConnectionAccess.revokedAt)))
               .get();
             if (unrevoked) {
-              const isActive = unrevoked.expiresAt === null || unrevoked.expiresAt > now;
               nextInput = {
                 ...input,
-                ...(preserveExistingConstraints
-                  ? { constraints: toAccessRecord(unrevoked).constraints }
-                  : {}),
-                ...(preserveExistingExpiry && isActive
-                  ? { expiresAt: mergeExpiry(input.expiresAt ?? null, unrevoked.expiresAt) }
-                  : {}),
+                constraints: toAccessRecord(unrevoked).constraints,
               };
             }
           }
@@ -826,11 +819,4 @@ function policyCurrentForInvocation(
       grant.grantEpoch !== null &&
       policy.grantEpoch === grant.grantEpoch,
   );
-}
-
-function mergeExpiry(requested: Date | null, existing: Date | null): Date | null {
-  if (requested && existing) {
-    return requested < existing ? requested : existing;
-  }
-  return requested ?? existing;
 }
