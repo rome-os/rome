@@ -517,8 +517,10 @@ private struct ViewerPage: View {
 enum ViewerDecoder {
     /// More frames than this shows still.
     static let maxFrames = 300
-    /// Decoded pixels across all frames, 4 bytes each: about 128 MB.
-    static let maxPixels = 32_000_000
+    /// Decoded pixels across all frames, 4 bytes each: about 64 MB. The
+    /// paged `TabView` keeps the pages it has shown, so a neighbour's frames
+    /// stay in memory beside the current one's.
+    static let maxPixels = 16_000_000
 
     nonisolated static func image(from data: Data, maxPixel: CGFloat, maxFrames: Int = maxFrames, maxPixels: Int = maxPixels) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }

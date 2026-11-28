@@ -654,7 +654,7 @@ final class DemoBackend: RomeBackend {
         try await pause(0.2)
         guard let output = Self.outputs(chatId: conciergeChatID).first(where: { $0.contentUrl == "/api" + path }) else { throw APIError.notFound }
         if let link = output.link, let data = assets[String(link.dropFirst())] { return data }
-        return Data("# \(output.title)\n\n周六：伏见稻荷、清水寺；周日：岚山、金阁寺。\n".utf8)
+        return Data("# \((output.name as NSString).deletingPathExtension)\n\n周六：伏见稻荷、清水寺；周日：岚山、金阁寺。\n".utf8)
     }
 
     /// The main chat's outputs, newest first: a task chat's among them, one moved.
