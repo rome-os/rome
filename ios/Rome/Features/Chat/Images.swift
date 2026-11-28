@@ -499,16 +499,82 @@ private struct ViewerPage: View {
         do {
             let data = try await image.data(assetLoader: assetLoader, apiLoader: apiLoader)
             let decoded = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: max(600, longEdge))
+                ViewerDecoder.image(from: data, maxPixel: max(600, longEdge))
             }.value
             guard let decoded else { throw APIError.network }
-            full = UIImage(cgImage: decoded)
+            full = decoded
             onLoad(data)
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled { failed = true }
         }
     }
+}
+
+/// The viewer's decode of an image file: a GIF of several frames as an
+/// animated image, anything else as its first frame, each frame at most
+/// `maxPixel` on the long edge. A GIF past the caps shows still.
+enum ViewerDecoder {
+    /// More frames than this shows still.
+    static let maxFrames = 300
+    /// Decoded pixels across all frames, 4 bytes each: about 128 MB.
+    static let maxPixels = 32_000_000
+
+    nonisolated static func image(from data: Data, maxPixel: CGFloat, maxFrames: Int = maxFrames, maxPixels: Int = maxPixels) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let first = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        let isGIF = (CGImageSourceGetType(source) as String?) == UTType.gif.identifier
+        guard isGIF, count > 1, count <= maxFrames, first.width * first.height * count <= maxPixels else {
+            return UIImage(cgImage: first)
+        }
+        var frames: [CGImage] = [first]
+        var delays: [Double] = [delay(source, at: 0)]
+        for index in 1..<count {
+            guard let frame = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else { continue }
+            frames.append(frame)
+            delays.append(delay(source, at: index))
+        }
+        guard frames.count > 1 else { return UIImage(cgImage: first) }
+        return animated(frames.map { UIImage(cgImage: $0) }, delays: delays)
+    }
+
+    /// A frame's delay in seconds. Like browsers, a delay of 10 ms or less
+    /// plays at 100 ms: many GIFs say 0 and mean "the default".
+    nonisolated static func delay(_ source: CGImageSource, at index: Int) -> Double {
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+        let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+        let value = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double).flatMap { $0 > 0 ? $0 : nil }
+            ?? gif?[kCGImagePropertyGIFDelayTime] as? Double
+            ?? 0
+        return value <= 0.011 ? 0.1 : value
+    }
+
+    /// `UIImage.animatedImage` shows every frame for the same time, so a
+    /// frame repeats to hold its own delay, in steps of the delays' greatest
+    /// common divisor (in centiseconds, as a GIF stores them). Repeats share
+    /// the frame's pixels. Past a sane number of steps, frames play evenly.
+    nonisolated static func animated(_ frames: [UIImage], delays: [Double]) -> UIImage? {
+        let centis = delays.map { max(1, Int(($0 * 100).rounded())) }
+        let total = Double(centis.reduce(0, +)) / 100
+        let step = centis.reduce(0) { gcd($0, $1) }
+        let steps = centis.reduce(0) { $0 + $1 / step }
+        guard steps <= 2_000 else { return UIImage.animatedImage(with: frames, duration: total) }
+        var sequence: [UIImage] = []
+        sequence.reserveCapacity(steps)
+        for (frame, centi) in zip(frames, centis) {
+            sequence += Array(repeating: frame, count: centi / step)
+        }
+        return UIImage.animatedImage(with: sequence, duration: total)
+    }
+
+    private nonisolated static func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? a : gcd(b, a % b) }
 }
 
 /// Pinch and double-tap zoom on an image, the system way.
