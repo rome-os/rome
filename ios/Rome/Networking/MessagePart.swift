@@ -372,8 +372,24 @@ enum MessagePart: Hashable, Sendable {
             if let channel = preview?["channel"]?.string {
                 fields.append(.init(label: String(localized: "Channel"), value: channel))
             }
+        case "connection_access":
+            title = preview?["title"]?.string
+            summary = preview?["summary"]?.string
+            if let appName = preview?["appName"]?.string ?? preview?["appId"]?.string {
+                fields.append(.init(label: String(localized: "App"), value: appName))
+            }
+            if let connection = preview?["connectionLabel"]?.string ?? preview?["connectionId"]?.string {
+                fields.append(.init(label: String(localized: "Connection"), value: connection))
+            }
+            if let operations = preview?["operations"]?.array {
+                let names = operations.compactMap { $0["name"]?.string }
+                if !names.isEmpty {
+                    fields.append(.init(label: String(localized: "Operations"), value: names.joined(separator: ", ")))
+                }
+            }
         default:
-            break
+            title = preview?["title"]?.string
+            summary = preview?["summary"]?.string
         }
         return ApprovalPart(
             approvalId: id,

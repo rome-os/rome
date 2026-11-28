@@ -424,6 +424,7 @@ import {
 } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
+  APP_CONNECTION_READ_APPROVAL_ACTION,
   APP_CONNECTION_WRITE_ACTION,
   APP_CONNECTION_RETENTION_MS,
   AppConnectionBroker,
@@ -434,7 +435,7 @@ import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import type { ResolvedApp } from "./apps/state.js";
+import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import {
@@ -1076,13 +1077,27 @@ async function main() {
     connectionRegistry,
     appConnectionAccessRepo,
     actionEngine,
-    { isReady: () => appConnectionAccessReady },
+    {
+      isReady: () => appConnectionAccessReady,
+      lookupApp: (appId) => {
+        const view = appCatalog.get(appId);
+        return isResolvedApp(view)
+          ? { id: view.appId, displayName: view.displayName, enabled: view.enabled }
+          : null;
+      },
+      findApproval: (approvalId) => approvalsRepo.findById(approvalId),
+    },
   );
   appConnections.registerActions(actionRegistry);
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");
   const activeAppConnectionApprovalInvocationIds = (
-    await approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION)
-  ).flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
+    await Promise.all([
+      approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION),
+      approvalsRepo.findActiveActionArgs(APP_CONNECTION_READ_APPROVAL_ACTION),
+    ])
+  )
+    .flat()
+    .flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
   const recoveredAppConnectionInvocations =
     await appConnectionAccessRepo.recoverInterruptedInvocations(
       activeAppConnectionApprovalInvocationIds,

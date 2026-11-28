@@ -238,8 +238,11 @@ describe("Feishu credential setup", () => {
             feishu: Record<
               string,
               {
-                instructions: string;
-                fields: Record<string, { label: string; options?: Record<string, string> }>;
+                instructions?: string;
+                fields: Record<
+                  string,
+                  { label: string; description?: string; options?: Record<string, string> }
+                >;
               }
             >;
           };
@@ -260,6 +263,7 @@ describe("Feishu credential setup", () => {
       for (const field of form.fields) {
         const expectedField = expected.fields[field.name];
         expect(field.label).toBe(expectedField.label);
+        expect(field.description).toBe(expectedField.description);
         if (field.options) {
           for (const option of field.options) {
             const value = typeof option === "string" ? option : option.value;

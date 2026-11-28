@@ -5,8 +5,9 @@
 import type { KindMount } from "../../kind-mount.js";
 import { createFeishuDescriptor, type FeishuDescriptorDeps } from "./descriptor.js";
 
+export type { FeishuDocumentRequest, FeishuRequest } from "./transport.js";
 export type { FeishuDescriptorDeps } from "./descriptor.js";
-export { FEISHU_DOCUMENT_READ, feishuDocumentGuidance } from "./documents.js";
+export { FEISHU_DOCUMENT_READ } from "./documents.js";
 
 export function feishu(deps: FeishuDescriptorDeps): KindMount {
   return { descriptor: createFeishuDescriptor(deps) };

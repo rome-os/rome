@@ -1,200 +1,250 @@
-import { Hono } from "hono";
-import type { DocumentAccessOptions } from "@rome/api-types/app-connection-access";
-import {
-  FEISHU_DOCUMENT_READ,
-  feishuDocumentGuidance,
-} from "../../connections/kinds/feishu/index.js";
+import { Hono, type Context } from "hono";
+import type {
+  AppConnectionAccessAuditPage,
+  AppConnectionAccessPolicyDto,
+  AppConnectionScopeCheck,
+  ConnectionAppAccessDto,
+} from "@rome/api-types/app-connection-access";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
-import { appAccessibleOperations } from "../../connections/app-connections.js";
+import type { AppConnectionAccessRecord } from "../../connections/app-connection-access.js";
+import { CredentialRejected, ProviderOperationError } from "../../connections/errors.js";
+import type { GrantValue } from "../../connections/grant.js";
+import type { OperationDescriptor } from "../../connections/types.js";
+import { appAccessibleOperations, describeAct } from "../../connections/app-connections.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 
-const ConstraintSchema = z
+const ConnectionPutSchema = z
   .object({
-    inputPointer: z.string().refine((value) => value === "" || value.startsWith("/")),
-    allowedValues: z
-      .array(z.union([z.string(), z.number(), z.boolean()]))
-      .min(1)
-      .max(100),
+    appId: z.string().min(1),
+    identity: z.string().min(1),
+    operation: z.string().min(1),
+    expectedRevision: z.int().nonnegative().optional(),
+    approvalMode: z.enum(["required", "not_required"]).optional(),
   })
   .strict();
 
-const PutAccessSchema = z
-  .object({
-    approval: z.enum(["required", "not_required"]),
-    constraints: z.array(ConstraintSchema).max(20).default([]),
-    expiresAt: z.string().datetime().nullable().optional(),
-  })
-  .strict();
-
-const AuditQuerySchema = z.object({
-  cursor: z.coerce.number().int().nonnegative().default(0),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+const ConnectionAuditQuery = z.strictObject({
+  appId: z.string().min(1).optional(),
+  beforeSeq: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 });
+const ScopeResult = z.object({
+  scopes: z.array(
+    z.object({ scopeName: z.string(), grantStatus: z.int(), scopeType: z.string().optional() }),
+  ),
+  checkedAt: z.iso.datetime({ offset: true }),
+});
+
+function grantStatus(
+  policy: AppConnectionAccessRecord,
+  grant: GrantValue | null | undefined,
+): AppConnectionAccessPolicyDto["grantStatus"] {
+  if (grant?.grantEpoch === policy.grantEpoch) return "current";
+  if (grant?.state === "unauthorized") return "authorization_required";
+  return grant ? "replaced" : "unavailable";
+}
+
+function policyDto(
+  policy: AppConnectionAccessRecord,
+  grant: GrantValue | null | undefined,
+): AppConnectionAccessPolicyDto {
+  return {
+    appId: policy.appId,
+    connectionId: policy.connectionId,
+    identity: policy.identity,
+    operation: policy.operation,
+    sideEffect: policy.sideEffects,
+    approvalMode: policy.approval,
+    constraints: policy.constraints,
+    revision: policy.revision,
+    grantStatus: grantStatus(policy, grant),
+    expiresAt: policy.expiresAt?.toISOString() ?? null,
+    createdAt: policy.createdAt.toISOString(),
+    updatedAt: policy.updatedAt.toISOString(),
+  };
+}
 
 export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const repo = deps.appConnectionAccessRepo;
 
-  app.get("/app-connection-access/:appId", async (c) => {
-    const policies = await repo.listActiveForApp(c.req.param("appId"));
-    const registry = deps.connectionRegistry;
-    return c.json({
-      policies: await Promise.all(
-        policies.map(async (policy) => {
-          const grant = await registry?.grantOf(policy.connectionId);
-          const grantStatus =
-            grant?.grantEpoch === policy.grantEpoch
-              ? "current"
-              : grant?.state === "unauthorized"
-                ? "authorization_required"
-                : grant
-                  ? "replaced"
-                  : "unavailable";
-          return {
-            ...policy,
-            grantStatus,
-            expiresAt: policy.expiresAt?.toISOString() ?? null,
-            createdAt: policy.createdAt.toISOString(),
-            updatedAt: policy.updatedAt.toISOString(),
-          };
-        }),
-      ),
-    });
-  });
-
-  app.get("/app-connection-access/:appId/documents", async (c) => {
-    const target = deps.appCatalog.get(c.req.param("appId"));
-    if (!isResolvedApp(target) || !target.enabled)
-      return c.json({ error: "App not found or disabled." }, 404);
-    const parsed = AuditQuerySchema.safeParse(c.req.query());
-    if (!parsed.success) return c.json({ error: "Invalid pagination." }, 400);
+  app.get("/app-connection-access/connections/:connectionId", async (c) => {
     const registry = deps.connectionRegistry;
     if (!registry) return c.json({ error: "Connections are unavailable." }, 503);
-    const all = registry
-      .all()
-      .filter((connection) => connection.connectionKind === "feishu")
-      .sort((left, right) => left.id.localeCompare(right.id));
-    const { cursor, limit } = parsed.data;
-    const selected = all.slice(cursor, cursor + limit);
-    const connections = await Promise.all(
-      selected.map(async (connection) => {
-        const descriptor = registry.getDescriptor(connection.connectionKind);
-        const grant = await registry.grantOf(connection.id);
-        const accessible = appAccessibleOperations(
-          registry,
-          connection,
-          descriptor?.grant ?? "app",
-        );
-        const supported =
-          accessible.ok &&
-          accessible.value.some(
-            (operation) =>
-              operation.name === FEISHU_DOCUMENT_READ &&
-              operation.appAccess?.sideEffects === "read-only",
-          );
-        return {
-          connectionId: connection.id,
-          label: connection.label,
-          identity: descriptor?.grant ?? "app",
-          operation: FEISHU_DOCUMENT_READ,
-          supported,
-          authorized: grant?.state === "authorized",
-          ...feishuDocumentGuidance(grant?.profile),
-        };
-      }),
-    );
-    const result: DocumentAccessOptions = {
-      connections,
-      ...(cursor + limit < all.length ? { nextCursor: cursor + limit } : {}),
+    const id = c.req.param("connectionId");
+    const connection = registry.all().find((conn) => conn.id === id);
+    if (!connection) return c.json({ error: "Connection not found." }, 404);
+    const descriptor = registry.getDescriptor(connection.connectionKind);
+    const [grant, policies] = await Promise.all([
+      registry.grantOf(id),
+      repo.listActiveForConnectionId(id),
+    ]);
+    const ops = descriptor && appAccessibleOperations(registry, connection, descriptor.grant);
+    const detail: ConnectionAppAccessDto = {
+      connection: {
+        connectionId: id,
+        connectionKind: connection.connectionKind,
+        label: connection.label,
+      },
+      identities: descriptor
+        ? [
+            {
+              identity: descriptor.grant,
+              actState: describeAct(connection).state,
+              providerGuidance: descriptor.appAccessGuidance?.(grant?.profile),
+              operations: ops?.ok
+                ? ops.value.map((op) => ({
+                    name: op.name,
+                    sideEffect: op.appAccess!.sideEffects,
+                    summary: op.description,
+                    requiredScopes: op.appAccess!.requiredScopes,
+                    requiredScopeGroups: op.appAccess!.requiredScopeGroups,
+                    approvalPreviewSummary: op.appAccess!.approvalPreview?.summary,
+                  }))
+                : [],
+            },
+          ]
+        : [],
+      policies: policies.map((policy) => policyDto(policy, grant)),
     };
-    return c.json(result);
+    return c.json(detail);
   });
 
-  app.get("/app-connection-access/:appId/audit", async (c) => {
-    const query = AuditQuerySchema.safeParse(c.req.query());
+  app.post("/app-connection-access/connections/:connectionId/scopes/check", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+    const reply = (status: AppConnectionScopeCheck["status"], errorCode?: string) =>
+      c.json({
+        status,
+        checkedAt: new Date().toISOString(),
+        errorCode,
+      } satisfies AppConnectionScopeCheck);
+    const registry = deps.connectionRegistry;
+    if (!registry) return reply("unavailable");
+    const id = c.req.param("connectionId");
+    const connection = registry.all().find((conn) => conn.id === id);
+    if (!connection) return c.json({ error: "Connection not found." }, 404);
+    const descriptor = registry.getDescriptor(connection.connectionKind);
+    const grant = await registry.grantOf(id);
+    const name = descriptor?.appAccessGuidance?.(grant?.profile).scopeCheckOperation;
+    if (!name) return reply("unsupported");
+    const isCheck = (op: OperationDescriptor) =>
+      op.name === name && op.appAccess?.sideEffects === "read-only";
+    if (!descriptor?.capabilities.actor?.operations?.some(isCheck)) return reply("unsupported");
+    const act = connection.act;
+    if (!act || grant?.state !== "authorized") return reply("unavailable");
+    try {
+      if (!act.operations().some(isCheck)) return reply("unsupported");
+      const result = ScopeResult.safeParse(await act.invoke({ operation: name, input: {} }));
+      if (!result.success) return reply("error", "provider_response_invalid");
+      const current = await registry.grantOf(id);
+      if (current?.state !== "authorized" || current.grantEpoch !== grant.grantEpoch)
+        return reply("unavailable");
+      return c.json({ status: "checked", ...result.data } satisfies AppConnectionScopeCheck);
+    } catch (error) {
+      if (error instanceof CredentialRejected)
+        return reply("unavailable", "authorization_required");
+      return reply(
+        "error",
+        error instanceof ProviderOperationError ? error.reason : "provider_unavailable",
+      );
+    }
+  });
+
+  app.get("/app-connection-access/connections/:connectionId/audit", async (c) => {
+    const query = ConnectionAuditQuery.safeParse(c.req.query());
     if (!query.success) return c.json({ error: "Invalid pagination." }, 400);
-    const rows = await repo.listAuditForApp(
-      c.req.param("appId"),
-      query.data.cursor,
-      query.data.limit + 1,
-    );
-    const selected = rows.slice(0, query.data.limit);
+    const page = await repo.listAuditForConnection(c.req.param("connectionId"), query.data);
     return c.json({
-      events: selected.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
-      ...(rows.length > selected.length ? { nextCursor: selected.at(-1)!.seq } : {}),
-    });
+      entries: page.entries.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      nextBeforeSeq: page.nextBeforeSeq,
+    } satisfies AppConnectionAccessAuditPage);
   });
 
-  app.put("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
+  app.put("/app-connection-access/connections/:connectionId/policies", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
-    const parsed = PutAccessSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = ConnectionPutSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Invalid access policy." }, 400);
-    const target = await resolveTarget(deps, {
-      appId: c.req.param("appId"),
-      connectionId: c.req.param("connectionId"),
-      identity: c.req.param("identity"),
-      operation: c.req.param("operation"),
-    });
-    if (!target.ok) return c.json({ error: target.error }, target.status);
-    if (target.value.sideEffects === "read-only" && parsed.data.approval === "required") {
-      return c.json({ error: "Read operations cannot require deferred approval." }, 400);
-    }
-    const expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
-    if (expiresAt && expiresAt <= new Date()) {
-      return c.json({ error: "expiresAt must be in the future." }, 400);
-    }
-    const policy = await repo.putIfAppActive(
-      {
-        appId: target.value.appId,
-        connectionId: target.value.connectionId,
-        identity: target.value.identity,
-        operation: target.value.operation,
-        sideEffects: target.value.sideEffects,
-        approval: parsed.data.approval,
-        constraints: parsed.data.constraints,
-        expiresAt,
-        grantEpoch: target.value.grantEpoch,
-      },
-      () => {
-        const app = deps.appCatalog.get(target.value.appId);
-        return isResolvedApp(app) && app.enabled;
-      },
+    const { appId, identity, operation, ...policy } = parsed.data;
+    return putPolicy(
+      c,
+      deps,
+      { appId, identity, operation, connectionId: c.req.param("connectionId") },
+      policy,
     );
-    if (!policy) return c.json({ error: "App not found or disabled." }, 409);
-    return c.json({
-      policy: {
-        ...policy,
-        expiresAt: policy.expiresAt?.toISOString() ?? null,
-        revokedAt: policy.revokedAt?.toISOString() ?? null,
-        createdAt: policy.createdAt.toISOString(),
-        updatedAt: policy.updatedAt.toISOString(),
-      },
-    });
   });
 
-  app.delete("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
-    if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
-    const revoked = await repo.revoke(
-      c.req.param("appId"),
-      c.req.param("connectionId"),
-      c.req.param("identity"),
-      c.req.param("operation"),
-    );
-    return revoked ? c.body(null, 204) : c.json({ error: "Access policy not found." }, 404);
-  });
+  app.delete(
+    "/app-connection-access/connections/:connectionId/policies/:appId/:identity/:operation",
+    async (c) => {
+      if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+      const target = c.req.param();
+      const revoked = await repo.revoke(
+        target.appId,
+        target.connectionId,
+        target.identity,
+        target.operation,
+      );
+      return revoked ? c.body(null, 204) : c.json({ error: "Access policy not found." }, 404);
+    },
+  );
 
   return app;
 }
 
+type PolicyTarget = { appId: string; connectionId: string; identity: string; operation: string };
+
+async function putPolicy(
+  c: Context,
+  deps: ApiDeps,
+  key: PolicyTarget,
+  policyInput: Pick<z.infer<typeof ConnectionPutSchema>, "approvalMode" | "expectedRevision">,
+) {
+  const target = await resolveTarget(deps, key);
+  if (!target.ok) return c.json({ error: target.error }, target.status);
+  const access = target.value.access;
+  const approval =
+    policyInput.approvalMode ?? (access.sideEffects === "write" ? "required" : "not_required");
+  const policy = await deps.appConnectionAccessRepo.putIfAppActive(
+    {
+      appId: target.value.appId,
+      connectionId: target.value.connectionId,
+      identity: target.value.identity,
+      operation: target.value.operation,
+      sideEffects: target.value.access.sideEffects,
+      approval,
+      expectedRevision: policyInput.expectedRevision,
+      constraints: [],
+      preserveExistingConstraints: true,
+      expiresAt: null,
+      grantEpoch: target.value.grantEpoch,
+    },
+    () => {
+      const app = deps.appCatalog.get(target.value.appId);
+      return isResolvedApp(app) && app.enabled;
+    },
+  );
+  if (policy === "policy_conflict")
+    return c.json(
+      { error: policy, message: "The access policy changed. Refresh and try again." },
+      409,
+    );
+  if (!policy) return c.json({ error: "App not found or disabled." }, 409);
+  return c.json({ policy: policyDto(policy, target.value.grant) });
+}
+
 async function resolveTarget(
   deps: ApiDeps,
-  target: { appId: string; connectionId: string; identity: string; operation: string },
+  target: PolicyTarget,
 ): Promise<
   | {
       ok: true;
-      value: typeof target & { sideEffects: "read-only" | "write"; grantEpoch: string };
+      value: typeof target & {
+        access: NonNullable<OperationDescriptor["appAccess"]>;
+        grant: GrantValue;
+        grantEpoch: string;
+      };
     }
   | { ok: false; status: 404 | 409 | 503; error: string }
 > {
@@ -225,7 +275,8 @@ async function resolveTarget(
     ok: true,
     value: {
       ...target,
-      sideEffects: operation.appAccess.sideEffects,
+      access: operation.appAccess,
+      grant,
       grantEpoch: grant.grantEpoch,
     },
   };

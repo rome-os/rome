@@ -8,9 +8,6 @@ import { STAND_IN_GUARDIAN_ONLY_WRITE } from "./stand-in-routes.js";
 /** Keyed by method and route pattern, as the route table names them. */
 const BODIES: Record<string, unknown> = {
   "POST /api/approvals/:id/resolve": { action: "approve" },
-  "PUT /api/app-connection-access/:appId/:connectionId/:identity/:operation": {
-    approval: "not_required",
-  },
   "PUT /api/voice-conversation/settings": { voice: "Iris", speed: 1 },
   [STAND_IN_GUARDIAN_ONLY_WRITE]: { confirm: true },
 };

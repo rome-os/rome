@@ -159,8 +159,53 @@ describe("feishu descriptor shape", () => {
     expect(desc.connectionKind).toBe("feishu");
     expect(desc.grant).toBe("app");
     expect(desc.capabilities.actor?.operations?.map((op) => op.name)).toEqual([
+      "feishu.scopes.list",
       "feishu.document.read",
+      "feishu.document.create",
+      "feishu.document.update",
+      "feishu.drive.inspect",
+      "feishu.wiki.spaces",
+      "feishu.wiki.node.get",
+      "feishu.wiki.nodes.list",
+      "feishu.base.get",
+      "feishu.base.tables.list",
+      "feishu.base.fields.list",
+      "feishu.base.records.list",
+      "feishu.sheets.info",
+      "feishu.sheets.cells.read",
+      "feishu.calendar.events.list",
+      "feishu.calendar.event.get",
+      "feishu.calendar.events.search",
+      "feishu.calendar.event.create",
+      "feishu.im.messages.list",
     ]);
+    const actor = desc.capabilities.actor!;
+    expect(actor.build(validCred(), {} as never).operations()).toBe(actor.operations);
+    expect(
+      actor.operations?.filter((op) => op.appAccess?.sideEffects === "write").map((op) => op.name),
+    ).toEqual(["feishu.document.create", "feishu.document.update", "feishu.calendar.event.create"]);
+    const docCreate = actor.operations?.find((op) => op.name === "feishu.document.create");
+    const docUpdate = actor.operations?.find((op) => op.name === "feishu.document.update");
+    expect(docCreate?.appAccess?.approvalPreview?.fields).toContainEqual({
+      label: "Content",
+      inputPointer: "/content",
+    });
+    expect(docUpdate?.appAccess?.approvalPreview?.fields).toContainEqual({
+      label: "Content",
+      inputPointer: "/content",
+    });
+    for (const op of actor.operations ?? []) {
+      expect(op.appAccess?.approvalPreview?.summary).toBeTruthy();
+      const properties = Object.keys(
+        (op.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
+      ).filter((key) => key !== "pageSize" && key !== "pageToken" && key !== "sortOrder");
+      const pointers = new Set(
+        (op.appAccess?.approvalPreview?.fields ?? []).map((field) => field.inputPointer),
+      );
+      for (const key of properties) {
+        expect(pointers.has(`/${key}`)).toBe(true);
+      }
+    }
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 

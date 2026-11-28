@@ -3,7 +3,8 @@ import { once } from "node:events";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { defaultHttpInstance } from "@larksuiteoapi/node-sdk";
 import { CredentialRejected } from "../../errors.js";
-import { createFeishuDocumentActor, FEISHU_DOCUMENT_READ } from "./documents.js";
+import { createFeishuActor } from "./actor.js";
+import { FEISHU_DOCUMENT_READ } from "./documents.js";
 
 const call = { operation: FEISHU_DOCUMENT_READ, input: { documentId: "DocumentA" } };
 const material = {
@@ -72,7 +73,7 @@ describe("Feishu document reads with the real SDK and loopback HTTP", () => {
           response.writeHead(status, { "content-type": "application/json" });
           response.end(JSON.stringify({ code, msg: "SYNTHETIC_PRIVATE_PROVIDER_ERROR" }));
         });
-        const actor = createFeishuDocumentActor({
+        const actor = createFeishuActor({
           ...material,
           appId: `cli_rejected_${code}_${status}`,
         });
@@ -97,8 +98,8 @@ describe("Feishu document reads with the real SDK and loopback HTTP", () => {
         json(response, { code: 0, expire: 7200, tenant_access_token: "t-synthetic-fixture" });
       } else json(response, { code: 0, data: { content: "synthetic document" } });
     });
-    const first = createFeishuDocumentActor(material);
-    const replacement = createFeishuDocumentActor({
+    const first = createFeishuActor(material);
+    const replacement = createFeishuActor({
       ...material,
       appSecret: "synthetic-replacement",
     });
@@ -134,7 +135,7 @@ describe("Feishu document reads with the real SDK and loopback HTTP", () => {
       response.on("close", closed);
       started();
     });
-    const actor = createFeishuDocumentActor({ ...material, appId: "cli_stop_fixture" });
+    const actor = createFeishuActor({ ...material, appId: "cli_stop_fixture" });
     try {
       const pending = actor.invoke(call);
       const rejected = expect(pending).rejects.toThrow();
@@ -167,7 +168,7 @@ describe("Feishu document reads with the real SDK and loopback HTTP", () => {
     const h = await fixture((_request, response) => {
       response.on("close", closed);
     });
-    const actor = createFeishuDocumentActor({ ...material, appId: "cli_deadline_fixture" });
+    const actor = createFeishuActor({ ...material, appId: "cli_deadline_fixture" });
     try {
       await expect(actor.invoke(call)).rejects.toThrow();
       await Promise.race([
@@ -189,7 +190,7 @@ describe("Feishu document reads with the real SDK and loopback HTTP", () => {
         json(response, { code: 0, expire: 7200, tenant_access_token: "t-synthetic-fixture" });
       else json(response, { code: 0, data: { content: "x".repeat(300 * 1024) } });
     });
-    const actor = createFeishuDocumentActor({ ...material, appId: "cli_size_fixture" });
+    const actor = createFeishuActor({ ...material, appId: "cli_size_fixture" });
     try {
       await expect(actor.invoke(call)).rejects.toMatchObject({
         reason: "provider_response_too_large",

@@ -14,6 +14,7 @@ import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
+import { FEISHU_OPERATIONS } from "./kinds/feishu/actor.js";
 import { ConnectionRegistry } from "./registry.js";
 import type { ConnectionDescriptor, OperationCall, OperationDescriptor } from "./types.js";
 import {
@@ -32,7 +33,16 @@ const operations: readonly OperationDescriptor[] = [
       required: ["workspaceId", "documentId"],
       additionalProperties: false,
     },
-    appAccess: { sideEffects: "read-only" },
+    appAccess: {
+      sideEffects: "read-only",
+      approvalPreview: {
+        summary: "Read a document.",
+        fields: [
+          { label: "Workspace", inputPointer: "/workspaceId" },
+          { label: "Document ID", inputPointer: "/documentId" },
+        ],
+      },
+    },
   },
   {
     name: "documents.create",
@@ -227,6 +237,159 @@ async function grant(
 }
 
 describe("App connection broker", () => {
+  it("rejects invalid Feishu times and attendee IDs before approval or execution and previews valid attendees", async () => {
+    const h = harness({ operations: FEISHU_OPERATIONS });
+    try {
+      const { id: connectionId } = await connect(h, "calendar");
+      const appId = "app-a";
+      const facade = h.broker.forApp(appId);
+      const operation = "feishu.calendar.event.create";
+      const target = {
+        connectionId,
+        identity: "account",
+        operation,
+        requestId: "calendar-request",
+      };
+      await grant(h, { appId, connectionId, operation, approval: "required" });
+      const event = {
+        summary: "Meeting",
+        startTime: "2026-01-01T01:00:00.100Z",
+        attendeeOpenIds: ["ou_one", "ou_two"],
+      };
+      for (const endTime of [
+        "invalid",
+        "2026-01-01T00:59:59Z",
+        event.startTime,
+        "2026-01-01T01:00:00.900Z",
+      ]) {
+        await expect(
+          facade.invoke({ ...target, input: { ...event, endTime } }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      for (const [name, input] of [
+        ["feishu.calendar.events.list", { anchorTime: "0", startTime: "0" }],
+        ["feishu.calendar.events.list", { anchorTime: "0", pageToken: "next" }],
+        ["feishu.calendar.events.list", { pageToken: "next", endTime: "0" }],
+        ["feishu.calendar.events.list", { startTime: "100", endTime: "9" }],
+        ["feishu.calendar.events.search", { query: "meeting", startTime: "100", endTime: "9" }],
+        ["feishu.im.messages.list", { chatId: "C", startTime: "100", endTime: "9" }],
+      ] as const) {
+        await grant(h, { appId, connectionId, operation: name });
+        await expect(
+          facade.invoke({ connectionId, identity: "account", operation: name, input }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      const input = { ...event, endTime: "2026-01-01T01:00:01Z" };
+      for (const invalid of ["oc_demo", "u"]) {
+        await expect(
+          facade.invoke({ ...target, input: { ...input, attendeeOpenIds: ["ou_one", invalid] } }),
+        ).rejects.toMatchObject({ detail: { code: "invalid_input" } });
+      }
+      expect(h.approvalRequests).toHaveLength(0);
+      expect(h.invocations).toHaveLength(0);
+      expect((await facade.invoke({ ...target, input })).status).toBe("pending_approval");
+      expect(h.approvalRequests[0]?.preview).toMatchObject({
+        fields: expect.arrayContaining([
+          { label: "Calendar", value: "primary" },
+          { label: "Attendees", value: "ou_one, ou_two" },
+        ]),
+      });
+      const createPreview = h.approvalRequests[0]?.preview as
+        | { fields?: Array<{ label: string; value: string }> }
+        | undefined;
+      expect(createPreview?.fields?.map((field) => field.label)).not.toContain("Description");
+      const attendeeOpenIds = Array.from({ length: 20 }, (_, i) => `ou_${i}_${"x".repeat(40)}`);
+      await facade.invoke({
+        ...target,
+        requestId: "long-attendee-list",
+        input: { ...input, attendeeOpenIds },
+      });
+      expect(h.approvalRequests[1]?.preview).toMatchObject({
+        fields: expect.arrayContaining([
+          { label: "Attendees", value: attendeeOpenIds.join(", ").slice(0, 499) + "…" },
+        ]),
+      });
+    } finally {
+      h.close();
+    }
+  });
+  it("shows target resource fields when Feishu read operations require per-call approval", async () => {
+    const h = harness({ operations: FEISHU_OPERATIONS });
+    try {
+      const { id: connectionId } = await connect(h, "feishu-bot");
+      const appId = "app-a";
+      const facade = h.broker.forApp(appId);
+      const cases = [
+        {
+          operation: "feishu.document.read",
+          input: { documentId: "doccn123" },
+          summary: "Read Feishu document",
+          expectedFields: [{ label: "Document ID", value: "doccn123" }],
+          omittedLabels: [],
+        },
+        {
+          operation: "feishu.im.messages.list",
+          input: { chatId: "oc_chat_1" },
+          summary: "List Feishu chat messages",
+          expectedFields: [{ label: "Chat ID", value: "oc_chat_1" }],
+          omittedLabels: ["Start", "End"],
+        },
+        {
+          operation: "feishu.sheets.cells.read",
+          input: { spreadsheetToken: "sht_1", sheetId: "sheet_a", range: "A1:C5" },
+          summary: "Read Feishu spreadsheet cells",
+          expectedFields: [
+            { label: "Spreadsheet token", value: "sht_1" },
+            { label: "Sheet ID", value: "sheet_a" },
+            { label: "Range", value: "A1:C5" },
+          ],
+          omittedLabels: [],
+        },
+        {
+          operation: "feishu.calendar.events.search",
+          input: { query: "roadmap" },
+          summary: "Search Feishu calendar events",
+          expectedFields: [
+            { label: "Calendar", value: "primary" },
+            { label: "Query", value: "roadmap" },
+          ],
+          omittedLabels: ["Start", "End"],
+        },
+      ] as const;
+
+      for (const [index, testCase] of cases.entries()) {
+        await grant(h, {
+          appId,
+          connectionId,
+          operation: testCase.operation,
+          approval: "required",
+        });
+        const result = await facade.invoke({
+          connectionId,
+          identity: "account",
+          operation: testCase.operation,
+          input: testCase.input,
+        });
+        expect(result.status).toBe("pending_approval");
+        expect(h.approvalRequests[index]).toMatchObject({
+          actionName: "core:app_connection_read_with_approval",
+          preview: {
+            summary: testCase.summary,
+            fields: expect.arrayContaining([...testCase.expectedFields]),
+          },
+        });
+        const preview = h.approvalRequests[index]?.preview as
+          | { fields?: Array<{ label: string; value: string }> }
+          | undefined;
+        const labels = preview?.fields?.map((field) => field.label);
+        for (const omitted of testCase.omittedLabels) {
+          expect(labels).not.toContain(omitted);
+        }
+      }
+    } finally {
+      h.close();
+    }
+  });
   it("stays unavailable until startup reconciliation succeeds", async () => {
     let ready = false;
     const h = harness({ isReady: () => ready });
@@ -1120,7 +1283,7 @@ describe("App connection broker", () => {
     }
   });
 
-  it("fails closed for a legacy read policy that requires deferred approval", async () => {
+  it("supports per-call approval for read-only operations and returns read output after approval", async () => {
     const h = harness();
     try {
       const connection = await connect(h, "docs");
@@ -1130,15 +1293,91 @@ describe("App connection broker", () => {
         operation: "documents.get",
         approval: "required",
       });
-      await expect(
-        h.broker.forApp("app-a").invoke({
-          connectionId: connection.id,
-          identity: "account",
-          operation: "documents.get",
-          input: { workspaceId: "one", documentId: "doc" },
-        }),
-      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      const pending = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        input: { workspaceId: "one", documentId: "doc-1" },
+      });
+      expect(pending).toMatchObject({ status: "pending_approval" });
+      if (pending.status !== "pending_approval") throw new Error("expected pending_approval");
       expect(h.invocations).toEqual([]);
+      expect(h.approvalRequests[0]).toMatchObject({
+        actionName: "core:app_connection_read_with_approval",
+        preview: {
+          summary: "Read a document.",
+          fields: [
+            { label: "App", value: "app-a" },
+            { label: "Connection", value: "docs" },
+            { label: "Identity", value: "account" },
+            { label: "Operation", value: "documents.get" },
+            { label: "Workspace", value: "one" },
+            { label: "Document ID", value: "doc-1" },
+          ],
+        },
+      });
+
+      // Unapproved read action cannot bypass a pending read_with_approval invocation
+      const bypass = await appContext("app-a", h).runAction("core:app_connection_read", {
+        invocationId: pending.executionId,
+      });
+      expect(bypass).toMatchObject({
+        status: "ok",
+        data: { ok: false, error: { code: "access_denied" } },
+      });
+      expect(h.invocations).toEqual([]);
+
+      // Approving executes the read and returns the provider data
+      const readApprovalAction = h.actionRegistry.get("core:app_connection_read_with_approval")!;
+      const executed = await readApprovalAction.execute({ invocationId: pending.executionId });
+      expect(executed).toMatchObject({
+        status: "ok",
+        data: {
+          ok: true,
+          value: {
+            status: "ok",
+            executionId: pending.executionId,
+            data: { operation: "documents.get", secretResult: "not-for-audit" },
+          },
+        },
+      });
+      expect(h.invocations).toHaveLength(1);
+      expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
+        status: "succeeded",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({
+          operation: "documents.get",
+          approval: "approved",
+          status: "succeeded",
+        }),
+      );
+
+      // Rejecting marks the read invocation rejected and audits approval_rejected
+      const second = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        input: { workspaceId: "one", documentId: "doc-2" },
+      });
+      if (second.status !== "pending_approval") throw new Error("expected pending_approval");
+      await h.broker.approvalRejected("core:app_connection_read_with_approval", {
+        invocationId: second.executionId,
+      });
+      expect(await h.access.getInvocation(second.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "approval_rejected",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({
+          operation: "documents.get",
+          approval: "rejected",
+          status: "approval_rejected",
+        }),
+      );
+      expect(h.invocations).toHaveLength(1);
     } finally {
       h.close();
     }

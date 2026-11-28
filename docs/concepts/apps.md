@@ -114,8 +114,10 @@ identity for one operation.
 **Contracts:**
 
 - Access defaults to denied. A Core-owned policy names the app, Connection, identity,
-  operation, side-effect classification, approval mode, optional input constraints, and
-  optional expiry. A descriptor change from read to write requires a new policy. Disabling
+  operation, side-effect classification, approval mode, and any stored input constraints.
+  Policies granted from Settings or chat stay active until revoked or replaced by a new
+  grant epoch (Core still honors an existing stored expiry if present). A descriptor change
+  from read to write requires a new policy. Disabling
   or removing the app revokes its policies. The policy is bound to the provider
   grant's current epoch. Reconnecting the Connection creates a new epoch and requires
   new App access. Fixing or otherwise giving its grant again does the same. Automatic
@@ -149,10 +151,19 @@ identity for one operation.
   or removing an App also rejects its pending invocations and clears their stored input.
   Startup preserves a pending invocation only when its durable approval exists. A duplicate
   of a failed invocation includes the original structured error code.
-- Read operations execute synchronously and cannot use deferred approval. An
-  approval-gated write returns `pending_approval`. Its later provider output is not
-  delivered to the App. Providers should expose a follow-up read when the App needs to
-  resolve the created resource.
+- Read operations default to `approvalMode: "not_required"` (**Allow**) and execute
+  synchronously. If the guardian sets a read operation to `approvalMode: "required"`
+  (**Ask every time**), `ctx.connections.invoke` returns `pending_approval` and queues a
+  `core:app_connection_read_with_approval` approval request. Once approved, Core replays
+  that action and returns the provider output to the replayed action result and
+  originating agent turn rather than to the earlier `invoke` call. Because read
+  invocations do not deduplicate by `requestId`, apps should treat `pending_approval` on a
+  read as terminal for the current call instead of retrying automatically.
+- Write operations default to `approvalMode: "required"` (**Ask every time**) and return
+  `pending_approval`. Their later provider output is not delivered to the App, so
+  providers should expose a follow-up read when the App needs to resolve the created
+  resource. A guardian can switch an individual write operation to **Allow**
+  (`approvalMode: "not_required"`) in Settings to skip per-call approval.
 - Core rechecks the policy revision and the provider grant immediately before calling
   the live capability. Revocation, expiry, degradation, or replacement cannot leave a
   captured authority usable. Startup reconciles persisted policies against the current
@@ -171,32 +182,46 @@ identity for one operation.
 - **Connection setup** — the guardian flow that creates or repairs a provider grant.
   Apps cannot start setup through `ctx.connections`.
 
-### Feishu document reads
+### App access in connection details
 
-A Feishu connection exposes `feishu.document.read` with identity `app`: the
-connected bot, not a user's OAuth identity. The input is `{ documentId }`, a
-Docx ID of at most 128 ASCII letters and digits. URLs, Wiki references, arbitrary
-HTTP paths and CLI arguments are not accepted. The output contains the ID,
-`content`, `format: "plain_text"` and `complete: true`. Content above 128 KiB is
-rejected rather than silently clipped. The transport has a 15-second deadline
-and a 256 KiB response limit.
+Settings → Connections shows **App Access** in the details of each connection
+that offers operations to apps. It lists the operations by identity and shows
+which installed apps have grants. The guardian can set each operation to
+**Deny**, **Allow**, or **Ask every time**, apply a preset template (read-only,
+read-only with ask on writes, or docs & wiki read-only), or revoke all grants
+for one app on the connection.
 
-The guardian grants an installed app access in Settings → Connections → App
-document access. The screen grants one document for 24 hours and states that it
-replaces the app's document-read rule on that connection. It also lists and
-revokes existing rules. Each app needs its own policy. The backend policy API
-continues to support explicit expiry and resource constraints. The screen does
-not create a parallel permission store.
+Where the provider offers a scope check, the dashboard compares its result
+with the scopes required by the selected app's grants. The check reads the
+provider's scope status. An administrator manages scopes in the provider
+console and gives the bot access to individual resources as needed. The app
+access modal also lists recent audit entries newest first.
 
-The bot separately needs `docx:document:readonly` (or a provider permission that
-includes it) and permission to open that document. Core shows the requirement and
-the corresponding developer-console link, but does not query the scope inventory
-or submit a provider permission request. The administrator must configure,
-approve and publish permissions as needed, then give the bot document access.
-The directory says `scopeStatus: "not_checked"`. An authorized connection does
-not prove that its bot has a document scope or a document's ACL.
+### Feishu bot operations
 
-Any independently authorized app uses the same SDK operation:
+Feishu operations run as the connected bot with identity `app`.
+
+| Area | Operations |
+| --- | --- |
+| Documents | Read plain text, create a document, and update a document |
+| Drive | Inspect a file or folder |
+| Wiki | List spaces, get a node, and list child nodes |
+| Base | Read Base details, tables, fields, and records |
+| Sheets | Read spreadsheet details and cell values |
+| Calendar | List, get, search, and create events |
+| Chats | List messages in a chat |
+| Scopes | List the bot's tenant scope grants |
+
+Creating or updating a document and creating a calendar event ask for guardian
+approval by default (`approvalMode: "required"`), and the guardian can switch
+individual operations to **Allow** in Settings. For `feishu.document.read`, the bot needs a scope that covers
+`docx:document:readonly` and permission to open the document. The SDK input
+`{ documentId }` takes a Docx ID of at most 128 ASCII letters and digits.
+The output contains the ID, `content`, `format: "plain_text"`, and
+`complete: true`. The operation rejects content above 128 KiB.
+
+Feishu API requests time out after 15 seconds and accept responses up to 256 KiB.
+An app with a grant calls the operation through the SDK.
 
 ```typescript
 const result = await ctx.connections.invoke({
@@ -215,10 +240,8 @@ reasons such as `provider_scope_required`, `provider_resource_denied` and
 Apps branch on `reason`, not the human-readable `message`. Provider messages,
 headers and credentials are not forwarded. The audit keeps no document content.
 
-This does not add user OAuth, managed writes, a raw HTTP broker, or automatic
-scope escalation. The local Lark app uses this operation for its explicit managed
-`docs.fetch` path. Its separate independent CLI mode never serves as a fallback
-for a rejected managed connection.
+The local Lark app uses this operation for managed `docs.fetch` calls. An error
+from the managed connection ends the call.
 
 ## Lockfile
 

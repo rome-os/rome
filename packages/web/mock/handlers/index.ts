@@ -1,5 +1,5 @@
 import { readModelSelectionInput } from "@rome/api-types/models";
-import { appDocumentAccessHandlers } from "./app-document-access";
+import { appConnectionAccessHandlers } from "./app-connection-access";
 import type { AccountCodeIssued, BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
@@ -1680,7 +1680,7 @@ const MOCK_SERVER_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
 )}`;
 
 export const handlers = [
-  ...appDocumentAccessHandlers,
+  ...appConnectionAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.

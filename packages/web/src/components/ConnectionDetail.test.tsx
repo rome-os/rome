@@ -1,4 +1,8 @@
 // @rstest-environment jsdom
+import type {
+  AppConnectionAccessAuditEntryDto,
+  ConnectionAppAccessDto,
+} from "@rome/api-types/app-connection-access";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -570,5 +574,112 @@ describe("ConnectionDetailBody — accounts", () => {
       onOpenAccount: rs.fn(),
     });
     expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
+  });
+});
+
+describe("ConnectionDetailBody — App Connection Access & Audit", () => {
+  it("shows access for a provider with brokered operations and pages and filters its audit log", async () => {
+    const card = cardFor(
+      [connection({ connectionKind: "github", grants: { user: "authorized" } })],
+      "github",
+    );
+    const connectionId = card.slots[0].connectionId!;
+    const endpoint = `/api/app-connection-access/connections/${connectionId}`;
+    const detail: ConnectionAppAccessDto = {
+      connection: { connectionId, connectionKind: "github", label: "GitHub" },
+      identities: [
+        {
+          identity: "account",
+          actState: "available",
+          operations: [{ name: "github.issue.get", sideEffect: "read-only" }],
+        },
+      ],
+      policies: [],
+    };
+    const recent: AppConnectionAccessAuditEntryDto = {
+      seq: 10,
+      appId: "app-a",
+      connectionId,
+      identity: "account",
+      operation: "github.issue.get",
+      accessRevision: 1,
+      approval: "not_required",
+      executionId: "exec-10",
+      requestIdHash: null,
+      status: "provider_error",
+      createdAt: "2026-11-26T00:00:00Z",
+    };
+    const older = {
+      ...recent,
+      seq: 9,
+      appId: "app-b",
+      operation: "retired.operation",
+      approval: "approved",
+      status: "succeeded",
+      executionId: "exec-9",
+      requestIdHash: "hash-9",
+    };
+    mockCeremonyFetch({
+      [`${endpoint}/audit?beforeSeq=10`]: { entries: [older], nextBeforeSeq: null },
+      [`${endpoint}/audit?appId=app-a`]: { entries: [recent], nextBeforeSeq: null },
+      [`${endpoint}/audit`]: { entries: [recent], nextBeforeSeq: 10 },
+      [endpoint]: detail,
+      "/api/apps": { apps: [{ id: "app-a", displayName: "App A", isEnabled: true }] },
+    });
+    const user = userEvent.setup();
+    renderBody(card);
+    const section = await screen.findByRole("region", { name: "App Access" });
+    expect(await within(section).findByText("No authorized apps yet")).toBeTruthy();
+    await user.click(within(section).getByRole("radio", { name: "Activity" }));
+    const audit = within(section);
+    const firstRow = await audit.findByRole("button", { name: /App A · github\.issue\.get/ });
+    expect(audit.getByText("Read-only")).toBeTruthy();
+    await user.click(firstRow);
+    expect(audit.getByText("Error code · provider_error")).toBeTruthy();
+    await user.click(audit.getByRole("button", { name: "Load more" }));
+    const secondRow = await audit.findByRole("button", { name: /app-b · retired\.operation/ });
+    expect(audit.getByText("Unknown")).toBeTruthy();
+    await user.click(secondRow);
+    expect(audit.getByText(/Request hash · hash-9/)).toBeTruthy();
+    expect(audit.queryByRole("button", { name: "Load more" })).toBeNull();
+    audit.getByRole("combobox", { name: "App" }).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await waitFor(() => expect(audit.queryByText(/app-b · retired\.operation/)).toBeNull());
+    expect(await audit.findByText(/App A · github\.issue\.get/)).toBeTruthy();
+    expect(rs.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url))).toContain(
+      `${endpoint}/audit?appId=app-a`,
+    );
+  });
+
+  it("omits App Access without fetching when rendered outside a QueryClientProvider", () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
+    const discord = cardFor(
+      [
+        connection({
+          id: "storybook-discord",
+          connectionKind: "discord",
+          grants: { bot: "authorized" },
+          display: { bot: grantDisplay({ displayName: "Rome Bot" }) },
+        }),
+      ],
+      "discord",
+    );
+    render(
+      <MemoryRouter>
+        <ConnectionDetailBody
+          card={discord}
+          composio={null}
+          onRefresh={() => {}}
+          onFlash={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "App Access" })).toBeNull();
+    expect(
+      fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes("/api/app-connection-access/")),
+    ).toEqual([]);
   });
 });

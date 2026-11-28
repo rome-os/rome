@@ -11,7 +11,7 @@ import { useId, useState, type ComponentType, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -102,7 +102,13 @@ export function StandardSetupRenderer(
         <div className="space-y-2" data-testid="setup-presenting">
           <ViewBody view={state.view} />
           {props.error && <p className="text-aux text-destructive-fg">{props.error}</p>}
-          <Button variant="ghost" size="sm" onClick={props.onCancel} disabled={props.busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={props.onCancel}
+            disabled={props.busy}
+          >
             {labels.cancel}
           </Button>
         </div>
@@ -192,6 +198,9 @@ function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): React
       <LinkList links={form.links} />
       {form.fields.map((field) => {
         const fieldLabel = translateFormText(`fields.${field.name}.label`, field.label);
+        const fieldDescription = field.description
+          ? translateFormText(`fields.${field.name}.description`, field.description)
+          : undefined;
         return (
           <Field key={field.name}>
             <FieldLabel htmlFor={`${uid}-${field.name}`}>{fieldLabel}</FieldLabel>
@@ -235,6 +244,7 @@ function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): React
                 onChange={(e) => setField(field.name, e.target.value)}
               />
             )}
+            {fieldDescription && <FieldDescription>{fieldDescription}</FieldDescription>}
           </Field>
         );
       })}
