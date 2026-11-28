@@ -63,6 +63,39 @@ private func replying(to original: String) -> [String: Any] { ["type": "reply_to
         #expect(parts[5] == .error(TurnError(text: "boom")))
     }
 
+    @Test func parsesConnectionAccessApprovalPreview() {
+        let parts = MessagePart.parse(json([
+            [
+                "type": "approval_card",
+                "approvalId": "a2",
+                "actionName": "core:request_connection_access",
+                "status": "pending",
+                "preview": [
+                    "kind": "connection_access",
+                    "appId": "lark",
+                    "appName": "Lark",
+                    "connectionId": "feishu-1",
+                    "connectionLabel": "Team Bot",
+                    "title": "Allow Lark to access Team Bot",
+                    "summary": "Read Feishu documents (2 read operations)",
+                    "operations": [
+                        ["name": "feishu.document.read", "sideEffect": "read-only"],
+                        ["name": "feishu.wiki.spaces", "sideEffect": "read-only"],
+                    ],
+                ],
+            ],
+        ]))
+        #expect(parts.count == 1)
+        guard case .approval(let approval) = parts[0] else { Issue.record("no approval"); return }
+        #expect(approval.title == "Allow Lark to access Team Bot")
+        #expect(approval.summary == "Read Feishu documents (2 read operations)")
+        #expect(approval.fields == [
+            .init(label: String(localized: "App"), value: "Lark"),
+            .init(label: String(localized: "Connection"), value: "Team Bot"),
+            .init(label: String(localized: "Operations"), value: "feishu.document.read, feishu.wiki.spaces"),
+        ])
+    }
+
     @Test func actionNamesReadAsWords() {
         #expect(displayActionName("system:send_email") == "send email")
         #expect(displayActionName(nil) == "Run action")

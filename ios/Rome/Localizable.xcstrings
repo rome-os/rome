@@ -1845,6 +1845,16 @@
         }
       }
     },
+    "Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
+          }
+        }
+      }
+    },
     "Connection did not start" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4479,6 +4489,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全屏查看照片"
+          }
+        }
+      }
+    },
+    "Operations" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作"
           }
         }
       }
