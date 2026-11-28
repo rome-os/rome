@@ -240,6 +240,9 @@ jobs:
                 if (!session.authRequired || session.passwordSource !== "setup" || session.canRemovePassword) {
                   throw new Error(`unexpected setup session: ${JSON.stringify(session)}`);
                 }
+                if (!session.setup || session.setup.expired !== false || !(session.setup.remainingMs > 0)) {
+                  throw new Error(`expected an active setup window: ${JSON.stringify(session)}`);
+                }
                 const forged = await fetch(`${base}/api/status`, {
                   headers: { "sec-fetch-site": "same-origin" },
                 });

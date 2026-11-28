@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import {
   clearInstanceToken,
   getIdentityIssue,
+  getInstanceToken,
   isInstanceLinked,
   persistInstanceToken,
   proveIdentity,
@@ -29,6 +30,7 @@ const log = createLogger("api:instance-enroll");
 
 const CALLBACK_PATH = "/api/instance/enroll/callback";
 const PENDING_TTL_MS = 10 * 60_000;
+const COMPLETED_TTL_MS = 2 * 60_000;
 const INSTANCE_CHECK_TIMEOUT_MS = 5_000;
 // The callback only ever redirects to one of these two constant internal paths —
 // never anything derived from the request — so it can't be turned into an open
@@ -43,13 +45,9 @@ interface PendingEnroll {
   expiresAt: number;
 }
 
-// state nonce -> PKCE verifier. In-process and short-lived: the flow completes
-// in one browser round-trip, and a stale entry is swept on the next access.
-const pending = new Map<string, PendingEnroll>();
-
-function sweepExpired(now: number): void {
-  for (const [state, entry] of pending) {
-    if (entry.expiresAt <= now) pending.delete(state);
+function sweepExpired(entries: Map<string, { expiresAt: number }>, now: number): void {
+  for (const [state, entry] of entries) {
+    if (entry.expiresAt <= now) entries.delete(state);
   }
 }
 
@@ -69,6 +67,7 @@ interface TokenResponse {
 export interface InstanceEnrollSeams {
   proveIdentity?: typeof proveIdentity;
   fetchImpl?: typeof fetch;
+  now?: () => number;
 }
 
 type EnrollStartGate = { ok: true } | { ok: false; status: 409 | 503; error: string };
@@ -134,6 +133,12 @@ async function checkExistingEnrollment(
 export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams = {}): Hono {
   const app = new Hono();
   const fetchImpl = seams.fetchImpl ?? globalThis.fetch;
+  const now = seams.now ?? Date.now;
+  // state nonce -> PKCE verifier. In-process and short-lived: the flow completes
+  // in one browser round-trip, and stale entries are swept on the next access.
+  const pending = new Map<string, PendingEnroll>();
+  const inFlight = new Map<string, Promise<string>>();
+  let lastCompleted: { state: string; expiresAt: number } | null = null;
 
   // The verifier never leaves this process; only the challenge rides the
   // browser leg.
@@ -158,11 +163,13 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
     // Rome Cloud's redirect gate accepts.
     const redirectUri = new URL(CALLBACK_PATH, getInstanceOrigin()).toString();
 
-    const now = Date.now();
-    sweepExpired(now);
+    const startedAt = now();
+    sweepExpired(pending, startedAt);
+    if (lastCompleted && lastCompleted.expiresAt <= startedAt) lastCompleted = null;
+
     const pkce = createPkce();
     const state = randomBytes(16).toString("base64url");
-    pending.set(state, { verifier: pkce.verifier, expiresAt: now + PENDING_TTL_MS });
+    pending.set(state, { verifier: pkce.verifier, expiresAt: startedAt + PENDING_TTL_MS });
 
     const authorizeUrl = new URL("/instance/authorize", origin);
     authorizeUrl.searchParams.set("redirect_uri", redirectUri);
@@ -180,18 +187,39 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
   // Every outcome redirects to the same constant path with an `enroll` marker.
   app.get("/instance/enroll/callback", async (c) => {
     const state = c.req.query("state");
-    const code = c.req.query("code");
-    const oauthError = c.req.query("error");
-
-    // Fail closed on the state echo before trusting anything else.
-    const entry = state ? pending.get(state) : undefined;
-    if (!state || !entry) {
+    if (!state) {
       return c.redirect(errorRedirect("state"));
     }
+
+    const active = inFlight.get(state);
+    if (active) return c.redirect(await active);
+
+    const requestedAt = now();
+    // The first callback for an expired pending state still reports expiry.
+    const entry = pending.get(state);
+    const completedEntry = lastCompleted?.state === state ? lastCompleted : null;
+    sweepExpired(pending, requestedAt);
+    if (lastCompleted && lastCompleted.expiresAt <= requestedAt) lastCompleted = null;
+
+    if (completedEntry) {
+      if (
+        completedEntry.expiresAt > requestedAt &&
+        (isInstanceLinked() || getInstanceToken() !== null)
+      ) {
+        return c.redirect(enrolledRedirect());
+      }
+      if (lastCompleted?.state === state) lastCompleted = null;
+      return c.redirect(errorRedirect("state"));
+    }
+
+    if (!entry) return c.redirect(errorRedirect("state"));
     pending.delete(state);
-    if (entry.expiresAt <= Date.now()) {
+    if (entry.expiresAt <= requestedAt) {
       return c.redirect(errorRedirect("expired"));
     }
+
+    const code = c.req.query("code");
+    const oauthError = c.req.query("error");
     if (oauthError || !code) {
       return c.redirect(errorRedirect("denied"));
     }
@@ -201,43 +229,56 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
       return c.redirect(errorRedirect("unconfigured"));
     }
 
-    try {
-      const response = await fetchImpl(new URL("/api/instance/token", origin), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code, code_verifier: entry.verifier }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) {
-        const reason = (await response.json().catch(() => null)) as { error?: unknown } | null;
-        const detail = typeof reason?.error === "string" ? reason.error : `http_${response.status}`;
-        log.warn("token exchange failed", { detail });
-        return c.redirect(errorRedirect("exchange"));
-      }
+    // Publish the promise before the exchange starts so duplicates share its result.
+    const promise = Promise.resolve()
+      .then(async () => {
+        try {
+          const response = await fetchImpl(new URL("/api/instance/token", origin), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ code, code_verifier: entry.verifier }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!response.ok) {
+            const reason = (await response.json().catch(() => null)) as { error?: unknown } | null;
+            const detail =
+              typeof reason?.error === "string" ? reason.error : `http_${response.status}`;
+            log.warn("token exchange failed", { detail });
+            return errorRedirect("exchange");
+          }
 
-      const data = (await response.json().catch(() => null)) as TokenResponse | null;
-      const token = typeof data?.instanceToken === "string" ? data.instanceToken : null;
-      const instanceId = typeof data?.instanceId === "string" ? data.instanceId : null;
-      if (!token || !instanceId) {
-        return c.redirect(errorRedirect("malformed"));
-      }
+          const data = (await response.json().catch(() => null)) as TokenResponse | null;
+          const token = typeof data?.instanceToken === "string" ? data.instanceToken : null;
+          const instanceId = typeof data?.instanceId === "string" ? data.instanceId : null;
+          if (!token || !instanceId) {
+            return errorRedirect("malformed");
+          }
 
-      const linked = await persistInstanceToken(deps.settingsRepo, token);
-      if (linked?.status === "key_conflict") return c.redirect(errorRedirect("key_conflict"));
-      if (linked && linked.status !== "ok") {
-        log.warn("instance enrolled but the signer key is not registered yet", {
-          status: linked.status,
-        });
-      }
-      void deps.provisionAfterLink?.();
-      log.info("instance enrolled via in-app OAuth", { instanceId });
-      return c.redirect(enrolledRedirect());
-    } catch (err) {
-      log.warn("token exchange errored", {
-        error: err instanceof Error ? err.message : String(err),
+          const linked = await persistInstanceToken(deps.settingsRepo, token);
+          if (linked?.status === "key_conflict") return errorRedirect("key_conflict");
+          if (linked && linked.status !== "ok") {
+            log.warn("instance enrolled but the signer key is not registered yet", {
+              status: linked.status,
+            });
+          }
+          void deps.provisionAfterLink?.();
+          log.info("instance enrolled via in-app OAuth", { instanceId });
+          if (isInstanceLinked() || getInstanceToken() !== null) {
+            lastCompleted = { state, expiresAt: now() + COMPLETED_TTL_MS };
+          }
+          return enrolledRedirect();
+        } catch (err) {
+          log.warn("token exchange errored", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return errorRedirect("network");
+        }
+      })
+      .finally(() => {
+        inFlight.delete(state);
       });
-      return c.redirect(errorRedirect("network"));
-    }
+    inFlight.set(state, promise);
+    return c.redirect(await promise);
   });
 
   // Lightweight gate signal for the web onboarding: is this instance enrolled?

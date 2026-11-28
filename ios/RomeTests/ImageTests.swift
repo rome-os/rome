@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 import Testing
 @testable import Rome
 
@@ -109,6 +111,31 @@ import Testing
         #expect(blocks == [.paragraph("See [the photo](/projects/a.png).")])
     }
 
+    /// ImageIO cannot draw an SVG: it shows as a link to the file.
+    @Test func anSVGImageIsALinkToTheFile() {
+        #expect(MarkdownParser.parse("![x](/api/assets/a.svg)") == [.paragraph("[x](/api/assets/a.svg)")])
+        #expect(MarkdownParser.parse("![](/api/assets/0123abcd.SVG)") == [.paragraph("[0123abcd.SVG](/api/assets/0123abcd.SVG)")])
+        #expect(MarkdownParser.parse("![](/projects/a%20%5B1%5D.svg)") == [.paragraph(#"[a \[1\].svg](/projects/a%20%5B1%5D.svg)"#)])
+        #expect(MarkdownParser.parse("![chart](https://x.example/c.svg?v=2#top)") == [.paragraph("[chart](https://x.example/c.svg?v=2#top)")])
+        // Only the path counts: a query that ends in .svg does not.
+        #expect(MarkdownParser.parse("![p](/api/charts/c.png?f=a.svg)") == [.image(alt: "p", src: "/api/charts/c.png?f=a.svg")])
+    }
+
+    @MainActor @Test func anSVGLinkStaysInItsSentence() {
+        let blocks = MarkdownParser.parse("Here ![sample.svg](/api/assets/s.svg) and ![b](/memory/b.png) done")
+        #expect(blocks == [
+            .paragraph("Here [sample.svg](/api/assets/s.svg) and"),
+            .image(alt: "b", src: "/memory/b.png"),
+            .paragraph("done"),
+        ])
+        #expect(MarkdownText.gallery(blocks, origin: nil).count == 1)
+    }
+
+    @Test func pngAndGifStayImages() {
+        #expect(MarkdownParser.parse("![a](/api/assets/a.png)") == [.image(alt: "a", src: "/api/assets/a.png")])
+        #expect(MarkdownParser.parse("![g](/api/assets/g.GIF)") == [.image(alt: "g", src: "/api/assets/g.GIF")])
+    }
+
     @Test func codeIsLeftAlone() {
         let blocks = MarkdownParser.parse("```\n![x](/projects/a.png)\n```")
         #expect(blocks == [.code(language: nil, text: "![x](/projects/a.png)")])
@@ -118,6 +145,21 @@ import Testing
 @Suite struct PictureSetTests {
     private func item(_ alt: String, _ src: String, _ note: String = "") -> PictureItem {
         PictureItem(alt: alt, src: src, note: note)
+    }
+
+    @Test func anSVGPictureIsALinkAfterTheSet() {
+        let blocks = MarkdownParser.parse("""
+        ```pictures
+        ![A](/projects/a.png) one
+        ![](/api/assets/s.svg) the logo
+        ![C](/projects/c.svg)
+        ```
+        """)
+        #expect(blocks == [
+            .pictures(layout: .grid, items: [item("A", "/projects/a.png", "one")]),
+            .paragraph("[s.svg](/api/assets/s.svg) the logo\n[C](/projects/c.svg)"),
+        ])
+        #expect(MarkdownParser.parse("```pictures\n![](/api/assets/s.svg)\n```") == [.paragraph("[s.svg](/api/assets/s.svg)")])
     }
 
     @Test func aGridHoldsOnePictureAndItsNotePerLine() {
@@ -372,5 +414,59 @@ final class HugeProtocol: URLProtocol, @unchecked Sendable {
         #expect(gallery.count == 4)
         #expect(PhotoViewerStart(position: 0, in: gallery).index == 0)
         #expect(PhotoViewerStart(position: MarkdownText.pictureKey(block: 2, item: 2), in: gallery).index == 3)
+    }
+}
+
+@Suite struct ViewerDecoderTests {
+    /// A GIF of `delays.count` solid frames, `size` pixels square.
+    private func gif(delays: [Double], size: Int = 8) -> Data {
+        let output = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(output, UTType.gif.identifier as CFString, delays.count, nil)!
+        CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        for (index, delay) in delays.enumerated() {
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            let frame = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format).image { context in
+                (index.isMultiple(of: 2) ? UIColor.red : UIColor.blue).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+            }
+            CGImageDestinationAddImage(destination, frame.cgImage!, [kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFDelayTime: delay, kCGImagePropertyGIFUnclampedDelayTime: delay,
+            ]] as CFDictionary)
+        }
+        #expect(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
+    @Test func aGIFOfSeveralFramesAnimates() throws {
+        let image = try #require(ViewerDecoder.image(from: gif(delays: [0.2, 0.5]), maxPixel: 600))
+        let frames = try #require(image.images)
+        #expect(abs(image.duration - 0.7) < 0.001)
+        // Each frame holds its own delay: 2 and 5 steps of 0.1 s.
+        #expect(frames.count == 7)
+    }
+
+    @Test func aTinyDelayPlaysAtATenth() throws {
+        let image = try #require(ViewerDecoder.image(from: gif(delays: [0, 0.01, 0.3]), maxPixel: 600))
+        #expect(abs(image.duration - 0.5) < 0.001)
+    }
+
+    @Test func oneFrameOrPastTheCapsStaysStill() throws {
+        let one = try #require(ViewerDecoder.image(from: gif(delays: [0.2]), maxPixel: 600))
+        #expect(one.images == nil)
+        let frames = try #require(ViewerDecoder.image(from: gif(delays: [0.1, 0.1, 0.1]), maxPixel: 600, maxFrames: 2))
+        #expect(frames.images == nil)
+        let pixels = try #require(ViewerDecoder.image(from: gif(delays: [0.1, 0.1], size: 10), maxPixel: 600, maxPixels: 199))
+        #expect(pixels.images == nil)
+        #expect(pixels.size == CGSize(width: 10, height: 10))
+    }
+
+    @Test func aStillImageDecodesAsBefore() throws {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 20), format: format).pngData { _ in }
+        let image = try #require(ViewerDecoder.image(from: png, maxPixel: 20))
+        #expect(image.images == nil)
+        #expect(image.size.width == 20)
     }
 }

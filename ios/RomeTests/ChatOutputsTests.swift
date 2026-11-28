@@ -33,7 +33,12 @@ private let outputsJSON = #"""
 
     @Test func aRowNamesTheFileAsTheWebDoes() throws {
         let outputs = try decoded().outputs
-        #expect(outputs[0].title == "Kyoto trip plan")
+        #expect(outputs[0].title == "Kyoto trip plan.md")
+        #expect(outputs[1].title == "Hotel.jpg")
+        #expect(ChatOutput.title(of: "sunset.mp4") == "Sunset.mp4")
+        #expect(ChatOutput.title(of: "Rome 发布摘要.md") == "Rome 发布摘要.md")
+        #expect(ChatOutput.title(of: "README") == "README")
+        #expect(ChatOutput.title(of: ".env") == ".env")
         #expect(outputs[0].type == .document)
         #expect(outputs[1].type == .picture)
         #expect(outputs[2].type == .code)

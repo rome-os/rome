@@ -865,20 +865,16 @@
     "edit": "编辑",
     "doneEditing": "完成",
     "filterLabel": "显示",
-    "more": "更多",
-    "moreChosen": "更多：{{kind}}",
     "today": "今天",
     "earlier": "更早",
     "filters": {
       "all": "全部",
-      "document": "文档",
-      "image": "图片",
-      "spreadsheet": "表格",
-      "page": "页面",
-      "audio": "音频",
-      "video": "视频",
-      "code": "代码",
-      "file": "其他"
+      "files": "文件",
+      "media": "媒体"
+    },
+    "filterEmpty": {
+      "files": "还没有文件。",
+      "media": "还没有图片、视频或音频。"
     },
     "types": {
       "document": "文档",

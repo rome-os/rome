@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rstest } from "@rstest/core";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
-import type { HostSnapshot } from "./types";
+import type { AuthSession, HostSnapshot } from "./types";
 
 function makeSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
   return {
@@ -33,6 +33,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function setupSession(remainingMs: number): AuthSession {
+  return {
+    authRequired: true,
+    authenticated: false,
+    passwordSource: "setup",
+    canRemovePassword: false,
+    setup: { expired: remainingMs === 0, remainingMs, expiresAt: "2000-01-01T00:00:00.000Z" },
+  };
+}
+
+function submitSetup() {
+  for (const label of ["New password", "Confirm password"]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value: "docker-pass-1" } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Set password & unlock" }));
+}
+
 describe("Rome Node Web UI", () => {
   const originalFetch = globalThis.fetch;
 
@@ -43,6 +60,7 @@ describe("Rome Node Web UI", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    rstest.useRealTimers();
     rstest.restoreAllMocks();
   });
 
@@ -205,24 +223,16 @@ describe("Rome Node Web UI", () => {
     expect(cloudLink.getAttribute("href")).toBe("https://rome.ai/dashboard");
   });
 
-  it("completes one-time setup token initialization and hides Remove password when non-loopback", async () => {
-    let initialized = false;
+  it("shows the setup countdown, validates passwords, and unlocks without offering password removal", async () => {
     const snapshot = makeSnapshot();
 
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === "/api/auth/session") {
-        return jsonResponse({
-          authRequired: true,
-          authenticated: initialized,
-          passwordSource: initialized ? "file" : "setup",
-          canRemovePassword: false,
-        });
+        return jsonResponse(setupSession(600_000));
       }
       if (url === "/api/auth/setup" && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { token?: string; newPassword?: string };
-        expect(body).toEqual({ token: "one-time-token-xyz", newPassword: "docker-pass-1" });
-        initialized = true;
+        expect(JSON.parse(String(init.body))).toEqual({ newPassword: "docker-pass-1" });
         return jsonResponse({
           authRequired: true,
           authenticated: true,
@@ -239,20 +249,192 @@ describe("Rome Node Web UI", () => {
     render(<App />);
 
     expect(await screen.findByText("Set up Web UI password")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("One-time setup token"), {
-      target: { value: "one-time-token-xyz" },
-    });
-    fireEvent.change(screen.getByLabelText("New password"), {
-      target: { value: "docker-pass-1" },
-    });
-    fireEvent.change(screen.getByLabelText("Confirm password"), {
-      target: { value: "docker-pass-1" },
-    });
+    expect(screen.getByRole("timer").textContent).toBe("Time left to set a password: 10:00");
+    expect(document.activeElement).toBe(screen.getByLabelText("New password"));
     fireEvent.click(screen.getByRole("button", { name: "Set password & unlock" }));
+    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 6 characters.");
+    submitSetup();
 
     expect(await screen.findByText("Password set")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Change password" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove password" })).toBeNull();
+  });
+
+  it("shows the locked state on arrival and reopens setup when the server reports a new window", async () => {
+    let finishRefresh!: (response: Response) => void;
+    const refresh = new Promise<Response>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const fetchSession = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(0)))
+      .mockReturnValueOnce(refresh);
+    globalThis.fetch = fetchSession;
+
+    render(<App />);
+    expect(await screen.findByText("First-run setup locked")).toBeTruthy();
+    expect(screen.getByText(/Restart the container.*ROME_NODE_UI_PASSWORD/)).toBeTruthy();
+    expect(screen.queryByLabelText("New password")).toBeNull();
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "Check status again" });
+    fireEvent.click(button);
+    expect(button.disabled).toBe(true);
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+
+    finishRefresh(jsonResponse(setupSession(600_000)));
+    expect(await screen.findByLabelText("New password")).toBeTruthy();
+    expect(screen.getByRole("timer").textContent).toContain("10:00");
+  });
+
+  it("ticks down and locks setup at the deadline even when the server clock differs", async () => {
+    rstest.useFakeTimers();
+    globalThis.fetch = rstest.fn(async () => jsonResponse(setupSession(2500)));
+
+    await act(async () => {
+      render(<App />);
+    });
+    expect(screen.getByRole("timer").textContent).toContain("0:03");
+    fireEvent.click(screen.getByRole("button", { name: "Set password & unlock" }));
+    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 6 characters.");
+    await act(async () => {
+      await rstest.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByRole("timer").textContent).toContain("0:02");
+    await act(async () => {
+      await rstest.advanceTimersByTimeAsync(1499);
+    });
+    expect(screen.getByRole("timer").textContent).toContain("0:01");
+    await act(async () => {
+      await rstest.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getByText("First-run setup locked")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set password & unlock" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("checks the server immediately when a tab becomes visible past the deadline", async () => {
+    rstest.useFakeTimers();
+    const fetchSession = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(2500)))
+      .mockResolvedValueOnce(jsonResponse(setupSession(0)));
+    globalThis.fetch = fetchSession;
+
+    await act(async () => {
+      render(<App />);
+    });
+    expect(screen.getByRole("timer").textContent).toContain("0:03");
+    rstest.setSystemTime(Date.now() + 2500);
+    await act(async () => {
+      fireEvent(document, new Event("visibilitychange"));
+    });
+    expect(screen.getByText("First-run setup locked")).toBeTruthy();
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the app unlocked when a session refresh started during setup resolves afterward", async () => {
+    rstest.useFakeTimers();
+    let finishSetup!: (response: Response) => void;
+    const setup = new Promise<Response>((resolve) => {
+      finishSetup = resolve;
+    });
+    let finishRefresh!: (response: Response) => void;
+    const refresh = new Promise<Response>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const fetchMock = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(2500)))
+      .mockReturnValueOnce(setup)
+      .mockReturnValueOnce(refresh)
+      .mockResolvedValueOnce(jsonResponse(makeSnapshot()));
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<App />);
+    });
+    submitSetup();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/setup", expect.anything());
+    rstest.setSystemTime(Date.now() + 2500);
+    fireEvent(document, new Event("visibilitychange"));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/session", expect.anything());
+
+    await act(async () => {
+      finishSetup(
+        jsonResponse({ authRequired: true, authenticated: true, passwordSource: "file" }),
+      );
+    });
+    expect(screen.getByRole("button", { name: "Lock UI" })).toBeTruthy();
+
+    await act(async () => {
+      finishRefresh(jsonResponse(setupSession(0)));
+    });
+    expect(screen.getByRole("button", { name: "Lock UI" })).toBeTruthy();
+    expect(screen.queryByText("First-run setup locked")).toBeNull();
+  });
+
+  it.each([410, 400])("locks setup on a setup_expired response with HTTP %d", async (status) => {
+    globalThis.fetch = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(600_000)))
+      .mockResolvedValueOnce(jsonResponse({ error: "Expired", code: "setup_expired" }, status));
+
+    render(<App />);
+    await screen.findByLabelText("New password");
+    submitSetup();
+    expect(await screen.findByText("First-run setup locked")).toBeTruthy();
+    expect(screen.queryByLabelText("New password")).toBeNull();
+  });
+
+  it("refreshes the session and switches to login if another browser finished setup", async () => {
+    const fetchSession = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(600_000)))
+      .mockResolvedValueOnce(jsonResponse({ error: "Conflict", code: "setup_conflict" }, 409))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authRequired: true,
+          authenticated: false,
+          passwordSource: "file",
+          canRemovePassword: false,
+        }),
+      );
+    globalThis.fetch = fetchSession;
+
+    render(<App />);
+    await screen.findByLabelText("New password");
+    submitSetup();
+    expect(await screen.findByText("Unlock Web UI")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("Password").value).toBe("");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(fetchSession).toHaveBeenNthCalledWith(3, "/api/auth/session", expect.anything());
+  });
+
+  it("clears a transient conflict when the refreshed session still allows setup", async () => {
+    globalThis.fetch = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(600_000)))
+      .mockResolvedValueOnce(jsonResponse({ error: "Conflict", code: "setup_conflict" }, 409))
+      .mockResolvedValueOnce(jsonResponse(setupSession(300_000)));
+
+    render(<App />);
+    await screen.findByLabelText("New password");
+    submitSetup();
+    expect(await screen.findByText("Time left to set a password: 5:00")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("New password").value).toBe("");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a session refresh failure after a setup conflict", async () => {
+    globalThis.fetch = rstest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(setupSession(600_000)))
+      .mockResolvedValueOnce(jsonResponse({ error: "Conflict", code: "setup_conflict" }, 409))
+      .mockRejectedValueOnce(new Error("Could not refresh the session"));
+
+    render(<App />);
+    await screen.findByLabelText("New password");
+    submitSetup();
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not refresh the session");
   });
 
   it("navigates to Computer use log, filters, searches, paginates, inspects content previews, and switches locale", async () => {

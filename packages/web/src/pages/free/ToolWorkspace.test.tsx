@@ -56,45 +56,24 @@ rs.mock("@/components/chat/task-link/task-links", () => ({
 }));
 
 rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
-  outputTitle: (name: string) => name.replace(/\.[^.]+$/, ""),
   OutputsPanel: ({
     chatId,
+    selectedId,
     onOpenTaskChat,
-    onOpenOutput,
   }: {
     chatId: string;
+    selectedId?: string | null;
     onOpenTaskChat?: (id: string, name: string) => void;
-    onOpenOutput?: (output: { id: string; name: string; link: string | null }) => void;
   }) => (
     <>
-      <p>Outputs body {chatId}</p>
+      <p>
+        Outputs body {chatId} {selectedId ?? "none"}
+      </p>
       {onOpenTaskChat ? (
         <button type="button" onClick={() => onOpenTaskChat("task-8", "Q3 report")}>
           Open source task
         </button>
       ) : null}
-      <button
-        type="button"
-        onClick={() => onOpenOutput?.({ id: "out-3", name: "budget.csv", link: null })}
-      >
-        Open output row
-      </button>
-    </>
-  ),
-  OutputFile: ({
-    chatId,
-    opened,
-    actions,
-  }: {
-    chatId: string;
-    opened: { id: string };
-    actions: HTMLElement | null;
-  }) => (
-    <>
-      <p>
-        File body {chatId} {opened.id}
-      </p>
-      {actions ? createPortal(<button type="button">Download {opened.id}</button>, actions) : null}
     </>
   ),
 }));
@@ -1368,10 +1347,7 @@ function OutputsOwner() {
       <button type="button" onClick={() => pane?.show("chat-1")}>
         Show outputs
       </button>
-      <button
-        type="button"
-        onClick={() => pane?.show("chat-1", { id: "out-2", name: "report.md", link: null })}
-      >
+      <button type="button" onClick={() => pane?.show("chat-1", "out-2")}>
         Open output
       </button>
       <button type="button" onClick={() => pane?.show("chat-1", undefined, { taskChats: true })}>
@@ -1419,7 +1395,7 @@ describe("ToolWorkspace Outputs tab", () => {
     expect(tabNames()).toEqual(["Tasks", "Outputs", "desktop", "projects"]);
     expect(screen.getByRole("tab", { name: "Outputs" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
-    expect(screen.getByText("Outputs body chat-1")).toBeTruthy();
+    expect(screen.getByText("Outputs body chat-1 none")).toBeTruthy();
     expect(JSON.parse(screen.getByTestId("outputs-host").textContent!)).toEqual({ active: true });
   });
 
@@ -1437,49 +1413,17 @@ describe("ToolWorkspace Outputs tab", () => {
     expect(shows("Task chat task-8")).toBe(true);
   });
 
-  it("opens the file a link names in a tab of its own, named for the file", async () => {
+  it("opens the file a link names inside the Outputs tab, with no tab of its own", async () => {
     const user = userEvent.setup();
     render(<OutputsHarness />);
     await user.click(screen.getByRole("button", { name: "Open output" }));
-    expect(tabNames()).toEqual(["report", "desktop", "projects"]);
-    expect(selected("report")).toBe(true);
-    expect(shows("File body chat-1 out-2")).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Close report" }));
+    expect(tabNames()).toEqual(["Outputs", "desktop", "projects"]);
+    expect(selected("Outputs")).toBe(true);
+    expect(shows("Outputs body chat-1 out-2")).toBe(true);
+    // The file's buttons are its header's, in the Outputs page: none in the tab row.
+    expect(document.querySelector("[data-tool-tab-actions]")!.textContent).toBe("");
+    await user.click(screen.getByRole("button", { name: "Close Outputs" }));
     expect(tabNames()).toEqual(["desktop", "projects"]);
     expect(selected("desktop")).toBe(true);
-  });
-
-  it("opens each file from the list in its own tab, and an open one chooses its tab", async () => {
-    const user = userEvent.setup();
-    render(<OutputsHarness />);
-    await user.click(screen.getByRole("button", { name: "Open output" }));
-    await user.click(screen.getByRole("button", { name: "Show outputs" }));
-    await user.click(screen.getByRole("button", { name: "Open output row" }));
-    expect(tabNames()).toEqual(["Outputs", "report", "budget", "desktop", "projects"]);
-    expect(selected("budget")).toBe(true);
-    expect(shows("File body chat-1 out-3")).toBe(true);
-    expect(shows("File body chat-1 out-2")).toBe(false);
-
-    await user.click(screen.getByRole("tab", { name: "Outputs" }));
-    await user.click(screen.getByRole("button", { name: "Open output row" }));
-    expect(tabNames()).toEqual(["Outputs", "report", "budget", "desktop", "projects"]);
-    expect(selected("budget")).toBe(true);
-
-    // The Outputs tab's close leaves the files opened from it.
-    await user.click(screen.getByRole("button", { name: "Close Outputs" }));
-    expect(tabNames()).toEqual(["report", "budget", "desktop", "projects"]);
-  });
-
-  it("puts the chosen file's buttons in the tab row, and only the chosen one's", async () => {
-    const user = userEvent.setup();
-    render(<OutputsHarness />);
-    await user.click(screen.getByRole("button", { name: "Show outputs" }));
-    await user.click(screen.getByRole("button", { name: "Open output row" }));
-    const row = () => document.querySelector("[data-tool-tab-actions]")!;
-    expect(row().textContent).toBe("Download out-3");
-    await user.click(screen.getByRole("button", { name: "Open output" }));
-    expect(row().textContent).toBe("Download out-2");
-    await user.click(screen.getByRole("tab", { name: "Outputs" }));
-    expect(row().textContent).toBe("");
   });
 });

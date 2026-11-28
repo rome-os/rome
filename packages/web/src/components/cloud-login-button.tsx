@@ -15,10 +15,13 @@ import { beginCloudLogin } from "@/lib/cloud-login";
 export function CloudLoginButton({
   onStartError,
   autoStart = false,
+  busy = false,
   chooseAccount = false,
 }: {
   onStartError: (message: string) => void;
   autoStart?: boolean;
+  /** Another sign-in the page started is under way, so this one must not start too. */
+  busy?: boolean;
   chooseAccount?: boolean;
 }) {
   const { t } = useTranslation("auth");
@@ -53,7 +56,7 @@ export function CloudLoginButton({
   return (
     <>
       <AuthActionButton
-        busy={starting}
+        busy={starting || busy}
         busyLabel={t("cloud.connecting")}
         onClick={() => void start()}
       >
@@ -62,7 +65,7 @@ export function CloudLoginButton({
       {chooseAccount && (
         <button
           type="button"
-          disabled={starting}
+          disabled={starting || busy}
           onClick={() => void start({ chooseAccount: true })}
           className="mx-auto mt-4 block text-ui text-muted-foreground hover:text-foreground focus:outline-none focus-visible:underline disabled:opacity-50"
         >

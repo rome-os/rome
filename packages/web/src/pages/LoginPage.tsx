@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,7 @@ export default function LoginPage() {
   const [cloudError, setCloudError] = useState("");
   const [visitorError, setVisitorError] = useState("");
   const [visitorStarting, setVisitorStarting] = useState(false);
+  const visitorInFlight = useRef(false);
 
   // The sign-in view is driven entirely by the bootstrap state's
   // needs-signin arm. Cloud-primary boxes show the cloud button; the local
@@ -60,15 +61,22 @@ export default function LoginPage() {
         ? t("visitorDashboard.errorForbiddenAccount", { email: rejectedEmail })
         : t(visitorErrorReasonKey(searchParams.get("reason")))
       : "";
-  const cloudErrorMessage = cloudError || cloudCallbackError || visitorCallbackError;
+  const cloudErrorMessage =
+    cloudError || visitorError || cloudCallbackError || visitorCallbackError;
 
   // Rome Cloud's "Open your Rome" links land here with `?via=cloud`: the owner
   // arrives signed in to Rome Cloud, which approves the owner without a
   // consent screen, so the sign-in starts without waiting for the click. The
   // hint is read once and dropped from the URL, so Back never restarts it. A
   // failed attempt returns as `?cloud=error`, which shows the button instead.
-  const [cloudHint] = useState(() => searchParams.get("via") === "cloud");
-  const autoStartCloud = cloudHint && !cloudError && !cloudCallbackError && !visitorCallbackError;
+  //
+  // Its "Open" link for a Rome shared with you lands here with `?via=visitor`:
+  // the visitor sign-in starts the same way, and goes straight to the visitor
+  // flow instead of first trying the owner sign-in and being refused.
+  const [hint] = useState(() => searchParams.get("via"));
+  const callbackFailed = Boolean(cloudCallbackError || visitorCallbackError);
+  const autoStartCloud = hint === "cloud" && !cloudError && !callbackFailed;
+  const autoStartVisitor = hint === "visitor" && dashboardVisitorAccess && !callbackFailed;
   useEffect(() => {
     if (!searchParams.has("via")) return;
     const next = new URLSearchParams(searchParams);
@@ -76,6 +84,7 @@ export default function LoginPage() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
   const visitorErrorMessage = visitorError || visitorCallbackError;
+  const visitorAutoStarted = useRef(false);
 
   const schema = z.object({
     userId: z.string().min(1, t("login.errorUsernameRequired")),
@@ -110,16 +119,26 @@ export default function LoginPage() {
   });
 
   async function startDashboardVisitorLogin() {
+    if (visitorInFlight.current) return;
+    visitorInFlight.current = true;
     setVisitorStarting(true);
     setVisitorError("");
     const result = await beginDashboardVisitorLogin();
     if (!result.ok) {
+      visitorInFlight.current = false;
       setVisitorError(
         result.reason === "network" ? t("networkError") : t("visitorDashboard.errorStart"),
       );
       setVisitorStarting(false);
     }
   }
+
+  // The ref survives StrictMode's double effect run, so one visit starts one attempt.
+  useEffect(() => {
+    if (!autoStartVisitor || visitorAutoStarted.current) return;
+    visitorAutoStarted.current = true;
+    void startDashboardVisitorLogin();
+  });
 
   const passwordForm = (
     <form
@@ -219,7 +238,15 @@ export default function LoginPage() {
         <div hidden={showLocalForm} className="w-full">
           {/* Signing out of this Rome keeps the Rome Cloud session, so the
               button alone would sign the same account in again. */}
-          <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} chooseAccount />
+          <CloudLoginButton
+            onStartError={(message) => {
+              setCloudError(message);
+              setVisitorError("");
+            }}
+            autoStart={autoStartCloud}
+            busy={visitorStarting}
+            chooseAccount
+          />
           {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
           {localPasswordAvailable &&
             switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
